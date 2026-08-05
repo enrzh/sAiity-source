@@ -21,18 +21,16 @@ protocol Translating: AnyObject, Sendable {
 /// The ordering here is the honest recommendation order, and the summaries say
 /// why — including for the two that are slower than they sound.
 enum TranslationEngine: String, CaseIterable, Sendable, Codable {
-    case apple
     case madlad
     case qwen
 
     static var current: TranslationEngine {
-        get { TranslationEngine(rawValue: UserDefaults.standard.string(forKey: "translationEngine") ?? "") ?? .apple }
+        get { TranslationEngine(rawValue: UserDefaults.standard.string(forKey: "translationEngine") ?? "") ?? .madlad }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: "translationEngine") }
     }
 
     var displayName: String {
         switch self {
-        case .apple: return "Apple"
         case .madlad: return "MADLAD"
         case .qwen: return "Qwen"
         }
@@ -40,9 +38,6 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
 
     var summary: String {
         switch self {
-        case .apple:
-            return "Runs on the Neural Engine — a sentence comes back in tens of milliseconds. "
-                 + "~40–80 MB per language pair, any target language. The fastest option."
         case .madlad:
             return "MADLAD-400-3B, a dedicated translation model on MLX. Best quality of the "
                  + "local options and Apache-2.0, so it can ship. 1.86 GB, and about 0.2 seconds "
@@ -64,7 +59,6 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
     /// covering both a Google model and a set of community requantisations.
     var licence: String {
         switch self {
-        case .apple: return "Apple system framework — nothing to download from us"
         case .madlad: return "Apache-2.0 (Google MADLAD-400)"
         case .qwen: return "Apache-2.0 (Alibaba Qwen); GGUF builds by unsloth"
         }
@@ -72,7 +66,6 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
 
     func makeTranslator() -> Translating? {
         switch self {
-        case .apple: return AppleTranslator()
         case .madlad: return MADLADTranslator()
         case .qwen: return QwenTranslator()
         }
@@ -82,22 +75,6 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
     /// sizes, each a separate download.
     var assetDescriptors: [ModelAsset] {
         switch self {
-        case .apple:
-            return [ModelAsset(
-                id: "mt.apple",
-                family: .system,
-                title: "Apple translation languages",
-                detail: "Downloaded and removed by macOS, roughly 40–80 MB per language pair. "
-                      + "The Translation framework exposes no removal API, so no app can delete these.",
-                licence: "Apple system framework",
-                advertisedBytes: nil,
-                storage: .opaque,
-                removal: .systemOnly(
-                    reason: "macOS manages translation languages. Remove them in Language & Region.",
-                    route: .languageAndRegion),
-                use: .never,
-                install: nil)]
-
         case .madlad:
             return [ModelAsset(
                 id: "mt.madlad",

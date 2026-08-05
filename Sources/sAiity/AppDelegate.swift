@@ -3,7 +3,6 @@ import AVFoundation
 import CoreGraphics
 import Foundation
 import NaturalLanguage
-import Speech
 
 /// Menu-bar app. No dock icon, no main window — just the caption bar.
 ///
@@ -32,7 +31,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ASREngine.current.makeBackend()
     }
 
-    private let translator = Translator()
     private var activeTranslator: Translating? = TranslationEngine.current.makeTranslator()
     private var translatorReady = false
 
@@ -97,7 +95,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var translateTo: String? = UserDefaults.standard.string(forKey: "translateTo") {
         didSet { UserDefaults.standard.set(translateTo, forKey: "translateTo") }
     }
-    private var translateNote = ""
     private var statusLine = "Idle"
     private var showedAnyCaption = false
 
@@ -217,12 +214,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.copyCurrentLine()
         }
 
-        if let t = translateTo {
-            Task { @MainActor in
-                await translator.setTarget(Locale.Language(identifier: t))
-            }
-        }
-
         // Keep the menu-bar picker and the window in step — they write the same
         // preference, so without this they silently disagree.
         NotificationCenter.default.addObserver(forName: .saiityTranslateTargetChanged, object: nil,
@@ -231,17 +222,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.translateTo = t
-                self.translateNote = ""
                 self.activeTranslator = TranslationEngine.current.makeTranslator()
                 self.translatorReady = false
                 Task { @MainActor in
-                    await self.translator.setTarget(t.map { Locale.Language(identifier: $0) })
                     // Hold the row open for as long as translation is on, so the
                     // bubble does not change height every time a translation
                     // lands and clears.
                     self.overlay.reservesTranslationRow = t != nil
                     if t == nil { self.overlay.showTranslation("") }
-                    await self.refreshTranslateNote()
                     // Changing the translation target no longer changes which
                     // recognition engine runs — that was only ever true for
                     // Whisper, which has been cut.
@@ -399,12 +387,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                              keyEquivalent: "")
         menu.addItem(all)
 
-        if !translateNote.isEmpty {
-            menu.addItem(.separator())
-            let n = NSMenuItem(title: translateNote, action: nil, keyEquivalent: "")
-            n.isEnabled = false
-            menu.addItem(n)
-        }
         assignTargets(menu)
         item.submenu = menu
         return item
@@ -643,20 +625,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                         userInfo: ["target": target as Any])
     }
 
-    /// Whether Apple still has to fetch this pair. Worth saying plainly: the
-    /// framework cannot raise its own download prompt from a menu-bar app, so
-    /// the user has to go to Settings for it.
-    @MainActor
-    private func refreshTranslateNote() async {
-        guard translateTo != nil, TranslationEngine.current == .apple else {
-            translateNote = ""
-            return
-        }
-        let src = Locale.Language(identifier: locale.identifier(.bcp47))
-        translateNote = await translator.availability(from: src) == .needsDownload
-            ? "Download in Settings → Translation Languages" : ""
-        rebuildMenu()
-    }
 
     @objc private func toggle() {
         state.isActive ? stop() : start()

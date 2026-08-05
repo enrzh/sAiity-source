@@ -55,10 +55,6 @@ enum AssetStorage: Sendable {
     case directory(URL, markers: [String])
     /// A single file whose finished size we know.
     case file(URL, expectedBytes: Int64)
-    /// Measurable but not ours: Apple's speech assets on the sealed volume.
-    case systemPath(String)
-    /// Not measurable at all: Apple's translation pairs expose no path.
-    case opaque
 }
 
 /// What removing an asset actually means.
@@ -69,7 +65,6 @@ enum AssetStorage: Sendable {
 /// ended up with a Delete button wired to a guard that could never pass.
 enum AssetRemoval: Sendable {
     case remove(URL)
-    case systemOnly(reason: String, route: SystemRoute)
 }
 
 /// When deleting would pull the rug out from under a running session.
@@ -97,7 +92,7 @@ enum AssetUse: Sendable {
 /// One downloadable thing, described once so every surface agrees about it.
 struct ModelAsset: Identifiable, Sendable {
     enum Family: Int, Sendable, Comparable {
-        case recognition, translation, system
+        case recognition, translation
         static func < (a: Family, b: Family) -> Bool { a.rawValue < b.rawValue }
     }
 
@@ -180,7 +175,6 @@ enum ModelRegistry {
     static func assets() -> [ModelAsset] {
         ASREngine.allCases.map(\.assetDescriptor)
             + TranslationEngine.allCases.flatMap(\.assetDescriptors)
-            + [appleSpeechAsset]
     }
 
     static func status(of asset: ModelAsset) -> AssetStatus {
@@ -202,13 +196,6 @@ enum ModelRegistry {
             return AssetStatus(asset: asset, isInstalled: complete,
                                isPartial: !complete && bytes > 0, bytesOnDisk: bytes)
 
-        case .systemPath(let path):
-            let bytes = byteSize(of: URL(fileURLWithPath: path))
-            return AssetStatus(asset: asset, isInstalled: bytes > 0,
-                               isPartial: false, bytesOnDisk: bytes)
-
-        case .opaque:
-            return AssetStatus(asset: asset, isInstalled: false, isPartial: false, bytesOnDisk: 0)
         }
     }
 
@@ -230,8 +217,6 @@ enum ModelRegistry {
     /// overstating it.
     static func strayBytes() -> Int64 {
         let known = snapshot().reduce(Int64(0)) { sum, s in
-            if case .systemPath = s.asset.storage { return sum }
-            if case .opaque = s.asset.storage { return sum }
             return sum + s.bytesOnDisk
         }
         return max(0, ownedTotalBytes() - known)
@@ -274,24 +259,4 @@ enum ModelRegistry {
         return freed
     }
 
-    // MARK: - Apple's speech assets
-
-    /// Measurable, never removable. `AssetInventory` exposes reserve, release
-    /// and status — and no uninstall anywhere in the Speech framework. `release`
-    /// frees one of the five allocation slots; it reclaims no disk.
-    static let appleSpeechAsset = ModelAsset(
-        id: "system.appleSpeech",
-        family: .system,
-        title: "Apple speech models",
-        detail: "Installed and removed by macOS, roughly 350 MB per language. "
-              + "No app can delete these — only System Settings can.",
-        licence: "Apple system framework",
-                advertisedBytes: nil,
-        storage: .systemPath(
-            "/System/Library/AssetsV2/com_apple_MobileAsset_UAF_Speech_AutomaticSpeechRecognition/purpose_auto"),
-        removal: .systemOnly(
-            reason: "The Speech framework has no uninstall API. macOS owns these files.",
-            route: .storage),
-        use: .never,
-        install: nil)
 }

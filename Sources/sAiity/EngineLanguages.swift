@@ -1,5 +1,4 @@
 import Foundation
-import Translation
 
 /// What an engine can translate into, and what string it wants to be told.
 ///
@@ -20,40 +19,10 @@ protocol TranslationLanguageProvider {
 extension TranslationEngine {
     var languages: any TranslationLanguageProvider.Type {
         switch self {
-        case .apple: return AppleLanguageProvider.self
         case .madlad: return MADLADLanguageProvider.self
         case .qwen: return QwenLanguageProvider.self
         }
     }
-}
-
-// MARK: - Apple
-
-enum AppleLanguageProvider: TranslationLanguageProvider {
-    /// The framework answer comes over XPC, so cache it.
-    private static let cache = Cache()
-
-    private actor Cache {
-        var codes: Set<String>?
-        func value() async -> Set<String> {
-            if let codes { return codes }
-            let langs = await LanguageAvailability().supportedLanguages
-            // Keep the script: folding zh-Hant into zh loses the distinction
-            // Apple itself models, and then Traditional silently becomes
-            // Simplified.
-            let set = Set(langs.map { l -> String in
-                var s = l.languageCode?.identifier ?? l.minimalIdentifier
-                if let script = l.script?.identifier { s += "-\(script)" }
-                return s
-            })
-            codes = set
-            return set
-        }
-    }
-
-    static func supportedCanonicalCodes() async -> Set<String> { await cache.value() }
-
-    static func nativeCode(for canonical: String) -> String? { canonical }
 }
 
 // MARK: - MADLAD

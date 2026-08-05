@@ -1,9 +1,7 @@
 import AppKit
 import Foundation
 import ServiceManagement
-import Speech
 import SwiftUI
-import Translation
 
 #if canImport(FoundationModels)
 import FoundationModels
@@ -39,8 +37,6 @@ final class AppState {
     var sessions: [SessionRef] = []
     var diskUsage: String?
 
-    var lastError: String?
-
     /// Routed through AppDelegate rather than written directly: enabling
     /// recording has to raise the one-time notice and, if a session is already
     /// running, actually start writing. Two code paths setting this flag meant
@@ -66,7 +62,6 @@ final class AppState {
                                             userInfo: ["engine": engine.rawValue])
         }
     }
-    var engineNeedsDownload = ASREngine.current.needsDownload
 
     /// Every downloadable asset with its live disk state, from one registry.
     var assets: [AssetStatus] = []
@@ -170,12 +165,6 @@ final class AppState {
     }
 
 
-    // Translation. Apple will only translate between language pairs whose assets
-    // are on disk, and `TranslationSession(installedSource:target:)` — the only
-    // initializer callable outside SwiftUI — throws for anything else. The ONLY
-    // supported way to get a pair downloaded is SwiftUI's .translationTask,
-    // which vends a session we can call prepareTranslation() on. That is why
-    // this lives in the window and not in the menu.
     /// Set when the change arrived FROM the notification, so echoing it back
     /// would be a loop rather than news.
     @ObservationIgnored private var applyingRemoteTarget = false
@@ -197,25 +186,6 @@ final class AppState {
         translateTo = code
         applyingRemoteTarget = false
     }
-    var translationConfig: TranslationSession.Configuration?
-    var showTranslationLanguages = false
-    /// (code, display name, installed) for every target Apple supports.
-    var translationLanguages: [(String, String, Bool)] = []
-    var translationLanguagesLoading = false
-    var downloadingPair: String?
-
-    // Apple speech models. Queried lazily — these calls round-trip the system
-    // speech daemon and are slow, which is why they no longer run on every
-    // settings open.
-    var showAppleLanguages = false
-    var appleLocales: [String] = []
-    var appleInstalled: Set<String> = []
-    var appleReserved: Set<String> = []
-    var appleMaxReserved = 0
-    var appleLoading = false
-    var appleDownloading: String?
-    var appleSizeOnDisk: String?
-
     var showQwenModels = false
     /// The searchable target-language sheet. Also raised from the menu bar's
     /// "All languages…" item, which is why it lives on shared state.
@@ -232,79 +202,6 @@ final class AppState {
     }
     var qwenModel = QwenModel.selected {
         didSet { QwenModel.selected = qwenModel }
-    }
-    func refreshAppleLocales() async {
-        appleLoading = true
-        defer { appleLoading = false }
-        appleLocales = await SpeechTranscriber.supportedLocales
-            .map { $0.identifier(.bcp47) }.sorted()
-        appleInstalled = Set(await SpeechTranscriber.installedLocales.map { $0.identifier(.bcp47) })
-        appleReserved = Set(await AssetInventory.reservedLocales.map { $0.identifier(.bcp47) })
-        appleMaxReserved = AssetInventory.maximumReservedLocales
-    }
-
-    func downloadAppleLocale(_ tag: String) async {
-        appleDownloading = tag
-        modelError = nil
-        defer { appleDownloading = nil }
-        let t = SpeechTranscriber(locale: Locale(identifier: tag), transcriptionOptions: [],
-                                  reportingOptions: [], attributeOptions: [])
-        do {
-            if let req = try await AssetInventory.assetInstallationRequest(supporting: [t]) {
-                try await req.downloadAndInstall()
-            }
-        } catch {
-            let ns = error as NSError
-            modelError = (ns.domain == "SFSpeechErrorDomain" && ns.code == 11)
-                ? "macOS allows only \(appleMaxReserved) languages at a time. Release one first."
-                : error.localizedDescription
-        }
-        await refreshAppleLocales()
-    }
-
-    func releaseAppleLocale(_ tag: String) async {
-        _ = await AssetInventory.release(reservedLocale: Locale(identifier: tag))
-        await refreshAppleLocales()
-    }
-
-    /// Reads the on-disk asset folder directly. The API under-reports: Japanese
-    /// weights sit there at 341 MB while `installedLocales` denies having them.
-    static func appleAssetsSize() -> String? {
-        let p = "/System/Library/AssetsV2/com_apple_MobileAsset_UAF_Speech_AutomaticSpeechRecognition/purpose_auto"
-        let size = ModelRegistry.byteSize(of: URL(fileURLWithPath: p))
-        return size > 0 ? ModelRegistry.format(size) : nil
-    }
-
-    /// Enumerate what Apple can translate into, and which pairs are already on
-    /// disk. `supportedLanguages` gives the full set; `status(from:to:)` is the
-    /// only way to know whether a specific PAIR is installed.
-    func refreshTranslationLanguages(from source: String) async {
-        translationLanguagesLoading = true
-        defer { translationLanguagesLoading = false }
-        let availability = LanguageAvailability()
-        let src = Locale.Language(identifier: source)
-        var out: [(String, String, Bool)] = []
-        for lang in await availability.supportedLanguages {
-            guard let code = lang.languageCode?.identifier else { continue }
-            // Skip the source itself and duplicate script variants.
-            if code == source { continue }
-            if out.contains(where: { $0.0 == code }) { continue }
-            let st = await availability.status(from: src, to: lang)
-            let name = Locale.current.localizedString(forLanguageCode: code) ?? code
-            out.append((code, name.capitalized, st == .installed))
-        }
-        translationLanguages = out.sorted { $0.1 < $1.1 }
-    }
-    var translationStatus = ""
-
-    /// Kicks the SwiftUI task that owns the session. Setting a fresh
-    /// Configuration is what re-triggers it.
-    func prepareTranslation(from source: String, to explicit: String? = nil) {
-        guard let t = explicit ?? translateTo else { return }
-        translationStatus = "Preparing…"
-        translationConfig = TranslationSession.Configuration(
-            source: Locale.Language(identifier: source),
-            target: Locale.Language(identifier: t))
     }
 
     func refresh() async {
@@ -376,16 +273,6 @@ final class AppState {
     /// "Zero KB", which reads like a glitch.
     static func folderSize(_ url: URL) -> String? { AppStateSizeHelper.folderSize(url) }
 
-    private static func _unused_folderSize(_ url: URL) -> String? {
-        let fm = FileManager.default
-        guard let e = fm.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey]) else { return nil }
-        var total: Int64 = 0
-        for case let f as URL in e {
-            total += Int64((try? f.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
-        }
-        guard total > 0 else { return nil }
-        return ByteCountFormatter.string(fromByteCount: total, countStyle: .file)
-    }
 }
 
 // MARK: - Window

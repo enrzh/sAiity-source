@@ -1,49 +1,8 @@
 import AudioCommon
 import Foundation
-import Translation
 import MADLADTranslation
 import LLM
 import NaturalLanguage
-
-/// Apple's Translation framework. Wraps the existing `Translator` actor so it
-/// satisfies the common protocol without duplicating its XPC/pair handling.
-final class AppleTranslator: Translating, @unchecked Sendable {
-    let name = "Apple Translation"
-    private let inner = Translator()
-    /// What the inner actor is currently set to translate INTO.
-    private var preparedTarget: String?
-
-    func prepare(from source: String, to target: String,
-                 progress: @escaping @Sendable (String) -> Void) async throws {
-        await inner.setTarget(Locale.Language(identifier: target))
-        preparedTarget = target
-        let availability = await inner.availability(from: Locale.Language(identifier: source))
-        switch availability {
-        case .installed:
-            progress("Ready.")
-        case .needsDownload:
-            // The pair download can only be triggered from SwiftUI's
-            // .translationTask, which lives in the settings window.
-            progress("Language pair not downloaded — use Download in Settings.")
-        case .unsupported:
-            progress("Apple cannot translate this pair.")
-        }
-    }
-
-    func translate(_ text: String, from source: String, to target: String) async -> String? {
-        // Honour the target actually passed in. This used to ignore it entirely
-        // and rely on prepare() having been called with the same value — so
-        // changing the target from the menu bar, which does not re-prepare, kept
-        // translating into the PREVIOUS language with no sign anything was wrong.
-        if target != preparedTarget {
-            await inner.setTarget(Locale.Language(identifier: target))
-            preparedTarget = target
-        }
-        return await inner.translate(text, from: Locale.Language(identifier: source))
-    }
-
-    func stop() async { preparedTarget = nil }
-}
 
 /// MADLAD-400-3B-MT — a T5 encoder-decoder run on MLX via
 /// `soniqo/speech-swift`, the only Swift package that compiles a dedicated

@@ -34,22 +34,6 @@ struct ModelsView: View {
             }
 
             Section {
-                ForEach(assets(.system)) { assetRow($0) }
-                HStack {
-                    Text("Apple speech languages").font(.callout)
-                    Spacer()
-                    Button("Languages…") { state.showAppleLanguages = true }
-                        .controlSize(.small)
-                }
-            } header: {
-                Text("Managed by macOS")
-            } footer: {
-                Text("macOS installs and removes these. No app can delete them, "
-                     + "so they are listed here for size only.")
-                    .font(.caption)
-            }
-
-            Section {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Downloaded models: \(state.ownedTotal)")
@@ -80,9 +64,6 @@ struct ModelsView: View {
         }
         .formStyle(.grouped)
         .task { state.refreshModels() }
-        .sheet(isPresented: $state.showAppleLanguages) {
-            AppleSpeechLanguagesView(state: state)
-        }
     }
 
     @ViewBuilder
@@ -123,14 +104,10 @@ struct ModelsView: View {
         }
     }
 
-    /// Progress → Remove (partial) → Delete (installed) → Download. Assets macOS
-    /// owns get an explanation and a route instead of a button that would lie.
+    /// Progress → Remove (partial) → Delete (installed) → Download.
     @ViewBuilder
     private func trailingControl(_ s: AssetStatus) -> some View {
-        if case .systemOnly(_, let route) = s.asset.removal {
-            Button(route.label) { route.open() }
-                .controlSize(.small)
-        } else if state.activeDownload == s.asset.id {
+        if state.activeDownload == s.asset.id {
             VStack(alignment: .trailing, spacing: 2) {
                 if let f = state.downloadProgress?.fraction {
                     ProgressView(value: f).frame(width: 100)
@@ -159,9 +136,8 @@ struct ModelsView: View {
         let total = ModelRegistry.format(ModelRegistry.ownedTotalBytes())
         let a = NSAlert()
         a.messageText = "Remove all downloaded models?"
-        a.informativeText = "This frees \(total). Apple's speech and translation "
-            + "languages are not included — macOS manages those and no app can "
-            + "delete them.\n\nAnything you use again will be downloaded once more."
+        a.informativeText = "This frees \(total).\n\nAnything you use again will "
+            + "be downloaded once more."
         a.alertStyle = .warning
         a.addButton(withTitle: "Remove All")
         a.addButton(withTitle: "Cancel")
@@ -170,11 +146,8 @@ struct ModelsView: View {
             if let freed = await state.removeAllDownloads() {
                 let done = NSAlert()
                 done.messageText = "Removed \(ModelRegistry.format(freed))."
-                done.informativeText = "Apple's speech and translation languages are "
-                    + "still installed. Only System Settings can remove those."
                 done.addButton(withTitle: "OK")
-                done.addButton(withTitle: SystemRoute.storage.label)
-                if done.runModal() == .alertSecondButtonReturn { SystemRoute.storage.open() }
+                _ = done.runModal()
             }
         }
     }
@@ -249,21 +222,8 @@ struct CaptionsView: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
-                    if state.translationEngine != .apple {
-                        Text("Licence: \(state.translationEngine.licence)")
-                            .font(.caption2).foregroundStyle(.tertiary)
-                    }
-                }
-
-                if state.translateTo != nil, state.translationEngine == .apple {
-                    HStack {
-                        Button("Language pairs…") { state.showTranslationLanguages = true }
-                        if !state.translationStatus.isEmpty {
-                            Text(state.translationStatus).font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                    Text("Apple only translates between pairs whose models are on disk. One download, then it works offline.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    Text("Licence: \(state.translationEngine.licence)")
+                        .font(.caption2).foregroundStyle(.tertiary)
                 }
             }
 
@@ -290,19 +250,6 @@ struct CaptionsView: View {
         }
         .sheet(isPresented: $state.showQwenModels) { QwenModelsView(state: state) }
         .sheet(isPresented: $state.showTranslationPicker) { TranslationTargetPicker(state: state) }
-        .sheet(isPresented: $state.showTranslationLanguages) {
-            TranslationLanguagesView(
-                state: state,
-                source: Locale.current.language.languageCode?.identifier ?? "en")
-        }
-        .translationTask(state.translationConfig) { session in
-            do {
-                try await session.prepareTranslation()
-                await MainActor.run { state.translationStatus = "Ready." }
-            } catch {
-                await MainActor.run { state.translationStatus = "Failed: \(error.localizedDescription)" }
-            }
-        }
     }
 
     @ViewBuilder
@@ -504,7 +451,7 @@ struct LibraryView: View {
             Section("Privacy") {
                 Text("Audio never leaves this Mac. Recognition, translation and transcripts are all processed and stored locally — no account, no API key.")
                     .font(.caption)
-                Text("Model files are downloaded once: Nemotron and Parakeet from huggingface.co, Apple's speech and translation models from Apple. Nothing you say is ever uploaded.")
+                Text("Model files are downloaded once from huggingface.co. Nothing you say is ever uploaded.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -522,172 +469,7 @@ struct LibraryView: View {
 
 // MARK: - Translation languages
 
-/// Which Apple translation pairs are on disk, and a way to fetch more.
-///
-/// Deliberately shows no Delete button: the Translation framework exposes
-/// `supportedLanguages` and a per-pair `status`, but **no removal API at all**.
-/// Only macOS can remove these, so the page routes there instead of offering a
-/// button that cannot work.
-struct TranslationLanguagesView: View {
-    @Bindable var state: AppState
-    let source: String
-    @Environment(\.dismiss) private var dismiss
 
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Translation languages").font(.headline)
-                    Text("From \(Locale.current.localizedString(forLanguageCode: source)?.capitalized ?? source) · \(state.translationLanguages.filter(\.2).count) installed")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
-            }
-            .padding(14)
-            Divider()
-
-            if state.translationLanguagesLoading && state.translationLanguages.isEmpty {
-                VStack { ProgressView("Checking which pairs are installed…") }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                List {
-                    ForEach(state.translationLanguages, id: \.0) { code, name, installed in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(name)
-                                Text(code).font(.caption2).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            if state.downloadingPair == code {
-                                ProgressView().controlSize(.small)
-                            } else if installed {
-                                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                            } else {
-                                Button("Download") {
-                                    state.downloadingPair = code
-                                    state.prepareTranslation(from: source, to: code)
-                                }
-                                .controlSize(.small)
-                                .disabled(state.downloadingPair != nil)
-                            }
-                        }
-                        .padding(.vertical, 2)
-                    }
-                }
-                .listStyle(.inset)
-            }
-
-            Divider()
-            HStack {
-                Text("Apple provides no way for an app to delete these. Remove them in System Settings.")
-                    .font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                Button("Open Language & Region") {
-                    if let u = URL(string: "x-apple.systempreferences:com.apple.Localization-Settings.extension") {
-                        NSWorkspace.shared.open(u)
-                    }
-                }
-                .controlSize(.small)
-            }
-            .padding(14)
-        }
-        .frame(width: 460, height: 520)
-        .task { await state.refreshTranslationLanguages(from: source) }
-        .translationTask(state.translationConfig) { session in
-            try? await session.prepareTranslation()
-            await MainActor.run { state.downloadingPair = nil }
-            await state.refreshTranslationLanguages(from: source)
-        }
-    }
-}
-
-// MARK: - Apple speech languages
-
-/// Apple's on-device speech models. sAiity no longer transcribes with them, but
-/// they still occupy real disk — over a gigabyte here — so the Models tab shows
-/// them and lets you fetch more.
-///
-/// No Delete button, for the same reason as translation: `AssetInventory` has
-/// reserve / release / status / maximumReservedLocales and **no uninstall API**,
-/// and the asset directory is on the sealed system volume — `Operation not
-/// permitted` even for root. Only macOS can reclaim them.
-struct AppleSpeechLanguagesView: View {
-    @Bindable var state: AppState
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Apple speech languages").font(.headline)
-                    Text("\(state.appleInstalled.count) of \(state.appleLocales.count) installed · \(state.appleReserved.count)/\(state.appleMaxReserved) allocation slots")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
-            }
-            .padding(14)
-            Divider()
-
-            if state.appleLoading && state.appleLocales.isEmpty {
-                VStack { ProgressView("Asking the speech service…") }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                List {
-                    ForEach(state.appleLocales, id: \.self) { tag in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(Self.displayName(tag))
-                                Text(tag).font(.caption2).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            if state.appleDownloading == tag {
-                                ProgressView().controlSize(.small)
-                            } else if state.appleInstalled.contains(tag) {
-                                if state.appleReserved.contains(tag) {
-                                    Button("Release slot") {
-                                        Task { await state.releaseAppleLocale(tag) }
-                                    }
-                                    .controlSize(.small)
-                                }
-                                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                            } else {
-                                Button("Download") { Task { await state.downloadAppleLocale(tag) } }
-                                    .controlSize(.small)
-                                    .disabled(state.appleDownloading != nil)
-                            }
-                        }
-                        .padding(.vertical, 2)
-                    }
-                }
-                .listStyle(.inset)
-            }
-
-            Divider()
-            HStack {
-                Text("These cannot be deleted by an app — the folder is on the sealed system volume. macOS removes them on its own schedule.")
-                    .font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                Button("Storage") { SystemRoute.storage.open() }.controlSize(.small)
-            }
-            .padding(14)
-        }
-        .frame(width: 460, height: 520)
-        .task { await state.refreshAppleLocales() }
-    }
-
-    static func displayName(_ tag: String) -> String {
-        let l = Locale(identifier: tag)
-        let lang = l.language.languageCode?.identifier ?? tag
-        let base = Locale.current.localizedString(forLanguageCode: lang)?.capitalized ?? lang
-        if let r = l.region?.identifier,
-           let region = Locale.current.localizedString(forRegionCode: r) {
-            return "\(base) — \(region)"
-        }
-        return base
-    }
-}
 
 // MARK: - Qwen models
 

@@ -180,9 +180,13 @@ struct OnboardingView: View {
             Divider().padding(.vertical, 4)
             Toggle("Also show a translation under each caption", isOn: $model.wantsTranslation)
             if model.wantsTranslation {
-                Text("Apple's translation is used to begin with — it is built into macOS and needs "
-                     + "no download from us. Other translators, including one covering about 450 "
-                     + "languages, are in Settings.")
+                // Say the cost before they commit. Translation used to lean on
+                // macOS's built-in translator, which needed nothing from us;
+                // now every option is a model we download, so an unqualified
+                // "yes" here would be a 1.86 GB surprise on the next screen.
+                Text("Translation runs on this Mac too, so it needs a model of its own — "
+                     + "MADLAD, 1.86 GB, covering about 450 languages. It is listed on the "
+                     + "next screen alongside the recognition model.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()

@@ -33,33 +33,24 @@ struct ModelRegistryTests {
 
         // MADLAD is the reason this test exists: it was downloadable, 1.86 GB,
         // and had no row anywhere in the app.
-        for expected in ["asr.nemotron", "asr.parakeetEou", "mt.madlad",
-                         "mt.apple", "system.appleSpeech"] {
+        for expected in ["asr.nemotron", "asr.parakeetEou", "mt.madlad"] {
             #expect(ids.contains(expected), "missing asset \(expected)")
         }
         // Whisper was cut: its translate mode stopped emitting finals ~25 s into
         // every session. Leaving a registry entry behind would put a 2.9 GB
         // download back on the Models page with no engine to use it.
         #expect(!ids.contains { $0.contains("whisper") }, "Whisper was removed; a stale asset remains")
+        // Apple went the same way: its translator needed no download but could
+        // only reach the pairs macOS had, and it kept a whole second code path
+        // alive for one engine.
+        #expect(!ids.contains { $0.contains("apple") }, "Apple was removed; a stale asset remains")
         // One per Qwen variant, so the sheet and the Models page agree.
         #expect(ids.filter { $0.hasPrefix("mt.qwen.") }.count == QwenModel.all.count)
     }
 
-    @Test("Assets macOS owns offer a route, never a delete")
-    func systemAssetsAreNotDeletable() {
-        for asset in ModelRegistry.assets() where asset.family == .system {
-            guard case .systemOnly = asset.removal else {
-                Issue.record("\(asset.id) claims to be deletable, but macOS owns it")
-                continue
-            }
-            // Nothing to install either — these come from framework flows.
-            #expect(asset.install == nil)
-        }
-    }
-
     @Test("Everything the app downloads can be downloaded and deleted from the UI")
     func ourAssetsAreFullyManageable() {
-        for asset in ModelRegistry.assets() where asset.family != .system {
+        for asset in ModelRegistry.assets() {
             #expect(asset.install != nil, "\(asset.id) has no download path")
             guard case .remove = asset.removal else {
                 Issue.record("\(asset.id) has no delete path")
