@@ -404,7 +404,10 @@ final class QwenTranslator: Translating, @unchecked Sendable {
         case .ok(let out):
             return out
         case .rejected(let why, let retryable):
-            NSLog("sAiity qwen: rejected (\(why)): \(raw.prefix(90))")
+            // Length, never content. This used to log up to 90 characters of
+            // what the user was listening to, straight into the unified system
+            // log, on a path that fires whenever the model misbehaves.
+            NSLog("sAiity qwen: rejected (\(why)), \(raw.count) chars")
             // Staying in the source language is this model's one recoverable
             // failure, and naming it explicitly usually fixes it on the second
             // pass. Everything else (empty, runaway length) is not worth the

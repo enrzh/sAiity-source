@@ -87,13 +87,6 @@ struct LanguageTests {
         #expect(QwenLanguageProvider.nativeCode(for: "sw") == "Swahili")
     }
 
-    @Test("Whisper admits it only does English")
-    func whisperIsEnglishOnly() async {
-        #expect(await WhisperLanguageProvider.supportedCanonicalCodes() == ["en"])
-        #expect(WhisperLanguageProvider.nativeCode(for: "de") == nil)
-        #expect(WhisperLanguageProvider.nativeCode(for: "en-US") == "en")
-    }
-
     @Test("A language no engine can do is never offered as if it could be")
     func everyOfferedLanguageHasAnEngine() async {
         for lang in LanguageCatalog.all.prefix(60) {

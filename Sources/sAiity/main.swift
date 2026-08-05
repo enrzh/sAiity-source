@@ -38,9 +38,22 @@ if args.count > 1, args[1].hasPrefix("--") {
 // winning across launches.
 UserDefaults.standard.register(defaults: ["autoLanguage": true])
 
+/// Strong reference to the app delegate; `NSApplication.delegate` is weak.
+nonisolated(unsafe) var delegateRef: AnyObject?
+
 // Menu-bar only: no dock icon, no default window.
+//
+// `AppDelegate` is @MainActor-isolated, and top-level code is not, so the
+// construction is hopped explicitly. We are on the main thread here — this is
+// the process entry point — so assumeIsolated states that rather than
+// scheduling work that would not run until after `app.run()` takes over.
 let app = NSApplication.shared
-let delegate = AppDelegate()
-app.delegate = delegate
+MainActor.assumeIsolated {
+    let delegate = AppDelegate()
+    app.delegate = delegate
+    // Held for the process lifetime: NSApplication.delegate is a weak reference,
+    // so without this the delegate would deallocate immediately.
+    delegateRef = delegate
+}
 app.setActivationPolicy(.accessory)
 app.run()

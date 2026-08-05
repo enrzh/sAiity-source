@@ -33,9 +33,14 @@ struct ModelRegistryTests {
 
         // MADLAD is the reason this test exists: it was downloadable, 1.86 GB,
         // and had no row anywhere in the app.
-        for expected in ["asr.nemotron", "mt.madlad", "mt.whisper", "mt.apple", "system.appleSpeech"] {
+        for expected in ["asr.nemotron", "asr.parakeetEou", "mt.madlad",
+                         "mt.apple", "system.appleSpeech"] {
             #expect(ids.contains(expected), "missing asset \(expected)")
         }
+        // Whisper was cut: its translate mode stopped emitting finals ~25 s into
+        // every session. Leaving a registry entry behind would put a 2.9 GB
+        // download back on the Models page with no engine to use it.
+        #expect(!ids.contains { $0.contains("whisper") }, "Whisper was removed; a stale asset remains")
         // One per Qwen variant, so the sheet and the Models page agree.
         #expect(ids.filter { $0.hasPrefix("mt.qwen.") }.count == QwenModel.all.count)
     }
@@ -72,7 +77,7 @@ struct ModelRegistryTests {
 
         let asset = ModelAsset(
             id: "test", family: .translation, title: "T", detail: "",
-            advertisedBytes: nil,
+            licence: nil, advertisedBytes: nil,
             storage: .directory(tmp, markers: ["weights.bin"]),
             removal: .remove(tmp), use: .never, install: nil)
 

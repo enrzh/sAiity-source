@@ -105,6 +105,14 @@ struct ModelAsset: Identifiable, Sendable {
     let family: Family
     let title: String
     let detail: String
+    /// The weights' own terms, and where they come from.
+    ///
+    /// These are downloaded at first use, not shipped inside the app, so this is
+    /// about telling the user what they are fetching rather than a
+    /// redistribution obligation. It still has to be right: the UI previously
+    /// said "Apache-2.0" for translation engines and said nothing at all for the
+    /// recognition engines, which are NVIDIA models under NVIDIA's own terms.
+    let licence: String?
     /// What we tell the user before downloading. Nil when genuinely unknown.
     let advertisedBytes: Int64?
     let storage: AssetStorage
@@ -277,7 +285,8 @@ enum ModelRegistry {
         title: "Apple speech models",
         detail: "Installed and removed by macOS, roughly 350 MB per language. "
               + "No app can delete these — only System Settings can.",
-        advertisedBytes: nil,
+        licence: "Apple system framework",
+                advertisedBytes: nil,
         storage: .systemPath(
             "/System/Library/AssetsV2/com_apple_MobileAsset_UAF_Speech_AutomaticSpeechRecognition/purpose_auto"),
         removal: .systemOnly(

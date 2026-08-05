@@ -99,6 +99,11 @@ struct ModelsView: View {
                 }
                 Text(s.asset.detail).font(.caption).foregroundStyle(.secondary)
                 sizeLine(s)
+                // Downloading a multi-gigabyte model is agreeing to somebody's
+                // terms; say whose before the button is pressed, not after.
+                if let lic = s.asset.licence {
+                    Text(lic).font(.caption2).foregroundStyle(.tertiary)
+                }
             }
             Spacer(minLength: 12)
             trailingControl(s)

@@ -175,12 +175,17 @@ final class StreamingASRBackend: TranscriptionBackend, @unchecked Sendable {
     /// Without this, speech that never gets sentence punctuation from the engine
     /// stays volatile forever and never reaches the transcript or the translator.
     func flushPending() async {
-        commitLock.lock()
-        let rest = lastSeen.hasPrefix(committed)
-            ? String(lastSeen.dropFirst(committed.count)) : lastSeen
-        committed = lastSeen
-        lastCommitAt = Date()
-        commitLock.unlock()
+        // Scoped `withLock` rather than lock/unlock: the manual pair is
+        // unavailable from an async context and becomes a hard error under the
+        // Swift 6 language mode. Scoping it also makes it impossible to acquire
+        // the lock and then suspend while holding it.
+        let rest = commitLock.withLock { () -> String in
+            let r = lastSeen.hasPrefix(committed)
+                ? String(lastSeen.dropFirst(committed.count)) : lastSeen
+            committed = lastSeen
+            lastCommitAt = Date()
+            return r
+        }
         let t = rest.trimmingCharacters(in: .whitespacesAndNewlines)
         if !t.isEmpty { emit?(TranscriptChunk(text: t, isFinal: true)) }
     }
@@ -199,10 +204,11 @@ final class StreamingASRBackend: TranscriptionBackend, @unchecked Sendable {
         // finish() returns the WHOLE session transcript; emit only what has not
         // already been committed, or the last line is duplicated.
         if let full = await engine.finishSession() {
-            commitLock.lock()
-            let rest = full.hasPrefix(committed) ? String(full.dropFirst(committed.count)) : full
-            committed = full
-            commitLock.unlock()
+            let rest = commitLock.withLock { () -> String in
+                let r = full.hasPrefix(committed) ? String(full.dropFirst(committed.count)) : full
+                committed = full
+                return r
+            }
             let t = rest.trimmingCharacters(in: .whitespacesAndNewlines)
             if !t.isEmpty { emit?(TranscriptChunk(text: t, isFinal: true)) }
         }

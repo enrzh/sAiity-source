@@ -10,7 +10,20 @@ cd "$(dirname "$0")"
 NAME="sAiity"
 APP="build/$NAME.app"
 
-swift build -c release
+# Version from git, so a bug report can name the build it came from. Falls back
+# to the Info.plist value outside a git checkout.
+GIT_VERSION=$(git describe --tags --always --dirty 2>/dev/null || true)
+GIT_COUNT=$(git rev-list --count HEAD 2>/dev/null || echo "1")
+
+# Test hooks (SAIITY_AUTOSTART and friends) are compiled in for local builds and
+# OUT for anything being notarised — one of them starts system-audio capture
+# with no UI and no consent, which has no business in a shipped binary.
+BUILD_FLAGS=()
+if [ "${1:-}" != "--notarize" ]; then
+    BUILD_FLAGS+=(-Xswiftc -DSAIITY_TEST_HOOKS)
+fi
+
+swift build -c release "${BUILD_FLAGS[@]}"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # The filename here MUST match CFBundleExecutable exactly, capital A included.
@@ -46,6 +59,42 @@ if compgen -G "$FW_SRC/*.framework" >/dev/null; then
         "$APP/Contents/MacOS/$NAME" 2>/dev/null || true
 fi
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+
+# Stamp the build so a bug report can name it.
+if [ -n "$GIT_VERSION" ]; then
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $GIT_VERSION" \
+        "$APP/Contents/Info.plist" >/dev/null 2>&1 || true
+    /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $GIT_COUNT" \
+        "$APP/Contents/Info.plist" >/dev/null 2>&1 || true
+fi
+
+# Third-party notices. The binary statically links Apache-2.0 code (FluidAudio,
+# MLX, swift-transformers, speech-swift) and MIT code (WhisperKit, LLM.swift,
+# and the vendored llama.framework). Apache-2.0 section 4 and the MIT notice
+# clause both require these to travel with the binary — so they are assembled
+# from the actual checkouts rather than transcribed by hand, which would go
+# stale the first time a dependency changed.
+CREDITS="$APP/Contents/Resources/Credits.txt"
+{
+    echo "sAiity"
+    echo "Copyright (c) $(date +%Y). MIT licensed — see LICENSE in the source repository."
+    echo
+    echo "This application includes software from the following projects."
+    echo "================================================================"
+    for lic in $(find .build/checkouts -maxdepth 2 \
+                 \( -iname "LICENSE" -o -iname "LICENSE.txt" -o -iname "LICENSE.md" \) \
+                 2>/dev/null | sort); do
+        proj=$(basename "$(dirname "$lic")")
+        echo
+        echo "--- $proj ---"
+        cat "$lic"
+    done
+    echo
+    echo "Model weights are downloaded at first use and are NOT distributed with"
+    echo "this application. Each carries its own terms; the app shows them per"
+    echo "model under Settings -> Models."
+} > "$CREDITS"
+echo "credits: $(grep -c '^--- ' "$CREDITS") third-party licences bundled"
 
 # SwiftPM resource bundles. MLX ships its Metal shader library
 # (mlx.metallib) inside mlx-swift_Cmlx.bundle; without it every MLX call dies
@@ -106,12 +155,29 @@ if [ "${1:-}" = "--notarize" ]; then
     esac
     PROFILE="${SAIITY_NOTARY_PROFILE:-saiity}"
     ZIP="build/$NAME.zip"
-    rm -f "$ZIP"
-    ditto -c -k --keepParent "$APP" "$ZIP"
-    xcrun notarytool submit "$ZIP" --keychain-profile "$PROFILE" --wait
+    SUBMIT_ZIP="build/$NAME-submit.zip"
+
+    # Order matters, and getting it wrong is invisible. Submission needs a zip;
+    # the ticket is stapled to the .app, NOT to that zip. Building the
+    # distributable first meant shipping an archive with no ticket while the
+    # script cheerfully printed "notarised + stapled" — a Mac with no network
+    # would then refuse to open it.
+    rm -f "$ZIP" "$SUBMIT_ZIP"
+    ditto -c -k --keepParent "$APP" "$SUBMIT_ZIP"
+    xcrun notarytool submit "$SUBMIT_ZIP" --keychain-profile "$PROFILE" --wait
+    rm -f "$SUBMIT_ZIP"
+
     xcrun stapler staple "$APP"
-    xcrun stapler validate "$APP"
-    echo "notarised + stapled: $APP"
+    ditto -c -k --keepParent "$APP" "$ZIP"
+
+    # Validate what actually ships, not the copy we happen to still have. An
+    # archive that unpacks without a ticket is the whole failure mode here.
+    VERIFY_DIR=$(mktemp -d)
+    ditto -x -k "$ZIP" "$VERIFY_DIR"
+    xcrun stapler validate "$VERIFY_DIR/$NAME.app"
+    spctl --assess --type execute --verbose=2 "$VERIFY_DIR/$NAME.app"
+    rm -rf "$VERIFY_DIR"
+    echo "notarised + stapled, verified from the archive: $ZIP"
 fi
 
 if [ "${1:-}" = "--install" ]; then

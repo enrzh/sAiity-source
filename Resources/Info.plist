@@ -16,9 +16,16 @@
   <!-- Menu-bar only: no Dock icon, no Cmd-Tab entry. Still visible in Finder,
        Spotlight and Launchpad once installed to /Applications. -->
   <key>LSUIElement</key><true/>
-  <!-- ScreenCaptureKit system-audio capture triggers the Screen Recording prompt. -->
-  <key>NSCameraUsageDescription</key><string>Not used.</string>
-  <key>NSMicrophoneUsageDescription</key><string>sAiity can transcribe microphone audio on device.</string>
+  <key>NSHumanReadableCopyright</key><string>MIT licensed. See Credits in the app's About window.</string>
+  <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
+  <!-- ScreenCaptureKit system-audio capture triggers the Screen Recording
+       prompt, which macOS does not gate on an Info.plist string.
+
+       There are deliberately NO camera or microphone entries here. The app has
+       zero AVCaptureDevice and AVAudioEngine call sites — it captures the
+       system's output, never an input device — and declaring intent it does not
+       have is both untrue and, for the camera, an automatic App Store 5.1.1
+       rejection. -->
   <key>NSSpeechRecognitionUsageDescription</key><string>Speech is transcribed entirely on this Mac. Nothing is uploaded.</string>
 </dict>
 </plist>

@@ -56,7 +56,7 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
     private var inSeconds = 0.0
     private var outSeconds = 0.0
     private var lastReport = 0.0
-    private let debug = ProcessInfo.processInfo.environment["SAIITY_AUTOSTART"] == "1"
+    private let debug = TestHooks.verboseLogging
 
     /// Excludes our own process so the app can never transcribe itself.
     func start(targetFormat: AVAudioFormat,

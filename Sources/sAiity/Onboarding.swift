@@ -15,7 +15,7 @@ enum Onboarding {
     private static let resumeKey = "onboardingResumeStep"
 
     static var needsRun: Bool {
-        if ProcessInfo.processInfo.environment["SAIITY_ONBOARDING"] == "force" { return true }
+        if TestHooks.forceOnboarding { return true }
         let d = UserDefaults.standard
         return d.integer(forKey: completedKey) < currentVersion
             && d.integer(forKey: dismissedKey) < currentVersion

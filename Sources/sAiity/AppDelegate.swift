@@ -6,6 +6,14 @@ import NaturalLanguage
 import Speech
 
 /// Menu-bar app. No dock icon, no main window — just the caption bar.
+///
+/// Isolated to the main actor as a whole. Everything here is AppKit or drives
+/// AppKit, and the alternative — a nonisolated class with `assumeIsolated` at
+/// each entry point — let `beginRecording()` and `endRecording()` mutate an
+/// NSView hierarchy and the status-item image from a cooperative-pool thread
+/// after their first `await`. The compiler warned about it; nothing enforced it.
+/// Class-level isolation makes that a build error instead.
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private let overlay = OverlayWindow()
@@ -13,25 +21,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var engine = ASREngine.current
     private var backend: TranscriptionBackend = AppDelegate.makeActiveBackend()
 
-    /// Whisper's translate task turns speech straight into English in one model
-    /// pass, so when English is the target it replaces the caption engine rather
-    /// than running alongside it. Any other target keeps Nemotron and translates
-    /// the committed text with Apple's framework.
+    /// Recognition is always the selected ASR engine.
+    ///
+    /// Whisper used to be able to replace it — speech straight to English in one
+    /// model pass — which is why this was a function rather than a property.
+    /// That engine was cut: it stopped emitting finals about 25 seconds into
+    /// every session (its sliding window slid but its commit index never
+    /// rebased), and it was slower than Nemotron plus a real translator anyway.
     static func makeActiveBackend() -> TranscriptionBackend {
-        // Whisper is opt-in, not automatic. Forcing it for English was a bad
-        // call: large-v3 re-decodes a growing window every hop, so it is far
-        // SLOWER than Nemotron + Apple Translation, which runs on the ANE and
-        // turns a sentence around in tens of milliseconds.
-        // Whisper is the one engine that replaces recognition rather than
-        // post-processing text.
-        if UserDefaults.standard.string(forKey: "translateTo") != nil,
-           TranslationEngine.current.replacesRecognition {
-            return WhisperTranslateBackend()
-        }
-        return ASREngine.current.makeBackend()
+        ASREngine.current.makeBackend()
     }
 
-    private var whisperIsTranslating: Bool { backend is WhisperTranslateBackend }
     private let translator = Translator()
     private var activeTranslator: Translating? = TranslationEngine.current.makeTranslator()
     private var translatorReady = false
@@ -43,7 +43,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     private func prepareTranslatorIfNeeded() async {
         guard let target = translateTo,
-              !TranslationEngine.current.replacesRecognition,
               let engine = activeTranslator, !translatorReady else { return }
         let src = detectedLanguage ?? locale.identifier(.bcp47)
         NSLog("sAiity translator: selected=\(TranslationEngine.current.rawValue) object=\(engine.name) src=\(src) dst=\(target)")
@@ -61,7 +60,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private var running = false
+    /// Where the capture session is in its lifecycle.
+    ///
+    /// A Bool could not express `starting`, and that gap was the bug: `start()`
+    /// set `running = true` and then did the real work — model load, possibly a
+    /// 634 MB download — in a Task nobody held. `stop()` flipped the flag and
+    /// tore down a backend that had not started yet, and the start Task
+    /// afterwards went right on to bring up the audio stream. The result was
+    /// system audio being captured, with the recording indicator lit, while the
+    /// menu said "Start captions".
+    enum SessionState: Equatable {
+        case idle, starting, running, stopping
+
+        /// What the menu offers, and what a caller may do next.
+        var isActive: Bool { self == .starting || self == .running }
+    }
+
+    private var state: SessionState = .idle {
+        didSet {
+            guard state != oldValue else { return }
+            // The Settings window gates model deletion on this: deleting weights
+            // out from under a loading engine is exactly as bad as under a
+            // running one, so `starting` counts as busy.
+            CaptionSession.shared.setRunning(state.isActive)
+        }
+    }
+
+    /// The in-flight start. Held so `stopAsync()` can cancel it and wait for it
+    /// to actually leave the engine before tearing anything down.
+    private var sessionTask: Task<Void, Never>?
+
     private var locale = Locale(identifier: "en-US")
     /// BCP-47, nil = off. Persisted — it was previously an in-memory var, so the
     /// chosen target silently reset to "off" on every launch, which is one of the
@@ -111,11 +139,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showLanguagePicker() {
-        MainActor.assumeIsolated {
-            SettingsWindowController.show()
-            SettingsWindowController.state.showTranslationPicker = true
-        }
+        SettingsWindowController.show()
+        SettingsWindowController.state.showTranslationPicker = true
     }
+
+    /// An LSUIElement app has no App menu, so this is the ONLY route to the
+    /// version string and to the third-party notices the licences require to
+    /// travel with the binary.
+    @objc private func showAbout() {
+        let credits: NSAttributedString
+        if let url = Bundle.main.url(forResource: "Credits", withExtension: "txt"),
+           let text = try? String(contentsOf: url, encoding: .utf8) {
+            credits = NSAttributedString(
+                string: text,
+                attributes: [.font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)])
+        } else {
+            credits = NSAttributedString(string: "Credits file missing from this build.")
+        }
+        ForegroundActivation.begin()
+        NSApp.orderFrontStandardAboutPanel(options: [
+            .applicationName: "sAiity",
+            .credits: credits,
+            .init(rawValue: "Copyright"): "MIT licensed. On-device live subtitles.",
+        ])
+        // The standard About panel has no close callback, so give up the Dock
+        // presence when the app next loses focus. One-shot: the token has to be
+        // held to be removed, and re-registering on every About would leak an
+        // observer per invocation.
+        guard aboutResignObserver == nil else { return }
+        aboutResignObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated {
+                    ForegroundActivation.end()
+                    if let t = self.aboutResignObserver {
+                        NotificationCenter.default.removeObserver(t)
+                        self.aboutResignObserver = nil
+                    }
+                }
+            }
+    }
+
+    private var aboutResignObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ note: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -143,14 +207,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         NotificationCenter.default.addObserver(forName: .saiityResetBubble, object: nil,
                                                queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.overlay.resetPosition() }
+            self?.overlay.resetPosition()
         }
 
         HotKeyCenter.shared.register(.toggleCaptions) { [weak self] in
-            MainActor.assumeIsolated { self?.toggle() }
+            self?.toggle()
         }
         HotKeyCenter.shared.register(.copyLastLine) { [weak self] in
-            MainActor.assumeIsolated { self?.copyCurrentLine() }
+            self?.copyCurrentLine()
         }
 
         if let t = translateTo {
@@ -166,7 +230,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let t = note.userInfo?["target"] as? String
             MainActor.assumeIsolated {
                 guard let self else { return }
-                let wasWhisper = self.whisperIsTranslating
                 self.translateTo = t
                 self.translateNote = ""
                 self.activeTranslator = TranslationEngine.current.makeTranslator()
@@ -179,19 +242,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.overlay.reservesTranslationRow = t != nil
                     if t == nil { self.overlay.showTranslation("") }
                     await self.refreshTranslateNote()
-                    // Whisper replaces recognition rather than post-processing
-                    // text, so turning translation on or off can change which
-                    // engine runs. Test exactly what makeActiveBackend() tests —
-                    // this used to read a "useWhisperForEnglish" default that
-                    // nothing ever wrote, so it was permanently false and
-                    // selecting Whisper only took effect after a relaunch.
-                    let wantsWhisper = t != nil && TranslationEngine.current.replacesRecognition
-                    if wasWhisper != wantsWhisper {
-                        let running = self.running
-                        if running { await self.backend.stop() }
-                        self.backend = AppDelegate.makeActiveBackend()
-                        if running { self.restartRecognition() }
-                    }
+                    // Changing the translation target no longer changes which
+                    // recognition engine runs — that was only ever true for
+                    // Whisper, which has been cut.
                     self.rebuildMenu()
                     await self.prepareTranslatorIfNeeded()
                 }
@@ -202,6 +255,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                                queue: .main) { [weak self] note in
             guard let raw = note.userInfo?["engine"] as? String,
                   let e = ASREngine(rawValue: raw) else { return }
+            // Delivered on .main, but the closure itself is nonisolated.
             MainActor.assumeIsolated { self?.engineChanged(to: e) }
         }
 
@@ -216,7 +270,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         //
         // Skipped under SAIITY_AUTOSTART, which is the headless/e2e path and
         // must not put a window on screen.
-        let autostart = ProcessInfo.processInfo.environment["SAIITY_AUTOSTART"] == "1"
+        let autostart = TestHooks.autostart
         if Onboarding.needsRun && !autostart {
             OnboardingWindowController.shared.show(state: SettingsWindowController.state)
         }
@@ -224,7 +278,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Sibling of SAIITY_AUTOSTART: this is a menu-bar app, so there is no
         // way to reach the settings window from a script, which makes checking
         // its layout after a change needlessly manual.
-        if ProcessInfo.processInfo.environment["SAIITY_OPEN_SETTINGS"] == "1" {
+        if TestHooks.openSettings {
             SettingsWindowController.show()
         }
     }
@@ -264,7 +318,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         s.isEnabled = false
         menu.addItem(s)
         menu.addItem(.separator())
-        let toggleItem = NSMenuItem(title: running ? "Stop captions" : "Start captions",
+        let toggleItem = NSMenuItem(title: state.isActive ? "Stop captions" : "Start captions",
                                     action: #selector(toggle), keyEquivalent: "")
         if let sc = HotKeyCenter.shortcut(for: .toggleCaptions), sc.isUsable {
             // Shown for discoverability. The real binding is the global hot key —
@@ -296,6 +350,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Open sAiity…", action: #selector(openMainWindow),
                                 keyEquivalent: ","))
+        menu.addItem(NSMenuItem(title: "About sAiity", action: #selector(showAbout),
+                                keyEquivalent: ""))
         // terminate(_:) lives on NSApplication, not on this delegate. Without an
         // explicit target, assignTargets below would point it at AppDelegate,
         // which does not implement it — and the item silently does nothing.
@@ -498,7 +554,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             a.runModal()
         }
 
-        if running {
+        if state.isActive {
             Task { @MainActor in
                 if saveTranscript { await beginRecording() } else { await endRecording() }
                 rebuildMenu()
@@ -559,7 +615,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard new != engine else { return }
         engine = new
         ASREngine.current = new
-        let wasRunning = running
+        let wasRunning = state.isActive
         Task { @MainActor in
             if wasRunning { await backend.stop() }
             backend = new.makeBackend()
@@ -603,14 +659,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func toggle() {
-        running ? stop() : start()
+        state.isActive ? stop() : start()
     }
 
     private func start() {
-        running = true
-        // start() is only ever reached from the menu, the hotkey or autostart,
-        // all of which are already on the main thread.
-        MainActor.assumeIsolated { CaptionSession.shared.setRunning(true) }
+        // Ignore a second Start while one is already in flight. Without this,
+        // two starts each brought up their own SCStream and their own ASR pump,
+        // and two pumps calling process() concurrently is the exact overlap
+        // StreamingASRBackend documents as a reproduced crash.
+        guard state == .idle else { return }
+        state = .starting
         showedAnyCaption = false
         overlay.reservesTranslationRow = translateTo != nil
         sessionLines.removeAll()
@@ -621,39 +679,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setStatus("Starting…")
         overlay.show(text: "starting…", isFinal: false)
 
-        Task { @MainActor in
+        sessionTask = Task { @MainActor in
             do {
                 NSLog("sAiity engine: preparing \(backend.name)")
-                try await backend.prepare(locale: locale) { [weak self] msg in
-                    Task { @MainActor in
-                        self?.setStatus(msg)
-                        self?.overlay.show(text: msg, isFinal: false)
+                try await backend.prepare(locale: locale) { msg in
+                    Task { @MainActor [self] in
+                        guard self.state == .starting else { return }
+                        self.setStatus(msg)
+                        self.overlay.show(text: msg, isFinal: false)
                     }
                 }
+                // Every await below is a place the user may have pressed Stop —
+                // prepare() alone can be a multi-gigabyte download. Bail before
+                // touching the microphone-equivalent, not after.
+                try Task.checkCancellation()
 
-                try await backend.start { [weak self] chunk in
-                    Task { @MainActor in self?.render(chunk) }
+                try await backend.start { chunk in
+                    Task { @MainActor [self] in self.render(chunk) }
                 }
+                try Task.checkCancellation()
 
                 guard let fmt = await backend.inputFormat else {
                     throw BackendError.notPrepared
                 }
+                try Task.checkCancellation()
                 captureFormat = fmt
+                let activeBackend = backend
                 try await capture.start(
                     targetFormat: fmt,
-                    onBuffer: { [weak self] buf in self?.backend.feed(buf) },
-                    onState: { [weak self] state in
-                        Task { @MainActor in self?.captureStateChanged(state) }
+                    // Capture the backend we are starting WITH, rather than
+                    // reading self.backend on each buffer. This closure runs on
+                    // the capture queue ~50×/s while the main actor may be
+                    // reassigning that property during an engine swap — an
+                    // unsynchronised read/write of a class reference. Binding it
+                    // once also guarantees the audio goes to the engine the
+                    // stream was configured for.
+                    onBuffer: { [activeBackend] buf in activeBackend.feed(buf) },
+                    onState: { audio in
+                        Task { @MainActor [self] in self.captureStateChanged(audio) }
                     })
 
                 if saveTranscript { await beginRecording() }
+                state = .running
                 setStatus("Listening · \(Self.coverageNote())")
                 NSLog("sAiity engine: started; preparing translator")
                 await prepareTranslatorIfNeeded()
                 overlay.show(text: "listening…", isFinal: false)
+            } catch is CancellationError {
+                // stopAsync() is awaiting us; it owns the teardown from here.
+                NSLog("sAiity engine: start cancelled before capture began")
             } catch {
-                running = false
-                CaptionSession.shared.setRunning(false)
+                state = .idle
                 let msg = error.localizedDescription
                 setStatus("Error")
                 overlay.show(text: msg, isFinal: true)
@@ -716,8 +792,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await backend.stop()
             do {
                 try await backend.prepare(locale: locale) { _ in }
-                try await backend.start { [weak self] chunk in
-                    Task { @MainActor in self?.render(chunk) }
+                try await backend.start { chunk in
+                    Task { @MainActor [self] in self.render(chunk) }
                 }
                 // Rebuild capture only if the engine now wants a different
                 // format; normally it does not, and restarting it needlessly
@@ -725,9 +801,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let fmt = await backend.inputFormat, fmt != captureFormat {
                     await capture.stop()
                     captureFormat = fmt
+                    let activeBackend = backend
                     try await capture.start(
                         targetFormat: fmt,
-                        onBuffer: { [weak self] buf in self?.backend.feed(buf) },
+                        onBuffer: { [activeBackend] buf in activeBackend.feed(buf) },
                         onState: { [weak self] st in
                             Task { @MainActor in self?.captureStateChanged(st) }
                         })
@@ -747,17 +824,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The awaitable form. `stop()` deliberately returns immediately for the
     /// menu, but anything that needs the models actually released — deleting
     /// them, for one — has to be able to wait for the teardown.
-    @MainActor
     private func stopAsync() async {
-        running = false
-        CaptionSession.shared.setRunning(false)
+        guard state != .stopping else { return }
+        state = .stopping
         setStatus("Idle")
+
+        // Cancel an in-flight start and WAIT for it. Cancellation alone is not
+        // enough: the start Task may be suspended inside a model download, and
+        // if we tore down here without waiting it would resume afterwards and
+        // bring the audio stream up behind our back — capture running with the
+        // menu reading "Start captions".
+        sessionTask?.cancel()
+        await sessionTask?.value
+        sessionTask = nil
+
         await capture.stop()
         await backend.stop()
         await activeTranslator?.stop()
         translatorReady = false
         await endRecording()
         overlay.clear()
+        state = .idle
     }
 
     /// Stop and drop every loaded model, so their files can be removed for real.
@@ -776,13 +863,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// delivers pure zeros forever; if the buffers themselves stop, the stream
     /// died and that is a real error.
     @MainActor
-    private func captureStateChanged(_ state: SystemAudioCapture.State) {
-        guard running else { return }
-        if ProcessInfo.processInfo.environment["SAIITY_AUTOSTART"] == "1" {
-            NSLog("sAiity capture state: \(state)")
+    private func captureStateChanged(_ audio: SystemAudioCapture.State) {
+        // Named `audio` rather than `state` so it cannot be confused with the
+        // session state below — they mean very different things, and the
+        // original shadowing hid which one this guard was testing.
+        guard state == .running else { return }
+        if TestHooks.verboseLogging {
+            NSLog("sAiity capture state: \(audio)")
         }
         let tag = locale.identifier(.bcp47)
-        switch state {
+        switch audio {
         case .audible:
             setStatus("Listening · \(tag)")
         case .silent:
@@ -808,7 +898,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // After committing a sentence the engine often emits a lone "." as the
         // start of the next one; showing that would blank the bar to a dot.
         guard text.rangeOfCharacter(from: .alphanumerics) != nil else { return }
-        if ProcessInfo.processInfo.environment["SAIITY_AUTOSTART"] == "1" {
+        if TestHooks.verboseLogging {
             NSLog("sAiity chunk final=\(chunk.isFinal): \(text)")
         }
         showedAnyCaption = true
@@ -820,7 +910,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Detection runs on the ACCUMULATED transcript, never a single line:
         // one-word lines are noise ("Ja." reads as Finnish, "Okay." as English).
         if let changed = detector.add(text) {
-            if ProcessInfo.processInfo.environment["SAIITY_AUTOSTART"] == "1" {
+            if TestHooks.verboseLogging {
                 NSLog("sAiity detected language: \(changed)")
             }
             detectedLanguage = changed
@@ -864,7 +954,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             var translated: String?
             if let target = translateTo, let engine = activeTranslator,
                let out = await engine.translate(text, from: srcCode, to: target) {
-                if ProcessInfo.processInfo.environment["SAIITY_AUTOSTART"] == "1" {
+                if TestHooks.verboseLogging {
                     NSLog("sAiity translated [\(TranslationEngine.current.rawValue)]: \(out)")
                 }
                 translated = out

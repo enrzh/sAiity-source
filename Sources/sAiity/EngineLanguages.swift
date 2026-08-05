@@ -21,7 +21,6 @@ extension TranslationEngine {
     var languages: any TranslationLanguageProvider.Type {
         switch self {
         case .apple: return AppleLanguageProvider.self
-        case .whisper: return WhisperLanguageProvider.self
         case .madlad: return MADLADLanguageProvider.self
         case .qwen: return QwenLanguageProvider.self
         }
@@ -55,17 +54,6 @@ enum AppleLanguageProvider: TranslationLanguageProvider {
     static func supportedCanonicalCodes() async -> Set<String> { await cache.value() }
 
     static func nativeCode(for canonical: String) -> String? { canonical }
-}
-
-// MARK: - Whisper
-
-enum WhisperLanguageProvider: TranslationLanguageProvider {
-    /// Whisper's translate task has exactly one destination, by design.
-    static func supportedCanonicalCodes() async -> Set<String> { ["en"] }
-
-    static func nativeCode(for canonical: String) -> String? {
-        canonical.split(separator: "-").first.map(String.init) == "en" ? "en" : nil
-    }
 }
 
 // MARK: - MADLAD
