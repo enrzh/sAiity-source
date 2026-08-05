@@ -228,7 +228,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     // Hold the row open for as long as translation is on, so the
                     // bubble does not change height every time a translation
                     // lands and clears.
-                    self.overlay.reservesTranslationRow = t != nil
+                    self.overlay.reservesTranslationRow =
+                        t != nil && CaptionStyle.current.showTranslation
                     if t == nil { self.overlay.showTranslation("") }
                     // Changing the translation target no longer changes which
                     // recognition engine runs — that was only ever true for
@@ -638,7 +639,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard state == .idle else { return }
         state = .starting
         showedAnyCaption = false
-        overlay.reservesTranslationRow = translateTo != nil
+        overlay.reservesTranslationRow =
+            translateTo != nil && CaptionStyle.current.showTranslation
         sessionLines.removeAll()
         lastFinalText = ""
         lastVolatileText = ""
@@ -926,7 +928,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     NSLog("sAiity translated [\(TranslationEngine.current.rawValue)]: \(out)")
                 }
                 translated = out
-                overlay.showTranslation(out)
+                // Honour the setting here too, or the row appears anyway the
+                // moment a translation lands.
+                if CaptionStyle.current.showTranslation { overlay.showTranslation(out) }
             }
             // Only finals are stored: volatile results are cumulative since the
             // last final, so persisting them would duplicate whole paragraphs.

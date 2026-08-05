@@ -26,9 +26,20 @@ enum FrameStore {
         return f
     }
 
-    /// The screen the saved frame overlaps most; if it overlaps none, that
-    /// display is gone and we fall back to the primary.
+    /// The screen the bubble is on, decided by its CENTRE rather than by which
+    /// display it overlaps most.
+    ///
+    /// Overlap area is not stable under resize: a bubble straddling two displays
+    /// can flip to the other one purely by growing a line taller, and since the
+    /// bubble's width is derived from the screen, it would then jump width for
+    /// no reason the user can see. Observed exactly that — the width changed on
+    /// the tallest caption of a session. A centre point cannot flip unless the
+    /// bubble is actually moved.
     static func bestScreen(for frame: NSRect) -> NSScreen? {
+        let c = NSPoint(x: frame.midX, y: frame.midY)
+        if let hit = NSScreen.screens.first(where: { NSPointInRect(c, $0.frame) }) { return hit }
+        // Centre is off every display (a monitor was unplugged): fall back to
+        // whichever still overlaps, then to the primary.
         var best: NSScreen?
         var bestArea: CGFloat = 0
         for s in NSScreen.screens {
@@ -179,18 +190,65 @@ final class BubbleContentView: NSView {
 
     override func mouseMoved(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
+        // The resize band stays live even in click-through mode. It is 8 pt, so
+        // it costs the video underneath almost nothing, and without it the
+        // bubble is resizable in principle and ungrabbable in practice.
         let interactive = dragRegion.insetBy(dx: -armSlack, dy: -armSlack).contains(p)
+            || resizeCursor(at: p) != nil
         if window?.ignoresMouseEvents != !interactive {
             window?.ignoresMouseEvents = !interactive
         }
         // An open hand over the strip is a far better "you can move this" hint
         // than a glyph that looks clickable but is not.
         guard interactive else { return }
-        if copyRect.contains(p) || menuRect.contains(p) {
+        if let resize = resizeCursor(at: p) {
+            resize.set()
+        } else if copyRect.contains(p) || menuRect.contains(p) {
             NSCursor.arrow.set()
         } else {
             NSCursor.openHand.set()
         }
+    }
+
+    /// How wide the grab band around each edge is. Matches the band `mouseDown`
+    /// hands to the system's resize machinery, so the cursor never promises a
+    /// resize that the click would turn into a drag.
+    static let edgeGrab: CGFloat = 8
+
+    /// The resize cursor for this point, or nil if it is not near an edge.
+    ///
+    /// A borderless panel draws no frame, so macOS provides no cursor for it —
+    /// the bubble was resizable with no indication whatsoever that it was. These
+    /// are the private system cursors AppKit itself uses for window edges;
+    /// `NSCursor.resizeLeftRight` is the documented fallback, which points the
+    /// right way but does not show the corner diagonals.
+    func resizeCursor(at p: NSPoint) -> NSCursor? {
+        let e = Self.edgeGrab
+        let left = p.x < e, right = p.x > bounds.maxX - e
+        let bottom = p.y < e, top = p.y > bounds.maxY - e
+        switch (left, right, bottom, top) {
+        case (true, _, true, _), (_, true, _, true):
+            return Self.systemCursor("_windowResizeNorthEastSouthWestCursor")
+                ?? .resizeLeftRight
+        case (true, _, _, true), (_, true, true, _):
+            return Self.systemCursor("_windowResizeNorthWestSouthEastCursor")
+                ?? .resizeLeftRight
+        case (true, _, _, _), (_, true, _, _):
+            return Self.systemCursor("_windowResizeEastWestCursor") ?? .resizeLeftRight
+        case (_, _, true, _), (_, _, _, true):
+            return Self.systemCursor("_windowResizeNorthSouthCursor") ?? .resizeUpDown
+        default:
+            return nil
+        }
+    }
+
+    /// AppKit's own window-edge cursors are unexported. Asked for by name so a
+    /// future macOS that drops them degrades to the public arrows rather than
+    /// crashing.
+    private static func systemCursor(_ name: String) -> NSCursor? {
+        let sel = NSSelectorFromString(name)
+        guard NSCursor.responds(to: sel) else { return nil }
+        return NSCursor.perform(sel)?.takeUnretainedValue() as? NSCursor
     }
 
     private func setControls(visible: Bool) {
@@ -215,14 +273,15 @@ final class BubbleContentView: NSView {
             onOpenWindow?()
             return
         }
-        guard dragRegion.insetBy(dx: -armSlack, dy: -armSlack).contains(p) else { return }
-        // Near an edge the system's resize machinery owns the gesture; starting
-        // a window drag there would make the bubble un-resizable.
-        let edge: CGFloat = 8
-        if p.x < edge || p.x > bounds.maxX - edge || p.y < edge || p.y > bounds.maxY - edge {
+        // Edges first, and regardless of the drag region: the system's resize
+        // machinery owns the gesture there, and starting a window drag instead
+        // would make the bubble un-resizable. Checked before the drag-region
+        // guard so the edges still work in click-through mode.
+        if resizeCursor(at: p) != nil {
             super.mouseDown(with: event)
             return
         }
+        guard dragRegion.insetBy(dx: -armSlack, dy: -armSlack).contains(p) else { return }
         // Option-drag is macOS's own window-tiling accelerator — letting it
         // through relocates the bubble to a screen edge after mouseUp.
         guard !event.modifierFlags.contains(.option) else { return }
@@ -444,13 +503,35 @@ final class OverlayWindow: NSPanel {
             attributes: [.font: font])
         var h = ceil(r.height)
         if maxLines > 0 {
-            // The label truncates at maxLines; measuring past that sized the
-            // window for text nobody sees — the "bubble takes over the whole
-            // screen" bug when a translation ran long.
+            // maxLines is a growth CAP, and the label truncates at the same
+            // number — so measuring past it would size the window for text
+            // nobody can see. Text longer than the cap wraps down to that many
+            // lines and is elided only beyond it.
             let line = ceil(font.ascender - font.descender + font.leading)
             h = min(h, line * CGFloat(maxLines) + 2)
         }
         return NSSize(width: ceil(r.width), height: h)
+    }
+
+    /// The width the bubble should have, independent of what it is showing.
+    ///
+    /// THIS is the fix for "the bubble moves when a translation arrives". The
+    /// width used to be `max(caption width, translation width)`, so the instant
+    /// a translation landed the measurement jumped and the window re-centred —
+    /// and because the translation arrives in its own async callback, the user
+    /// saw two layout events per line. Nothing about the text enters this
+    /// calculation any more.
+    private func targetWidth(in visible: NSRect) -> CGFloat {
+        let st = CaptionStyle.current
+        let margin = max(0, CGFloat(st.screenMargin))
+        // A dragged width is the user's decision and is honoured up to the full
+        // screen — "pull it to full width" has to stick. Only the automatic
+        // width respects the margin.
+        if let uw = userWidth {
+            return min(max(uw, Self.minWidth), visible.width)
+        }
+        let usable = max(Self.minWidth, visible.width - margin * 2)
+        return min(max(CGFloat(st.widthFraction) * visible.width, Self.minWidth), usable)
     }
 
     /// Size the bubble to the caption — in BOTH axes.
@@ -467,75 +548,97 @@ final class OverlayWindow: NSPanel {
     private func sizeToFit() {
         guard let screen = FrameStore.bestScreen(for: frame) ?? NSScreen.main else { return }
         let v = screen.visibleFrame
-        let maxWidth = min(1100, v.width - 120)
-        let unwrapped = CGFloat.greatestFiniteMagnitude
-
-        var natural = measure(label.stringValue, font: label.font ?? .systemFont(ofSize: 30),
-                              width: unwrapped).width
-        if !translationLabel.isHidden {
-            natural = max(natural, measure(translationLabel.stringValue,
-                                           font: translationLabel.font ?? .systemFont(ofSize: 24),
-                                           width: unwrapped).width)
-        }
-        var targetW = min(max(natural + Self.hPadding * 2, Self.minWidth), maxWidth)
-        if let uw = userWidth {
-            // The user chose a width by dragging an edge; keep it.
-            targetW = min(max(uw, 280), maxWidth)
-        }
-
         let st = CaptionStyle.current
+
+        let targetW = targetWidth(in: v)
         let contentW = targetW - Self.hPadding * 2
-        var contentH = measure(label.stringValue, font: label.font ?? .systemFont(ofSize: 30),
-                               width: contentW, maxLines: st.maxLines).height
+
+        // Only the HEIGHT responds to content: text wraps inside a fixed width
+        // and the bubble grows upward from its bottom edge.
+        var contentH = measure(label.stringValue, font: st.original.font,
+                               width: contentW, maxLines: st.original.maxLines).height
         if !translationLabel.isHidden {
-            // Measure a space when the row is reserved but empty, so it holds
-            // exactly one line rather than collapsing to nothing.
+            // A space when the row is reserved but empty, so it holds exactly
+            // one line rather than collapsing and changing height the moment a
+            // translation lands.
             let t = translationLabel.stringValue.isEmpty ? " " : translationLabel.stringValue
-            contentH += stack.spacing + measure(t,
-                                                font: translationLabel.font ?? .systemFont(ofSize: 24),
-                                                width: contentW,
-                                                maxLines: translationLabel.maximumNumberOfLines).height
+            contentH += CGFloat(st.lineGap)
+                + measure(t, font: st.translation.font, width: contentW,
+                          maxLines: st.translation.maxLines).height
         }
-        // Belt and braces: never more than 40% of the screen, whatever the maths.
+        // Never taller than 40% of the screen, whatever the maths says.
         let targetH = min(max(110, contentH + Self.topPadding + Self.bottomPadding),
                           v.height * 0.4)
 
-        // Hysteresis. Every partial result changes the text, and at a 0.5pt
-        // threshold the window re-laid-out on essentially every frame, which
-        // reads as the bubble twitching rather than the caption updating.
-        let widthChanged = abs(targetW - frame.width) > Self.resizeSlack
-        let heightChanged = abs(targetH - frame.height) > 1
-        guard widthChanged || heightChanged else { return }
-        // Never shrink the width for a momentarily shorter line — only grow, or
-        // shrink when it is a real difference. Otherwise the edges breathe in
-        // and out with each word.
-        if !widthChanged { targetW = frame.width }
+        guard abs(targetW - frame.width) > 0.5 || abs(targetH - frame.height) > 0.5 else { return }
 
         var f = frame
-        f.origin.x = frame.midX - targetW / 2      // grow symmetrically
-        // Anchor the BOTTOM edge, so the bubble grows upward.
-        //
-        // It used to pin the top and grow down, which is wrong for something
-        // that sits near the bottom of the screen: adding the translation row
-        // pushed it past the screen edge, `clamp` shoved it back up, and the
-        // whole bubble appeared to jump every time a translation arrived.
         f.size = NSSize(width: targetW, height: targetH)
+        // Width only changes when a SETTING changes, so re-centring on it is
+        // now a deliberate response to the user, not per-caption jitter.
+        if abs(targetW - frame.width) > 0.5 { f.origin.x = frame.midX - targetW / 2 }
+        // origin.y is left alone: in AppKit that is the bottom edge, so the
+        // bubble grows upward and its base stays where the user put it.
         if !hasCustomFrame {
             f.origin.x = v.midX - targetW / 2
             f.origin.y = v.minY + 90
         }
-        setFrame(FrameStore.clamp(f, into: v), display: true)
+        let final = clampKeepingBottom(f, into: v, margin: CGFloat(st.screenMargin))
+        if TestHooks.verboseLogging {
+            // The bubble's stillness cannot be seen from a script, so it is
+            // logged: x and width must not change between captions.
+            NSLog(String(format: "sAiity bubble: x=%.0f y=%.0f w=%.0f h=%.0f",
+                         final.origin.x, final.origin.y, final.width, final.height))
+        }
+        setFrame(final, display: true)
+    }
+
+    /// Keep the bubble on screen without undoing the bottom anchor.
+    ///
+    /// The generic clamp pushed the whole window DOWN when growth took its top
+    /// edge past the screen, which reads as the bubble jumping. Here the height
+    /// is trimmed instead, so the base never moves. The margin is honoured
+    /// horizontally unless the user has deliberately dragged the bubble wider.
+    private func clampKeepingBottom(_ rect: NSRect, into visible: NSRect,
+                                    margin: CGFloat) -> NSRect {
+        var f = rect
+        let side = userWidth == nil ? max(0, margin) : 0
+        f.size.width = min(f.width, visible.width - side * 2)
+        f.origin.x = min(max(f.minX, visible.minX + side), visible.maxX - f.width - side)
+        f.origin.y = max(f.minY, visible.minY)
+        if f.maxY > visible.maxY { f.size.height = visible.maxY - f.minY }
+        return f
     }
 
     /// Push the persisted look onto the live window. Called on every change so
     /// the settings page is a real preview, not a promise about next launch.
     func applyStyle(_ st: CaptionStyle) {
-        label.font = .systemFont(ofSize: st.fontSize, weight: .semibold)
-        label.maximumNumberOfLines = st.maxLines
-        translationLabel.font = .systemFont(ofSize: st.translationFontSize, weight: .medium)
+        // Every visual property comes from the struct. Nothing is hardcoded
+        // here any more: the original used to be fixed white/semibold and the
+        // translation fixed teal/medium, so half the style fields were read but
+        // could never be changed and the rest were not read at all.
+        label.font = st.original.font
+        label.textColor = st.original.color
+        label.maximumNumberOfLines = st.original.maxLines
+        translationLabel.font = st.translation.font
+        translationLabel.textColor = st.translation.color
+        translationLabel.maximumNumberOfLines = st.translation.maxLines
+        translationLabel.alphaValue = st.translation.opacity
+        stack.spacing = CGFloat(st.lineGap)
+
         glass.cornerRadius = st.cornerRadius
-        glass.style = st.glassStyle == 1 ? .clear : .regular
-        glass.tintColor = st.tintColor
+        switch st.glassStyle {
+        case 1: glass.style = .clear
+        default: glass.style = .regular
+        }
+        // "Solid" is the legibility answer for bright video, where even regular
+        // glass leaves white-on-white at roughly 2:1 contrast. NSGlassEffectView
+        // has no opaque mode, so it is a near-black layer behind the content.
+        if st.glassStyle == 2 {
+            glass.tintColor = st.tintColor ?? NSColor(white: 0.06, alpha: 1)
+        } else {
+            glass.tintColor = st.tintColor
+        }
         if st.hidden { orderOut(nil) }
         sizeToFit()
     }
@@ -570,7 +673,7 @@ final class OverlayWindow: NSPanel {
     func show(text: String, isFinal: Bool) {
         label.stringValue = text
         let st = CaptionStyle.current
-        label.alphaValue = isFinal ? st.textOpacity : st.volatileOpacity
+        label.alphaValue = isFinal ? st.original.opacity : st.original.volatileOpacity
         sizeToFit()
         guard !CaptionStyle.current.hidden else { orderOut(nil); return }
         if !text.isEmpty, !isVisible { orderFrontRegardless() }

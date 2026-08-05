@@ -33,10 +33,16 @@ if args.count > 1, args[1].hasPrefix("--") {
     exit(0)
 }
 
-// Automatic language detection is ON unless the user turns it off. Registered
-// rather than hardcoded so an explicit "off" in the menu still wins — and keeps
+// Registered rather than hardcoded, so an explicit "off" still wins and keeps
 // winning across launches.
-UserDefaults.standard.register(defaults: ["autoLanguage": true])
+//
+// captionClickThrough defaults ON: the bubble sits about 90 pt above the bottom
+// of the screen, which is exactly where a video player puts its scrubber, and
+// defaulting to off meant the subtitles quietly swallowed every click there.
+UserDefaults.standard.register(defaults: [
+    "autoLanguage": true,
+    "captionClickThrough": true,
+])
 
 /// Strong reference to the app delegate; `NSApplication.delegate` is weak.
 nonisolated(unsafe) var delegateRef: AnyObject?

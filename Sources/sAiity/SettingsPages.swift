@@ -254,21 +254,77 @@ struct CaptionsView: View {
 
     @ViewBuilder
     private var appearanceSections: some View {
-        Section("Appearance") {
-            Toggle("Show the caption bubble", isOn: Binding(
-                get: { !state.style.hidden }, set: { state.style.hidden = !$0 }))
-            Toggle("Show the translation line", isOn: $state.style.showTranslation)
-            LabeledContent("Caption size") {
-                HStack {
-                    Slider(value: $state.style.fontSize, in: 16...64, step: 1)
-                    Text("\(Int(state.style.fontSize))").monospacedDigit().frame(width: 26)
-                }
-            }
-            Stepper("Maximum lines: \(state.style.maxLines)", value: $state.style.maxLines, in: 1...6)
-            Picker("Glass", selection: $state.style.glassStyle) {
-                Text("Regular").tag(0); Text("Clear").tag(1)
+        Section {
+            LabeledToggle("Show the caption bubble",
+                          "Hides the subtitles without stopping recognition, so you can "
+                          + "keep a transcript running with nothing on screen.",
+                          isOn: Binding(get: { !state.style.hidden },
+                                        set: { state.style.hidden = !$0 }))
+            LabeledToggle("Let clicks pass through the bubble",
+                          "On, only the bubble's top strip can be grabbed and everything "
+                          + "else clicks straight through to the video underneath — which "
+                          + "matters, because the bubble sits over the scrubber. Off, you "
+                          + "can drag it by any part of it.",
+                          isOn: $state.captionClickThrough)
+            Picker("Background", selection: $state.style.glassStyle) {
+                Text("Glass").tag(0); Text("Clear").tag(1); Text("Solid").tag(2)
             }
             .pickerStyle(.segmented)
+            Text("Solid is the readable choice over bright video — glass leaves white "
+                 + "text on a white scene at roughly 2:1 contrast.")
+                .font(.caption).foregroundStyle(.secondary)
+            ColorPicker("Background tint", selection: Binding(
+                get: { Color(nsColor: state.style.tintColor ?? .black) },
+                set: { state.style.tintHex = CaptionStyle.hex(from: NSColor($0)) }))
+            slider("Corner radius", $state.style.cornerRadius, 0...40, "%.0f")
+            slider("Width", $state.style.widthFraction, 0.3...1.0, "%.0f%%", scale: 100)
+            slider("Gap to screen edge", $state.style.screenMargin, 0...160, "%.0f")
+            Text("Width is a setting rather than something measured from the text — that "
+                 + "is what stops the bubble resizing and re-centring on every line. Drag "
+                 + "an edge to override it; a dragged width may go right to the screen edge.")
+                .font(.caption).foregroundStyle(.secondary)
+        } header: {
+            HStack {
+                Text("Bubble")
+                Spacer()
+                ResetButton {
+                    let d = CaptionStyle()
+                    state.style.glassStyle = d.glassStyle
+                    state.style.tintHex = d.tintHex
+                    state.style.cornerRadius = d.cornerRadius
+                    state.style.widthFraction = d.widthFraction
+                    state.style.screenMargin = d.screenMargin
+                    state.style.hidden = d.hidden
+                    state.captionClickThrough = true
+                    NotificationCenter.default.post(name: .saiityResetBubble, object: nil)
+                }
+            }
+        }
+
+        textStyleSection("Original text", $state.style.original,
+                         note: "The recognised speech. It is dimmed while the engine may "
+                             + "still revise it — that is the second opacity below.",
+                         volatile: true,
+                         reset: { state.style.original = .original })
+
+        Section {
+            LabeledToggle("Show the translation line",
+                          "The second line under each caption. Turning this off keeps "
+                          + "translation running for the transcript but hides it on screen.",
+                          isOn: $state.style.showTranslation)
+        } header: {
+            HStack {
+                Text("Translated text")
+                Spacer()
+                ResetButton {
+                    state.style.translation = .translation
+                    state.style.showTranslation = true
+                }
+            }
+        }
+        textStyleControls($state.style.translation, volatile: false)
+        Section {
+            slider("Gap between the lines", $state.style.lineGap, 0...24, "%.0f")
             HStack {
                 Button("Preview") {
                     NotificationCenter.default.post(name: .saiityCaptionPreview, object: nil)
@@ -276,11 +332,109 @@ struct CaptionsView: View {
                 Button("Reset position") {
                     NotificationCenter.default.post(name: .saiityResetBubble, object: nil)
                 }
-                Button("Defaults") { state.style = CaptionStyle() }
+                ResetButton("Reset everything") { state.style = CaptionStyle() }
             }
             .controlSize(.small)
             Text("Changes apply live. Preview puts sample text in the real bubble.")
                 .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    /// One group of text controls, used for both roles so they cannot drift.
+    @ViewBuilder
+    private func textStyleSection(_ title: String, _ style: Binding<TextStyle>,
+                                  note: String, volatile: Bool,
+                                  reset: @escaping () -> Void) -> some View {
+        Section {
+            textStyleControls(style, volatile: volatile)
+        } header: {
+            HStack {
+                Text(title)
+                Spacer()
+                ResetButton(action: reset)
+            }
+        } footer: {
+            Text(note).font(.caption)
+        }
+    }
+
+    @ViewBuilder
+    private func textStyleControls(_ style: Binding<TextStyle>, volatile: Bool) -> some View {
+        slider("Size", style.fontSize, 12...72, "%.0f")
+        Picker("Weight", selection: style.weight) {
+            Text("Light").tag(-0.4); Text("Regular").tag(0.0)
+            Text("Medium").tag(0.23); Text("Semibold").tag(0.3); Text("Bold").tag(0.4)
+        }
+        .pickerStyle(.segmented)
+        ColorPicker("Colour", selection: Binding(
+            get: { Color(nsColor: style.wrappedValue.color) },
+            set: { style.colorHex.wrappedValue = CaptionStyle.hex(from: NSColor($0)) }))
+        slider("Opacity", style.opacity, 0.2...1.0, "%.0f%%", scale: 100)
+        if volatile {
+            slider("Opacity while still being revised", style.volatileOpacity, 0.2...1.0,
+                   "%.0f%%", scale: 100)
+        }
+        Stepper("Maximum lines: \(style.wrappedValue.maxLines)", value: style.maxLines, in: 1...8)
+    }
+
+    /// Sliders here are always label + track + read-out; writing that out five
+    /// times invites them to drift apart.
+    @ViewBuilder
+    private func slider(_ title: String, _ value: Binding<Double>,
+                        _ range: ClosedRange<Double>, _ format: String,
+                        scale: Double = 1) -> some View {
+        LabeledContent(title) {
+            HStack {
+                Slider(value: value, in: range)
+                Text(String(format: format, value.wrappedValue * scale))
+                    .monospacedDigit().frame(width: 44, alignment: .trailing)
+            }
+        }
+    }
+}
+
+/// "Reset" for one group of settings.
+///
+/// Every group gets one. A single global Defaults button means undoing one
+/// experiment with the translation colour also throws away a carefully chosen
+/// font size, so in practice nobody presses it and the settings silently drift
+/// somewhere the user cannot get back from.
+struct ResetButton: View {
+    let title: String
+    let action: () -> Void
+
+    init(_ title: String = "Reset", action: @escaping () -> Void) {
+        self.title = title
+        self.action = action
+    }
+
+    var body: some View {
+        Button(title, action: action)
+            .controlSize(.small)
+            .help("Put this section back to its defaults.")
+    }
+}
+
+/// A toggle with the explanation directly under it.
+///
+/// Every switch in this app now carries one: a bare label leaves the user to
+/// guess what turning it off costs, and several of these have real consequences
+/// (a durable transcript, clicks reaching the video behind).
+struct LabeledToggle: View {
+    let title: String
+    let note: String
+    @Binding var isOn: Bool
+
+    init(_ title: String, _ note: String, isOn: Binding<Bool>) {
+        self.title = title
+        self.note = note
+        self._isOn = isOn
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Toggle(title, isOn: $isOn)
+            Text(note).font(.caption).foregroundStyle(.secondary)
         }
     }
 }

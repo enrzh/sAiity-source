@@ -6,20 +6,62 @@ extension Notification.Name {
     static let saiityCaptionPreview = Notification.Name("sAiityCaptionPreview")
 }
 
+/// How one line of text is drawn. The original caption and the translation each
+/// get their own, because they are read differently: the original is glanced at
+/// to follow along, the translation is what a non-speaker actually reads.
+///
+/// Previously the translation was hardcoded to 24 pt teal with no control at
+/// all, so someone reading the translation who enlarged "Caption size" made the
+/// line they were *not* reading bigger.
+struct TextStyle: Equatable, Codable, Sendable {
+    var fontSize: Double
+    /// NSFont weight, as a raw value: -0.4 … 0.6 in practice.
+    var weight: Double
+    /// sRGB hex, six digits. Not optional — text always has a colour.
+    var colorHex: String
+    var opacity: Double
+    /// Dimming applied while the engine may still revise this line. Only the
+    /// original is ever volatile, but keeping the field symmetric means the two
+    /// roles can share one editor.
+    var volatileOpacity: Double
+    var maxLines: Int
+
+    static let original = TextStyle(fontSize: 30, weight: 0.3, colorHex: "FFFFFF",
+                                    opacity: 1.0, volatileOpacity: 0.72, maxLines: 4)
+    static let translation = TextStyle(fontSize: 26, weight: 0.0, colorHex: "9FE8FF",
+                                       opacity: 1.0, volatileOpacity: 1.0, maxLines: 4)
+
+    var color: NSColor { CaptionStyle.color(fromHex: colorHex) ?? .white }
+    var font: NSFont { .systemFont(ofSize: fontSize, weight: .init(weight)) }
+}
+
 /// How the caption bubble looks. Persisted, and applied live — changing a value
 /// in the window updates the bubble immediately rather than on next launch,
 /// because you cannot judge caption legibility from a settings form.
 struct CaptionStyle: Equatable, Codable, Sendable {
-    var fontSize: Double = 30
-    var translationFontSize: Double = 24
-    var maxLines: Int = 3
+
+    // MARK: Text, per role
+    var original: TextStyle = .original
+    var translation: TextStyle = .translation
+    /// Gap between the original line and the translation under it.
+    var lineGap: Double = 6
+
+    // MARK: The bubble
     var cornerRadius: Double = 22
-    var textOpacity: Double = 1.0
-    /// Volatile (not yet committed) text is dimmed so it is obvious the engine
-    /// may still revise it.
-    var volatileOpacity: Double = 0.72
-    var glassStyle: Int = 0            // 0 = regular, 1 = clear
+    var glassStyle: Int = 0            // 0 = regular, 1 = clear, 2 = solid
     var tintHex: String = ""           // empty = untinted glass
+
+    /// Width as a fraction of the screen's usable width.
+    ///
+    /// The bubble's width is a SETTING, deliberately, not a measurement. Sizing
+    /// it to its text meant every caption — and every translation arriving a
+    /// moment later — resized and re-centred the window. A subtitle bubble whose
+    /// width tracks its content cannot help but jitter.
+    var widthFraction: Double = 0.62
+    /// How much space to leave between the bubble and the screen edge. Applies
+    /// to the automatic width and to how far the bubble may be pushed.
+    var screenMargin: Double = 24
+
     var showTranslation: Bool = true
     var hidden: Bool = false           // hide the bubble without stopping capture
 
@@ -41,12 +83,23 @@ struct CaptionStyle: Equatable, Codable, Sendable {
         }
     }
 
-    var tintColor: NSColor? {
-        guard !tintHex.isEmpty, tintHex.count == 6,
-              let v = UInt32(tintHex, radix: 16) else { return nil }
+    static func color(fromHex hex: String) -> NSColor? {
+        guard hex.count == 6, let v = UInt32(hex, radix: 16) else { return nil }
         return NSColor(srgbRed: CGFloat((v >> 16) & 0xFF) / 255,
                        green: CGFloat((v >> 8) & 0xFF) / 255,
                        blue: CGFloat(v & 0xFF) / 255, alpha: 1)
+    }
+
+    static func hex(from color: NSColor) -> String {
+        guard let c = color.usingColorSpace(.sRGB) else { return "FFFFFF" }
+        return String(format: "%02X%02X%02X",
+                      Int(round(c.redComponent * 255)),
+                      Int(round(c.greenComponent * 255)),
+                      Int(round(c.blueComponent * 255)))
+    }
+
+    var tintColor: NSColor? {
+        tintHex.isEmpty ? nil : Self.color(fromHex: tintHex)
     }
 
     /// A realistic two-line sample, so the preview exercises wrapping and the
