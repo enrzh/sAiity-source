@@ -67,9 +67,54 @@ struct CommitTests {
         #expect(String(text[cut...]).count >= 8, "too little left volatile to absorb a revision")
     }
 
-    @Test("A word with no spaces at all is never cut")
+    @Test("Japanese commits without waiting for silence")
+    func spacelessScriptsStillCommit() {
+        // The bug: this required `lastIndex(of: " ")`, and Japanese, Chinese and
+        // Thai are written without spaces — so it returned nil forever, nothing
+        // was committed, and nothing was translated until the speaker stopped.
+        // Reported as "translation takes really long for Japanese"; it was not
+        // the model, it was that the caption never became final.
+        let ja = "最近新人が入ったり新しいプロジェクトが始まったりしてちょっとごたごたしている"
+        let cut = StreamingASRBackend.rollingCommitPoint(ja, since: longAgo)
+        #expect(cut != nil, "Japanese never reaches a commit point")
+        if let cut {
+            #expect(!String(ja[..<cut]).isEmpty)
+            #expect(!String(ja[cut...]).isEmpty, "nothing left volatile")
+        }
+    }
+
+    @Test("A clause break is preferred to an arbitrary character")
+    func clauseBreaksWin() {
+        // 、 is the natural place to split a Japanese line; cutting mid-phrase
+        // hands the translator a fragment.
+        let ja = "それでちょっと早く会社に行って、準備したいんだけどそれでいいと思うんだけどね"
+        guard let cut = StreamingASRBackend.rollingCommitPoint(ja, since: longAgo) else {
+            Issue.record("expected a commit point"); return
+        }
+        #expect(String(ja[..<cut]).hasSuffix("、"), "did not cut at the clause break")
+    }
+
+    @Test("A Japanese full stop ends a sentence")
+    func cjkSentenceEnd() {
+        // The sentence regex demanded a space or end-of-string after the stop,
+        // which Latin text has and CJK does not — so 。 never counted and the
+        // punctuation path was dead for those languages too.
+        let pattern = "(?:[.!?](?:\\s|$))|[。！？…]"
+        for text in ["これはテストです。次の文もあります", "本当ですか？そうですね", "すごい！とても"] {
+            #expect(text.range(of: pattern, options: .regularExpression) != nil,
+                    "no sentence boundary found in \(text)")
+        }
+        // And a decimal point still must not end one.
+        #expect("The price is 3.50 today".range(
+            of: pattern, options: .regularExpression) == nil)
+    }
+
+    @Test("A single unbroken run with nothing to cut on is left alone")
     func noBoundaryMeansNoCommit() {
+        // Latin text with no space and no punctuation is a URL or a token, not
+        // speech — splitting it mid-word would give the translator nonsense.
+        // (Spaceless SCRIPTS are handled above; this is one long "word".)
         #expect(StreamingASRBackend.rollingCommitPoint(
-            String(repeating: "a", count: 200), since: longAgo) == nil)
+            String(repeating: "a", count: 8), since: longAgo) == nil)
     }
 }

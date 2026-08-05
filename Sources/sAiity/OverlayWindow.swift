@@ -425,10 +425,16 @@ final class OverlayWindow: NSPanel {
             queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated {
                     guard let self else { return }
-                    self.userWidth = self.frame.width
+                    // Cap what we remember, not just what we draw: an
+                    // un-capped width restored later on a smaller display is
+                    // how the bubble ended up hanging off both edges.
+                    let usable = (FrameStore.bestScreen(for: self.frame)
+                                  ?? NSScreen.main)?.visibleFrame.width ?? self.frame.width
+                    self.userWidth = min(self.frame.width, usable)
                     self.hasCustomFrame = true
-                    FrameStore.save(self.frame)
                     self.sizeToFit()
+                    self.keepOnScreen()
+                    FrameStore.save(self.frame)
                 }
             }
 
@@ -464,7 +470,10 @@ final class OverlayWindow: NSPanel {
             return
         }
         hasCustomFrame = true
-        userWidth = saved.width
+        // Cap the remembered width to THIS screen. A frame saved on an external
+        // monitor and restored on the laptop panel is the likeliest way the
+        // bubble ends up wider than the display it is showing on.
+        userWidth = min(saved.width, screen.visibleFrame.width)
         setFrame(FrameStore.clamp(saved, into: screen.visibleFrame), display: false)
     }
 
@@ -474,6 +483,9 @@ final class OverlayWindow: NSPanel {
         saveWork?.cancel()
         let w = DispatchWorkItem { [weak self] in
             guard let self else { return }
+            // Applied after the drag ends rather than during it, so the bubble
+            // does not fight the cursor — but it always ends up on screen.
+            self.keepOnScreen()
             FrameStore.save(self.frame)
         }
         saveWork = w
@@ -481,8 +493,13 @@ final class OverlayWindow: NSPanel {
     }
 
     @objc private func screensChanged() {
-        guard let screen = FrameStore.bestScreen(for: frame) else { return }
-        setFrame(FrameStore.clamp(frame, into: screen.visibleFrame), display: true)
+        // A display was added, removed or resized. Whatever the bubble's width
+        // was — a remembered drag from a wider monitor, most likely — it has to
+        // fit the screen it is on now.
+        userWidth = userWidth.map { min($0, (FrameStore.bestScreen(for: frame)
+                                             ?? NSScreen.main)?.visibleFrame.width ?? $0) }
+        keepOnScreen()
+        sizeToFit()
     }
 
     private static let hPadding: CGFloat = 24      // each side
@@ -570,8 +587,6 @@ final class OverlayWindow: NSPanel {
         let targetH = min(max(110, contentH + Self.topPadding + Self.bottomPadding),
                           v.height * 0.4)
 
-        guard abs(targetW - frame.width) > 0.5 || abs(targetH - frame.height) > 0.5 else { return }
-
         var f = frame
         f.size = NSSize(width: targetW, height: targetH)
         // Width only changes when a SETTING changes, so re-centring on it is
@@ -584,13 +599,37 @@ final class OverlayWindow: NSPanel {
             f.origin.y = v.minY + 90
         }
         let final = clampKeepingBottom(f, into: v, margin: CGFloat(st.screenMargin))
+
+        // Compare against the CLAMPED result, not the unclamped target. The
+        // early-out used to sit above this, so a frame that was already off the
+        // screen — restored from a wider display, or left over from a drag —
+        // matched its own target and was returned unchanged, hanging off both
+        // edges with the text clipped. Containment now wins every time.
+        guard abs(final.width - frame.width) > 0.5
+                || abs(final.height - frame.height) > 0.5
+                || abs(final.origin.x - frame.origin.x) > 0.5
+                || abs(final.origin.y - frame.origin.y) > 0.5 else { return }
+
         if TestHooks.verboseLogging {
             // The bubble's stillness cannot be seen from a script, so it is
             // logged: x and width must not change between captions.
-            NSLog(String(format: "sAiity bubble: x=%.0f y=%.0f w=%.0f h=%.0f",
-                         final.origin.x, final.origin.y, final.width, final.height))
+            NSLog(String(format: "sAiity bubble: x=%.0f y=%.0f w=%.0f h=%.0f screen=%.0f",
+                         final.origin.x, final.origin.y, final.width, final.height, v.width))
         }
         setFrame(final, display: true)
+    }
+
+    /// Force the bubble back inside its screen, whatever put it outside.
+    ///
+    /// Called after anything that can move or resize it, including the user
+    /// doing so themselves: a window dragged half off the display, or a width
+    /// restored from a monitor that is no longer attached, has to come back.
+    /// The rule is simply that the bubble is always fully on screen.
+    func keepOnScreen() {
+        guard let screen = FrameStore.bestScreen(for: frame) ?? NSScreen.main else { return }
+        let margin = CGFloat(CaptionStyle.current.screenMargin)
+        let f = clampKeepingBottom(frame, into: screen.visibleFrame, margin: margin)
+        if f != frame { setFrame(f, display: true) }
     }
 
     /// Keep the bubble on screen without undoing the bottom anchor.

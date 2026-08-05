@@ -180,12 +180,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ note: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        if let img = NSImage(systemSymbolName: "captions.bubble", accessibilityDescription: "sAiity") {
-            img.isTemplate = true
-            statusItem.button?.image = img
-        } else {
-            statusItem.button?.title = "CC"
-        }
+        updateStatusItemIcon()
+        if statusItem.button?.image == nil { statusItem.button?.title = "CC" }
         statusItem.button?.toolTip = "sAiity — on-device live subtitles"
         overlay.onCopy = { [weak self] in self?.copyCurrentLine() }
         overlay.onOpenWindow = { SettingsWindowController.show() }
@@ -583,12 +579,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// The menu-bar icon fills in while a transcript is being written, so the
     /// state is never ambiguous.
+    /// The menu-bar icon: the app's own icon, drawn down to menu-bar size.
+    ///
+    /// The only place the icon is set — it used to be assigned here AND at
+    /// launch, so changing it meant changing both and the launch one silently
+    /// won until the first recording toggle.
+    ///
+    /// Recording adds a red dot rather than swapping the glyph. The app icon is
+    /// colour art, so there is no filled/outline pair to switch between, and a
+    /// dot is what the rest of the app already uses for this.
     private func updateStatusItemIcon() {
-        let name = overlay.isRecording ? "captions.bubble.fill" : "captions.bubble"
-        if let img = NSImage(systemSymbolName: name, accessibilityDescription: "sAiity") {
-            img.isTemplate = true
-            statusItem.button?.image = img
+        let side: CGFloat = 18
+        let recording = overlay.isRecording
+        // applicationIconImage is what the Dock and Finder show; asking for it
+        // by name depends on CFBundleIconFile resolving, which it does not in a
+        // bare SwiftPM build.
+        let source = NSApp.applicationIconImage ?? NSImage(named: "AppIcon")
+
+        let img = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
+            if let source {
+                source.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
+            } else if let sym = NSImage(systemSymbolName: "captions.bubble",
+                                        accessibilityDescription: nil) {
+                sym.draw(in: rect)
+            }
+            if recording {
+                NSColor.systemRed.setFill()
+                NSBezierPath(ovalIn: NSRect(x: rect.maxX - 7, y: rect.maxY - 7,
+                                            width: 6, height: 6)).fill()
+            }
+            return true
         }
+        // Never a template: templates are flattened to a silhouette, which would
+        // throw away the whole point of using the app icon.
+        img.isTemplate = source == nil
+        img.accessibilityDescription = recording ? "sAiity, recording" : "sAiity"
+        statusItem.button?.image = img
     }
 
     /// Swap engines live. Recognition restarts; capture keeps running, so no

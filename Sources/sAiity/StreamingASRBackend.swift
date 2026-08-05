@@ -78,9 +78,22 @@ final class StreamingASRBackend: TranscriptionBackend, @unchecked Sendable {
         // revise its most recent tokens, and committing them invites a visible
         // correction after the fact.
         let keepBack = text.index(text.endIndex, offsetBy: -min(12, n / 4))
-        guard let space = text[..<keepBack].lastIndex(of: " ") else { return nil }
-        return text.index(after: space)
+        let head = text[..<keepBack]
+        guard !head.isEmpty else { return nil }
+
+        // A clause break is the best cut — it exists in both writing systems.
+        if let p = head.lastIndex(where: { Self.clauseBreaks.contains($0) }) {
+            return text.index(after: p)
+        }
+        if let space = head.lastIndex(of: " ") { return text.index(after: space) }
+        // Japanese, Chinese and Thai are written without spaces. Requiring one
+        // meant this never fired for them, so nothing was committed — and so
+        // nothing was translated — until the speaker stopped talking entirely.
+        // Those scripts break acceptably at any character.
+        return keepBack
     }
+
+    private static let clauseBreaks: Set<Character> = ["、", "，", ",", ";", "；", ":", "：", "…"]
 
     private let pendingLock = NSLock()
     private var pending: [Float] = []
@@ -118,7 +131,12 @@ final class StreamingASRBackend: TranscriptionBackend, @unchecked Sendable {
             // Commit whole sentences: a finished sentence is stable, translates
             // well, and is the right unit for a transcript line.
             var finalPart = ""
-            if let r = pendingText.range(of: "[.!?](\\s|$)", options: [.regularExpression, .backwards]) {
+            // Latin punctuation needs a following space or end-of-string, so a
+            // decimal point does not end a sentence. CJK full stops do not —
+            // Japanese and Chinese run straight on with no space, so requiring
+            // one meant a sentence boundary was NEVER found in those languages.
+            if let r = pendingText.range(of: "(?:[.!?](?:\\s|$))|[。！？…]",
+                                         options: [.regularExpression, .backwards]) {
                 finalPart = String(pendingText[..<r.upperBound])
                 self.committed += finalPart
             } else if let cut = Self.rollingCommitPoint(pendingText, since: self.lastCommitAt) {
