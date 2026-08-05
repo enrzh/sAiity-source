@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>sAiity</string>
+  <key>CFBundleDisplayName</key><string>sAiity</string>
+  <!-- Lowercase: reverse-DNS ids are case-folded inconsistently by LaunchServices
+       and tooling, so the brand's capital A stays out of the identifier. -->
+  <key>CFBundleIdentifier</key><string>de.aiity.saiity</string>
+  <key>CFBundleExecutable</key><string>sAiity</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>LSMinimumSystemVersion</key><string>26.0</string>
+  <!-- Menu-bar only: no Dock icon, no Cmd-Tab entry. Still visible in Finder,
+       Spotlight and Launchpad once installed to /Applications. -->
+  <key>LSUIElement</key><true/>
+  <!-- ScreenCaptureKit system-audio capture triggers the Screen Recording prompt. -->
+  <key>NSCameraUsageDescription</key><string>Not used.</string>
+  <key>NSMicrophoneUsageDescription</key><string>sAiity can transcribe microphone audio on device.</string>
+  <key>NSSpeechRecognitionUsageDescription</key><string>Speech is transcribed entirely on this Mac. Nothing is uploaded.</string>
+</dict>
+</plist>

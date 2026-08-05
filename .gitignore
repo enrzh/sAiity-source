@@ -1,0 +1,23 @@
+# SwiftPM build products. .build alone is several gigabytes of compiled
+# dependencies and checkouts — never commit it.
+.build/
+.swiftpm/
+*.o
+*.dSYM/
+
+# The assembled .app produced by build-app.sh, plus the notarisation archive.
+build/
+*.zip
+*.dmg
+
+# Package.resolved IS committed on purpose: one dependency (speech-swift) tracks
+# branch "main", so the resolved file is the only thing pinning it to a revision
+# that builds. Do not add it here.
+
+# macOS
+.DS_Store
+
+# Xcode, if anyone opens the package in it
+*.xcuserdatad/
+xcuserdata/
+DerivedData/

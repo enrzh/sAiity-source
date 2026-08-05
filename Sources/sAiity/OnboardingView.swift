@@ -1,0 +1,354 @@
+import AppKit
+import SwiftUI
+
+/// The first-run wizard.
+///
+/// What it replaces: a fresh install used to open to an idle menu-bar icon with
+/// no explanation. Clicking "Start captions" then began a silent 634 MB download
+/// and finished by failing on a permission the user had never been asked for,
+/// with the error shown only inside a caption bubble.
+@MainActor
+@Observable
+final class OnboardingModel {
+    var step: OnboardingStep = .welcome
+    var permissionGranted = false
+    var checkingPermission = false
+    var askedOnce = false
+
+    /// What the user says they need, which decides what gets downloaded.
+    enum Purpose: String, CaseIterable {
+        case anyLanguage, englishOnly
+
+        var title: String {
+            switch self {
+            case .anyLanguage: return "Any language"
+            case .englishOnly: return "English only"
+            }
+        }
+        var detail: String {
+            switch self {
+            case .anyLanguage:
+                return "One multilingual model that works out which language is being spoken. "
+                     + "634 MB."
+            case .englishOnly:
+                return "A smaller, faster English-only model. 437 MB. Other languages come out "
+                     + "as nonsense, so only pick this if English is all you need."
+            }
+        }
+        var engine: ASREngine {
+            switch self {
+            case .anyLanguage: return .nemotron
+            case .englishOnly: return .parakeetEou
+            }
+        }
+    }
+
+    var purpose: Purpose = .anyLanguage
+    var wantsTranslation = false
+    var target = "en"
+
+    let state: AppState
+    init(state: AppState) {
+        self.state = state
+        if let resume = Onboarding.resumeStep {
+            step = resume
+            Onboarding.resumeStep = nil
+        }
+    }
+
+    func refreshPermission() async {
+        checkingPermission = true
+        permissionGranted = await ScreenRecordingPermission.probe()
+        checkingPermission = false
+    }
+
+    /// Write the choices through the same paths Settings uses, so nothing here
+    /// is a special case that can drift.
+    func apply() {
+        ASREngine.current = purpose.engine
+        state.engine = purpose.engine
+        if wantsTranslation {
+            state.translateTo = target
+        } else {
+            state.translateTo = nil
+        }
+    }
+
+    var recognitionAsset: ModelAsset { purpose.engine.assetDescriptor }
+}
+
+struct OnboardingView: View {
+    @Bindable var model: OnboardingModel
+    let onFinish: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(28)
+            Divider()
+            footer
+        }
+        .frame(width: 640, height: 560)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch model.step {
+        case .welcome: welcome
+        case .permission: permission
+        case .purpose: purpose
+        case .models: models
+        case .finish: finish
+        }
+    }
+
+    // MARK: - Steps
+
+    private var welcome: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("sAiity").font(.system(size: 34, weight: .semibold))
+            Text("Live subtitles for anything your Mac is playing.")
+                .font(.title3).foregroundStyle(.secondary)
+            Divider().padding(.vertical, 6)
+            bullet("microphone.slash", "It captures the audio your Mac plays, not your microphone.")
+            bullet("lock", "Everything runs on this Mac. No audio ever leaves it.")
+            bullet("arrow.down.circle", "That means a one-time model download — you choose which.")
+            Spacer()
+        }
+    }
+
+    private var permission: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Allow Screen Recording").font(.title2.weight(.semibold))
+            Text("macOS has no separate permission for system audio — Screen Recording is the one "
+                 + "that gates it. sAiity records no video and takes no screenshots.")
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 8) {
+                Image(systemName: model.permissionGranted
+                      ? "checkmark.circle.fill" : "exclamationmark.circle")
+                    .foregroundStyle(model.permissionGranted ? Color.green : Color.orange)
+                Text(model.permissionGranted ? "Granted." : "Not granted yet.")
+                if model.checkingPermission { ProgressView().controlSize(.small) }
+            }
+            .padding(.top, 4)
+
+            if !model.permissionGranted {
+                HStack {
+                    Button("Allow…") {
+                        // Effective only on the very first ask; after that macOS
+                        // ignores it, which is why Open Settings sits next to it.
+                        ScreenRecordingPermission.request()
+                        model.askedOnce = true
+                        Task { await model.refreshPermission() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    Button("Open Settings") { ScreenRecordingPermission.openSettings() }
+                }
+                if model.askedOnce, ScreenRecordingPermission.canRelaunch {
+                    Text("Already allowed it in System Settings but still showing as not granted? "
+                         + "macOS sometimes only applies it to a fresh launch.")
+                        .font(.caption).foregroundStyle(.secondary).padding(.top, 6)
+                    Button("Quit & Reopen") { ScreenRecordingPermission.relaunch() }
+                        .controlSize(.small)
+                }
+            }
+            Spacer()
+        }
+        .task { await model.refreshPermission() }
+        // Coming back from System Settings is the strongest signal there is that
+        // something changed — better than polling alone.
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await model.refreshPermission() }
+        }
+    }
+
+    private var purpose: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("What will you caption?").font(.title2.weight(.semibold))
+            Text("This only picks a starting model. You can change it any time in Settings.")
+                .foregroundStyle(.secondary)
+
+            ForEach(OnboardingModel.Purpose.allCases, id: \.self) { p in
+                choice(title: p.title, detail: p.detail, selected: model.purpose == p) {
+                    model.purpose = p
+                }
+            }
+
+            Divider().padding(.vertical, 4)
+            Toggle("Also show a translation under each caption", isOn: $model.wantsTranslation)
+            if model.wantsTranslation {
+                Text("Apple's translation is used to begin with — it is built into macOS and needs "
+                     + "no download from us. Other translators, including one covering about 450 "
+                     + "languages, are in Settings.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+    }
+
+    private var models: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("One download and you are set").font(.title2.weight(.semibold))
+            Text("Recognition always needs a model on this Mac — that is the price of not sending "
+                 + "your audio to a server.")
+                .foregroundStyle(.secondary)
+
+            let asset = model.recognitionAsset
+            let status = ModelRegistry.status(of: asset)
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(asset.title).font(.body.weight(.medium))
+                    Text(asset.detail).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 12)
+                if status.isInstalled {
+                    Label("Ready", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green).font(.callout)
+                } else if model.state.activeDownload == asset.id {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        if let f = model.state.downloadProgress?.fraction {
+                            ProgressView(value: f).frame(width: 110)
+                            Text("\(Int(f * 100))%").font(.caption2).foregroundStyle(.secondary)
+                        } else {
+                            ProgressView().controlSize(.small)
+                        }
+                    }
+                } else {
+                    Button("Download \(ModelRegistry.format(asset.advertisedBytes ?? 0))") {
+                        Task { await model.state.download(asset) }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+            .padding(12)
+            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+
+            if let e = model.state.modelError {
+                Text(e).font(.caption).foregroundStyle(.red)
+            }
+            Text("You can skip this and let it download the first time you start captions — it "
+                 + "just means waiting then instead of now.")
+                .font(.caption).foregroundStyle(.secondary)
+            Spacer()
+        }
+        .task { model.state.refreshModels() }
+    }
+
+    private var finish: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Ready").font(.title2.weight(.semibold))
+            // Read the live binding rather than the default: it is user-editable,
+            // and telling someone the wrong shortcut is worse than telling them none.
+            bullet("captions.bubble", "Start captions from the sAiity icon in the menu bar"
+                   + (HotKeyCenter.shortcut(for: .toggleCaptions)
+                        .map { ", or press \($0.displayString)." } ?? "."))
+            bullet("slider.horizontal.3", "Change engine, language and appearance in Settings.")
+            bullet("lock", "Nothing you caption is sent anywhere.")
+            Spacer()
+        }
+    }
+
+    // MARK: - Chrome
+
+    private var footer: some View {
+        HStack {
+            Text(model.step.title).font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            if model.step != .welcome {
+                Button("Back") { back() }
+            }
+            Button(model.step == .finish ? "Done" : "Continue") { advance() }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(model.step == .permission && !model.permissionGranted)
+        }
+        .padding(14)
+    }
+
+    private func bullet(_ symbol: String, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: symbol).frame(width: 20).foregroundStyle(.tint)
+            Text(text)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func choice(title: String, detail: String, selected: Bool,
+                        action: @escaping () -> Void) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: selected ? "largecircle.fill.circle" : "circle")
+                .foregroundStyle(selected ? Color.accentColor : .secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.body.weight(.medium))
+                Text(detail).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(selected ? AnyShapeStyle(.tint.opacity(0.12)) : AnyShapeStyle(.clear),
+                    in: RoundedRectangle(cornerRadius: 8))
+        .contentShape(Rectangle())
+        .onTapGesture(perform: action)
+    }
+
+    private func advance() {
+        let steps = OnboardingStep.allCases
+        guard let i = steps.firstIndex(of: model.step) else { return }
+        if model.step == .purpose { model.apply() }
+        if model.step == .finish {
+            Onboarding.complete()
+            onFinish()
+            return
+        }
+        model.step = steps[min(i + 1, steps.count - 1)]
+    }
+
+    private func back() {
+        let steps = OnboardingStep.allCases
+        guard let i = steps.firstIndex(of: model.step), i > 0 else { return }
+        model.step = steps[i - 1]
+    }
+}
+
+/// Hosts the wizard in a real window, and puts the app in the Dock while it is
+/// up — see `ForegroundActivation` for why an agent app has to.
+@MainActor
+final class OnboardingWindowController: NSObject, NSWindowDelegate {
+    static let shared = OnboardingWindowController()
+    private var window: NSWindow?
+
+    func show(state: AppState) {
+        if let w = window {
+            ForegroundActivation.begin()
+            w.makeKeyAndOrderFront(nil)
+            return
+        }
+        let model = OnboardingModel(state: state)
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 560),
+                         styleMask: [.titled, .closable],
+                         backing: .buffered, defer: false)
+        w.title = "Set up sAiity"
+        w.center()
+        w.isReleasedWhenClosed = false
+        w.delegate = self
+        w.contentViewController = NSHostingController(
+            rootView: OnboardingView(model: model) { [weak self] in self?.close() })
+        window = w
+        ForegroundActivation.begin()
+        w.makeKeyAndOrderFront(nil)
+    }
+
+    private func close() {
+        window?.close()
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        // Closing without finishing is a decision, not a completion.
+        if Onboarding.needsRun { Onboarding.dismiss() }
+        ForegroundActivation.end()
+        window = nil
+    }
+}
