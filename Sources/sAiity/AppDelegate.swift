@@ -25,7 +25,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let overlay = OverlayWindow()
     private let capture = SystemAudioCapture()
     private var engine = ASREngine.current
-    private var backend: TranscriptionBackend = AppDelegate.makeActiveBackend()
+    private var backend: TranscriptionBackend = AppDelegate.makeActiveBackend() {
+        // The capture callback outlives any one backend — see BackendSink.
+        didSet { captureSink.point(at: backend) }
+    }
+    /// What the audio callback actually feeds. Always points at `backend`.
+    private let captureSink = BackendSink()
 
     /// Recognition is always the selected ASR engine.
     ///
@@ -41,6 +46,83 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var activeTranslator: Translating? = TranslationEngine.current.makeTranslator()
     private var translatorReady = false
 
+    /// Serialises translator replacement, and lets a superseded swap bow out.
+    ///
+    /// Replacing the translator means releasing gigabytes and loading gigabytes.
+    /// Every change — menu-bar target, Settings target, translation engine, GGUF
+    /// selection — used to fire that off immediately and unserialised, so
+    /// clicking through a few languages while one load was in flight started a
+    /// fresh multi-gigabyte load per click, each holding its own copy alive.
+    private var translatorSwap: Task<Void, Never>?
+    private var translatorGeneration = 0
+
+    /// Release the current translator, then build and prepare its replacement.
+    ///
+    /// Order matters: the outgoing model is released *before* the incoming one
+    /// is constructed, so the peak is one model rather than two.
+    @MainActor
+    private func swapTranslator() {
+        translatorGeneration += 1
+        let generation = translatorGeneration
+        translatorSwap = Task { @MainActor [previous = translatorSwap] in
+            await previous?.value
+            let outgoing = activeTranslator
+            activeTranslator = nil
+            translatorReady = false
+            await outgoing?.stop()
+            // A newer choice landed while we were releasing. Let that one do the
+            // loading rather than paying for a model already superseded.
+            guard generation == translatorGeneration else { return }
+            activeTranslator = TranslationEngine.current.makeTranslator()
+            await prepareTranslatorIfNeeded()
+        }
+    }
+
+    /// Hand back everything the translator holds, without disturbing the
+    /// session. Used when the system is short of memory.
+    @MainActor
+    private func unloadTranslator(reason: String) async {
+        let outgoing = activeTranslator
+        activeTranslator = nil
+        translatorReady = false
+        await outgoing?.stop()
+        activeTranslator = TranslationEngine.current.makeTranslator()
+        MemoryPolicy.releaseCaches()
+        NSLog("sAiity memory: released translator (\(reason)) — \(MemoryPolicy.describeFootprint())")
+    }
+
+    /// The system is short of memory. Give some back before it starts killing
+    /// processes — quite possibly this one, mid-session.
+    @MainActor
+    private func handleMemoryPressure(_ level: MemoryPolicy.Pressure) {
+        switch level {
+        case .warning:
+            // Pooled buffers only. Nothing the user can perceive.
+            MemoryPolicy.releaseCaches()
+        case .critical:
+            // Captions are the point of the app; translation is the expensive
+            // extra. Shedding the translator keeps the session alive instead of
+            // losing it, and it is said out loud rather than left to look like
+            // translation quietly breaking.
+            // `activeTranslator` is non-nil even when no weights are loaded, so
+            // readiness is the only honest test of whether there is anything
+            // here worth shedding.
+            guard translatorReady else {
+                MemoryPolicy.releaseCaches()
+                return
+            }
+            Task { @MainActor in
+                await unloadTranslator(reason: "system memory pressure")
+                if state.isActive {
+                    // It stays off for the rest of this session: reloading into
+                    // a machine that just said it was out of memory is how you
+                    // get killed instead of throttled.
+                    setStatus("Translation off — low memory. Restart captions to resume.")
+                }
+            }
+        }
+    }
+
     /// Load (and if necessary download) the selected translator. This was the
     /// missing link: the translator object was constructed but `prepare()` was
     /// never called, so MADLAD and Qwen never downloaded their weights and
@@ -49,6 +131,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func prepareTranslatorIfNeeded() async {
         guard let target = translateTo,
               let engine = activeTranslator, !translatorReady else { return }
+        // Loading is deferred until a session is actually running, deliberately.
+        // Choosing a target used to load the model there and then — 1.9 GB for
+        // MADLAD, up to 2.5 GB for a large GGUF — and hold it for as long as the
+        // app was open, with captions stopped and nothing to translate. That was
+        // the largest block of memory this app held for no reason at all.
+        // start() calls this again once the session is up.
+        guard state.isActive else {
+            setStatus("Translation: \(AppLanguage(code: target).displayName) — loads on start")
+            return
+        }
         let src = detectedLanguage ?? locale.identifier(.bcp47)
         NSLog("sAiity translator: selected=\(TranslationEngine.current.rawValue) object=\(engine.name) src=\(src) dst=\(target)")
         do {
@@ -123,6 +215,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// when translations finish out of order.
     private var transcriptWriteChain: Task<Void, Never>?
 
+    /// How many caption lines may be waiting on the translator at once.
+    ///
+    /// MADLAD serialises translation behind a lock and takes a second or two per
+    /// sentence. When speech outruns it there is nothing to stop the queue
+    /// growing for the length of the session: each waiting line pins its chunk
+    /// — including per-word timings — and occupies a thread in the cooperative
+    /// pool while it blocks on that lock. Past this many, lines go through
+    /// untranslated instead of joining a queue that is not going to drain. A
+    /// translation that lands a minute after the words were spoken is worth
+    /// nothing on screen anyway.
+    private static let maxPendingTranslations = 4
+    private var pendingTranslations = 0
+
     // Auto language detection. `autoLanguage` controls whether a confident
     // detection also SWITCHES the recogniser; the detected language is always
     // tracked, because translation needs a real source language rather than
@@ -188,6 +293,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var aboutResignObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ note: Notification) {
+        // Before anything can allocate: cap MLX's buffer pool, and start
+        // listening for the system asking for memory back. See MemoryPolicy —
+        // this app can hold several gigabytes of models, and on a 16 GB machine
+        // that is the difference between working and taking the Mac down with it.
+        MemoryPolicy.startMonitoring { [weak self] level in
+            self?.handleMemoryPressure(level)
+        }
+        // didSet does not fire for an initial value, so aim the sink once here.
+        captureSink.point(at: backend)
+
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         updateStatusItemIcon()
         if statusItem.button?.image == nil { statusItem.button?.title = "CC" }
@@ -227,21 +342,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.translateTo = t
-                self.activeTranslator = TranslationEngine.current.makeTranslator()
-                self.translatorReady = false
-                Task { @MainActor in
-                    // Hold the row open for as long as translation is on, so the
-                    // bubble does not change height every time a translation
-                    // lands and clears.
-                    self.overlay.reservesTranslationRow =
-                        t != nil && CaptionStyle.current.showTranslation
-                    if t == nil { self.overlay.showTranslation("") }
-                    // Changing the translation target no longer changes which
-                    // recognition engine runs — that was only ever true for
-                    // Whisper, which has been cut.
-                    self.rebuildMenu()
-                    await self.prepareTranslatorIfNeeded()
-                }
+                // Hold the row open for as long as translation is on, so the
+                // bubble does not change height every time a translation
+                // lands and clears.
+                self.overlay.reservesTranslationRow =
+                    t != nil && CaptionStyle.current.showTranslation
+                if t == nil { self.overlay.showTranslation("") }
+                // Changing the translation target no longer changes which
+                // recognition engine runs — that was only ever true for
+                // Whisper, which has been cut.
+                self.rebuildMenu()
+                // Releases the outgoing model before loading its replacement,
+                // and collapses a burst of changes into one load.
+                self.swapTranslator()
             }
         }
 
@@ -722,7 +835,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 try Task.checkCancellation()
                 captureFormat = fmt
-                let activeBackend = backend
                 try await capture.start(
                     targetFormat: fmt,
                     // Capture the backend we are starting WITH, rather than
@@ -732,7 +844,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     // unsynchronised read/write of a class reference. Binding it
                     // once also guarantees the audio goes to the engine the
                     // stream was configured for.
-                    onBuffer: { [activeBackend] buf in activeBackend.feed(buf) },
+                    onBuffer: { [captureSink] buf in captureSink.feed(buf) },
                     onState: { audio in
                         Task { @MainActor [self] in self.captureStateChanged(audio) }
                     })
@@ -824,8 +936,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Swap the recogniser without dropping the capture stream or the session.
+    /// Chains engine restarts. Two of these overlapping meant two `start()`
+    /// calls on the backend, and so two pumps driving one FluidAudio actor —
+    /// the overlap that trapped inside its buffer compaction and killed the app
+    /// mid-session. Held so `stopAsync()` can wait for a restart in flight
+    /// rather than tearing down underneath one.
+    private var restartTask: Task<Void, Never>?
+
     private func restartRecognition() {
-        Task { @MainActor in
+        restartTask = Task { @MainActor [previous = restartTask] in
+            await previous?.value
             await backend.stop()
             do {
                 try await backend.prepare(locale: locale) { _ in }
@@ -838,10 +958,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let fmt = await backend.inputFormat, fmt != captureFormat {
                     await capture.stop()
                     captureFormat = fmt
-                    let activeBackend = backend
                     try await capture.start(
                         targetFormat: fmt,
-                        onBuffer: { [activeBackend] buf in activeBackend.feed(buf) },
+                        onBuffer: { [captureSink] buf in captureSink.feed(buf) },
                         onState: { [weak self] st in
                             Task { @MainActor in self?.captureStateChanged(st) }
                         })
@@ -875,11 +994,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         await sessionTask?.value
         sessionTask = nil
 
+        // Same reasoning for an engine restart in flight. It is fired and
+        // forgotten from the engine-changed notification, so without this it
+        // could resume after the teardown and call start() on the backend we
+        // just stopped — leaving a pump running with the session shut down.
+        restartTask?.cancel()
+        await restartTask?.value
+        restartTask = nil
+
         await capture.stop()
         await backend.stop()
         await activeTranslator?.stop()
         translatorReady = false
+        // Queued transcript writes have to land before the recording closes:
+        // TranscriptStore is an actor, so once end() has closed the handle a
+        // still-pending append is silently dropped and the session loses its
+        // tail. Only worth waiting for when a transcript is actually being
+        // written — otherwise there is nothing at stake, and this is a wait on
+        // however long the last translation takes. The translator was stopped
+        // just above, so anything still queued behind it now returns at once;
+        // at most one generation is genuinely in flight.
+        if await TranscriptStore.shared.isRecording {
+            await transcriptWriteChain?.value
+        }
+        transcriptWriteChain = nil
         await endRecording()
+        // Anything still pooled goes back to the system now, not at some
+        // unspecified later point. Stop is exactly when a user expects an app
+        // to stop costing them memory.
+        MemoryPolicy.releaseCaches()
+        NSLog("sAiity memory: session stopped — \(MemoryPolicy.describeFootprint())")
         overlay.clear()
         state = .idle
     }
@@ -991,15 +1135,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // export of that session was permanently mis-ordered.
         let idx = sessionLines.count
         let generation = sessionGeneration
+
+        // Backpressure: see maxPendingTranslations. Decided before the segment
+        // is recorded so the stored `trLoc` says what actually happened rather
+        // than promising a translation that was never attempted.
+        let translating = wantsTranslation && pendingTranslations < Self.maxPendingTranslations
+        if translating {
+            pendingTranslations += 1
+        } else if wantsTranslation {
+            NSLog("sAiity translate: skipped, \(pendingTranslations) already queued")
+        }
+
         sessionLines.append(Segment(i: idx, t0: chunk.start, t1: chunk.end,
                                     text: text, loc: locale.identifier(.bcp47),
-                                    tr: nil, trLoc: wantsTranslation ? translateTo : nil,
+                                    tr: nil, trLoc: translating ? translateTo : nil,
                                     words: chunk.words.isEmpty ? nil : chunk.words))
 
         // Translate concurrently; the result is patched in by index.
         let srcCode = detectedLanguage ?? locale.identifier(.bcp47)
         let translation: Task<String?, Never> = Task { @MainActor in
-            guard wantsTranslation, let target = translateTo,
+            guard translating else { return nil }
+            defer { self.pendingTranslations -= 1 }
+            guard let target = translateTo,
                   let engine = activeTranslator else { return nil }
             guard let out = await engine.translate(text, from: srcCode, to: target) else {
                 return nil

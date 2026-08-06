@@ -39,6 +39,33 @@ struct TimedWord: Sendable, Codable {
 ///   - MLX Audio    — Nemotron streaming models, built for low latency
 ///
 /// Each of those is "feed PCM, get text back", which is exactly this protocol.
+/// Where the capture callback delivers audio, indirected through a box.
+///
+/// The audio callback lives for as long as the `SCStream` does, while the
+/// backend under it can be replaced — switching recognition engine or latency
+/// tier builds a new one. Capturing the backend directly in that closure meant
+/// the stream kept feeding the OLD, already-stopped backend after a switch, and
+/// because both engines want the same 16 kHz format the capture session was
+/// never rebuilt, so nothing ever corrected it. Two things followed, both
+/// silent: the new engine received no audio at all and captions simply stopped,
+/// and the dead backend's queue grew at roughly 64 KB/s — some 230 MB an hour —
+/// with no pump left to drain it, for as long as the app stayed open.
+final class BackendSink: @unchecked Sendable {
+    private let lock = NSLock()
+    private var backend: TranscriptionBackend?
+
+    func point(at backend: TranscriptionBackend?) {
+        lock.withLock { self.backend = backend }
+    }
+
+    /// Called ~50×/s from the capture queue. Reads the current backend under the
+    /// lock and hands off; `feed` itself only copies samples and returns.
+    func feed(_ buffer: AVAudioPCMBuffer) {
+        let current = lock.withLock { backend }
+        current?.feed(buffer)
+    }
+}
+
 protocol TranscriptionBackend: AnyObject, Sendable {
     /// Shown in the UI so it is always obvious which engine is running.
     var name: String { get }

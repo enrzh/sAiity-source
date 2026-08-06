@@ -236,7 +236,17 @@ final class AppState {
             .supportedCanonicalCodes().contains(t)
     }
     var llmModel = LocalModel.selected {
-        didSet { LocalModel.selected = llmModel }
+        didSet {
+            guard llmModel != oldValue else { return }
+            LocalModel.selected = llmModel
+            // Writing the preference is not enough: the translator holds an LLM
+            // built from the *old* file, so without this the app kept using —
+            // and kept several gigabytes of — the model the user just switched
+            // away from, and the new selection took effect only after a restart.
+            // The same notification the engine picker posts rebuilds it.
+            NotificationCenter.default.post(name: .saiityTranslateTargetChanged, object: nil,
+                                            userInfo: ["target": translateTo as Any])
+        }
     }
 
     func refresh() async {

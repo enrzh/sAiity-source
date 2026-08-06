@@ -83,6 +83,13 @@ final class MADLADTranslator: Translating, @unchecked Sendable {
         //
         // Going through `fromLocal` once the weights are on disk sidesteps both,
         // and skips the network entirely on every later launch.
+        // Bound MLX's buffer pool before the first allocation goes through it.
+        // Left at its default the pool will grow to a large fraction of physical
+        // RAM and never shrink, which is how this app came to hold ~2 GB it was
+        // no longer using. Done here rather than at launch so a user who never
+        // runs an MLX model never initialises Metal at all.
+        MemoryPolicy.prepareForMLX()
+
         let madlad = MADLADTranslation.MADLADTranslator.self
         if Self.isDownloaded() {
             progress("Loading MADLAD…")
@@ -126,7 +133,18 @@ final class MADLADTranslator: Translating, @unchecked Sendable {
         return lock.withLock { try? t.translate(text, to: native) }
     }
 
-    func stop() async { translator = nil }
+    /// Dropping the reference is not enough to get the memory back.
+    ///
+    /// MLX pools freed buffers rather than returning them, so nilling the model
+    /// moved ~1.9 GB of weights into MLX's cache, where it stayed for the life
+    /// of the process — the app looked like it had released the translator while
+    /// still holding every byte of it, and a subsequent load allocated on top.
+    /// `releaseCaches()` is what actually hands the pages back.
+    func stop() async {
+        translator = nil
+        MemoryPolicy.releaseCaches()
+        NSLog("sAiity madlad: released — \(MemoryPolicy.describeFootprint())")
+    }
 }
 
 
@@ -256,12 +274,18 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
 
         // No GGML/Metal environment variables: ghost-pepper sets none, and the
         // ones tried here previously were treating a symptom of the template bug.
-        // Load off the main actor; 4096 is their context size for 0.8B/2B.
-        // NOTE: maxTokenCount is n_ctx AND n_batch, not a generation cap —
-        // lowering it truncates the prompt.
+        //
+        // maxTokenCount is n_ctx AND n_batch, not a generation cap: llama.cpp
+        // allocates the whole KV cache for it up front, so this number is paid
+        // in resident memory whether or not the tokens are ever used. The real
+        // workload is a ~700-token system-plus-few-shot prompt and one sentence
+        // of output; 4096 (inherited from ghost-pepper) bought nothing and cost
+        // twice the KV cache. 2048 keeps a wide margin over the prompt — going
+        // lower would start truncating it, which is the failure this number
+        // guards against.
         let url = m.localURL
         let loaded: LLM? = await Task.detached(priority: .userInitiated) {
-            guard let l = LLM(from: url, maxTokenCount: 4096) else { return nil }
+            guard let l = LLM(from: url, maxTokenCount: 2048) else { return nil }
             l.temp = 0.1
             // The library default is `print($0)`, which spews every token to stdout.
             l.postprocess = { _ in }
@@ -480,6 +504,12 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
         return .ok(t)
     }
 
+    /// llama.cpp frees the model and its KV cache in `LLMCore.deinit`, so this
+    /// really does return the memory — with one caveat the caller cannot fix:
+    /// a generation that overran its timeout has already been abandoned (see
+    /// `generate`), and that decode loop keeps its own model alive until it
+    /// finishes on its own. Dropping our reference here is still correct; it
+    /// just means the release happens when the stranded loop ends.
     func stop() async { llm = nil }
 
     /// GGUF fetch with real progress and a non-destructive replace. An imported

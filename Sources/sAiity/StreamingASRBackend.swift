@@ -39,6 +39,20 @@ extension FluidStreamingEngine {
 /// Parakeet EOU has the same shape (`prefix` → `await` → `removeFirst`); it
 /// does not trap, because a `min()` saves it — it silently decodes the same
 /// audio twice and drops twice as much instead. Which is worse.
+///
+/// It crashed again in the field on 2026-08-05, from the other direction: this
+/// type *documented* the invariant without enforcing it. `start()` assigned over
+/// `pump` without reclaiming the previous one, and an unreferenced `Task` keeps
+/// running — so a second `start()` (an engine switch racing a stop) left two
+/// pumps driving one actor. `stopPump()` now makes that structurally impossible,
+/// and `pump` is under its own lock so two callers cannot both think they own it.
+///
+/// What is enforced here: at most one pump exists, and it has fully left the
+/// engine before `stop()` calls `finishSession()`. What is *not* enforced here:
+/// a caller invoking `start()` and `stop()` concurrently on the same instance
+/// would still overlap a new pump with the teardown. AppDelegate prevents that
+/// with its session state machine and a single-flight restart chain; if this
+/// type ever gains another caller, that has to be enforced rather than assumed.
 final class StreamingASRBackend: TranscriptionBackend, @unchecked Sendable {
     let name: String
     private let engine: any FluidStreamingEngine
@@ -121,7 +135,54 @@ final class StreamingASRBackend: TranscriptionBackend, @unchecked Sendable {
 
     private let pendingLock = NSLock()
     private var pending: [Float] = []
+    /// True while the backlog is over its cap, so the log records the onset
+    /// rather than one line per audio callback, fifty times a second.
+    private var overflowing = false
+
+    /// How much un-processed audio may pile up before the oldest is dropped.
+    ///
+    /// Capture never stops — not even in digital silence — so `feed` runs at
+    /// roughly 64 KB/s for the life of the stream, and nothing about the pump
+    /// falling behind is self-correcting: a batch that takes longer than the
+    /// audio it contains makes the next batch bigger, which takes longer still.
+    /// Unbounded, that is about 230 MB an hour, and a backend that has been
+    /// stopped and replaced drains at zero.
+    ///
+    /// Ten seconds is far more slack than a healthy pump ever uses (it drains
+    /// every 80 ms). Reaching this cap means recognition is not keeping up, and
+    /// at that point stale audio is worthless — captions are supposed to track
+    /// what is being said now. Dropping the oldest is strictly better than
+    /// taking the machine down.
+    private static let maxPendingSeconds: Double = 10
+    private var maxPendingSamples: Int { Int(engine.sampleRate * Self.maxPendingSeconds) }
+
+    /// Guards `pump` itself. Overwriting the property is not the same as
+    /// stopping the task, and two callers must not both believe they own it.
+    private let pumpLock = NSLock()
     private var pump: Task<Void, Never>?
+
+    #if SAIITY_TEST_HOOKS
+    /// Test-only view of the backlog. The cap is the whole point of `feed`, and
+    /// an unbounded queue is invisible from the outside until the machine runs
+    /// out of memory — which is exactly how it was found.
+    var pendingSampleCountForTests: Int { pendingLock.withLock { pending.count } }
+    #endif
+
+    /// Cancel the running pump and wait for it to actually leave the engine.
+    ///
+    /// `cancel()` alone does NOT interrupt an in-flight `await engine.process()`
+    /// — returning while that call is still suspended is precisely what lets a
+    /// second pump, or a `finish()`, re-enter the actor and corrupt its buffer
+    /// offset.
+    private func stopPump() async {
+        guard let p = (pumpLock.withLock { () -> Task<Void, Never>? in
+            let p = pump
+            pump = nil
+            return p
+        }) else { return }
+        p.cancel()
+        await p.value
+    }
 
     init(name: String, engine: any FluidStreamingEngine) {
         self.name = name
@@ -139,6 +200,13 @@ final class StreamingASRBackend: TranscriptionBackend, @unchecked Sendable {
     }
 
     func start(onChunk: @escaping @Sendable (TranscriptChunk) -> Void) async throws {
+        // Reclaim a pump left over from an earlier start before creating
+        // another. Assigning over the property was not enough: an unreferenced
+        // Task keeps running, so a second start — an engine switch racing a
+        // stop, say — left two pumps calling process() on one actor. That is
+        // exactly the overlap this type exists to prevent, and it is how the
+        // buffer-offset trap documented above was reached in the field.
+        await stopPump()
         emit = onChunk
         commitLock.withLock { committed = ""; lastSeen = ""; lastCommitAt = Date() }
         sessionStart = Date()
@@ -189,6 +257,7 @@ final class StreamingASRBackend: TranscriptionBackend, @unchecked Sendable {
 
         // The single pump. See the type doc for why this is a correctness
         // requirement rather than an optimisation.
+        pumpLock.withLock {
         pump = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
@@ -203,6 +272,7 @@ final class StreamingASRBackend: TranscriptionBackend, @unchecked Sendable {
                 try? await self.engine.process(batch)
             }
         }
+        }
     }
 
     /// Cheap and non-blocking: copy the samples out and return. The pump owns
@@ -212,7 +282,22 @@ final class StreamingASRBackend: TranscriptionBackend, @unchecked Sendable {
         let n = Int(buffer.frameLength)
         guard n > 0 else { return }
         let src = UnsafeBufferPointer(start: ch[0], count: n)
-        pendingLock.withLock { pending.append(contentsOf: src) }
+        let cap = maxPendingSamples
+        pendingLock.withLock {
+            pending.append(contentsOf: src)
+            // See maxPendingSeconds. `count > cap` is what makes the removal
+            // count strictly smaller than the array — the unclamped version of
+            // this arithmetic is what traps inside FluidAudio.
+            guard pending.count > cap else {
+                overflowing = false
+                return
+            }
+            pending.removeFirst(pending.count - cap)
+            if !overflowing {
+                overflowing = true
+                NSLog("sAiity asr: \(name) backlog over \(Int(Self.maxPendingSeconds))s — dropping oldest audio")
+            }
+        }
     }
 
     /// Audio went silent: whatever is still volatile is a finished utterance.
@@ -235,15 +320,19 @@ final class StreamingASRBackend: TranscriptionBackend, @unchecked Sendable {
     }
 
     func stop() async {
-        // cancel() does NOT interrupt an in-flight `await engine.process(...)`.
-        // Calling finish() while that call is still suspended re-enters the
-        // actor and corrupts its buffer offset exactly the way concurrent feeds
-        // did — verified, it crashed here with the same "Can't remove more items
-        // than it has" trap. Wait for the pump to actually leave the engine.
-        pump?.cancel()
-        await pump?.value
-        pump = nil
-        pendingLock.withLock { pending.removeAll(keepingCapacity: true) }
+        // Waits for the pump to actually leave the engine. Calling finish()
+        // while a process() is still suspended re-enters the actor and corrupts
+        // its buffer offset exactly the way concurrent feeds did — verified, it
+        // crashed here with the same "Can't remove more items than it has" trap.
+        await stopPump()
+        // Not `keepingCapacity`: this backend may be about to be discarded, and
+        // holding the session's high-water allocation — potentially many
+        // megabytes of audio — for an object nobody will use again is the kind
+        // of retention that adds up to running the machine out of memory.
+        pendingLock.withLock {
+            pending = []
+            overflowing = false
+        }
 
         // finish() returns the WHOLE session transcript; emit only what has not
         // already been committed, or the last line is duplicated.

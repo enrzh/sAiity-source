@@ -18,6 +18,13 @@ let package = Package(
         // Qwen via llama.cpp/GGUF. Ships a binaryTarget, so no cmake.
         .package(url: "https://github.com/obra/LLM.swift",
                  revision: "c2144e1a0e29c280ec6080b7da85e876d51f8509"),
+        // Already here transitively, under speech-swift. Declared explicitly so
+        // the app can import MLX and bound its buffer pool: MLX caches freed GPU
+        // buffers and its default ceiling is a fraction of physical RAM, which on
+        // a 16 GB Mac means MADLAD's gigabytes are never returned to the system.
+        // Pinned to the version speech-swift already resolves, so adding this
+        // changes what we can call, not what gets built.
+        .package(url: "https://github.com/ml-explore/mlx-swift", exact: "0.31.6"),
         // In-app updates. Without this a shipped build can never be fixed after
         // the fact — a bad bug would live forever on every Mac that has it.
         .package(url: "https://github.com/sparkle-project/Sparkle",
@@ -33,6 +40,7 @@ let package = Package(
                 // also loading 1.86 GB into memory, which fromPretrained does.
                 .product(name: "AudioCommon", package: "speech-swift"),
                 .product(name: "LLM", package: "LLM.swift"),
+                .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
             path: "Sources/sAiity",
