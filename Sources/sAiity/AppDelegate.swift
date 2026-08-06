@@ -221,10 +221,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var sentenceStart: Double = 0
     private var sentenceEnd: Double = 0
 
+    /// Identifies the sentence whose original is on screen right now.
+    ///
+    /// A translation takes a second or two, by which time the speaker may have
+    /// started the next sentence. Without this the translation line kept
+    /// whatever arrived last regardless of what was above it — measured: the
+    /// bubble read "direkt auf dem Gerät" over "This application generates
+    /// subtitles for everything that is played on Mac", two different
+    /// sentences stacked as if they were a pair. A translation is now only
+    /// shown while its own original is still displayed.
+    private var displaySentenceID = 0
+    /// Set when a sentence is closed: the next content rendered belongs to the
+    /// next sentence, whether it arrives as a final clause or as volatile text.
+    private var sentenceClosed = false
+
     /// Also the display cap: past this a sentence is closed rather than left to
     /// grow past what the bubble can show.
     private static let maxSentenceChars = 220
     private static let sentenceTerminators: Set<Character> = [".", "!", "?", "…", "。", "！", "？"]
+    /// Punctuation that says the speaker is mid-thought, so a pause after it is
+    /// a breath rather than a full stop.
+    private static let clauseContinuations: Set<Character> = [",", "、", "，", ";", "；", ":", "：", "-", "–"]
 
     #if SAIITY_TEST_HOOKS
     static var sentenceTerminatorsForTests: Set<Character> { sentenceTerminators }
@@ -951,6 +968,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         try? await Task.sleep(nanoseconds: 350_000_000)
         guard state == .running else { return }
         await backend.flushPending()
+        // flushPending emits the tail through the same callback as every other
+        // chunk, and that callback hops to the main actor — so the tail is still
+        // in flight right here. Closing now strands it: measured, the final
+        // "wird" of a sentence became the whole of the next one, alone on
+        // screen. Let it land first.
+        try? await Task.sleep(nanoseconds: 80_000_000)
+        guard state == .running else { return }
+
+        // A pause after a comma is a breath, not the end of a thought. Closing
+        // on it split "Untertitel für alles, was der Mac abspielt, direkt auf
+        // dem Gerät." into three, each translated without the others. If the
+        // text so far ends mid-clause, give the speaker a moment to carry on;
+        // if more arrives, the gap that follows *it* will do the closing.
+        if let last = lastFinalText.last, Self.clauseContinuations.contains(last) {
+            let partsBefore = sentenceParts.count
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard state == .running else { return }
+            guard sentenceParts.count == partsBefore else { return }
+        }
+
         // The pause IS the end of the sentence. That matters most for the
         // multilingual model, which frequently emits no punctuation at all —
         // without this its sentences would only ever be closed by the length
@@ -1147,6 +1184,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         showedAnyCaption = true
 
+        // The first words of a new sentence replace the last one on screen, so
+        // the translation under them no longer belongs to what is above it.
+        // Clear it here rather than letting it sit under unrelated text; the
+        // row keeps its height, so nothing jumps.
+        if sentenceClosed, sentenceParts.isEmpty {
+            sentenceClosed = false
+            displaySentenceID += 1
+            overlay.showTranslation("")
+        }
+
         guard chunk.isFinal else {
             // Still being revised: show it after the part of the sentence that
             // has already settled, so the line reads forward instead of being
@@ -1190,10 +1237,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                     words: sentenceWords)
         sentenceParts.removeAll()
         sentenceWords.removeAll()
-        emitSentence(text, chunk: chunk)
+        // Its original stays on screen until the next sentence starts rendering.
+        sentenceClosed = true
+        emitSentence(text, chunk: chunk, sentenceID: displaySentenceID)
     }
 
-    private func emitSentence(_ text: String, chunk: TranscriptChunk) {
+    private func emitSentence(_ text: String, chunk: TranscriptChunk, sentenceID: Int) {
 
         // Detection runs on the ACCUMULATED transcript, never a single line:
         // one-word lines are noise ("Ja." reads as Finnish, "Okay." as English).
@@ -1277,7 +1326,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if self.sessionGeneration == generation, idx < self.sessionLines.count {
                 self.sessionLines[idx].tr = out
             }
-            if CaptionStyle.current.showTranslation { self.overlay.showTranslation(out) }
+            // Only if this sentence is still the one on screen. A translation
+            // that resolves after the speaker has moved on belongs to text the
+            // viewer can no longer see, and stacking it under the next sentence
+            // reads as a mistranslation of that sentence.
+            if CaptionStyle.current.showTranslation, self.displaySentenceID == sentenceID {
+                self.overlay.showTranslation(out)
+            }
             return out
         }
 

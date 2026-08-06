@@ -67,7 +67,20 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
     /// −45 dBFS — and the hold is long enough to ignore the gaps *between words*
     /// while still catching the gap between sentences.
     private static let gapRMSThreshold: Float = 0.0056     // ≈ -45 dBFS
-    private static let gapHoldFrames = 21_600              // 450 ms at 48 kHz
+    /// 750 ms at 48 kHz.
+    ///
+    /// This is the line between a breath and a full stop, and it decides where
+    /// sentences end: the caption pipeline treats a gap as the end of a thought,
+    /// because most of what the multilingual recogniser emits carries no
+    /// punctuation to end it with. At 450 ms it fired on the pause a speaker
+    /// leaves at a comma — "Untertitel für alles, was der Mac abspielt, direkt
+    /// auf dem Gerät." was split into three, and each third was translated
+    /// without the other two.
+    ///
+    /// Clause pauses in ordinary speech run 200-500 ms; the pause at the end of
+    /// a sentence is longer. Raising this costs about a third of a second before
+    /// a finished sentence is translated, and buys sentences that are whole.
+    private static let gapHoldFrames = 36_000
     private var quietFrames = 0
     /// Fires once per pause. Re-arms only after speech resumes, so a long
     /// silence does not flush repeatedly.
