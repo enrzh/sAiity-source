@@ -312,7 +312,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         s.isEnabled = false
         menu.addItem(s)
         menu.addItem(.separator())
-        let toggleItem = NSMenuItem(title: state.isActive ? "Stop captions" : "Start captions",
+        let toggleItem = NSMenuItem(title: state.isActive ? String(localized: "Stop captions") : String(localized: "Start captions"),
                                     action: #selector(toggle), keyEquivalent: "")
         if let sc = HotKeyCenter.shortcut(for: .toggleCaptions), sc.isUsable {
             // Shown for discoverability. The real binding is the global hot key —
@@ -325,16 +325,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(translationMenuItem())
 
         menu.addItem(.separator())
-        let copyLine = NSMenuItem(title: "Copy current line", action: #selector(copyCurrentLine),
+        let copyLine = NSMenuItem(title: String(localized: "Copy current line"), action: #selector(copyCurrentLine),
                                   keyEquivalent: "c")
         copyLine.isEnabled = !(lastFinalText.isEmpty && lastVolatileText.isEmpty)
         menu.addItem(copyLine)
-        let copyAll = NSMenuItem(title: "Copy whole session", action: #selector(copyWholeSession),
+        let copyAll = NSMenuItem(title: String(localized: "Copy whole session"), action: #selector(copyWholeSession),
                                  keyEquivalent: "C")
         copyAll.isEnabled = !sessionLines.isEmpty
         menu.addItem(copyAll)
 
-        let rec = NSMenuItem(title: "Save transcript", action: #selector(toggleSaveTranscript),
+        let rec = NSMenuItem(title: String(localized: "Save transcript"), action: #selector(toggleSaveTranscript),
                              keyEquivalent: "")
         rec.state = saveTranscript ? .on : .off
         rec.toolTip = "Write this session to disk. Off by default."
@@ -342,11 +342,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(transcriptsMenuItem())
 
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Open sAiity…", action: #selector(openMainWindow),
+        menu.addItem(NSMenuItem(title: String(localized: "Open sAiity…"), action: #selector(openMainWindow),
                                 keyEquivalent: ","))
-        menu.addItem(NSMenuItem(title: "About sAiity", action: #selector(showAbout),
+        menu.addItem(NSMenuItem(title: String(localized: "About sAiity"), action: #selector(showAbout),
                                 keyEquivalent: ""))
-        let update = NSMenuItem(title: "Check for Updates…",
+        let update = NSMenuItem(title: String(localized: "Check for Updates…"),
                                 action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)),
                                 keyEquivalent: "")
         update.target = updater
@@ -354,7 +354,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // terminate(_:) lives on NSApplication, not on this delegate. Without an
         // explicit target, assignTargets below would point it at AppDelegate,
         // which does not implement it — and the item silently does nothing.
-        let quit = NSMenuItem(title: "Quit sAiity", action: #selector(NSApplication.terminate(_:)),
+        let quit = NSMenuItem(title: String(localized: "Quit sAiity"), action: #selector(NSApplication.terminate(_:)),
                               keyEquivalent: "q")
         quit.target = NSApp
         menu.addItem(quit)
@@ -364,9 +364,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 
     private func translationMenuItem() -> NSMenuItem {
-        let item = NSMenuItem(title: "Translate to", action: nil, keyEquivalent: "")
+        let item = NSMenuItem(title: String(localized: "Translate to"), action: nil, keyEquivalent: "")
         let menu = NSMenu()
-        let off = NSMenuItem(title: "Off", action: #selector(pickTranslation(_:)), keyEquivalent: "")
+        let off = NSMenuItem(title: String(localized: "Off"), action: #selector(pickTranslation(_:)), keyEquivalent: "")
         off.representedObject = ""
         off.state = translateTo == nil ? .on : .off
         menu.addItem(off)
@@ -394,7 +394,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for code in ["en", "de"] where shown.count < 8 { add(code) }
 
         menu.addItem(.separator())
-        let all = NSMenuItem(title: "All languages…", action: #selector(showLanguagePicker),
+        let all = NSMenuItem(title: String(localized: "All languages…"), action: #selector(showLanguagePicker),
                              keyEquivalent: "")
         menu.addItem(all)
 
@@ -429,7 +429,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Past sessions, newest first. Everything is local; "Reveal in Finder" is
     /// there so what exists on disk is never a mystery.
     private func transcriptsMenuItem() -> NSMenuItem {
-        let item = NSMenuItem(title: "Transcripts", action: nil, keyEquivalent: "")
+        let item = NSMenuItem(title: String(localized: "Transcripts"), action: nil, keyEquivalent: "")
         let menu = NSMenu()
         let sessions = TranscriptStore.list()
 

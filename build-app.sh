@@ -60,6 +60,15 @@ if compgen -G "$FW_SRC/*.framework" >/dev/null; then
 fi
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
+# Localizations. SwiftUI keys against Bundle.main's Localizable table, so the
+# compiled catalog goes straight into Contents/Resources — a bare swift-build
+# binary simply falls back to the English keys.
+if [ -f Resources/Localizable.xcstrings ]; then
+    xcrun xcstringstool compile Resources/Localizable.xcstrings \
+        --output-directory "$APP/Contents/Resources"
+    echo "localized: $(ls -d "$APP/Contents/Resources/"*.lproj | wc -l | tr -d ' ') languages"
+fi
+
 # Stamp the build so a bug report can name it.
 if [ -n "$GIT_VERSION" ]; then
     /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $GIT_VERSION" \
