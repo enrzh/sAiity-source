@@ -71,6 +71,9 @@ enum AssetRemoval: Sendable {
 enum AssetUse: Sendable {
     case never
     case whenRecognitionEngine(ASREngine)
+    /// One latency tier of the Nemotron model. Only the selected tier counts as
+    /// in use — the other is just bytes that can be deleted freely.
+    case whenNemotronTier(chunkMs: Int)
     case whenTranslator(TranslationEngine)
     case whenQwenVariant(file: String)
 
@@ -81,6 +84,8 @@ enum AssetUse: Sendable {
             return false
         case .whenRecognitionEngine(let e):
             return ASREngine.current == e
+        case .whenNemotronTier(let ms):
+            return ASREngine.current == .nemotron && NemotronEngine.selectedChunkMs == ms
         case .whenTranslator(let t):
             return TranslationEngine.current == t
         case .whenQwenVariant(let f):
@@ -173,7 +178,7 @@ enum ModelRegistry {
     // MARK: - The catalogue
 
     static func assets() -> [ModelAsset] {
-        ASREngine.allCases.map(\.assetDescriptor)
+        ASREngine.allCases.flatMap(\.assetDescriptors)
             + TranslationEngine.allCases.flatMap(\.assetDescriptors)
     }
 

@@ -59,7 +59,21 @@ final class AppState {
         didSet {
             guard engine != oldValue else { return }
             NotificationCenter.default.post(name: .saiityEngineChanged, object: nil,
-                                            userInfo: ["engine": engine.rawValue])
+                                            userInfo: ["engine": engine.rawValue,
+                                                       "chunkMs": nemotronTier])
+        }
+    }
+
+    /// Nemotron's latency tier. A tier is a separate model, so changing it goes
+    /// through the same engine-changed path as changing the engine — the
+    /// running backend has to be rebuilt either way.
+    var nemotronTier = NemotronEngine.selectedChunkMs {
+        didSet {
+            guard nemotronTier != oldValue else { return }
+            NemotronEngine.selectedChunkMs = nemotronTier
+            NotificationCenter.default.post(name: .saiityEngineChanged, object: nil,
+                                            userInfo: ["engine": engine.rawValue,
+                                                       "chunkMs": nemotronTier])
         }
     }
 

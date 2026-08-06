@@ -627,9 +627,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Swap engines live. Recognition restarts; capture keeps running, so no
     /// audio is lost beyond the model-load gap.
     @MainActor
+    private var engineTier = NemotronEngine.selectedChunkMs
+
     private func engineChanged(to new: ASREngine) {
-        guard new != engine else { return }
+        // The tier is part of the engine's identity: same enum case, different
+        // tier means a different model on disk and a different backend.
+        let newTier = NemotronEngine.selectedChunkMs
+        guard new != engine || newTier != engineTier else { return }
         engine = new
+        engineTier = newTier
         ASREngine.current = new
         let wasRunning = state.isActive
         Task { @MainActor in

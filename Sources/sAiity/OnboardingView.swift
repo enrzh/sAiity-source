@@ -74,7 +74,13 @@ final class OnboardingModel {
         }
     }
 
-    var recognitionAsset: ModelAsset { purpose.engine.assetDescriptor }
+    /// The asset onboarding offers to download: the engine's currently-selected
+    /// variant. Nemotron has two latency tiers; a fresh install gets the
+    /// default (balanced) one, so `.first` matching the selection is right.
+    var recognitionAsset: ModelAsset {
+        let all = purpose.engine.assetDescriptors
+        return all.first { $0.use.isSelected } ?? all[0]
+    }
 }
 
 struct OnboardingView: View {

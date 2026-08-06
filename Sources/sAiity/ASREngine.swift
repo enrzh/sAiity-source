@@ -37,7 +37,8 @@ enum ASREngine: String, CaseIterable, Sendable {
     /// True when this engine needs weights fetched before use.
     var needsDownload: Bool {
         switch self {
-        case .nemotron: return !NemotronEngine.isDownloaded()
+        case .nemotron:
+            return !NemotronEngine.isDownloaded(chunkMs: NemotronEngine.selectedChunkMs)
         case .parakeetEou: return !ParakeetEouEngine.isDownloaded()
         }
     }
@@ -78,27 +79,41 @@ enum ASREngine: String, CaseIterable, Sendable {
         }
     }
 
-    /// This engine's entry in the model registry. Owning the descriptor here
-    /// rather than in a central switch is what makes a new engine case produce a
-    /// working Models row without touching the UI.
-    var assetDescriptor: ModelAsset {
+    /// This engine's registry entries. Owning the descriptors here rather than
+    /// in a central switch is what makes a new engine case produce working
+    /// Models rows without touching the UI. Plural, because Nemotron's latency
+    /// tiers are each their own ~640 MB download with the chunk size baked into
+    /// the encoder — a tier is a model, not a setting.
+    var assetDescriptors: [ModelAsset] {
         switch self {
         case .nemotron:
-            return ModelAsset(
-                id: "asr.nemotron",
-                family: .recognition,
-                title: "Nemotron (multilingual)",
-                detail: summary,
-                licence: "NVIDIA Open Model License · huggingface.co/FluidInference",
-                advertisedBytes: 634 * 1_048_576,
-                storage: .directory(NemotronEngine.assetDirectory,
-                                    markers: ["multilingual/\(NemotronEngine.chunkMs)ms/metadata.json"]),
-                removal: .remove(NemotronEngine.assetDirectory),
-                use: .whenRecognitionEngine(.nemotron),
-                install: { sink in try await NemotronEngine.downloadWeights(progress: sink) })
+            return NemotronEngine.availableChunkMs.map { ms in
+                let fast = ms < NemotronEngine.chunkMs
+                return ModelAsset(
+                    id: fast ? "asr.nemotron.fast" : "asr.nemotron",
+                    family: .recognition,
+                    title: fast ? "Nemotron (multilingual, fast)" : "Nemotron (multilingual)",
+                    detail: fast
+                        ? "The same multilingual model decoding every \(ms) ms instead of "
+                          + "\(NemotronEngine.chunkMs) — captions appear about twice as fast, for "
+                          + "roughly double the encoder work per second of audio. Noticeable on "
+                          + "battery. A separate download; both tiers can be installed."
+                        : summary,
+                    licence: "NVIDIA Open Model License · huggingface.co/FluidInference",
+                    advertisedBytes: 634 * 1_048_576,
+                    // Each tier is measured and deleted as ITS OWN directory —
+                    // removing one must not take the other tier with it.
+                    storage: .directory(NemotronEngine.variantDirectory(chunkMs: ms),
+                                        markers: ["metadata.json"]),
+                    removal: .remove(NemotronEngine.variantDirectory(chunkMs: ms)),
+                    use: .whenNemotronTier(chunkMs: ms),
+                    install: { sink in
+                        try await NemotronEngine.downloadWeights(chunkMs: ms, progress: sink)
+                    })
+            }
 
         case .parakeetEou:
-            return ModelAsset(
+            return [ModelAsset(
                 id: "asr.parakeetEou",
                 family: .recognition,
                 title: "Parakeet EOU (English)",
@@ -109,7 +124,7 @@ enum ASREngine: String, CaseIterable, Sendable {
                                     markers: ParakeetEouEngine.markers),
                 removal: .remove(ParakeetEouEngine.assetDirectory),
                 use: .whenRecognitionEngine(.parakeetEou),
-                install: { sink in try await ParakeetEouEngine.downloadWeights(progress: sink) })
+                install: { sink in try await ParakeetEouEngine.downloadWeights(progress: sink) })]
         }
     }
 }

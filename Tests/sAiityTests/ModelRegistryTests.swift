@@ -33,7 +33,7 @@ struct ModelRegistryTests {
 
         // MADLAD is the reason this test exists: it was downloadable, 1.86 GB,
         // and had no row anywhere in the app.
-        for expected in ["asr.nemotron", "asr.parakeetEou", "mt.madlad"] {
+        for expected in ["asr.nemotron", "asr.nemotron.fast", "asr.parakeetEou", "mt.madlad"] {
             #expect(ids.contains(expected), "missing asset \(expected)")
         }
         // Whisper was cut: its translate mode stopped emitting finals ~25 s into
@@ -84,6 +84,24 @@ struct ModelRegistryTests {
         s = ModelRegistry.status(of: asset)
         #expect(s.isInstalled)
         #expect(!s.isPartial)
+    }
+
+    @Test("The two Nemotron tiers are independent assets")
+    func nemotronTiersAreIndependent() {
+        // A tier is its own ~640 MB directory. Deleting Fast must not remove
+        // Balanced, and neither may resolve to the shared parent.
+        let tiers = ModelRegistry.assets().filter { $0.id.hasPrefix("asr.nemotron") }
+        #expect(tiers.count == 2)
+        let dirs = tiers.compactMap { a -> String? in
+            guard case .remove(let url) = a.removal else { return nil }
+            return url.path
+        }
+        #expect(Set(dirs).count == 2, "tiers share a removal directory: \(dirs)")
+        for d in dirs {
+            #expect(d.contains("ms"), "\(d) is not a variant directory")
+            #expect(!d.hasSuffix("nemotron-multilingual"),
+                    "\(d) would delete every tier at once")
+        }
     }
 
     @Test("Nemotron's install check is not satisfied by another model's metadata")

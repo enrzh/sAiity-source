@@ -33,6 +33,27 @@ final class NemotronEngine: FluidStreamingEngine, @unchecked Sendable {
     /// (`nemotron-multilingual/multilingual/<tier>ms`), not a runtime setting,
     /// so offering a choice here means offering another ~640 MB.
     static let chunkMs = 2240
+    /// The tiers FluidAudio actually ships for this model. Anything else 404s.
+    static let availableChunkMs = [1120, 2240]
+
+    /// The tier the user selected. Persisted; invalid stored values fall back
+    /// to the default rather than crashing a download against a bad URL.
+    static var selectedChunkMs: Int {
+        get {
+            let v = UserDefaults.standard.integer(forKey: "nemotronChunkMs")
+            return availableChunkMs.contains(v) ? v : chunkMs
+        }
+        set { UserDefaults.standard.set(newValue, forKey: "nemotronChunkMs") }
+    }
+
+    /// This instance's tier — fixed at init, because the tier IS the model: each
+    /// one is its own ~640 MB directory with the chunk size baked into the
+    /// encoder. Switching tiers means a different backend, not a setting.
+    let tierChunkMs: Int
+
+    init(chunkMs: Int = NemotronEngine.selectedChunkMs) {
+        self.tierChunkMs = chunkMs
+    }
 
     private let manager = StreamingNemotronMultilingualAsrManager()
 
@@ -88,10 +109,10 @@ final class NemotronEngine: FluidStreamingEngine, @unchecked Sendable {
         // language, with the language identified from audio. That removes the
         // per-locale model juggling — and the 5-slot allocation cap — that
         // Apple's engine forces on us.
-        if !Self.isDownloaded() { progress("Downloading Nemotron model…") }
+        if !Self.isDownloaded(chunkMs: tierChunkMs) { progress("Downloading Nemotron model…") }
         let dir = try await StreamingNemotronMultilingualAsrManager.downloadVariant(
             languageCode: "auto",
-            chunkMs: Self.chunkMs,
+            chunkMs: tierChunkMs,
             to: Self.downloadBase,
             progressHandler: { p in
                 progress("Downloading Nemotron model… \(Int(p.fractionCompleted * 100))%")

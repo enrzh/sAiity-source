@@ -159,6 +159,25 @@ struct CaptionsView: View {
                           systemImage: "exclamationmark.triangle")
                         .font(.caption).foregroundStyle(.orange)
                 }
+                if state.engine == .nemotron {
+                    Picker("Caption latency", selection: $state.nemotronTier) {
+                        Text("Balanced").tag(2240)
+                        Text("Fast").tag(1120)
+                    }
+                    .pickerStyle(.segmented)
+                    Text(state.nemotronTier == 1120
+                         ? "Captions roughly twice as often, for about double the "
+                           + "recognition work per second of audio — noticeable on battery."
+                         : "The default. Captions arrive about every 2 seconds at the "
+                           + "lowest recognition cost.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if !NemotronEngine.isDownloaded(chunkMs: state.nemotronTier) {
+                        Label("This tier is its own ~640 MB download — each latency has the "
+                              + "chunk size baked into its model. Fetch it under Models.",
+                              systemImage: "arrow.down.circle")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
+                }
                 if state.engine.needsDownload {
                     Label("Not downloaded yet — see Models.", systemImage: "arrow.down.circle")
                         .font(.caption).foregroundStyle(.orange)
