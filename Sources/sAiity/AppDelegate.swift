@@ -714,6 +714,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     onState: { audio in
                         Task { @MainActor [self] in self.captureStateChanged(audio) }
                     })
+                // Commit on a pause, which is what makes a finished sentence
+                // translate when the speaker stops rather than when a 3.5 s
+                // budget runs out.
+                capture.onSpeechGap = { [weak self] in
+                    Task { @MainActor in await self?.commitAtSpeechGap() }
+                }
 
                 if saveTranscript { await beginRecording() }
                 state = .running
@@ -746,6 +752,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// is nothing to switch — the value's real job is telling the translator
     /// what the source language actually is.
     @MainActor
+    /// Commit whatever is pending because the speaker paused.
+    ///
+    /// Delayed deliberately. The recogniser decodes in 2240 ms chunks, so at the
+    /// instant a gap is detected the words leading up to it may not have been
+    /// decoded yet — flushing immediately would push the end of the sentence
+    /// into the NEXT line. Waiting a beat lets the trailing chunk land first.
+    private func commitAtSpeechGap() async {
+        guard state == .running else { return }
+        try? await Task.sleep(nanoseconds: 350_000_000)
+        guard state == .running else { return }
+        await backend.flushPending()
+    }
+
     /// What the running engine can hear, said up front.
     ///
     /// This has to be proactive, because the reactive check cannot work for the

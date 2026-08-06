@@ -33,6 +33,16 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
         case stalled       // no buffers at all — the stream itself died
     }
 
+    /// A pause in speech, as distinct from "nothing is playing".
+    ///
+    /// `.silent` needs two seconds of bit-exact zero, which is right for "the
+    /// video ended" and useless for "the speaker took a breath" — a pause in
+    /// real audio still carries room tone, music and codec noise. This is a
+    /// separate, much shorter signal on level rather than on exact zero, and it
+    /// is what lets a finished sentence be translated the moment the speaker
+    /// stops instead of waiting out a time budget.
+    var onSpeechGap: (@Sendable () -> Void)?
+
     private var stream: SCStream?
     private var converter: AVAudioConverter?
     private var targetFormat: AVAudioFormat?
@@ -51,6 +61,17 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
     private static let silenceEpsilon: Float = 1e-7
     /// 2 s at 48 kHz — long enough not to trip on the gap between two words.
     private static let silenceHoldFrames = 96_000
+
+    /// Speech-gap detection. RMS, not peak: a single click during a pause should
+    /// not reset it. The threshold sits well below speech and above room tone —
+    /// −45 dBFS — and the hold is long enough to ignore the gaps *between words*
+    /// while still catching the gap between sentences.
+    private static let gapRMSThreshold: Float = 0.0056     // ≈ -45 dBFS
+    private static let gapHoldFrames = 21_600              // 450 ms at 48 kHz
+    private var quietFrames = 0
+    /// Fires once per pause. Re-arms only after speech resumes, so a long
+    /// silence does not flush repeatedly.
+    private var gapArmed = false
 
     // Diagnostics: audio seconds captured vs audio seconds actually delivered.
     private var inSeconds = 0.0
@@ -206,6 +227,22 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
         } else {
             silentFrames = 0
             transition(to: .audible)
+        }
+
+        // Speech gaps, measured independently of the digital-silence state above
+        // — quiet is not the same as nothing, and only the former marks the end
+        // of a sentence.
+        var rms: Float = 0
+        vDSP_rmsqv(ch[0], 1, &rms, vDSP_Length(pcm.frameLength))
+        if rms < Self.gapRMSThreshold {
+            quietFrames += Int(pcm.frameLength)
+            if gapArmed, quietFrames >= Self.gapHoldFrames {
+                gapArmed = false
+                onSpeechGap?()
+            }
+        } else {
+            quietFrames = 0
+            gapArmed = true
         }
     }
 

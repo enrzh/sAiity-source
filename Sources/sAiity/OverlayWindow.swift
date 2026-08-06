@@ -14,6 +14,28 @@ enum FrameStore {
         return (r.width > 1 && r.height > 1) ? r : nil
     }
 
+    /// A width the user chose by dragging an edge, stored separately from the
+    /// frame.
+    ///
+    /// The frame is saved after any settle, including ones the app caused, so
+    /// deriving "the user picked this width" from it was wrong — and it switched
+    /// off the automatic width and the screen margin for everyone from their
+    /// second launch onwards.
+    private static let widthKey = "captionUserWidth"
+
+    static func saveUserWidth(_ w: CGFloat) {
+        UserDefaults.standard.set(Double(w), forKey: widthKey)
+    }
+
+    static func loadUserWidth() -> CGFloat? {
+        let v = UserDefaults.standard.double(forKey: widthKey)
+        return v > 1 ? CGFloat(v) : nil
+    }
+
+    static func clearUserWidth() {
+        UserDefaults.standard.removeObject(forKey: widthKey)
+    }
+
     /// Pull a saved frame back onto a screen that still exists. Shrink before
     /// moving, so a frame saved on a big display cannot end up wider than the
     /// laptop panel you just undocked to.
@@ -81,6 +103,10 @@ final class BubbleContentView: NSView {
     var clickThroughText: Bool { UserDefaults.standard.bool(forKey: "captionClickThrough") }
 
     private var tracking: NSTrackingArea?
+    /// The dot's two homes: the settings icon's spot while the controls are
+    /// hidden, and just right of the icon once it fades in.
+    private var dotAtIconSpot: NSLayoutConstraint!
+    private var dotBesideIcon: NSLayoutConstraint!
     private let menuButton = NSImageView()
     private let copyButton = NSImageView()
     private let recordDot = NSView()
@@ -138,12 +164,20 @@ final class BubbleContentView: NSView {
 
             recordDot.widthAnchor.constraint(equalToConstant: 8),
             recordDot.heightAnchor.constraint(equalToConstant: 8),
-            recordDot.leadingAnchor.constraint(equalTo: menuButton.trailingAnchor, constant: 9),
             recordDot.centerYAnchor.constraint(equalTo: menuButton.centerYAnchor),
 
             copyButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
             copyButton.centerYAnchor.constraint(equalTo: menuButton.centerYAnchor),
         ])
+
+        // While the controls are hidden the dot takes the settings icon's place
+        // — centred on it, so it reads as "this is the status here" rather than
+        // floating in empty space next to an invisible button. On hover the icon
+        // fades in and the dot slides right to make room.
+        dotAtIconSpot = recordDot.centerXAnchor.constraint(equalTo: menuButton.centerXAnchor)
+        dotBesideIcon = recordDot.leadingAnchor.constraint(equalTo: menuButton.trailingAnchor,
+                                                          constant: 9)
+        dotAtIconSpot.isActive = true
     }
 
     // MARK: - Hit regions
@@ -252,10 +286,17 @@ final class BubbleContentView: NSView {
     }
 
     private func setControls(visible: Bool) {
+        // Swap the dot's constraint inside the same animation group as the fade,
+        // so the icon appearing and the dot moving aside read as one gesture.
+        dotAtIconSpot.isActive = !visible
+        dotBesideIcon.isActive = visible
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.14
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            ctx.allowsImplicitAnimation = true
             menuButton.animator().alphaValue = visible ? 1 : 0
             copyButton.animator().alphaValue = visible ? 1 : 0
+            layoutSubtreeIfNeeded()
         }
     }
 
@@ -430,8 +471,11 @@ final class OverlayWindow: NSPanel {
                     // how the bubble ended up hanging off both edges.
                     let usable = (FrameStore.bestScreen(for: self.frame)
                                   ?? NSScreen.main)?.visibleFrame.width ?? self.frame.width
-                    self.userWidth = min(self.frame.width, usable)
+                    let w = min(self.frame.width, usable)
+                    self.userWidth = w
                     self.hasCustomFrame = true
+                    // The one place a deliberate width is recorded.
+                    FrameStore.saveUserWidth(w)
                     self.sizeToFit()
                     self.keepOnScreen()
                     FrameStore.save(self.frame)
@@ -463,21 +507,49 @@ final class OverlayWindow: NSPanel {
         return NSRect(x: v.midX - width / 2, y: v.minY + 90, width: width, height: 110)
     }
 
+    /// Non-zero while the app itself is moving the window.
+    ///
+    /// `setFrame` posts `didMoveNotification` exactly like a user drag does, and
+    /// telling the two apart is the whole ballgame: `frameMoved` used to mark
+    /// EVERY move as user-chosen, so the app's very first frame assignment —
+    /// inside `restoreFrame`, before a caption had ever been shown — permanently
+    /// disabled the re-centring branch in `sizeToFit`. Nothing could pull the
+    /// bubble back after that, which is why it stayed wherever a clamp put it.
+    private var programmaticMoves = 0
+
+    private func moveProgrammatically(_ body: () -> Void) {
+        programmaticMoves += 1
+        body()
+        // The notification is posted synchronously by setFrame, so by here it
+        // has already been handled and the count can come straight back down.
+        programmaticMoves -= 1
+    }
+
+    /// Every internal frame change goes through this. A `setFrame` that skips it
+    /// will be mistaken for a user drag.
+    private func setFrameInternal(_ rect: NSRect, display: Bool = true) {
+        moveProgrammatically { setFrame(rect, display: display) }
+    }
+
     private func restoreFrame() {
         guard let saved = FrameStore.load(),
               let screen = FrameStore.bestScreen(for: saved) else {
-            if let s = NSScreen.main { setFrame(defaultFrame(on: s), display: false) }
+            if let s = NSScreen.main { setFrameInternal(defaultFrame(on: s), display: false) }
             return
         }
         hasCustomFrame = true
-        // Cap the remembered width to THIS screen. A frame saved on an external
-        // monitor and restored on the laptop panel is the likeliest way the
-        // bubble ends up wider than the display it is showing on.
-        userWidth = min(saved.width, screen.visibleFrame.width)
-        setFrame(FrameStore.clamp(saved, into: screen.visibleFrame), display: false)
+        // Deliberately does NOT set userWidth. A saved frame means "this is
+        // where it was", not "the user chose this width" — conflating the two
+        // meant the automatic width and the screen margin were switched off from
+        // the second launch onwards, with no user action at all. The width is
+        // restored separately, and only if a real drag stored one.
+        userWidth = FrameStore.loadUserWidth().map { min($0, screen.visibleFrame.width) }
+        setFrameInternal(FrameStore.clamp(saved, into: screen.visibleFrame), display: false)
     }
 
     @objc private func frameMoved() {
+        // A move the app made itself says nothing about what the user wants.
+        guard programmaticMoves == 0 else { return }
         hasCustomFrame = true
         // Coalesce the flood of move notifications during a drag.
         saveWork?.cancel()
@@ -506,10 +578,7 @@ final class OverlayWindow: NSPanel {
     private static let topPadding: CGFloat = 34    // control strip
     private static let bottomPadding: CGFloat = 14
     /// Wide enough that the corner controls never collide with the text.
-    private static let minWidth: CGFloat = 420
-    /// How much the natural width must change before the window is resized.
-    /// Below this the bubble visibly breathes as each word arrives.
-    private static let resizeSlack: CGFloat = 28
+    private static var minWidth: CGFloat { BubbleGeometry.minWidth }
 
     private func measure(_ text: String, font: NSFont, width: CGFloat,
                          maxLines: Int = 0) -> NSSize {
@@ -540,15 +609,12 @@ final class OverlayWindow: NSPanel {
     /// calculation any more.
     private func targetWidth(in visible: NSRect) -> CGFloat {
         let st = CaptionStyle.current
-        let margin = max(0, CGFloat(st.screenMargin))
-        // A dragged width is the user's decision and is honoured up to the full
-        // screen — "pull it to full width" has to stick. Only the automatic
-        // width respects the margin.
         if let uw = userWidth {
-            return min(max(uw, Self.minWidth), visible.width)
+            return BubbleGeometry.draggedWidth(uw, visible: visible.width)
         }
-        let usable = max(Self.minWidth, visible.width - margin * 2)
-        return min(max(CGFloat(st.widthFraction) * visible.width, Self.minWidth), usable)
+        return BubbleGeometry.autoWidth(visible: visible.width,
+                                        fraction: CGFloat(st.widthFraction),
+                                        margin: CGFloat(st.screenMargin))
     }
 
     /// Size the bubble to the caption — in BOTH axes.
@@ -616,7 +682,7 @@ final class OverlayWindow: NSPanel {
             NSLog(String(format: "sAiity bubble: x=%.0f y=%.0f w=%.0f h=%.0f screen=%.0f",
                          final.origin.x, final.origin.y, final.width, final.height, v.width))
         }
-        setFrame(final, display: true)
+        setFrameInternal(final)
     }
 
     /// Force the bubble back inside its screen, whatever put it outside.
@@ -629,7 +695,7 @@ final class OverlayWindow: NSPanel {
         guard let screen = FrameStore.bestScreen(for: frame) ?? NSScreen.main else { return }
         let margin = CGFloat(CaptionStyle.current.screenMargin)
         let f = clampKeepingBottom(frame, into: screen.visibleFrame, margin: margin)
-        if f != frame { setFrame(f, display: true) }
+        if f != frame { setFrameInternal(f) }
     }
 
     /// Keep the bubble on screen without undoing the bottom anchor.
@@ -640,13 +706,8 @@ final class OverlayWindow: NSPanel {
     /// horizontally unless the user has deliberately dragged the bubble wider.
     private func clampKeepingBottom(_ rect: NSRect, into visible: NSRect,
                                     margin: CGFloat) -> NSRect {
-        var f = rect
-        let side = userWidth == nil ? max(0, margin) : 0
-        f.size.width = min(f.width, visible.width - side * 2)
-        f.origin.x = min(max(f.minX, visible.minX + side), visible.maxX - f.width - side)
-        f.origin.y = max(f.minY, visible.minY)
-        if f.maxY > visible.maxY { f.size.height = visible.maxY - f.minY }
-        return f
+        BubbleGeometry.clamp(rect, into: visible, margin: margin,
+                             respectMargin: userWidth == nil)
     }
 
     /// Push the persisted look onto the live window. Called on every change so
@@ -699,10 +760,11 @@ final class OverlayWindow: NSPanel {
         hasCustomFrame = false
         userWidth = nil
         UserDefaults.standard.removeObject(forKey: "captionFrame")
+        FrameStore.clearUserWidth()
         guard let screen = NSScreen.main else { return }
         let v = screen.visibleFrame
-        setFrame(NSRect(x: v.midX - frame.width / 2, y: v.minY + 90,
-                        width: frame.width, height: frame.height), display: true)
+        setFrameInternal(NSRect(x: v.midX - frame.width / 2, y: v.minY + 90,
+                                width: frame.width, height: frame.height))
     }
 
     // MARK: - Content
