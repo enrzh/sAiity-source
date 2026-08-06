@@ -8,6 +8,12 @@ let args = CommandLine.arguments
 if args.count > 1, args[1].hasPrefix("--") {
     let sessions = TranscriptStore.list()
     switch args[1] {
+    case "--version":
+        // The git-stamped version from the bundle, or "unbundled" from a bare
+        // swift-build binary — a bug report has to be able to name its build.
+        let v = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        let b = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        print("sAiity \(v ?? "unbundled") (\(b ?? "0"))")
     case "--list":
         let df = ISO8601DateFormatter()
         for s in sessions {
@@ -27,7 +33,7 @@ if args.count > 1, args[1].hasPrefix("--") {
         default:    print(Export.txt(segs))
         }
     default:
-        FileHandle.standardError.write(Data("usage: sAiity [--list | --export srt|md|txt [id]]\n".utf8))
+        FileHandle.standardError.write(Data("usage: sAiity [--version | --list | --export srt|md|txt [id]]\n".utf8))
         exit(2)
     }
     exit(0)
@@ -55,6 +61,32 @@ nonisolated(unsafe) var delegateRef: AnyObject?
 // scheduling work that would not run until after `app.run()` takes over.
 let app = NSApplication.shared
 MainActor.assumeIsolated {
+    // Even a menu-bar app needs a functioning Edit menu: without one, the
+    // standard editing shortcuts do nothing in any text field the app shows —
+    // most painfully the language search box. The menu is never visible (there
+    // is no menu bar to show it in) but the key equivalents route through it.
+    let main = NSMenu()
+    let editItem = NSMenuItem()
+    let edit = NSMenu(title: "Edit")
+    edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+    edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+    edit.addItem(.separator())
+    edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+    edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+    edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+    edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)),
+                 keyEquivalent: "a")
+    editItem.submenu = edit
+    main.addItem(editItem)
+
+    let windowItem = NSMenuItem()
+    let window = NSMenu(title: "Window")
+    window.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)),
+                   keyEquivalent: "w")
+    windowItem.submenu = window
+    main.addItem(windowItem)
+    app.mainMenu = main
+
     let delegate = AppDelegate()
     app.delegate = delegate
     // Held for the process lifetime: NSApplication.delegate is a weak reference,

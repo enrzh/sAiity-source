@@ -95,6 +95,30 @@ final class StreamingASRBackend: TranscriptionBackend, @unchecked Sendable {
 
     private static let clauseBreaks: Set<Character> = ["、", "，", ",", ";", "；", ":", "：", "…"]
 
+    /// Session clock for subtitle timings. The engine's callback carries no
+    /// timestamps (those came from Apple's engine, which is gone), so without
+    /// this every SRT cue read 00:00:00 — ordered, and useless as subtitles.
+    /// Commit time is within one chunk (~2.2 s) of when the words were spoken,
+    /// which is accurate enough for a subtitle file.
+    private var sessionStart = Date()
+    private var lastFinalEnd: Double = 0
+
+    /// A final chunk stamped from the session clock.
+    ///
+    /// The start is the LATER of "where the previous final ended" and "now minus
+    /// roughly how long this text takes to say". Without the second bound, the
+    /// first cue after any quiet stretch — including the model-loading minute at
+    /// session start — claimed the whole gap and showed on screen for it.
+    /// ~14 chars/second is unhurried speech; err long rather than short, since a
+    /// subtitle that lingers reads better than one that flashes.
+    private func stampedFinal(_ text: String) -> TranscriptChunk {
+        let now = Date().timeIntervalSince(sessionStart)
+        let spokenFor = min(Double(text.count) / 14.0 + 0.4, 12.0)
+        let start = min(max(lastFinalEnd, now - spokenFor), now)
+        lastFinalEnd = now
+        return TranscriptChunk(text: text, isFinal: true, start: start, end: now)
+    }
+
     private let pendingLock = NSLock()
     private var pending: [Float] = []
     private var pump: Task<Void, Never>?
@@ -117,6 +141,8 @@ final class StreamingASRBackend: TranscriptionBackend, @unchecked Sendable {
     func start(onChunk: @escaping @Sendable (TranscriptChunk) -> Void) async throws {
         emit = onChunk
         commitLock.withLock { committed = ""; lastSeen = ""; lastCommitAt = Date() }
+        sessionStart = Date()
+        lastFinalEnd = 0
         pendingLock.withLock { pending.removeAll(keepingCapacity: true) }
 
         await engine.setPartial { [weak self] text in
@@ -156,7 +182,7 @@ final class StreamingASRBackend: TranscriptionBackend, @unchecked Sendable {
             self.commitLock.unlock()
 
             let f = finalPart.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !f.isEmpty { onChunk(TranscriptChunk(text: f, isFinal: true)) }
+            if !f.isEmpty { onChunk(self.stampedFinal(f)) }
             let v = tail.trimmingCharacters(in: .whitespacesAndNewlines)
             if !v.isEmpty { onChunk(TranscriptChunk(text: v, isFinal: false)) }
         }
@@ -205,7 +231,7 @@ final class StreamingASRBackend: TranscriptionBackend, @unchecked Sendable {
             return r
         }
         let t = rest.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !t.isEmpty { emit?(TranscriptChunk(text: t, isFinal: true)) }
+        if !t.isEmpty { emit?(stampedFinal(t)) }
     }
 
     func stop() async {
@@ -228,7 +254,7 @@ final class StreamingASRBackend: TranscriptionBackend, @unchecked Sendable {
                 return r
             }
             let t = rest.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !t.isEmpty { emit?(TranscriptChunk(text: t, isFinal: true)) }
+            if !t.isEmpty { emit?(stampedFinal(t)) }
         }
         await engine.teardown()
         emit = nil

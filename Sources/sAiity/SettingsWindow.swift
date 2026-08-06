@@ -85,7 +85,6 @@ final class AppState {
         }
     }
     var shortcutError: String?
-    var shortcutsVersion: Int = 0
 
     /// Writing back to CaptionStyle.current persists AND posts the change
     /// notification, so the live bubble updates as the slider moves.
@@ -103,6 +102,10 @@ final class AppState {
         strayTotal = stray > 8 << 20 ? ModelRegistry.format(stray) : nil
     }
 
+    /// The in-flight download, so Cancel can actually cancel it. Before this a
+    /// misclick on a multi-gigabyte model had no exit short of quitting the app.
+    @ObservationIgnored private var downloadTask: Task<Void, Never>?
+
     /// Download one asset. Progress is whatever the underlying API can honestly
     /// report — some give bytes, some a fraction, some nothing at all.
     func download(_ asset: ModelAsset) async {
@@ -110,14 +113,32 @@ final class AppState {
         activeDownload = asset.id
         downloadProgress = DownloadProgress(note: "Starting…")
         modelError = nil
-        defer { activeDownload = nil; downloadProgress = nil; refreshModels() }
-        do {
-            try await install { p in
-                Task { @MainActor in self.downloadProgress = p }
+
+        let task = Task {
+            do {
+                try await install { p in
+                    Task { @MainActor in self.downloadProgress = p }
+                }
+            } catch is CancellationError {
+                // The user pressed Cancel; not an error, so no red text.
+            } catch let e as URLError where e.code == .cancelled {
+                // URLSession's spelling of the same thing.
+            } catch {
+                self.modelError = error.localizedDescription
             }
-        } catch {
-            modelError = error.localizedDescription
         }
+        downloadTask = task
+        await task.value
+        downloadTask = nil
+        activeDownload = nil
+        downloadProgress = nil
+        refreshModels()
+    }
+
+    /// Stop the in-flight download. Cancellation propagates through the
+    /// URLSession awaits, so the transfer stops rather than running on unseen.
+    func cancelDownload() {
+        downloadTask?.cancel()
     }
 
     /// Delete one asset's files.

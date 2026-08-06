@@ -104,29 +104,8 @@ struct ModelsView: View {
         }
     }
 
-    /// Progress → Remove (partial) → Delete (installed) → Download.
-    @ViewBuilder
     private func trailingControl(_ s: AssetStatus) -> some View {
-        if state.activeDownload == s.asset.id {
-            VStack(alignment: .trailing, spacing: 2) {
-                if let f = state.downloadProgress?.fraction {
-                    ProgressView(value: f).frame(width: 100)
-                    Text("\(Int(f * 100))%").font(.caption2).foregroundStyle(.secondary)
-                } else {
-                    ProgressView().controlSize(.small)
-                }
-            }
-        } else if s.isInstalled || s.isPartial {
-            Button(s.isPartial ? "Remove" : "Delete", role: .destructive) {
-                Task { await state.delete(s.asset) }
-            }
-            .controlSize(.small)
-        } else if s.asset.install != nil {
-            Button("Download") { Task { await state.download(s.asset) } }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .disabled(state.activeDownload != nil)
-        }
+        AssetControl(state: state, status: s)
     }
 
     /// Names the real figure before doing anything irreversible, and says up
@@ -456,7 +435,7 @@ private struct ShortcutRecorder: NSViewRepresentable {
             HotKeyCenter.shared.rebind(action)
             state.shortcutError = (s != nil && HotKeyCenter.shortcut(for: action) == nil)
                 ? "That combination is already taken by another app." : nil
-            state.shortcutsVersion &+= 1
+            ()
         }
         return v
     }
@@ -591,6 +570,15 @@ struct LibraryView: View {
                                value: CGPreflightScreenCaptureAccess() ? "Granted" : "Not granted")
                 Text("System-audio capture is gated behind Screen Recording — macOS has no audio-only permission.")
                     .font(.caption).foregroundStyle(.secondary)
+                LabeledToggle("Start sAiity when you log in",
+                              "Registers the app as a login item so captions are one keypress "
+                              + "away after a restart. Off by default — this app can capture "
+                              + "system audio, so being running should be your choice.",
+                              isOn: Binding(get: { state.launchAtLogin },
+                                            set: { state.setLaunchAtLogin($0) }))
+                if !state.launchAtLoginNote.isEmpty {
+                    Text(state.launchAtLoginNote).font(.caption).foregroundStyle(.orange)
+                }
                 HStack {
                     Button("Run setup again…") {
                         Onboarding.reset()
@@ -674,22 +662,7 @@ struct QwenModelsView: View {
                         // state, progress and the delete guards are identical
                         // wherever this model is shown.
                         if let asset = state.assets.first(where: { $0.id == "mt.qwen.\(m.file)" }) {
-                            if state.activeDownload == asset.id {
-                                if let f = state.downloadProgress?.fraction {
-                                    ProgressView(value: f).frame(width: 90)
-                                } else {
-                                    ProgressView().controlSize(.small)
-                                }
-                            } else if asset.isInstalled || asset.isPartial {
-                                Button(asset.isPartial ? "Remove" : "Delete", role: .destructive) {
-                                    Task { await state.delete(asset.asset) }
-                                }
-                                .controlSize(.small)
-                            } else {
-                                Button("Download") { Task { await state.download(asset.asset) } }
-                                    .controlSize(.small)
-                                    .disabled(state.activeDownload != nil)
-                            }
+                            AssetControl(state: state, status: asset)
                         }
                     }
                     .contentShape(Rectangle())

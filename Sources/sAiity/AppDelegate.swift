@@ -108,6 +108,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastFinalText = ""
     private var lastVolatileText = ""
     private var sessionLines: [Segment] = []
+    /// Bumped by start(), so an async result from the previous session cannot
+    /// patch a line of this one that happens to share an index.
+    private var sessionGeneration = 0
+    /// Serialises transcript-store appends into claim order. Each link awaits
+    /// the previous, so the jsonl's line order matches the spoken order even
+    /// when translations finish out of order.
+    private var transcriptWriteChain: Task<Void, Never>?
 
     // Auto language detection. `autoLanguage` controls whether a confident
     // detection also SWITCHES the recogniser; the detected language is always
@@ -668,6 +675,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlay.reservesTranslationRow =
             translateTo != nil && CaptionStyle.current.showTranslation
         sessionLines.removeAll()
+        sessionGeneration += 1
+        transcriptWriteChain = nil
         lastFinalText = ""
         lastVolatileText = ""
         detector.reset()
@@ -946,48 +955,68 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Skip translation when the line is already in the target language —
-        // cheaper than asking any engine, and it silences both Apple's
-        // "cannot translate this pair" and an LLM's temptation to paraphrase.
-        // Applies to every engine, which is why it lives here.
-        if chunk.isFinal, let target = translateTo, text.count >= 12 {
+        // Skip TRANSLATION when the line is already in the target language —
+        // cheaper than asking any engine, and it silences an LLM's temptation
+        // to paraphrase. Only the translation: this used to `return`, which
+        // silently dropped the line from the transcript as well, so a session
+        // in the target language recorded nothing at all.
+        var wantsTranslation = translateTo != nil
+        if wantsTranslation, text.count >= 12 {
             let r = NLLanguageRecognizer()
             r.processString(text)
             if let lang = r.dominantLanguage?.rawValue.split(separator: "-").first,
-               let want = target.split(separator: "-").first,
+               let want = translateTo?.split(separator: "-").first,
                lang == want {
-                return
+                wantsTranslation = false
             }
         }
 
-        // Translate only committed lines: partial phrases translate badly, and
-        // re-translating every volatile update would be wasteful. The source is
-        // the DETECTED language when we have one — the selected locale is only a
-        // decoding hint and may not be what is actually being spoken.
+        // The segment claims its index NOW, synchronously — never after an
+        // await. Each line's translation takes as long as the model takes, so
+        // two in-flight lines routinely finish out of order; claiming the index
+        // on completion wrote sentence B before sentence A, and every SRT
+        // export of that session was permanently mis-ordered.
+        let idx = sessionLines.count
+        let generation = sessionGeneration
+        sessionLines.append(Segment(i: idx, t0: chunk.start, t1: chunk.end,
+                                    text: text, loc: locale.identifier(.bcp47),
+                                    tr: nil, trLoc: wantsTranslation ? translateTo : nil,
+                                    words: chunk.words.isEmpty ? nil : chunk.words))
+
+        // Translate concurrently; the result is patched in by index.
         let srcCode = detectedLanguage ?? locale.identifier(.bcp47)
-        Task { @MainActor in
-            var translated: String?
-            if let target = translateTo, let engine = activeTranslator,
-               let out = await engine.translate(text, from: srcCode, to: target) {
-                if TestHooks.verboseLogging {
-                    NSLog("sAiity translated [\(TranslationEngine.current.rawValue)]: \(out)")
-                }
-                translated = out
-                // Honour the setting here too, or the row appears anyway the
-                // moment a translation lands.
-                if CaptionStyle.current.showTranslation { overlay.showTranslation(out) }
+        let translation: Task<String?, Never> = Task { @MainActor in
+            guard wantsTranslation, let target = translateTo,
+                  let engine = activeTranslator else { return nil }
+            guard let out = await engine.translate(text, from: srcCode, to: target) else {
+                return nil
             }
-            // Only finals are stored: volatile results are cumulative since the
-            // last final, so persisting them would duplicate whole paragraphs.
-            sessionLines.append(Segment(i: sessionLines.count, t0: chunk.start, t1: chunk.end,
-                                        text: text, loc: locale.identifier(.bcp47),
-                                        tr: translated, trLoc: translateTo,
-                                        words: chunk.words.isEmpty ? nil : chunk.words))
+            if TestHooks.verboseLogging {
+                NSLog("sAiity translated [\(TranslationEngine.current.rawValue)]: \(out)")
+            }
+            // Guard the generation: Stop clears sessionLines, and a translation
+            // resolving across that boundary would patch a line of the NEXT
+            // session that happens to share the index.
+            if self.sessionGeneration == generation, idx < self.sessionLines.count {
+                self.sessionLines[idx].tr = out
+            }
+            if CaptionStyle.current.showTranslation { self.overlay.showTranslation(out) }
+            return out
+        }
+
+        // The on-disk store is append-only, so ORDER at the write is what makes
+        // exports correct. Chain the writes: each link awaits the previous one,
+        // then its own translation — lines land in claim order however long any
+        // individual translation takes, and each still hits disk as soon as it
+        // can, preserving the crash-safety of line-at-a-time appends.
+        transcriptWriteChain = Task { @MainActor [previous = transcriptWriteChain] in
+            await previous?.value
+            let tr = await translation.value
             if await TranscriptStore.shared.isRecording {
-                await TranscriptStore.shared.append(chunk, locale: locale.identifier(.bcp47),
-                                                    translation: translated,
-                                                    translateTo: translateTo)
-                recordedLines += 1
+                await TranscriptStore.shared.append(chunk, locale: self.locale.identifier(.bcp47),
+                                                    translation: tr,
+                                                    translateTo: self.translateTo)
+                self.recordedLines += 1
             }
         }
     }

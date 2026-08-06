@@ -179,6 +179,11 @@ struct OnboardingView: View {
 
             Divider().padding(.vertical, 4)
             Toggle("Also show a translation under each caption", isOn: $model.wantsTranslation)
+            // Unconditional: with the description only visible when the toggle
+            // was on, the OFF state gave no hint of what saying yes would cost.
+            Text("A second line under the captions, in a language you choose. Runs on "
+                 + "this Mac like everything else.")
+                .font(.caption).foregroundStyle(.secondary)
             if model.wantsTranslation {
                 // Say the cost before they commit. Translation used to lean on
                 // macOS's built-in translator, which needed nothing from us;
@@ -209,22 +214,12 @@ struct OnboardingView: View {
                 }
                 Spacer(minLength: 12)
                 if status.isInstalled {
+                    // Onboarding says Ready rather than offering Delete — the
+                    // one place the shared control's installed state is wrong.
                     Label("Ready", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green).font(.callout)
-                } else if model.state.activeDownload == asset.id {
-                    VStack(alignment: .trailing, spacing: 2) {
-                        if let f = model.state.downloadProgress?.fraction {
-                            ProgressView(value: f).frame(width: 110)
-                            Text("\(Int(f * 100))%").font(.caption2).foregroundStyle(.secondary)
-                        } else {
-                            ProgressView().controlSize(.small)
-                        }
-                    }
                 } else {
-                    Button("Download \(ModelRegistry.format(asset.advertisedBytes ?? 0))") {
-                        Task { await model.state.download(asset) }
-                    }
-                    .buttonStyle(.borderedProminent)
+                    AssetControl(state: model.state, status: status, prominent: true)
                 }
             }
             .padding(12)
