@@ -148,6 +148,16 @@ final class BubbleContentView: NSView {
         recordDot.layer?.cornerRadius = 4
         recordDot.isHidden = true
 
+        // The bubble was a VoiceOver dead zone: image views and a bare NSView,
+        // no roles, no labels — a subtitle app whose own subtitles and controls
+        // a screen reader could not see.
+        menuButton.setAccessibilityRole(.button)
+        menuButton.setAccessibilityLabel("Open sAiity settings")
+        copyButton.setAccessibilityRole(.button)
+        copyButton.setAccessibilityLabel("Copy this caption")
+        recordDot.setAccessibilityRole(.image)
+        recordDot.setAccessibilityLabel("Recording a transcript")
+
         for v in [menuButton, copyButton, recordDot] {
             v.translatesAutoresizingMaskIntoConstraints = false
             addSubview(v)
@@ -437,6 +447,10 @@ final class OverlayWindow: NSPanel {
         stack.alignment = .centerX
         stack.spacing = 6
         stack.translatesAutoresizingMaskIntoConstraints = false
+        label.setAccessibilityRole(.staticText)
+        label.setAccessibilityLabel("Live caption")
+        translationLabel.setAccessibilityRole(.staticText)
+        translationLabel.setAccessibilityLabel("Translation")
         stack.addArrangedSubview(label)
         stack.addArrangedSubview(translationLabel)
 
@@ -484,6 +498,13 @@ final class OverlayWindow: NSPanel {
 
         NotificationCenter.default.addObserver(
             forName: .saiityCaptionStyleChanged, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.applyStyle(CaptionStyle.current) }
+            }
+        // Reduce Transparency / Increase Contrast changing mid-session must
+        // take effect immediately, like every other style change.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.applyStyle(CaptionStyle.current) }
             }
         NotificationCenter.default.addObserver(
@@ -631,7 +652,10 @@ final class OverlayWindow: NSPanel {
     private func sizeToFit() {
         guard let screen = FrameStore.bestScreen(for: frame) ?? NSScreen.main else { return }
         let v = screen.visibleFrame
-        let st = CaptionStyle.current
+        // The same adjusted style applyStyle draws with — measuring with the raw
+        // one would size the bubble for a lighter font than is on screen when
+        // Increase Contrast is active.
+        let st = effectiveStyle
 
         let targetW = targetWidth(in: v)
         let contentW = targetW - Self.hPadding * 2
@@ -712,7 +736,27 @@ final class OverlayWindow: NSPanel {
 
     /// Push the persisted look onto the live window. Called on every change so
     /// the settings page is a real preview, not a promise about next launch.
-    func applyStyle(_ st: CaptionStyle) {
+    /// The system accessibility settings the style must defer to. A user who
+    /// set Reduce Transparency system-wide has answered the glass question for
+    /// every app; the bubble does not get to overrule that.
+    private var effectiveStyle: CaptionStyle {
+        var st = CaptionStyle.current
+        let a11y = NSWorkspace.shared
+        if a11y.accessibilityDisplayShouldReduceTransparency, st.glassStyle != 2 {
+            st.glassStyle = 2   // solid
+        }
+        if a11y.accessibilityDisplayShouldIncreaseContrast {
+            st.glassStyle = 2
+            st.original.weight = max(st.original.weight, 0.3)
+            st.translation.weight = max(st.translation.weight, 0.3)
+            st.original.opacity = 1.0
+            st.translation.opacity = 1.0
+        }
+        return st
+    }
+
+    func applyStyle(_ ignored: CaptionStyle) {
+        let st = effectiveStyle
         // Every visual property comes from the struct. Nothing is hardcoded
         // here any more: the original used to be fixed white/semibold and the
         // translation fixed teal/medium, so half the style fields were read but

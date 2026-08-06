@@ -24,10 +24,7 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
     case madlad
     case qwen
 
-    static var current: TranslationEngine {
-        get { TranslationEngine(rawValue: UserDefaults.standard.string(forKey: "translationEngine") ?? "") ?? .madlad }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: "translationEngine") }
-    }
+    @Defaults(rawKey: "translationEngine") static var current: TranslationEngine = .madlad
 
     var displayName: String {
         switch self {

@@ -32,7 +32,9 @@ enum Onboarding {
         UserDefaults.standard.set(currentVersion, forKey: dismissedKey)
     }
 
-    /// Where to pick up after a relaunch forced by the permission step.
+    /// Where to pick up after a relaunch forced by the permission step. Not on
+    /// the @Defaults wrapper: the value is optional, and "no stored value" and
+    /// "stored none" must stay distinguishable.
     static var resumeStep: OnboardingStep? {
         get { UserDefaults.standard.string(forKey: resumeKey).flatMap(OnboardingStep.init(rawValue:)) }
         set { UserDefaults.standard.set(newValue?.rawValue, forKey: resumeKey) }

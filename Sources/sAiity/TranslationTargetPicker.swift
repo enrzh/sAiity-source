@@ -28,9 +28,16 @@ struct TranslationTargetPicker: View {
     private var elsewhere: [AppLanguage] { matches.filter { !supported.contains($0.code) } }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
+        SheetShell(title: "Translate captions to",
+                   subtitle: "Using \(state.translationEngine.displayName)",
+                   width: 500, height: 560,
+                   headerAccessory: {
+            Button("Off") {
+                state.translateTo = nil
+                dismiss()
+            }
+            .controlSize(.small)
+        }) {
             // A macOS .searchable installs into a toolbar, which a bare sheet
             // does not have — so the field is explicit.
             HStack(spacing: 6) {
@@ -53,27 +60,8 @@ struct TranslationTargetPicker: View {
                 list
             }
         }
-        .frame(width: 500, height: 560)
         .task { await loadSupported() }
         .onChange(of: state.translationEngine) { Task { await loadSupported() } }
-    }
-
-    private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Translate captions to").font(.headline)
-                Text("Using \(state.translationEngine.displayName)")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button("Off") {
-                state.translateTo = nil
-                dismiss()
-            }
-            .controlSize(.small)
-            Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
-        }
-        .padding(14)
     }
 
     private var list: some View {
@@ -97,25 +85,31 @@ struct TranslationTargetPicker: View {
     }
 
     private func row(_ lang: AppLanguage) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(lang.displayName)
-                if state.translationEngine == .qwen,
-                   !LLMLanguageProvider.strongTier.contains(lang.code) {
-                    Text("Outside Qwen's strongest languages — quality varies.")
-                        .font(.caption2).foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-            if state.translateTo == lang.code {
-                Image(systemName: "checkmark").foregroundStyle(.tint)
-            }
-        }
-        .contentShape(Rectangle())
-        .onTapGesture {
+        // A real Button, not an onTapGesture on a passive view: gestures are
+        // invisible to the keyboard and to VoiceOver, so the menu bar's "All
+        // languages…" opened a sheet a keyboard user could not operate at all.
+        Button {
             state.translateTo = lang.code
             dismiss()
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(lang.displayName)
+                    if state.translationEngine == .qwen,
+                       !LLMLanguageProvider.strongTier.contains(lang.code) {
+                        Text("Outside Qwen's strongest languages — quality varies.")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                if state.translateTo == lang.code {
+                    Image(systemName: "checkmark").foregroundStyle(.tint)
+                }
+            }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(state.translateTo == lang.code ? .isSelected : [])
         .padding(.vertical, 1)
     }
 

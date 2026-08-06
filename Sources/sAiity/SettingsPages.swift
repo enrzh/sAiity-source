@@ -645,25 +645,21 @@ struct LocalModelsView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Local LLM models").font(.headline)
-                    Text("Qwen, Gemma, or your own GGUF · one is used at a time")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
-            }
-            .padding(14)
-            Divider()
-
+        SheetShell(title: "Local LLM models",
+                   subtitle: "Qwen, Gemma, or your own GGUF · one is used at a time",
+                   width: 520, height: 560) {
             List {
                 ForEach(LocalModel.all) { m in
                     HStack(alignment: .top) {
-                        Image(systemName: m == state.llmModel ? "largecircle.fill.circle" : "circle")
-                            .foregroundStyle(m == state.llmModel ? Color.accentColor : Color.secondary)
-                            .onTapGesture { state.llmModel = m }
+                        // The radio is a Button so Tab reaches it and VoiceOver
+                        // announces it as selectable, with the selection trait.
+                        Button { state.llmModel = m } label: {
+                            Image(systemName: m == state.llmModel ? "largecircle.fill.circle" : "circle")
+                                .foregroundStyle(m == state.llmModel ? Color.accentColor : Color.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Use \(m.label)")
+                        .accessibilityAddTraits(m == state.llmModel ? .isSelected : [])
                         VStack(alignment: .leading, spacing: 2) {
                             HStack(spacing: 6) {
                                 Text(m.label).font(.body.weight(.medium))
@@ -696,7 +692,7 @@ struct LocalModelsView: View {
                         }
                     }
                     .contentShape(Rectangle())
-                    .onTapGesture { state.llmModel = m }
+                    .onTapGesture { state.llmModel = m }   // convenience only; the Button above is the accessible path
                     .padding(.vertical, 3)
                 }
             }
@@ -710,7 +706,6 @@ struct LocalModelsView: View {
                 Text(e).font(.caption).foregroundStyle(.red).padding(14)
             }
         }
-        .frame(width: 520, height: 560)
     }
 
     @State private var customURL = ""

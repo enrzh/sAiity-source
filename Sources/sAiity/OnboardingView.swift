@@ -283,20 +283,26 @@ struct OnboardingView: View {
 
     private func choice(title: String, detail: String, selected: Bool,
                         action: @escaping () -> Void) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: selected ? "largecircle.fill.circle" : "circle")
-                .foregroundStyle(selected ? Color.accentColor : .secondary)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.body.weight(.medium))
-                Text(detail).font(.caption).foregroundStyle(.secondary)
+        // A Button rather than a tap gesture, so the wizard is operable by
+        // keyboard and announced properly — first-run is exactly the moment a
+        // VoiceOver user must not hit a dead end.
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: selected ? "largecircle.fill.circle" : "circle")
+                    .foregroundStyle(selected ? Color.accentColor : .secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.body.weight(.medium))
+                    Text(detail).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
+            .padding(10)
+            .background(selected ? AnyShapeStyle(.tint.opacity(0.12)) : AnyShapeStyle(.clear),
+                        in: RoundedRectangle(cornerRadius: 8))
+            .contentShape(Rectangle())
         }
-        .padding(10)
-        .background(selected ? AnyShapeStyle(.tint.opacity(0.12)) : AnyShapeStyle(.clear),
-                    in: RoundedRectangle(cornerRadius: 8))
-        .contentShape(Rectangle())
-        .onTapGesture(perform: action)
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private func advance() {

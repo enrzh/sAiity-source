@@ -129,17 +129,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Recently chosen targets, so the menu stays short without being a fixed
     /// list that ignores what this person actually uses.
-    private var recentTargets: [String] {
-        get { UserDefaults.standard.stringArray(forKey: "recentTranslateTargets") ?? [] }
-        set {
-            UserDefaults.standard.set(Array(newValue.prefix(6)), forKey: "recentTranslateTargets")
-        }
-    }
+    @Defaults("recentTranslateTargets") private var recentTargets: [String] = []
 
     private func rememberTarget(_ code: String) {
         var r = recentTargets.filter { $0 != code }
         r.insert(code, at: 0)
-        recentTargets = r
+        recentTargets = Array(r.prefix(6))
     }
 
     @objc private func showLanguagePicker() {

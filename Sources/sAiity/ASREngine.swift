@@ -7,10 +7,7 @@ enum ASREngine: String, CaseIterable, Sendable {
     case nemotron
     case parakeetEou
 
-    static var current: ASREngine {
-        get { ASREngine(rawValue: UserDefaults.standard.string(forKey: "asrEngine") ?? "") ?? .nemotron }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: "asrEngine") }
-    }
+    @Defaults(rawKey: "asrEngine") static var current: ASREngine = .nemotron
 
     var displayName: String {
         switch self {
