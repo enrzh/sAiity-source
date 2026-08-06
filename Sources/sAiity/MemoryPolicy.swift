@@ -29,6 +29,58 @@ import MLX
 /// The policy here is: keep the pool small, hand memory back at every point the
 /// user is not actively using it, and shed aggressively when the system says it
 /// is under pressure — before the kernel starts choosing victims for us.
+///
+/// ## Known residual: ~10 MB per MADLAD load, and it is not ours to fix
+///
+/// Everything above works, and with translation off the app is flat across
+/// sessions. With MADLAD on, roughly 10 MB per start/stop cycle survives Stop.
+/// It was chased to the end in August 2026; recording the answer here so nobody
+/// spends that day twice.
+///
+/// It is **inside MLX**, not in this app and not in speech-swift. Measured on a
+/// standalone load/release loop, one `MADLADTranslator.fromLocal` at a time and
+/// nothing else running:
+///
+///   - 13,279 live `mlx::core::array::ArrayDesc` (448 bytes each) plus ~2,300
+///     `AGXG16GFamilyBuffer` are retained per load, exactly linear: 26,559 after
+///     two loads, 66,396 after five. That is the ~10 MB.
+///   - `leaks` reports 80 bytes total, so none of it is orphaned — it is all
+///     still referenced.
+///   - `leaks --traceTree` puts the root, across every sampled block, in a
+///     static inside MLX's C++ core: `mlx::core::io::thread_pool()::pool_`,
+///     the pool `Load::eval_cpu` enqueues one read task into per tensor. MADLAD
+///     is 1,898 tensors. What is *proven* is that the blocks are live and that
+///     the reference chain ends there; the exact mechanism inside MLX (queued
+///     task, worker-held `std::function`, or stale words in the deque's buffer
+///     fooling a conservative scanner) was not pinned down, and an upstream
+///     report should say so rather than assert one.
+///   - The Swift objects all die correctly — translator, tokenizer and the
+///     whole module tree deallocate on `stop()`, confirmed with weak references.
+///
+/// Two things made this hard to see, and both are worth knowing:
+///
+///   - MLX's own accounting stays clean (`active 0 MB, cached 0 MB` after every
+///     release), because an array that has never been evaluated owns a
+///     descriptor and no buffer. That is also why `vmmap` blames *Malloc Small*
+///     rather than anything GPU-shaped, and why `releaseCaches()` cannot help:
+///     there is nothing pooled to hand back.
+///   - **RSS lies here.** Under any memory pressure the kernel compresses these
+///     pages out and RSS falls while the leak grows. Measure `phys_footprint`
+///     (`TASK_VM_INFO`) — what Activity Monitor calls Memory — or count the
+///     objects with `heap <pid> | grep ArrayDesc`, which is exact.
+///
+/// Ruled out by measurement, so do not re-try them: scoping the load to its own
+/// `MLXRandom.RandomState`, and reseeding the global PRNG after loading. Both
+/// fix a real but much smaller retention (~2,800 descriptors per *model
+/// construction*, MLX's PRNG state being a lazy array whose every split holds
+/// the one before it) — and both leave the count on the real load path
+/// bit-for-bit unchanged, because the weights path retains the same graph
+/// anyway. There is no API on `mlx-swift` 0.31.6 to drain or reset that pool.
+///
+/// The cost is bounded and small: ~10 MB per captioning session that uses
+/// MADLAD, released when the app quits. Fixing it means an upstream change in
+/// `ml-explore/mlx`; until then this is a known, documented residual and not
+/// something to work around here.
 enum MemoryPolicy {
 
     /// Ceiling for MLX's reuse pool.
