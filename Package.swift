@@ -46,7 +46,14 @@ let package = Package(
             name: "sAiityTests",
             dependencies: ["sAiity"],
             path: "Tests/sAiityTests",
-            swiftSettings: [.swiftLanguageMode(.v5)]
+            swiftSettings: [.swiftLanguageMode(.v5)],
+            // Sparkle is a dynamic framework living in the build products
+            // directory, three levels up from the xctest binary. Without this
+            // rpath the whole test bundle fails to dlopen — and SIP strips
+            // DYLD_FRAMEWORK_PATH from the test runner, so an env var cannot
+            // stand in for it.
+            linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath",
+                                           "-Xlinker", "@loader_path/../../.."])]
         ),
     ]
 )
