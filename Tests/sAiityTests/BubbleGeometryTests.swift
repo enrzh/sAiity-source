@@ -107,3 +107,71 @@ struct BubbleGeometryTests {
         }
     }
 }
+
+/// A saved frame records where the bubble was, not how wide it should be.
+///
+/// From the field: `captionFrame` held 1520pt on a 1710pt screen whose settings
+/// ask for 1060, restored verbatim because the restore path used a margin-blind
+/// clamp. The bubble came back nearly edge to edge — 41pt of gap on one side,
+/// 149 on the other, and the 24pt margin honoured on neither.
+@Suite struct RestoredWidthTests {
+
+    private static let screen = NSRect(x: 0, y: 0, width: 1710, height: 1011)
+
+    @Test("A stale saved width does not survive a restore")
+    func staleWidthIsReplacedBySetting() {
+        let saved = NSRect(x: 41, y: 290, width: 1520, height: 149)
+        // What restoreFrame now does when no user width was ever stored.
+        let want = BubbleGeometry.autoWidth(visible: Self.screen.width,
+                                            fraction: 0.62, margin: 24)
+        #expect(want == 1060.2, "the setting's width, not the saved one")
+
+        var f = saved
+        f.size.width = want
+        let final = BubbleGeometry.clamp(f, into: Self.screen, margin: 24, respectMargin: true)
+
+        #expect(final.width == want)
+        #expect(final.minX >= Self.screen.minX + 24, "left margin honoured")
+        #expect(final.maxX <= Self.screen.maxX - 24, "right margin honoured")
+    }
+
+    @Test("A width the user really chose still survives, edge to edge")
+    func userChosenWidthSurvives() {
+        // Dragging the bubble to full width has to stick, so this path skips the
+        // margin deliberately — but never leaves the screen.
+        let w = BubbleGeometry.draggedWidth(3000, visible: Self.screen.width)
+        #expect(w == Self.screen.width)
+        let f = BubbleGeometry.clamp(NSRect(x: 900, y: 90, width: w, height: 149),
+                                     into: Self.screen, margin: 24, respectMargin: false)
+        #expect(f.minX >= Self.screen.minX)
+        #expect(f.maxX <= Self.screen.maxX, "even a dragged width stays on screen")
+    }
+
+    @Test("Any saved frame, however wrong, lands fully on screen")
+    func absurdSavedFramesAreContained() {
+        for saved in [NSRect(x: -800, y: 10, width: 4000, height: 200),
+                      NSRect(x: 1690, y: 10, width: 1520, height: 200),
+                      NSRect(x: 41, y: 290, width: 1520, height: 149)] {
+            var f = FrameStoreClampShim.clamp(saved, into: Self.screen)
+            f.size.width = BubbleGeometry.autoWidth(visible: Self.screen.width,
+                                                    fraction: 0.62, margin: 24)
+            let final = BubbleGeometry.clamp(f, into: Self.screen, margin: 24, respectMargin: true)
+            #expect(final.minX >= Self.screen.minX, "\(saved) left off screen")
+            #expect(final.maxX <= Self.screen.maxX, "\(saved) right off screen")
+        }
+    }
+}
+
+/// Mirrors FrameStore.clamp, which is nested inside OverlayWindow and not
+/// reachable from here. Kept identical on purpose: if the real one changes and
+/// this does not, the test above stops describing the shipped behaviour.
+enum FrameStoreClampShim {
+    static func clamp(_ saved: NSRect, into visible: NSRect) -> NSRect {
+        var f = saved
+        f.size.width = min(f.width, visible.width)
+        f.size.height = min(f.height, visible.height)
+        f.origin.x = min(max(f.minX, visible.minX), visible.maxX - f.width)
+        f.origin.y = min(max(f.minY, visible.minY), visible.maxY - f.height)
+        return f
+    }
+}

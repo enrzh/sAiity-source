@@ -146,7 +146,7 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Blase"
+            "value": "Sprechblase"
           }
         }
       }
@@ -186,7 +186,7 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Änderungen gelten sofort. Die Vorschau zeigt Beispieltext in der echten Blase."
+            "value": "Änderungen gelten sofort. Die Vorschau zeigt Beispieltext in der echten Sprechblase."
           }
         }
       }
@@ -456,7 +456,7 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Klicks durch die Blase hindurchlassen"
+            "value": "Klicks durch die Sprechblase hindurchlassen"
           }
         }
       }
@@ -876,7 +876,7 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Untertitel-Blase anzeigen"
+            "value": "Sprechblase anzeigen"
           }
         }
       }

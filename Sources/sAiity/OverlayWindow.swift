@@ -425,23 +425,37 @@ final class OverlayWindow: NSPanel {
         // no tintColor, which washes the text out.
         glass.style = .regular
 
+        // Both lines are configured together, deliberately.
+        //
+        // They were configured separately, and one line differed: the original
+        // got a lowered horizontal compression resistance and the translation
+        // did not. An NSTextField at the default priority refuses to be drawn
+        // narrower than its text, so instead of wrapping inside the bubble a
+        // long translation pushed straight through it — and since the bubble is
+        // held against the screen edge, "through the bubble" means off the
+        // screen, with the line clipped mid-word. Short lines fit, so it only
+        // ever showed up on long translated captions.
+        //
+        // The two roles differ in font, colour and line count. They must not
+        // differ in how they wrap.
+        for text in [label, translationLabel] {
+            text.alignment = .center
+            text.lineBreakMode = .byWordWrapping
+            text.cell?.wraps = true
+            text.translatesAutoresizingMaskIntoConstraints = false
+            text.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            // Wrap to the bubble, never to the text's own preferred width.
+            text.preferredMaxLayoutWidth = Self.minWidth - Self.hPadding * 2
+        }
+
         label.font = .systemFont(ofSize: 30, weight: .semibold)
         label.textColor = .white
-        label.alignment = .center
-        label.lineBreakMode = .byWordWrapping
         label.maximumNumberOfLines = 3
-        label.cell?.wraps = true
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         translationLabel.font = .systemFont(ofSize: 24, weight: .medium)
         translationLabel.textColor = NSColor.systemTeal
-        translationLabel.alignment = .center
-        translationLabel.lineBreakMode = .byWordWrapping
         translationLabel.maximumNumberOfLines = 2
-        translationLabel.cell?.wraps = true
         translationLabel.isHidden = true
-        translationLabel.translatesAutoresizingMaskIntoConstraints = false
 
         stack.orientation = .vertical
         stack.alignment = .centerX
@@ -565,7 +579,29 @@ final class OverlayWindow: NSPanel {
         // the second launch onwards, with no user action at all. The width is
         // restored separately, and only if a real drag stored one.
         userWidth = FrameStore.loadUserWidth().map { min($0, screen.visibleFrame.width) }
-        setFrameInternal(FrameStore.clamp(saved, into: screen.visibleFrame), display: false)
+
+        let v = screen.visibleFrame
+        let st = CaptionStyle.current
+        var f = FrameStore.clamp(saved, into: v)
+        // A saved frame records WHERE the bubble was, never how wide it should
+        // be. Without a stored user width the width is a setting, so a width
+        // left over from a wider display, an older build or a since-changed
+        // setting must not survive the restore. Found in the field: 1520pt
+        // restored onto a 1710pt screen whose setting asks for 1060, which left
+        // 41pt of gap on one side and 149 on the other and honoured the 24pt
+        // margin on neither.
+        if userWidth == nil {
+            f.size.width = BubbleGeometry.autoWidth(visible: v.width,
+                                                    fraction: CGFloat(st.widthFraction),
+                                                    margin: CGFloat(st.screenMargin))
+        }
+        // And the margin-aware clamp, not FrameStore's margin-blind one — that
+        // one only caps at the screen edge, so it would happily restore a bubble
+        // running the full width of the display with no margin at all.
+        setFrameInternal(BubbleGeometry.clamp(f, into: v,
+                                              margin: CGFloat(st.screenMargin),
+                                              respectMargin: userWidth == nil),
+                         display: false)
     }
 
     @objc private func frameMoved() {
@@ -659,6 +695,13 @@ final class OverlayWindow: NSPanel {
 
         let targetW = targetWidth(in: v)
         let contentW = targetW - Self.hPadding * 2
+        // Wrap to the bubble's CURRENT width, not to whatever it was when the
+        // labels were built. This is also what keeps the height measured below
+        // in agreement with what is actually drawn — measuring a wrap at one
+        // width and laying it out at another is how a bubble ends up with a
+        // line more than it has room for.
+        label.preferredMaxLayoutWidth = contentW
+        translationLabel.preferredMaxLayoutWidth = contentW
 
         // Only the HEIGHT responds to content: text wraps inside a fixed width
         // and the bubble grows upward from its bottom edge.
@@ -805,10 +848,16 @@ final class OverlayWindow: NSPanel {
         userWidth = nil
         UserDefaults.standard.removeObject(forKey: "captionFrame")
         FrameStore.clearUserWidth()
-        guard let screen = NSScreen.main else { return }
-        let v = screen.visibleFrame
-        setFrameInternal(NSRect(x: v.midX - frame.width / 2, y: v.minY + 90,
-                                width: frame.width, height: frame.height))
+        // Recompute rather than keeping the width the bubble happens to have.
+        // Reset has just discarded the user's chosen width, so the width is a
+        // setting again — carrying the old one forward is how a dragged-wide
+        // bubble survived a reset, got saved back out on the next drag, and came
+        // back wider than the setting on every launch after that.
+        //
+        // sizeToFit does the centring too, now that hasCustomFrame is false:
+        // it puts the bubble at the default spot with the width the settings
+        // ask for, which is the whole point of this button.
+        sizeToFit()
     }
 
     // MARK: - Content
