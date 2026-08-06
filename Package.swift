@@ -10,8 +10,6 @@ let package = Package(
         // Zero external dependencies of its own, which is why it is preferred
         // over the MLX route to the same Nemotron checkpoint.
         .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.15.0"),
-        // Whisper, for one-pass speech -> English translation. MIT, weights MIT.
-        .package(url: "https://github.com/argmaxinc/WhisperKit.git", from: "1.0.0"),
         // MADLAD-400-3B-MT (T5 seq2seq) on MLX — the only Swift package that
         // compiles a dedicated translation model on this toolchain.
         // NOTE: this package pins mlx-swift-lm to branch "main", so builds are
@@ -20,18 +18,22 @@ let package = Package(
         // Qwen via llama.cpp/GGUF. Ships a binaryTarget, so no cmake.
         .package(url: "https://github.com/obra/LLM.swift",
                  revision: "c2144e1a0e29c280ec6080b7da85e876d51f8509"),
+        // In-app updates. Without this a shipped build can never be fixed after
+        // the fact — a bad bug would live forever on every Mac that has it.
+        .package(url: "https://github.com/sparkle-project/Sparkle",
+                 from: "2.9.5"),
     ],
     targets: [
         .executableTarget(
             name: "sAiity",
             dependencies: [
                 .product(name: "FluidAudio", package: "FluidAudio"),
-                .product(name: "WhisperKit", package: "WhisperKit"),
                 .product(name: "MADLADTranslation", package: "speech-swift"),
                 // For HuggingFaceDownloader: fetching MADLAD's weights without
                 // also loading 1.86 GB into memory, which fromPretrained does.
                 .product(name: "AudioCommon", package: "speech-swift"),
                 .product(name: "LLM", package: "LLM.swift"),
+                .product(name: "Sparkle", package: "Sparkle"),
             ],
             path: "Sources/sAiity",
             swiftSettings: [.swiftLanguageMode(.v5)]

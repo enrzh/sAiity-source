@@ -21,3 +21,7 @@ build/
 *.xcuserdatad/
 xcuserdata/
 DerivedData/
+
+# Sparkle update-signing private key. The public half lives in Info.plist;
+# leaking this file would let anyone sign updates as us.
+scripts/sparkle_ed25519_private.pem

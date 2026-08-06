@@ -1,4 +1,5 @@
 import AppKit
+import Sparkle
 import AVFoundation
 import CoreGraphics
 import Foundation
@@ -15,6 +16,12 @@ import NaturalLanguage
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
+    /// Sparkle. The standard controller drives the whole flow — check, consent,
+    /// download, staged install — against the appcast in Info.plist. Automatic
+    /// checks are off until the user opts in.
+    private let updater = SPUStandardUpdaterController(startingUpdater: true,
+                                                       updaterDelegate: nil,
+                                                       userDriverDelegate: nil)
     private let overlay = OverlayWindow()
     private let capture = SystemAudioCapture()
     private var engine = ASREngine.current
@@ -339,6 +346,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                 keyEquivalent: ","))
         menu.addItem(NSMenuItem(title: "About sAiity", action: #selector(showAbout),
                                 keyEquivalent: ""))
+        let update = NSMenuItem(title: "Check for Updates…",
+                                action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)),
+                                keyEquivalent: "")
+        update.target = updater
+        menu.addItem(update)
         // terminate(_:) lives on NSApplication, not on this delegate. Without an
         // explicit target, assignTargets below would point it at AppDelegate,
         // which does not implement it — and the item silently does nothing.

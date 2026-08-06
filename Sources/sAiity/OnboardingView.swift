@@ -45,6 +45,7 @@ final class OnboardingModel {
 
     var purpose: Purpose = .anyLanguage
     var wantsTranslation = false
+    var wantsAutoUpdates = false
     var target = "en"
 
     let state: AppState
@@ -245,6 +246,13 @@ struct OnboardingView: View {
     private var finish: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Ready").font(.title2.weight(.semibold))
+            Toggle("Check for updates automatically", isOn: $model.wantsAutoUpdates)
+            Text("Asks aiity.de about once a day whether a newer version exists. The "
+                 + "check sends no audio, no transcripts and no identifiers — but it is "
+                 + "a network request, so it is off unless you want it. You can always "
+                 + "check by hand from the menu bar.")
+                .font(.caption).foregroundStyle(.secondary)
+            Divider().padding(.vertical, 2)
             // Read the live binding rather than the default: it is user-editable,
             // and telling someone the wrong shortcut is worse than telling them none.
             bullet("captions.bubble", "Start captions from the sAiity icon in the menu bar"
@@ -310,6 +318,8 @@ struct OnboardingView: View {
         guard let i = steps.firstIndex(of: model.step) else { return }
         if model.step == .purpose { model.apply() }
         if model.step == .finish {
+            // Sparkle reads this defaults key itself; no updater API needed.
+            UserDefaults.standard.set(model.wantsAutoUpdates, forKey: "SUEnableAutomaticChecks")
             Onboarding.complete()
             onFinish()
             return

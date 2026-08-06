@@ -16,6 +16,13 @@
   <!-- Menu-bar only: no Dock icon, no Cmd-Tab entry. Still visible in Finder,
        Spotlight and Launchpad once installed to /Applications. -->
   <key>LSUIElement</key><true/>
+  <!-- Sparkle. Automatic checks are OFF until the user opts in during
+       onboarding — an app that phones home for updates without asking would
+       undercut its own privacy pitch, even though update checks carry no
+       user data. -->
+  <key>SUFeedURL</key><string>https://aiity.de/saiity/appcast.xml</string>
+  <key>SUPublicEDKey</key><string>DzbCne8eregDpstl+s0s7lID5lVvzbB8OrXorH7ccMQ=</string>
+  <key>SUEnableAutomaticChecks</key><false/>
   <key>NSHumanReadableCopyright</key><string>MIT licensed. See Credits in the app's About window.</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
   <!-- ScreenCaptureKit system-audio capture triggers the Screen Recording
