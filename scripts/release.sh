@@ -59,9 +59,18 @@ echo "Release artifacts ready:"
 echo "  build/sAiity-$VERSION.zip   ($LEN bytes, notarised, stapled)"
 echo "  build/appcast.xml           (Ed25519-signed entry)"
 echo
+# The upload target comes from the environment, and deliberately has no default.
+# This repository is public: hardcoding the host meant publishing the server's
+# address, its login and its web root to anyone reading the script — free
+# reconnaissance for a box that already sees brute-force traffic. Set it locally,
+# e.g. in a shell profile:
+#
+#   export SAIITY_PUBLISH_TARGET="user@host:/var/www/example.com/saiity/"
+TARGET="${SAIITY_PUBLISH_TARGET:-<set SAIITY_PUBLISH_TARGET>}"
+
 echo "To publish, run BOTH (the appcast must go up last — an appcast that"
 echo "points at a zip that is not there yet bricks the update for whoever"
 echo "checks in that window):"
 echo
-echo "  scp build/sAiity-$VERSION.zip  ${SAIITY_PUBLISH_TARGET}"
-echo "  scp build/appcast.xml          ${SAIITY_PUBLISH_TARGET}"
+echo "  scp build/sAiity-$VERSION.zip  $TARGET"
+echo "  scp build/appcast.xml          $TARGET"
