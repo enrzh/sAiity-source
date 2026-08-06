@@ -206,6 +206,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Untruncated, unlike the overlay label — never copy from the view.
     private var lastFinalText = ""
     private var lastVolatileText = ""
+
+    // MARK: - Sentence assembly
+    //
+    // The recogniser commits a clause every few seconds, because waiting for
+    // punctuation means continuous speech produces no captions at all. Those
+    // clauses are the right unit for the engine and the wrong unit for a
+    // viewer: shown one at a time they replace each other, so a sentence
+    // arrives as a series of two-word flashes and the translation of each is
+    // made without the rest. These hold the clauses until they form something
+    // worth reading.
+    private var sentenceParts: [String] = []
+    private var sentenceWords: [TimedWord] = []
+    private var sentenceStart: Double = 0
+    private var sentenceEnd: Double = 0
+
+    /// Also the display cap: past this a sentence is closed rather than left to
+    /// grow past what the bubble can show.
+    private static let maxSentenceChars = 220
+    private static let sentenceTerminators: Set<Character> = [".", "!", "?", "…", "。", "！", "？"]
+
+    #if SAIITY_TEST_HOOKS
+    static var sentenceTerminatorsForTests: Set<Character> { sentenceTerminators }
+    static var maxSentenceCharsForTests: Int { maxSentenceChars }
+    #endif
+
+    /// Joins clauses the way the script writes them. Chinese, Japanese and Thai
+    /// run on without spaces, and inserting one produces text a native reader
+    /// sees as broken — and a translator sees as two words.
+    static func joinClauses(_ parts: [String]) -> String {
+        parts.reduce(into: "") { out, part in
+            guard !out.isEmpty else { out = part; return }
+            let runOn = (out.last.map(isSpaceless) ?? false)
+                || (part.first.map(isSpaceless) ?? false)
+            out += runOn ? part : " " + part
+        }
+    }
+
+    private static func isSpaceless(_ c: Character) -> Bool {
+        guard let s = c.unicodeScalars.first else { return false }
+        switch s.value {
+        // CJK punctuation and kana, CJK ideographs, Thai. Korean is written
+        // WITH spaces despite being written in Hangul, so it is not here.
+        case 0x3000...0x30FF, 0x3400...0x4DBF, 0x4E00...0x9FFF, 0x0E00...0x0E7F:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func trimmedForDisplay(_ parts: [String]) -> String {
+        String(joinClauses(parts).suffix(maxSentenceChars))
+    }
     private var sessionLines: [Segment] = []
     /// Bumped by start(), so an async result from the previous session cannot
     /// patch a line of this one that happens to share an index.
@@ -805,6 +857,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         transcriptWriteChain = nil
         lastFinalText = ""
         lastVolatileText = ""
+        sentenceParts.removeAll()
+        sentenceWords.removeAll()
         detector.reset()
         detectedLanguage = nil
         setStatus("Starting…")
@@ -897,6 +951,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         try? await Task.sleep(nanoseconds: 350_000_000)
         guard state == .running else { return }
         await backend.flushPending()
+        // The pause IS the end of the sentence. That matters most for the
+        // multilingual model, which frequently emits no punctuation at all —
+        // without this its sentences would only ever be closed by the length
+        // cap, in the middle of a word.
+        closeSentence()
     }
 
     /// What the running engine can hear, said up front.
@@ -1004,6 +1063,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         await capture.stop()
         await backend.stop()
+        // backend.stop() emits whatever was still volatile; close the sentence
+        // it lands in so the last thing said reaches the transcript instead of
+        // being dropped with the session.
+        closeSentence()
         await activeTranslator?.stop()
         translatorReady = false
         // Queued transcript writes have to land before the recording closes:
@@ -1083,10 +1146,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSLog("sAiity chunk final=\(chunk.isFinal): \(text)")
         }
         showedAnyCaption = true
-        if chunk.isFinal { lastFinalText = text } else { lastVolatileText = text }
-        overlay.show(text: String(text.suffix(220)), isFinal: chunk.isFinal)
 
-        guard chunk.isFinal else { return }
+        guard chunk.isFinal else {
+            // Still being revised: show it after the part of the sentence that
+            // has already settled, so the line reads forward instead of being
+            // replaced by its own tail.
+            lastVolatileText = text
+            overlay.show(text: Self.trimmedForDisplay(sentenceParts + [text]), isFinal: false)
+            return
+        }
+
+        // A committed clause EXTENDS the sentence on screen; it does not replace
+        // it. The engine commits a clause every few seconds so that continuous
+        // speech still produces captions, but those units are not sentences —
+        // "Mac abspielt" on its own is not something anyone can read, and handed
+        // to a translator it comes back as "Mac plays." Assembling them here is
+        // what puts a whole thought on screen and gives the translator a whole
+        // thought to work with.
+        if sentenceParts.isEmpty { sentenceStart = chunk.start }
+        sentenceEnd = chunk.end
+        sentenceParts.append(text)
+        sentenceWords.append(contentsOf: chunk.words)
+        lastVolatileText = ""
+        lastFinalText = Self.joinClauses(sentenceParts)
+        overlay.show(text: Self.trimmedForDisplay(sentenceParts), isFinal: true)
+
+        // Finished, or run on for so long that waiting costs more than an
+        // awkward break. Speech that carries no punctuation at all — most of
+        // what the multilingual model emits — is closed by the pause instead,
+        // from commitAtSpeechGap().
+        let ended = lastFinalText.last.map(Self.sentenceTerminators.contains) ?? false
+        if ended || lastFinalText.count >= Self.maxSentenceChars { closeSentence() }
+    }
+
+    /// Hand the assembled sentence on: language detection, translation, and the
+    /// transcript all work on the whole thing rather than on a clause of it.
+    @MainActor
+    private func closeSentence() {
+        guard !sentenceParts.isEmpty else { return }
+        let text = Self.joinClauses(sentenceParts)
+        let chunk = TranscriptChunk(text: text, isFinal: true,
+                                    start: sentenceStart, end: sentenceEnd,
+                                    words: sentenceWords)
+        sentenceParts.removeAll()
+        sentenceWords.removeAll()
+        emitSentence(text, chunk: chunk)
+    }
+
+    private func emitSentence(_ text: String, chunk: TranscriptChunk) {
 
         // Detection runs on the ACCUMULATED transcript, never a single line:
         // one-word lines are noise ("Ja." reads as Finnish, "Okay." as English).
