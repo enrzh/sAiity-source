@@ -221,7 +221,7 @@ final class AppState {
         translateTo = code
         applyingRemoteTarget = false
     }
-    var showQwenModels = false
+    var showLocalModels = false
     /// The searchable target-language sheet. Also raised from the menu bar's
     /// "All languages…" item, which is why it lives on shared state.
     var showTranslationPicker = false
@@ -235,8 +235,8 @@ final class AppState {
         targetSupportedByEngine = await translationEngine.languages
             .supportedCanonicalCodes().contains(t)
     }
-    var qwenModel = QwenModel.selected {
-        didSet { QwenModel.selected = qwenModel }
+    var llmModel = LocalModel.selected {
+        didSet { LocalModel.selected = llmModel }
     }
 
     func refresh() async {
@@ -244,7 +244,7 @@ final class AppState {
         // whatever was current when the AppState singleton was created, which
         // is one of the ways "selecting a model appears to do nothing".
         translationEngine = TranslationEngine.current
-        qwenModel = QwenModel.selected
+        llmModel = LocalModel.selected
         // Was missing, so a target picked from the menu bar never appeared here.
         adoptTarget(UserDefaults.standard.string(forKey: "translateTo"))
         await refreshTargetSupport()

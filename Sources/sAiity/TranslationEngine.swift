@@ -32,7 +32,7 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
     var displayName: String {
         switch self {
         case .madlad: return "MADLAD"
-        case .qwen: return "Qwen"
+        case .qwen: return "Local LLM"
         }
     }
 
@@ -45,10 +45,10 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
                  + "and it only ever translates, so it cannot wander off answering the speaker."
         case .qwen:
             return "A small local LLM doing the translation — about 1.2 seconds per "
-                 + "sentence on the recommended 2B model, measured. Most flexible of the "
-                 + "options, since it can be instructed about tone or terminology. "
-                 + "Stay at 2B or above: the 0.8B model is fast but keeps answering or "
-                 + "echoing the caption instead of translating it."
+                 + "sentence on the recommended Qwen 2B, measured. Most flexible of the "
+                 + "options: choose from Qwen and Gemma builds, or add your own GGUF by "
+                 + "URL or from disk. Stay at 2B-class or above; sub-billion models keep "
+                 + "answering or echoing the caption instead of translating it."
         }
     }
 
@@ -60,14 +60,14 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
     var licence: String {
         switch self {
         case .madlad: return "Apache-2.0 (Google MADLAD-400)"
-        case .qwen: return "Apache-2.0 (Alibaba Qwen); GGUF builds by unsloth"
+        case .qwen: return "Per model — shown on each row under Models"
         }
     }
 
     func makeTranslator() -> Translating? {
         switch self {
         case .madlad: return MADLADTranslator()
-        case .qwen: return QwenTranslator()
+        case .qwen: return LocalLLMTranslator()
         }
     }
 
@@ -91,20 +91,24 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
                 install: { sink in try await MADLADTranslator.downloadWeights(progress: sink) })]
 
         case .qwen:
-            return QwenModel.all.map { m in
+            return LocalModel.all.map { m in
                 ModelAsset(
-                    id: "mt.qwen.\(m.file)",
+                    id: "mt.llm.\(m.file)",
                     family: .translation,
                     title: m.label,
                     detail: m.note,
-                    licence: "Apache-2.0 (Qwen) · huggingface.co/unsloth",
-                advertisedBytes: m.bytes,
+                    licence: m.licence,
+                    advertisedBytes: m.bytes,
                     storage: .file(m.localURL, expectedBytes: m.bytes),
                     removal: .remove(m.localURL),
                     use: .whenQwenVariant(file: m.file),
-                    install: { sink in
-                        try await FileDownloader.download(from: m.downloadURL, to: m.localURL,
-                                                          expectedBytes: m.bytes, progress: sink)
+                    // An imported file has nothing to download — it is already
+                    // in place, so it gets no install path at all.
+                    install: m.downloadURL.map { url in
+                        { sink in
+                            try await FileDownloader.download(from: url, to: m.localURL,
+                                                              expectedBytes: m.bytes, progress: sink)
+                        }
                     })
             }
         }

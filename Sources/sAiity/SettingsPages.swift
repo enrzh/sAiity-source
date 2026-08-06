@@ -214,9 +214,9 @@ struct CaptionsView: View {
                     }
                     if state.translationEngine == .qwen {
                         HStack {
-                            Button("Choose model…") { state.showQwenModels = true }
+                            Button("Choose model…") { state.showLocalModels = true }
                                 .controlSize(.small)
-                            Text("\(state.qwenModel.label) · \(state.qwenModel.sizeText)")
+                            Text("\(state.llmModel.label) · \(state.llmModel.sizeText)")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
@@ -246,7 +246,7 @@ struct CaptionsView: View {
         .task(id: "\(state.translateTo ?? "")|\(state.translationEngine.rawValue)") {
             await state.refreshTargetSupport()
         }
-        .sheet(isPresented: $state.showQwenModels) { QwenModelsView(state: state) }
+        .sheet(isPresented: $state.showLocalModels) { LocalModelsView(state: state) }
         .sheet(isPresented: $state.showTranslationPicker) { TranslationTargetPicker(state: state) }
     }
 
@@ -640,7 +640,7 @@ struct LibraryView: View {
 /// fastest option and people will reach for it, but a sub-billion instruct model
 /// invents and drops meaning badly enough that a wrong translation is worse than
 /// none. Saying so is more useful than quietly omitting it.
-struct QwenModelsView: View {
+struct LocalModelsView: View {
     @Bindable var state: AppState
     @Environment(\.dismiss) private var dismiss
 
@@ -648,8 +648,8 @@ struct QwenModelsView: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Qwen models").font(.headline)
-                    Text("All Apache-2.0 · one is used at a time")
+                    Text("Local LLM models").font(.headline)
+                    Text("Qwen, Gemma, or your own GGUF · one is used at a time")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -659,11 +659,11 @@ struct QwenModelsView: View {
             Divider()
 
             List {
-                ForEach(QwenModel.all) { m in
+                ForEach(LocalModel.all) { m in
                     HStack(alignment: .top) {
-                        Image(systemName: m == state.qwenModel ? "largecircle.fill.circle" : "circle")
-                            .foregroundStyle(m == state.qwenModel ? Color.accentColor : Color.secondary)
-                            .onTapGesture { state.qwenModel = m }
+                        Image(systemName: m == state.llmModel ? "largecircle.fill.circle" : "circle")
+                            .foregroundStyle(m == state.llmModel ? Color.accentColor : Color.secondary)
+                            .onTapGesture { state.llmModel = m }
                         VStack(alignment: .leading, spacing: 2) {
                             HStack(spacing: 6) {
                                 Text(m.label).font(.body.weight(.medium))
@@ -680,22 +680,111 @@ struct QwenModelsView: View {
                         // Same registry asset the Models page uses, so download
                         // state, progress and the delete guards are identical
                         // wherever this model is shown.
-                        if let asset = state.assets.first(where: { $0.id == "mt.qwen.\(m.file)" }) {
+                        if let asset = state.assets.first(where: { $0.id == "mt.llm.\(m.file)" }) {
                             AssetControl(state: state, status: asset)
+                        }
+                        if case .huggingFace = m.source {} else {
+                            Button {
+                                LocalModel.removeCustom(m)
+                                state.refreshModels()
+                            } label: {
+                                Image(systemName: "minus.circle")
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                            .help("Forget this model and delete its file.")
                         }
                     }
                     .contentShape(Rectangle())
-                    .onTapGesture { state.qwenModel = m }
+                    .onTapGesture { state.llmModel = m }
                     .padding(.vertical, 3)
                 }
             }
             .listStyle(.inset)
+
+            Divider()
+            addYourOwn
 
             if let e = state.modelError {
                 Divider()
                 Text(e).font(.caption).foregroundStyle(.red).padding(14)
             }
         }
-        .frame(width: 480, height: 480)
+        .frame(width: 520, height: 560)
+    }
+
+    @State private var customURL = ""
+    @State private var adding = false
+
+    /// Bring-your-own-model. The file picker is what actually covers Ollama:
+    /// its blobs ARE GGUF files, but it publishes no download URLs, so "paste a
+    /// link" alone could never reach a model the user already has on disk.
+    @ViewBuilder
+    private var addYourOwn: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Add your own").font(.callout.weight(.medium))
+            HStack(spacing: 6) {
+                TextField("Direct link to a .gguf file", text: $customURL)
+                    .textFieldStyle(.roundedBorder)
+                    .disableAutocorrection(true)
+                Button("Add") { addByURL() }
+                    .disabled(adding || URL(string: customURL)?.scheme?.hasPrefix("http") != true)
+                Button("Choose file…") { addByFile() }
+                    .disabled(adding)
+                if adding { ProgressView().controlSize(.small) }
+            }
+            Text("A link downloads through the app; a chosen file is copied in. Ollama "
+                 + "users: the blobs under ~/.ollama/models/blobs are GGUF files and can "
+                 + "be chosen directly. The translation prompt was tuned on Qwen — another "
+                 + "family may behave a little differently.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(14)
+    }
+
+    private func addByURL() {
+        guard let url = URL(string: customURL) else { return }
+        adding = true
+        state.modelError = nil
+        Task { @MainActor in
+            defer { adding = false }
+            do {
+                let m = try await LocalModel.addCustom(url: url)
+                customURL = ""
+                state.refreshModels()
+                await state.download(m.asset(in: state))
+            } catch {
+                state.modelError = error.localizedDescription
+            }
+        }
+    }
+
+    private func addByFile() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.init(filenameExtension: "gguf") ?? .data]
+        // Ollama blobs have no extension at all, so the filter cannot be strict.
+        panel.allowsOtherFileTypes = true
+        panel.canChooseDirectories = false
+        panel.message = "Choose a GGUF model file. Ollama blobs (sha256-…) work too."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        adding = true
+        state.modelError = nil
+        Task { @MainActor in
+            defer { adding = false }
+            do {
+                _ = try LocalModel.addCustom(importing: url)
+                state.refreshModels()
+            } catch {
+                state.modelError = error.localizedDescription
+            }
+        }
+    }
+}
+
+private extension LocalModel {
+    /// The registry asset for this model, freshly built — the stored snapshot
+    /// may predate a just-added custom model.
+    func asset(in state: AppState) -> ModelAsset {
+        TranslationEngine.qwen.assetDescriptors.first { $0.id == "mt.llm.\(file)" }!
     }
 }

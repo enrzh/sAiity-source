@@ -147,7 +147,7 @@ final class MADLADTranslator: Translating, @unchecked Sendable {
 /// the model a bare string as a raw text continuation, so it never knew it was
 /// meant to translate, no stop sequence was in effect, and generation ran to the
 /// token cap every time. Measured after the fix: ~0.5-0.7 s per sentence.
-final class QwenTranslator: Translating, @unchecked Sendable {
+final class LocalLLMTranslator: Translating, @unchecked Sendable {
     let name = "Qwen (local LLM)"
 
     /// Ghost-pepper's budget. A hung generation cannot be cancelled (the decode
@@ -156,7 +156,7 @@ final class QwenTranslator: Translating, @unchecked Sendable {
     private static let timeout: TimeInterval = 15
 
     private var llm: LLM?
-    private var model = QwenModel.selected
+    private var model = LocalModel.selected
     private var systemPrompt = ""
     /// Human-readable target ("English"), for the prompt and the retry nudge.
     private var targetName = ""
@@ -165,7 +165,7 @@ final class QwenTranslator: Translating, @unchecked Sendable {
     private var preparedTarget: String?
 
     static var isAvailable: Bool { true }
-    static func isDownloaded() -> Bool { QwenModel.selected.isDownloaded }
+    static func isDownloaded() -> Bool { LocalModel.selected.isDownloaded }
 
     /// The language name to put in the prompt, always in English.
     ///
@@ -175,7 +175,7 @@ final class QwenTranslator: Translating, @unchecked Sendable {
     /// languages inside one instruction is exactly what a small model handles
     /// worst.
     private static func englishName(of code: String) -> String {
-        QwenLanguageProvider.nativeCode(for: code) ?? code
+        LLMLanguageProvider.nativeCode(for: code) ?? code
     }
 
     /// Hard role denial plus few-shot examples that DEMONSTRATE the failure
@@ -237,7 +237,7 @@ final class QwenTranslator: Translating, @unchecked Sendable {
 
     func prepare(from source: String, to target: String,
                  progress: @escaping @Sendable (String) -> Void) async throws {
-        let m = QwenModel.selected
+        let m = LocalModel.selected
         model = m
         if !m.isDownloaded {
             let label = m.label
@@ -293,12 +293,22 @@ final class QwenTranslator: Translating, @unchecked Sendable {
                 // thinking tokens, and clearing history stops one caption from
                 // conditioning the next.
                 llm.useResolvedTemplate(systemPrompt: system)
+
+                // Not every family HAS a system role. The resolver returns the
+                // Gemma (and Mistral) presets with the system prompt DISCARDED —
+                // so Gemma received zero instructions and answered with the
+                // empty sentinel every time. When the resolved template carries
+                // no system prompt, fold the instructions into the user turn;
+                // and only Qwen-style templates get the pre-closed <think>
+                // pair, because injecting think tokens a model never saw in
+                // training reads to it as garbage input.
+                let carriesSystem = llm.template?.systemPrompt != nil
+                let effectiveUser = carriesSystem ? user : system + "\n\n" + user
+                let thinking: ThinkingMode = carriesSystem ? .suppressed : .none
+
                 llm.history = []
                 llm.temp = temp
-                // .suppressed makes preprocess emit a pre-closed <think></think>
-                // pair so the model resumes after it — the real fix for thinking
-                // leakage, rather than stripping it afterwards.
-                await llm.respond(to: user, thinking: .suppressed)
+                await llm.respond(to: effectiveUser, thinking: thinking)
                 return llm.output
             }
             group.addTask {
@@ -472,10 +482,16 @@ final class QwenTranslator: Translating, @unchecked Sendable {
 
     func stop() async { llm = nil }
 
-    /// GGUF fetch with real progress and a non-destructive replace. HuggingFace
-    /// redirects to a CDN, which URLSession follows for us.
-    static func download(_ m: QwenModel, progress: @escaping ProgressSink) async throws {
-        try await FileDownloader.download(from: m.downloadURL, to: m.localURL,
+    /// GGUF fetch with real progress and a non-destructive replace. An imported
+    /// file has no source to fetch from — if its bytes are gone, they are gone,
+    /// and saying so beats pretending a re-download exists.
+    static func download(_ m: LocalModel, progress: @escaping ProgressSink) async throws {
+        guard let url = m.downloadURL else {
+            throw TranslationEngineError.notAvailable(
+                "\(m.label) was imported from disk and its file is missing. "
+                + "Import it again from the original location.")
+        }
+        try await FileDownloader.download(from: url, to: m.localURL,
                                           expectedBytes: m.bytes, progress: progress)
     }
 }

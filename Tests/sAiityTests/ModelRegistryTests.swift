@@ -45,13 +45,21 @@ struct ModelRegistryTests {
         // alive for one engine.
         #expect(!ids.contains { $0.contains("apple") }, "Apple was removed; a stale asset remains")
         // One per Qwen variant, so the sheet and the Models page agree.
-        #expect(ids.filter { $0.hasPrefix("mt.qwen.") }.count == QwenModel.all.count)
+        #expect(ids.filter { $0.hasPrefix("mt.llm.") }.count == LocalModel.all.count)
     }
 
     @Test("Everything the app downloads can be downloaded and deleted from the UI")
     func ourAssetsAreFullyManageable() {
+        let imported = Set(LocalModel.custom.compactMap {
+            if case .importedFile = $0.source { return "mt.llm.\($0.file)" }
+            return nil
+        })
         for asset in ModelRegistry.assets() {
-            #expect(asset.install != nil, "\(asset.id) has no download path")
+            // An imported file has no source to download from — by design its
+            // only action is Delete.
+            if !imported.contains(asset.id) {
+                #expect(asset.install != nil, "\(asset.id) has no download path")
+            }
             guard case .remove = asset.removal else {
                 Issue.record("\(asset.id) has no delete path")
                 continue

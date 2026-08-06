@@ -53,8 +53,12 @@ enum AssetStorage: Sendable {
     /// present for the download to count as complete. Anything less is a
     /// partial download — which is a third state, not a synonym for missing.
     case directory(URL, markers: [String])
-    /// A single file whose finished size we know.
-    case file(URL, expectedBytes: Int64)
+    /// A single file. `expectedBytes` nil means the size is genuinely unknown
+    /// (a pasted URL whose server sent no Content-Length); completeness then
+    /// rests on the downloader's staging, which only ever creates the
+    /// destination file once a transfer finished. Comparing against zero
+    /// instead would make any one-byte fragment read as complete.
+    case file(URL, expectedBytes: Int64?)
 }
 
 /// What removing an asset actually means.
@@ -89,7 +93,7 @@ enum AssetUse: Sendable {
         case .whenTranslator(let t):
             return TranslationEngine.current == t
         case .whenQwenVariant(let f):
-            return TranslationEngine.current == .qwen && QwenModel.selected.file == f
+            return TranslationEngine.current == .qwen && LocalModel.selected.file == f
         }
     }
 }
@@ -193,11 +197,16 @@ enum ModelRegistry {
                                isPartial: !complete && bytes > 0, bytesOnDisk: bytes)
 
         case .file(let url, let expected):
-            let bytes = byteSize(of: url.deletingLastPathComponent()) > 0
-                ? Int64((try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0)
-                : 0
-            // A GGUF that is short is a truncated download, not a model.
-            let complete = bytes > 0 && Double(bytes) >= Double(expected) * 0.98
+            let bytes = Int64((try? FileManager.default.attributesOfItem(
+                atPath: url.path)[.size] as? Int) ?? 0)
+            // A GGUF that is short is a truncated download, not a model. With
+            // no expected size, presence is the signal — see the case comment.
+            let complete: Bool
+            if let expected {
+                complete = bytes > 0 && Double(bytes) >= Double(expected) * 0.98
+            } else {
+                complete = bytes > 0
+            }
             return AssetStatus(asset: asset, isInstalled: complete,
                                isPartial: !complete && bytes > 0, bytesOnDisk: bytes)
 

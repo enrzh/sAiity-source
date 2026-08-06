@@ -82,9 +82,9 @@ struct LanguageTests {
         // The prompt and all its few-shot examples are English. Feeding it
         // "Chinesisch" on a German Mac mixes languages inside one instruction,
         // which is what a small model handles worst.
-        #expect(QwenLanguageProvider.nativeCode(for: "zh-Hans")?.contains("Chinese") == true)
-        #expect(QwenLanguageProvider.nativeCode(for: "de") == "German")
-        #expect(QwenLanguageProvider.nativeCode(for: "sw") == "Swahili")
+        #expect(LLMLanguageProvider.nativeCode(for: "zh-Hans")?.contains("Chinese") == true)
+        #expect(LLMLanguageProvider.nativeCode(for: "de") == "German")
+        #expect(LLMLanguageProvider.nativeCode(for: "sw") == "Swahili")
     }
 
     @Test("A language no engine can do is never offered as if it could be")

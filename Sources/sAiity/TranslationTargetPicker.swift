@@ -101,7 +101,7 @@ struct TranslationTargetPicker: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(lang.displayName)
                 if state.translationEngine == .qwen,
-                   !QwenLanguageProvider.strongTier.contains(lang.code) {
+                   !LLMLanguageProvider.strongTier.contains(lang.code) {
                     Text("Outside Qwen's strongest languages — quality varies.")
                         .font(.caption2).foregroundStyle(.secondary)
                 }

@@ -20,7 +20,7 @@ extension TranslationEngine {
     var languages: any TranslationLanguageProvider.Type {
         switch self {
         case .madlad: return MADLADLanguageProvider.self
-        case .qwen: return QwenLanguageProvider.self
+        case .qwen: return LLMLanguageProvider.self
         }
     }
 }
@@ -56,7 +56,7 @@ enum MADLADLanguageProvider: TranslationLanguageProvider {
 
 // MARK: - Qwen
 
-enum QwenLanguageProvider: TranslationLanguageProvider {
+enum LLMLanguageProvider: TranslationLanguageProvider {
     /// An instruct LLM has no hard language list — what varies is quality, not
     /// capability. Offering the full catalogue and being honest about quality
     /// beats inventing a boundary the model does not have.
