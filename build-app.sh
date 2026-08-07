@@ -18,12 +18,19 @@ GIT_COUNT=$(git rev-list --count HEAD 2>/dev/null || echo "1")
 # Test hooks (SAIITY_AUTOSTART and friends) are compiled in for local builds and
 # OUT for anything being notarised — one of them starts system-audio capture
 # with no UI and no consent, which has no business in a shipped binary.
-BUILD_FLAGS=()
-if [ "${1:-}" != "--notarize" ]; then
-    BUILD_FLAGS+=(-Xswiftc -DSAIITY_TEST_HOOKS)
+#
+# Written as two explicit calls rather than an array of flags. macOS ships bash
+# 3.2, where expanding an EMPTY array as "${arr[@]}" under `set -u` is an
+# unbound-variable error — so the array form worked for every local build, where
+# it holds the test-hook flags, and failed on the one path where it is empty:
+# --notarize. That is the path nobody could run until there was a Developer ID
+# certificate to run it with, so the first real release attempt was also the
+# first time this line executed.
+if [ "${1:-}" = "--notarize" ]; then
+    swift build -c release
+else
+    swift build -c release -Xswiftc -DSAIITY_TEST_HOOKS
 fi
-
-swift build -c release "${BUILD_FLAGS[@]}"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # The filename here MUST match CFBundleExecutable exactly, capital A included.
