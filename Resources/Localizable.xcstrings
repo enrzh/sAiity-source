@@ -1,6 +1,28 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "A second line under the captions, in a language you choose. Runs on this Mac like everything else.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eine zweite Zeile unter den Untertiteln, in einer Sprache deiner Wahl. Läuft wie alles andere auf diesem Mac."
+          }
+        }
+      }
+    },
+    "A smaller, faster English-only model. 437 MB. Other languages come out as nonsense, so only pick this if English is all you need.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ein kleineres, schnelleres Modell nur für Englisch. 437 MB. Andere Sprachen kommen als Unsinn heraus – wähle das nur, wenn dir Englisch reicht."
+          }
+        }
+      }
+    },
     "About sAiity": {
       "localizations": {
         "de": {
@@ -61,6 +83,17 @@
         }
       }
     },
+    "Already allowed it in System Settings but still showing as not granted? macOS sometimes only applies it to a fresh launch.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Schon in den Systemeinstellungen erlaubt, wird aber weiterhin als nicht erteilt angezeigt? macOS übernimmt das manchmal erst bei einem Neustart der App."
+          }
+        }
+      }
+    },
     "Also show a translation under each caption": {
       "localizations": {
         "de": {
@@ -77,6 +110,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Jede Sprache"
+          }
+        }
+      }
+    },
+    "Asks aiity.de about once a day whether a newer version exists. The check sends no audio, no transcripts and no identifiers — but it is a network request, so it is off unless you want it. You can always check by hand from the menu bar.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fragt etwa einmal täglich bei aiity.de nach, ob es eine neuere Version gibt. Die Abfrage sendet keinen Ton, keine Transkripte und keine Kennungen – aber sie ist eine Netzwerkanfrage und daher aus, solange du sie nicht möchtest. Über die Menüleiste kannst du jederzeit selbst nachsehen."
           }
         }
       }
@@ -177,6 +221,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Untertitel"
+          }
+        }
+      }
+    },
+    "Change engine, language and appearance in Settings.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Engine, Sprache und Aussehen änderst du in den Einstellungen."
           }
         }
       }
@@ -381,6 +436,17 @@
         }
       }
     },
+    "Everything runs on this Mac. No audio ever leaves it.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alles läuft auf diesem Mac. Es verlässt ihn kein Ton."
+          }
+        }
+      }
+    },
     "Fast": {
       "localizations": {
         "de": {
@@ -447,6 +513,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Bereit"
+          }
+        }
+      }
+    },
+    "It captures the audio your Mac plays, not your microphone.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Es nimmt den Ton auf, den dein Mac abspielt – nicht dein Mikrofon."
           }
         }
       }
@@ -581,6 +658,17 @@
         }
       }
     },
+    "Nothing you caption is sent anywhere.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nichts, was du untertitelst, wird irgendwohin gesendet."
+          }
+        }
+      }
+    },
     "Off": {
       "localizations": {
         "de": {
@@ -597,6 +685,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ein Download, dann kann es losgehen"
+          }
+        }
+      }
+    },
+    "One multilingual model that works out which language is being spoken. 634 MB.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ein mehrsprachiges Modell, das selbst erkennt, welche Sprache gesprochen wird. 634 MB."
           }
         }
       }
@@ -717,6 +816,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Erkennung"
+          }
+        }
+      }
+    },
+    "Recognition always needs a model on this Mac — that is the price of not sending your audio to a server.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Erkennung braucht immer ein Modell auf diesem Mac – das ist der Preis dafür, deinen Ton an keinen Server zu schicken."
           }
         }
       }
@@ -861,6 +971,17 @@
         }
       }
     },
+    "Set up sAiity": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "sAiity einrichten"
+          }
+        }
+      }
+    },
     "Shortcuts": {
       "localizations": {
         "de": {
@@ -921,6 +1042,28 @@
         }
       }
     },
+    "Start captions from the sAiity icon in the menu bar, or press %@.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Untertitel startest du über das sAiity-Symbol in der Menüleiste oder mit %@."
+          }
+        }
+      }
+    },
+    "Start captions from the sAiity icon in the menu bar.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Untertitel startest du über das sAiity-Symbol in der Menüleiste."
+          }
+        }
+      }
+    },
     "Start sAiity when you log in": {
       "localizations": {
         "de": {
@@ -967,6 +1110,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Speicher"
+          }
+        }
+      }
+    },
+    "That means a one-time model download — you choose which.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dafür wird einmalig ein Modell geladen – du wählst welches."
+          }
+        }
+      }
+    },
+    "This only picks a starting model. You can change it any time in Settings.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Das wählt nur ein Startmodell. Du kannst es jederzeit in den Einstellungen ändern."
           }
         }
       }
@@ -1031,6 +1196,17 @@
         }
       }
     },
+    "Translation runs on this Mac too, so it needs a model of its own — MADLAD, 1.86 GB, covering about 450 languages. It is listed on the next screen alongside the recognition model.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Auch die Übersetzung läuft auf diesem Mac und braucht daher ein eigenes Modell – MADLAD, 1,86 GB, für rund 450 Sprachen. Es steht auf dem nächsten Schritt neben dem Erkennungsmodell."
+          }
+        }
+      }
+    },
     "Use %@": {
       "localizations": {
         "de": {
@@ -1091,6 +1267,17 @@
         }
       }
     },
+    "You can skip this and let it download the first time you start captions — it just means waiting then instead of now.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Du kannst das überspringen und beim ersten Start der Untertitel herunterladen lassen – dann wartest du eben später statt jetzt."
+          }
+        }
+      }
+    },
     "in use": {
       "localizations": {
         "de": {
@@ -1101,12 +1288,34 @@
         }
       }
     },
+    "macOS has no separate permission for system audio — Screen Recording is the one that gates it. sAiity records no video and takes no screenshots.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS hat keine eigene Berechtigung für Systemton – die Bildschirmaufnahme ist die Hürde davor. sAiity nimmt kein Video auf und macht keine Screenshots."
+          }
+        }
+      }
+    },
     "recommended": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "empfohlen"
+          }
+        }
+      }
+    },
+    "sAiity": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "sAiity"
           }
         }
       }

@@ -53,11 +53,11 @@ enum OnboardingStep: String, CaseIterable {
 
     var title: String {
         switch self {
-        case .welcome: return "Welcome"
-        case .permission: return "Permission"
-        case .purpose: return "What for"
-        case .models: return "Models"
-        case .finish: return "Ready"
+        case .welcome: return String(localized: "Welcome")
+        case .permission: return String(localized: "Permission")
+        case .purpose: return String(localized: "What for")
+        case .models: return String(localized: "Models")
+        case .finish: return String(localized: "Ready")
         }
     }
 }

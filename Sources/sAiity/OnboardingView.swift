@@ -21,18 +21,16 @@ final class OnboardingModel {
 
         var title: String {
             switch self {
-            case .anyLanguage: return "Any language"
-            case .englishOnly: return "English only"
+            case .anyLanguage: return String(localized: "Any language")
+            case .englishOnly: return String(localized: "English only")
             }
         }
         var detail: String {
             switch self {
             case .anyLanguage:
-                return "One multilingual model that works out which language is being spoken. "
-                     + "634 MB."
+                return String(localized: "One multilingual model that works out which language is being spoken. 634 MB.")
             case .englishOnly:
-                return "A smaller, faster English-only model. 437 MB. Other languages come out "
-                     + "as nonsense, so only pick this if English is all you need."
+                return String(localized: "A smaller, faster English-only model. 437 MB. Other languages come out as nonsense, so only pick this if English is all you need.")
             }
         }
         var engine: ASREngine {
@@ -128,8 +126,7 @@ struct OnboardingView: View {
     private var permission: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Allow Screen Recording").font(.title2.weight(.semibold))
-            Text("macOS has no separate permission for system audio — Screen Recording is the one "
-                 + "that gates it. sAiity records no video and takes no screenshots.")
+            Text("macOS has no separate permission for system audio — Screen Recording is the one that gates it. sAiity records no video and takes no screenshots.")
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 8) {
@@ -154,8 +151,7 @@ struct OnboardingView: View {
                     Button("Open Settings") { ScreenRecordingPermission.openSettings() }
                 }
                 if model.askedOnce, ScreenRecordingPermission.canRelaunch {
-                    Text("Already allowed it in System Settings but still showing as not granted? "
-                         + "macOS sometimes only applies it to a fresh launch.")
+                    Text("Already allowed it in System Settings but still showing as not granted? macOS sometimes only applies it to a fresh launch.")
                         .font(.caption).foregroundStyle(.secondary).padding(.top, 6)
                     Button("Quit & Reopen") { ScreenRecordingPermission.relaunch() }
                         .controlSize(.small)
@@ -188,17 +184,14 @@ struct OnboardingView: View {
             Toggle("Also show a translation under each caption", isOn: $model.wantsTranslation)
             // Unconditional: with the description only visible when the toggle
             // was on, the OFF state gave no hint of what saying yes would cost.
-            Text("A second line under the captions, in a language you choose. Runs on "
-                 + "this Mac like everything else.")
+            Text("A second line under the captions, in a language you choose. Runs on this Mac like everything else.")
                 .font(.caption).foregroundStyle(.secondary)
             if model.wantsTranslation {
                 // Say the cost before they commit. Translation used to lean on
                 // macOS's built-in translator, which needed nothing from us;
                 // now every option is a model we download, so an unqualified
                 // "yes" here would be a 1.86 GB surprise on the next screen.
-                Text("Translation runs on this Mac too, so it needs a model of its own — "
-                     + "MADLAD, 1.86 GB, covering about 450 languages. It is listed on the "
-                     + "next screen alongside the recognition model.")
+                Text("Translation runs on this Mac too, so it needs a model of its own — MADLAD, 1.86 GB, covering about 450 languages. It is listed on the next screen alongside the recognition model.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
@@ -208,8 +201,7 @@ struct OnboardingView: View {
     private var models: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("One download and you are set").font(.title2.weight(.semibold))
-            Text("Recognition always needs a model on this Mac — that is the price of not sending "
-                 + "your audio to a server.")
+            Text("Recognition always needs a model on this Mac — that is the price of not sending your audio to a server.")
                 .foregroundStyle(.secondary)
 
             let asset = model.recognitionAsset
@@ -235,8 +227,7 @@ struct OnboardingView: View {
             if let e = model.state.modelError {
                 Text(e).font(.caption).foregroundStyle(.red)
             }
-            Text("You can skip this and let it download the first time you start captions — it "
-                 + "just means waiting then instead of now.")
+            Text("You can skip this and let it download the first time you start captions — it just means waiting then instead of now.")
                 .font(.caption).foregroundStyle(.secondary)
             Spacer()
         }
@@ -247,17 +238,21 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Ready").font(.title2.weight(.semibold))
             Toggle("Check for updates automatically", isOn: $model.wantsAutoUpdates)
-            Text("Asks aiity.de about once a day whether a newer version exists. The "
-                 + "check sends no audio, no transcripts and no identifiers — but it is "
-                 + "a network request, so it is off unless you want it. You can always "
-                 + "check by hand from the menu bar.")
+            Text("Asks aiity.de about once a day whether a newer version exists. The check sends no audio, no transcripts and no identifiers — but it is a network request, so it is off unless you want it. You can always check by hand from the menu bar.")
                 .font(.caption).foregroundStyle(.secondary)
             Divider().padding(.vertical, 2)
             // Read the live binding rather than the default: it is user-editable,
             // and telling someone the wrong shortcut is worse than telling them none.
-            bullet("captions.bubble", "Start captions from the sAiity icon in the menu bar"
-                   + (HotKeyCenter.shortcut(for: .toggleCaptions)
-                        .map { ", or press \($0.displayString)." } ?? "."))
+            // Two whole sentences rather than one built by concatenation: a
+            // LocalizedStringKey interpolating \(shortcut) becomes the key
+            // "…, or press %@." and stays translatable. Gluing the tail on at
+            // runtime produced a String, which localizes to nothing at all.
+            if let shortcut = HotKeyCenter.shortcut(for: .toggleCaptions)?.displayString {
+                bullet("captions.bubble",
+                       "Start captions from the sAiity icon in the menu bar, or press \(shortcut).")
+            } else {
+                bullet("captions.bubble", "Start captions from the sAiity icon in the menu bar.")
+            }
             bullet("slider.horizontal.3", "Change engine, language and appearance in Settings.")
             bullet("lock", "Nothing you caption is sent anywhere.")
             Spacer()
@@ -281,7 +276,12 @@ struct OnboardingView: View {
         .padding(14)
     }
 
-    private func bullet(_ symbol: String, _ text: String) -> some View {
+    /// `text` is a LocalizedStringKey, not a String, and that is the whole
+    /// point: `Text(someString)` resolves to SwiftUI's VERBATIM overload, so a
+    /// literal handed through a String parameter never becomes a localization
+    /// key. These three bullets sat in the catalog fully translated and still
+    /// rendered in English on a German system for exactly that reason.
+    private func bullet(_ symbol: String, _ text: LocalizedStringKey) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: symbol).frame(width: 20).foregroundStyle(.tint)
             Text(text)
@@ -351,7 +351,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 560),
                          styleMask: [.titled, .closable],
                          backing: .buffered, defer: false)
-        w.title = "Set up sAiity"
+        w.title = String(localized: "Set up sAiity")
         w.center()
         w.isReleasedWhenClosed = false
         w.delegate = self
