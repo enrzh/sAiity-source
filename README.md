@@ -46,8 +46,10 @@ removed from the four lines of clamping that caused it.
 translated when the speaker stops. The alternative — flushing when a time or
 length budget runs out — cuts sentences in half and hands the translator a
 fragment, which is how you get confident nonsense. Silence is detected as RMS
-below −45 dBFS for 450 ms, which is a different thing from the digital silence
-of a paused video, and both are handled.
+below −45 dBFS held for 750 ms, which is a different thing from the digital
+silence of a paused video, and both are handled. That threshold is the line
+between a breath and a full stop: at 450 ms it fired on the pause a speaker
+leaves at a comma, and a sentence with commas in it was split at every one.
 
 **Chinese, Japanese and Korean actually work.** Sentence detection originally
 required `[.!?]` followed by a space, and the rolling commit looked for the last
