@@ -157,11 +157,19 @@ if [ -d "$APP/Contents/Frameworks" ]; then
 
     # 2. Loose Mach-O helpers inside a framework (Sparkle's Autoupdate). Anything
     #    inside a bundle from step 1 is already covered by that bundle.
+    #
+    #    Match on the path RELATIVE to Frameworks/, not the absolute one. The
+    #    app bundle is itself called sAiity.app, so every absolute path under it
+    #    contains ".app/" — testing the full path skipped every loose executable
+    #    including the one this step exists for, and Apple's second rejection was
+    #    Autoupdate alone.
+    FW_ROOT="$APP/Contents/Frameworks"
     while IFS= read -r -d '' exe; do
-        case "$exe" in *.app/*|*.xpc/*) continue ;; esac
+        rel="${exe#"$FW_ROOT/"}"
+        case "$rel" in *.app/*|*.xpc/*) continue ;; esac
         file -b "$exe" 2>/dev/null | grep -q "Mach-O" || continue
         sign_code "$exe"
-    done < <(find "$APP/Contents/Frameworks" -type f -perm +111 -print0)
+    done < <(find "$FW_ROOT" -type f -perm +111 -print0)
 
     # 3. The frameworks themselves, now that everything within them is signed.
     for fw in "$APP/Contents/Frameworks"/*.framework; do
