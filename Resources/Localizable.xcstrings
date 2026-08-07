@@ -1,6 +1,61 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%@ cannot translate into %@.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ kann nicht nach %@ übersetzen."
+          }
+        }
+      }
+    },
+    "%@ is running the live captions. Stop captions first.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ liefert gerade die Live-Untertitel. Stoppe zuerst die Untertitel."
+          }
+        }
+      }
+    },
+    "%@ to download": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ zu laden"
+          }
+        }
+      }
+    },
+    "%lld lines · %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld Zeilen · %@"
+          }
+        }
+      }
+    },
+    "A link downloads through the app; a chosen file is copied in. Ollama users: the blobs under ~/.ollama/models/blobs are GGUF files and can be chosen directly. The translation prompt was tuned on Qwen — another family may behave a little differently.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ein Link wird über die App geladen; eine ausgewählte Datei wird hineinkopiert. Für Ollama: Die Blobs unter ~/.ollama/models/blobs sind GGUF-Dateien und lassen sich direkt auswählen. Der Übersetzungs-Prompt wurde auf Qwen abgestimmt – eine andere Familie kann sich etwas anders verhalten."
+          }
+        }
+      }
+    },
     "A second line under the captions, in a language you choose. Runs on this Mac like everything else.": {
       "extractionState": "manual",
       "localizations": {
@@ -8,6 +63,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Eine zweite Zeile unter den Untertiteln, in einer Sprache deiner Wahl. Läuft wie alles andere auf diesem Mac."
+          }
+        }
+      }
+    },
+    "A small local LLM doing the translation — about 1.2 seconds per sentence on the recommended Qwen 2B, measured. Most flexible of the options: choose from Qwen and Gemma builds, or add your own GGUF by URL or from disk. Stay at 2B-class or above; sub-billion models keep answering or echoing the caption instead of translating it.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ein kleines lokales LLM übernimmt die Übersetzung – gemessen etwa 1,2 Sekunden pro Satz auf dem empfohlenen Qwen 2B. Die flexibelste Option: Wähle unter Qwen- und Gemma-Builds oder füge dein eigenes GGUF per URL oder von der Festplatte hinzu. Bleib bei 2B-Klasse oder darüber; Modelle unter einer Milliarde Parametern antworten auf den Untertitel oder wiederholen ihn, statt ihn zu übersetzen."
           }
         }
       }
@@ -49,6 +115,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Eigenes Modell hinzufügen"
+          }
+        }
+      }
+    },
+    "Added by URL. The translation prompt was tuned on Qwen; another family may behave differently.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Per URL hinzugefügt. Der Übersetzungs-Prompt wurde auf Qwen abgestimmt; eine andere Familie kann sich anders verhalten."
           }
         }
       }
@@ -114,6 +191,21 @@
         }
       }
     },
+    "Apache-2.0 (Google MADLAD-400)": {
+      "extractionState": "manual",
+      "shouldTranslate": false
+    },
+    "Approve sAiity in System Settings → General → Login Items.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bestätige sAiity in den Systemeinstellungen → Allgemein → Anmeldeobjekte."
+          }
+        }
+      }
+    },
     "Asks aiity.de about once a day whether a newer version exists. The check sends no audio, no transcripts and no identifiers — but it is a network request, so it is off unless you want it. You can always check by hand from the menu bar.": {
       "extractionState": "manual",
       "localizations": {
@@ -125,12 +217,23 @@
         }
       }
     },
+    "Audio never leaves this Mac. Recognition, translation and transcripts are all processed and stored locally — no account, no API key.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Es verlässt kein Ton diesen Mac. Erkennung, Übersetzung und Transkripte werden alle lokal verarbeitet und gespeichert – kein Konto, kein API-Schlüssel."
+          }
+        }
+      }
+    },
     "Available with %@": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Verfügbar mit %@"
+            "value": "Verfügbar mit: %@"
           }
         }
       }
@@ -171,6 +274,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ausgewogen"
+          }
+        }
+      }
+    },
+    "Best quality of the Qwen sizes, but roughly twice the time per sentence — likely too slow to keep up.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Beste Qualität der Qwen-Größen, aber rund die doppelte Zeit pro Satz – vermutlich zu langsam, um mitzuhalten."
           }
         }
       }
@@ -225,6 +339,28 @@
         }
       }
     },
+    "Captions are running. Stop them first.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Untertitel laufen. Stoppe sie zuerst."
+          }
+        }
+      }
+    },
+    "Captions roughly twice as often, for about double the recognition work per second of audio — noticeable on battery.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Etwa doppelt so häufig Untertitel, bei ungefähr doppelter Erkennungsarbeit pro Sekunde Ton – im Akkubetrieb spürbar."
+          }
+        }
+      }
+    },
     "Change engine, language and appearance in Settings.": {
       "extractionState": "manual",
       "localizations": {
@@ -262,6 +398,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Automatisch nach Updates suchen"
+          }
+        }
+      }
+    },
+    "Choose a GGUF model file. Ollama blobs (sha256-…) work too.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wähle eine GGUF-Modelldatei. Ollama-Blobs (sha256-…) funktionieren auch."
           }
         }
       }
@@ -326,6 +473,17 @@
         }
       }
     },
+    "Copy the current caption": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aktuellen Untertitel kopieren"
+          }
+        }
+      }
+    },
     "Copy whole session": {
       "localizations": {
         "de": {
@@ -346,12 +504,45 @@
         }
       }
     },
+    "Could not delete %@.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ konnte nicht gelöscht werden."
+          }
+        }
+      }
+    },
     "Delete": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Löschen"
+          }
+        }
+      }
+    },
+    "Delete All": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alle löschen"
+          }
+        }
+      }
+    },
+    "Delete all transcripts?": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alle Transkripte löschen?"
           }
         }
       }
@@ -396,6 +587,17 @@
         }
       }
     },
+    "Download %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ laden"
+          }
+        }
+      }
+    },
     "Downloaded models: %@": {
       "localizations": {
         "de": {
@@ -426,12 +628,34 @@
         }
       }
     },
+    "English only, 437 MB. A fifth of Nemotron's parameters, so it reaches the first word sooner, and it detects the end of an utterance itself, so sentences break where the speaker actually stopped. Pick this if you only caption English; it will produce confident nonsense on anything else.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nur Englisch, 437 MB. Ein Fünftel der Parameter von Nemotron, dadurch ist es schneller beim ersten Wort, und es erkennt das Ende einer Äußerung selbst – Sätze brechen dort, wo die sprechende Person tatsächlich aufgehört hat. Wähle das, wenn du nur Englisch untertitelst; bei allem anderen produziert es überzeugend klingenden Unsinn."
+          }
+        }
+      }
+    },
     "Error": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Fehler"
+          }
+        }
+      }
+    },
+    "Everything runs on this Mac, so the models live here rather than on a server. Removing them all frees the space; anything you select again is downloaded once more.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alles läuft auf diesem Mac, deshalb liegen die Modelle hier statt auf einem Server. Alle zu entfernen gibt den Speicher frei; was du erneut auswählst, wird noch einmal geladen."
           }
         }
       }
@@ -457,6 +681,28 @@
         }
       }
     },
+    "Fast, but too small for usable translation — it drops and invents meaning. Listed for completeness.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Schnell, aber zu klein für brauchbare Übersetzung – es lässt Bedeutung weg und erfindet welche. Der Vollständigkeit halber gelistet."
+          }
+        }
+      }
+    },
+    "Forget this model and delete its file.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dieses Modell vergessen und seine Datei löschen."
+          }
+        }
+      }
+    },
     "Gap between the lines": {
       "localizations": {
         "de": {
@@ -477,12 +723,31 @@
         }
       }
     },
+    "Gemma 3 1B": {
+      "extractionState": "manual",
+      "shouldTranslate": false
+    },
+    "Gemma 3 4B": {
+      "extractionState": "manual",
+      "shouldTranslate": false
+    },
     "Glass": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Glas"
+          }
+        }
+      }
+    },
+    "Google's small model — noticeably better at translation per parameter than same-size Qwen, and fast. Worth trying if 2B feels slow.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Googles kleines Modell – pro Parameter merklich besser im Übersetzen als gleich großes Qwen, und schnell. Einen Versuch wert, wenn sich 2B zäh anfühlt."
           }
         }
       }
@@ -507,12 +772,34 @@
         }
       }
     },
+    "Hides the subtitles without stopping recognition, so you can keep a transcript running with nothing on screen.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Blendet die Untertitel aus, ohne die Erkennung zu stoppen – so läuft ein Transkript weiter, ohne dass etwas auf dem Bildschirm steht."
+          }
+        }
+      }
+    },
     "Idle": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Bereit"
+          }
+        }
+      }
+    },
+    "Imported from %@. The translation prompt was tuned on Qwen; another family may behave differently.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aus %@ importiert. Der Übersetzungs-Prompt wurde auf Qwen abgestimmt; eine andere Familie kann sich anders verhalten."
           }
         }
       }
@@ -578,6 +865,17 @@
         }
       }
     },
+    "Local LLM": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lokales LLM"
+          }
+        }
+      }
+    },
     "Local LLM models": {
       "localizations": {
         "de": {
@@ -588,7 +886,23 @@
         }
       }
     },
+    "MADLAD-400-3B": {
+      "extractionState": "manual",
+      "shouldTranslate": false
+    },
+    "MADLAD-400-3B, a dedicated translation model on MLX. Best quality of the local options and Apache-2.0, so it can ship. 1.86 GB, and about 0.2 seconds per sentence once loaded, measured — the fastest of the downloadable engines, and it only ever translates, so it cannot wander off answering the speaker.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MADLAD-400-3B, ein reines Übersetzungsmodell auf MLX. Beste Qualität der lokalen Optionen und Apache-2.0, also mitlieferbar. 1,86 GB und gemessen etwa 0,2 Sekunden pro Satz, sobald es geladen ist – die schnellste der ladbaren Engines, und sie übersetzt ausschließlich, kann also nicht abschweifen und der sprechenden Person antworten."
+          }
+        }
+      }
+    },
     "Maximum lines: %lld": {
+      "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
@@ -608,6 +922,17 @@
         }
       }
     },
+    "Model files are downloaded once from huggingface.co. Nothing you say is ever uploaded.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modelldateien werden einmalig von huggingface.co geladen. Nichts, was du sagst, wird jemals hochgeladen."
+          }
+        }
+      }
+    },
     "Models": {
       "localizations": {
         "de": {
@@ -618,12 +943,71 @@
         }
       }
     },
+    "NVIDIA Nemotron (streaming, on-device)": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "NVIDIA Nemotron (Streaming, auf dem Gerät)"
+          }
+        }
+      }
+    },
     "Needs a different translator": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Braucht einen anderen Übersetzer"
+          }
+        }
+      }
+    },
+    "Nemotron": {
+      "extractionState": "manual",
+      "shouldTranslate": false
+    },
+    "Nemotron (multilingual)": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nemotron (mehrsprachig)"
+          }
+        }
+      }
+    },
+    "Nemotron (multilingual, fast)": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nemotron (mehrsprachig, schnell)"
+          }
+        }
+      }
+    },
+    "No available translator covers this language.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kein verfügbarer Übersetzer deckt diese Sprache ab."
+          }
+        }
+      }
+    },
+    "No language matches “%@”.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keine Sprache passt zu „%@“."
           }
         }
       }
@@ -658,6 +1042,28 @@
         }
       }
     },
+    "Not set": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nicht gesetzt"
+          }
+        }
+      }
+    },
+    "Nothing saved yet.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Noch nichts gespeichert."
+          }
+        }
+      }
+    },
     "Nothing you caption is sent anywhere.": {
       "extractionState": "manual",
       "localizations": {
@@ -669,12 +1075,45 @@
         }
       }
     },
+    "OK": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK"
+          }
+        }
+      }
+    },
     "Off": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Aus"
+          }
+        }
+      }
+    },
+    "Off by default. A transcript is a durable record of a conversation other people were part of, and system audio captures everyone on the call.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Standardmäßig aus. Ein Transkript ist eine dauerhafte Aufzeichnung eines Gesprächs, an dem andere beteiligt waren, und der Systemton nimmt alle im Anruf auf."
+          }
+        }
+      }
+    },
+    "On, only the bubble's top strip can be grabbed and everything else clicks straight through to the video underneath — which matters, because the bubble sits over the scrubber. Off, you can drag it by any part of it.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An lässt sich nur der obere Streifen der Sprechblase greifen, alles andere klickt direkt zum Video darunter durch – wichtig, weil die Sprechblase über der Zeitleiste liegt. Aus kannst du sie an jeder Stelle ziehen."
           }
         }
       }
@@ -696,6 +1135,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ein mehrsprachiges Modell, das selbst erkennt, welche Sprache gesprochen wird. 634 MB."
+          }
+        }
+      }
+    },
+    "One multilingual model, 634 MB, downloaded once. Its own metadata declares 121 language tags — European, Asian and African — and it identifies the spoken language from audio rather than being told, so there is no per-language switching. Better on noisy and music-backed audio; slightly higher latency.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ein mehrsprachiges Modell, 634 MB, einmal geladen. Seine eigenen Metadaten nennen 121 Sprach-Tags – europäische, asiatische und afrikanische – und es erkennt die gesprochene Sprache aus dem Ton, statt sie gesagt zu bekommen; ein Umschalten pro Sprache entfällt. Besser bei lautem und mit Musik unterlegtem Ton, dafür etwas höhere Latenz."
+          }
+        }
+      }
+    },
+    "Only one translator runs at a time — pick it under Captions.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Es läuft immer nur ein Übersetzer – wähle ihn unter Untertitel."
           }
         }
       }
@@ -750,12 +1211,104 @@
         }
       }
     },
+    "Other files: %@ — caches and leftovers from interrupted downloads.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Weitere Dateien: %@ – Caches und Reste abgebrochener Downloads."
+          }
+        }
+      }
+    },
+    "Outside Qwen's strongest languages — quality varies.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Außerhalb der stärksten Sprachen von Qwen – die Qualität schwankt."
+          }
+        }
+      }
+    },
+    "Parakeet": {
+      "extractionState": "manual",
+      "shouldTranslate": false
+    },
+    "Parakeet EOU (English)": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parakeet EOU (Englisch)"
+          }
+        }
+      }
+    },
+    "Parakeet EOU (streaming, on-device)": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parakeet EOU (Streaming, auf dem Gerät)"
+          }
+        }
+      }
+    },
+    "Partial download — %@, incomplete": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Teilweise geladen – %@, unvollständig"
+          }
+        }
+      }
+    },
+    "Per model — shown on each row under Models": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Je Modell – in jeder Zeile unter Modelle angegeben"
+          }
+        }
+      }
+    },
+    "Permanently removes %lld sessions.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Entfernt %lld Sitzungen dauerhaft."
+          }
+        }
+      }
+    },
     "Permission": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Berechtigung"
+          }
+        }
+      }
+    },
+    "Press keys…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tasten drücken …"
           }
         }
       }
@@ -780,6 +1333,17 @@
         }
       }
     },
+    "Put this section back to its defaults.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diesen Abschnitt auf die Voreinstellungen zurücksetzen."
+          }
+        }
+      }
+    },
     "Quit & Reopen": {
       "localizations": {
         "de": {
@@ -800,12 +1364,50 @@
         }
       }
     },
+    "Qwen, Gemma, or your own GGUF · one is used at a time": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Qwen, Gemma oder dein eigenes GGUF · es wird immer nur eins genutzt"
+          }
+        }
+      }
+    },
+    "Qwen3.5 0.8B": {
+      "extractionState": "manual",
+      "shouldTranslate": false
+    },
+    "Qwen3.5 2B": {
+      "extractionState": "manual",
+      "shouldTranslate": false
+    },
+    "Qwen3.5 2B (Q5)": {
+      "extractionState": "manual",
+      "shouldTranslate": false
+    },
+    "Qwen3.5 4B": {
+      "extractionState": "manual",
+      "shouldTranslate": false
+    },
     "Ready": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Bereit"
+          }
+        }
+      }
+    },
+    "Recognises %@ only. Other languages come out as nonsense rather than an error.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erkennt nur %@. Andere Sprachen kommen als Unsinn heraus, nicht als Fehler."
           }
         }
       }
@@ -841,6 +1443,17 @@
         }
       }
     },
+    "Registers the app as a login item so captions are one keypress away after a restart. Off by default — this app can capture system audio, so being running should be your choice.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trägt die App als Anmeldeobjekt ein, damit Untertitel nach einem Neustart einen Tastendruck entfernt sind. Standardmäßig aus – diese App kann den Systemton aufnehmen, also soll es deine Entscheidung sein, ob sie läuft."
+          }
+        }
+      }
+    },
     "Regular": {
       "localizations": {
         "de": {
@@ -861,12 +1474,45 @@
         }
       }
     },
+    "Remove All": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alle entfernen"
+          }
+        }
+      }
+    },
     "Remove All…": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Alle entfernen …"
+          }
+        }
+      }
+    },
+    "Remove all downloaded models?": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alle geladenen Modelle entfernen?"
+          }
+        }
+      }
+    },
+    "Removed %@.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ entfernt."
           }
         }
       }
@@ -952,6 +1598,7 @@
       }
     },
     "Search %lld languages": {
+      "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
@@ -1022,12 +1669,45 @@
         }
       }
     },
+    "Slightly better quality than Q4 for ~150 MB more.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Etwas bessere Qualität als Q4 für ~150 MB mehr."
+          }
+        }
+      }
+    },
     "Solid": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Deckend"
+          }
+        }
+      }
+    },
+    "Solid is the readable choice over bright video — glass leaves white text on a white scene at roughly 2:1 contrast.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deckend ist über hellem Video die lesbare Wahl – Glas lässt weißen Text auf heller Szene bei rund 2:1 Kontrast stehen."
+          }
+        }
+      }
+    },
+    "Start / stop captions": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Untertitel starten / stoppen"
           }
         }
       }
@@ -1094,6 +1774,17 @@
         }
       }
     },
+    "Step %lld of %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Schritt %lld von %lld"
+          }
+        }
+      }
+    },
     "Stop captions": {
       "localizations": {
         "de": {
@@ -1104,12 +1795,78 @@
         }
       }
     },
+    "Stop this download. Nothing is kept; Download starts it again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diesen Download stoppen. Es wird nichts behalten; Laden startet ihn erneut."
+          }
+        }
+      }
+    },
     "Storage": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Speicher"
+          }
+        }
+      }
+    },
+    "System-audio capture is gated behind Screen Recording — macOS has no audio-only permission.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Aufnahme des Systemtons hängt an der Bildschirmaufnahme – macOS kennt keine Berechtigung nur für Ton."
+          }
+        }
+      }
+    },
+    "System-wide. Click a field and press the combination; ⌫ clears. Needs ⌃, ⌥ or ⌘.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Systemweit. Klicke ein Feld an und drücke die Kombination; ⌫ löscht sie. Benötigt ⌃, ⌥ oder ⌘."
+          }
+        }
+      }
+    },
+    "That URL did not answer with a downloadable file (HTTP %lld).": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diese URL hat nicht mit einer ladbaren Datei geantwortet (HTTP %lld)."
+          }
+        }
+      }
+    },
+    "That combination is already taken by another app.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diese Kombination ist bereits von einer anderen App belegt."
+          }
+        }
+      }
+    },
+    "That file is empty or unreadable.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diese Datei ist leer oder nicht lesbar."
           }
         }
       }
@@ -1125,6 +1882,83 @@
         }
       }
     },
+    "The default. Captions arrive about every 2 seconds at the lowest recognition cost.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Voreinstellung. Untertitel erscheinen etwa alle 2 Sekunden bei geringstem Erkennungsaufwand."
+          }
+        }
+      }
+    },
+    "The quality pick among the LLM options. About the speed of Qwen 4B; the prompt heuristics here were tuned on Qwen, so behaviour may differ slightly.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Qualitätswahl unter den LLM-Optionen. Etwa so schnell wie Qwen 4B; die Prompt-Heuristiken hier wurden auf Qwen abgestimmt, das Verhalten kann also leicht abweichen."
+          }
+        }
+      }
+    },
+    "The recognised speech. It is dimmed while the engine may still revise it — that is the second opacity below.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die erkannte Sprache. Sie ist abgedunkelt, solange die Engine sie noch überarbeiten kann – das ist die zweite Deckkraft unten."
+          }
+        }
+      }
+    },
+    "The same multilingual model decoding every %lld ms instead of %lld — captions appear about twice as fast, for roughly double the encoder work per second of audio. Noticeable on battery. A separate download; both tiers can be installed.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dasselbe mehrsprachige Modell, das alle %lld ms statt alle %lld decodiert – Untertitel erscheinen etwa doppelt so schnell, bei ungefähr doppelter Encoder-Arbeit pro Sekunde Ton. Im Akkubetrieb spürbar. Ein eigener Download; beide Stufen lassen sich installieren."
+          }
+        }
+      }
+    },
+    "The second line under each caption. Turning this off keeps translation running for the transcript but hides it on screen.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die zweite Zeile unter jedem Untertitel. Aus lässt die Übersetzung fürs Transkript weiterlaufen, blendet sie aber auf dem Bildschirm aus."
+          }
+        }
+      }
+    },
+    "The smallest size whose translation quality holds up. A sensible default if you want an LLM doing this.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die kleinste Größe, deren Übersetzungsqualität standhält. Eine sinnvolle Voreinstellung, wenn ein LLM das übernehmen soll."
+          }
+        }
+      }
+    },
+    "This frees %@.\n\nAnything you use again will be downloaded once more.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Das gibt %@ frei.\n\nWas du wieder nutzt, wird noch einmal geladen."
+          }
+        }
+      }
+    },
     "This only picks a starting model. You can change it any time in Settings.": {
       "extractionState": "manual",
       "localizations": {
@@ -1132,6 +1966,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Das wählt nur ein Startmodell. Du kannst es jederzeit in den Einstellungen ändern."
+          }
+        }
+      }
+    },
+    "This tier is its own ~640 MB download — each latency has the chunk size baked into its model. Fetch it under Models.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diese Stufe ist ein eigener Download von ~640 MB – jede Latenz hat die Blockgröße fest im Modell. Lade sie unter Modelle."
           }
         }
       }
@@ -1217,6 +2062,28 @@
         }
       }
     },
+    "Using %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aktuell: %@"
+          }
+        }
+      }
+    },
+    "Walks through permission and models from the start.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Führt Berechtigung und Modelle von vorn durch."
+          }
+        }
+      }
+    },
     "Weight": {
       "localizations": {
         "de": {
@@ -1267,6 +2134,17 @@
         }
       }
     },
+    "Width is a setting rather than something measured from the text — that is what stops the bubble resizing and re-centring on every line. Drag an edge to override it; a dragged width may go right to the screen edge.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Breite ist eine Einstellung und wird nicht aus dem Text gemessen – genau das verhindert, dass die Sprechblase bei jeder Zeile ihre Größe ändert und sich neu zentriert. Zieh eine Kante, um sie zu überschreiben; eine gezogene Breite darf bis an den Bildschirmrand reichen."
+          }
+        }
+      }
+    },
     "You can skip this and let it download the first time you start captions — it just means waiting then instead of now.": {
       "extractionState": "manual",
       "localizations": {
@@ -1274,6 +2152,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Du kannst das überspringen und beim ersten Start der Untertitel herunterladen lassen – dann wartest du eben später statt jetzt."
+          }
+        }
+      }
+    },
+    "Your own model — check its terms at the source": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dein eigenes Modell – prüfe seine Bedingungen an der Quelle"
           }
         }
       }
@@ -1299,6 +2188,17 @@
         }
       }
     },
+    "nothing downloaded": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "nichts geladen"
+          }
+        }
+      }
+    },
     "recommended": {
       "localizations": {
         "de": {
@@ -1316,6 +2216,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "sAiity"
+          }
+        }
+      }
+    },
+    "size unknown": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Größe unbekannt"
           }
         }
       }

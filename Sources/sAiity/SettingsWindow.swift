@@ -109,7 +109,7 @@ final class AppState {
     func refreshModels() {
         assets = ModelRegistry.snapshot()
         let total = ModelRegistry.ownedTotalBytes()
-        ownedTotal = total > 0 ? ModelRegistry.format(total) : "nothing downloaded"
+        ownedTotal = total > 0 ? ModelRegistry.format(total) : String(localized: "nothing downloaded")
         let stray = ModelRegistry.strayBytes()
         // Only worth mentioning once it is a real amount; a few KB of cache
         // metadata is noise.
@@ -167,13 +167,13 @@ final class AppState {
         modelError = nil
         if asset.use.isSelected {
             if CaptionSession.shared.isRunning {
-                modelError = "\(asset.title) is running the live captions. Stop captions first."
+                modelError = String(localized: "\(asset.title) is running the live captions. Stop captions first.")
                 return
             }
             await CaptionSession.shared.releaseEverything()
         }
         if !ModelRegistry.remove(asset) {
-            modelError = "Could not delete \(asset.title)."
+            modelError = String(localized: "Could not delete \(asset.title).")
         }
         refreshModels()
     }
@@ -184,7 +184,7 @@ final class AppState {
     func removeAllDownloads() async -> Int64? {
         modelError = nil
         guard !CaptionSession.shared.isRunning else {
-            modelError = "Captions are running. Stop them first."
+            modelError = String(localized: "Captions are running. Stop them first.")
             return nil
         }
         await CaptionSession.shared.releaseEverything()
@@ -279,7 +279,7 @@ final class AppState {
         case .requiresApproval:
             launchAtLogin = true
             if !keepNote {
-                launchAtLoginNote = "Approve sAiity in System Settings → General → Login Items."
+                launchAtLoginNote = String(localized: "Approve sAiity in System Settings → General → Login Items.")
             }
         case .notFound, .notRegistered:
             // Both are simply "not a login item yet" — NOT a signing failure.

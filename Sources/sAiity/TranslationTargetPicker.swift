@@ -140,8 +140,7 @@ struct TargetUnsupportedNotice: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Label("\(state.translationEngine.displayName) cannot translate into "
-                  + "\(AppLanguage(code: target).displayName).",
+            Label("\(state.translationEngine.displayName) cannot translate into \(AppLanguage(code: target).displayName).",
                   systemImage: "exclamationmark.triangle")
                 .font(.caption).foregroundStyle(Color.orange)
             if engines.isEmpty {

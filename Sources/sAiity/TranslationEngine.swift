@@ -28,24 +28,17 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
 
     var displayName: String {
         switch self {
-        case .madlad: return "MADLAD"
-        case .qwen: return "Local LLM"
+        case .madlad: return String(localized: "MADLAD")
+        case .qwen: return String(localized: "Local LLM")
         }
     }
 
     var summary: String {
         switch self {
         case .madlad:
-            return "MADLAD-400-3B, a dedicated translation model on MLX. Best quality of the "
-                 + "local options and Apache-2.0, so it can ship. 1.86 GB, and about 0.2 seconds "
-                 + "per sentence once loaded, measured — the fastest of the downloadable engines, "
-                 + "and it only ever translates, so it cannot wander off answering the speaker."
+            return String(localized: "MADLAD-400-3B, a dedicated translation model on MLX. Best quality of the local options and Apache-2.0, so it can ship. 1.86 GB, and about 0.2 seconds per sentence once loaded, measured — the fastest of the downloadable engines, and it only ever translates, so it cannot wander off answering the speaker.")
         case .qwen:
-            return "A small local LLM doing the translation — about 1.2 seconds per "
-                 + "sentence on the recommended Qwen 2B, measured. Most flexible of the "
-                 + "options: choose from Qwen and Gemma builds, or add your own GGUF by "
-                 + "URL or from disk. Stay at 2B-class or above; sub-billion models keep "
-                 + "answering or echoing the caption instead of translating it."
+            return String(localized: "A small local LLM doing the translation — about 1.2 seconds per sentence on the recommended Qwen 2B, measured. Most flexible of the options: choose from Qwen and Gemma builds, or add your own GGUF by URL or from disk. Stay at 2B-class or above; sub-billion models keep answering or echoing the caption instead of translating it.")
         }
     }
 
@@ -56,8 +49,8 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
     /// covering both a Google model and a set of community requantisations.
     var licence: String {
         switch self {
-        case .madlad: return "Apache-2.0 (Google MADLAD-400)"
-        case .qwen: return "Per model — shown on each row under Models"
+        case .madlad: return String(localized: "Apache-2.0 (Google MADLAD-400)")
+        case .qwen: return String(localized: "Per model — shown on each row under Models")
         }
     }
 

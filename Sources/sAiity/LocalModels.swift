@@ -35,7 +35,7 @@ struct LocalModel: Identifiable, Sendable, Equatable, Codable {
     let licence: String
 
     var sizeText: String {
-        bytes.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "size unknown"
+        bytes.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? String(localized: "size unknown")
     }
 
     // MARK: - Built-ins
@@ -44,29 +44,26 @@ struct LocalModel: Identifiable, Sendable, Equatable, Codable {
         LocalModel(source: .huggingFace(repo: "unsloth/Qwen3.5-0.8B-GGUF",
                                         file: "Qwen3.5-0.8B-Q4_K_M.gguf"),
                    file: "Qwen3.5-0.8B-Q4_K_M.gguf",
-                   label: "Qwen3.5 0.8B", bytes: 533 * 1_048_576, recommended: false,
-                   note: "Fast, but too small for usable translation — it drops and invents "
-                       + "meaning. Listed for completeness.",
+                   label: String(localized: "Qwen3.5 0.8B"), bytes: 533 * 1_048_576, recommended: false,
+                   note: String(localized: "Fast, but too small for usable translation — it drops and invents meaning. Listed for completeness."),
                    licence: "Apache-2.0 (Alibaba Qwen) · huggingface.co/unsloth"),
         LocalModel(source: .huggingFace(repo: "unsloth/Qwen3.5-2B-GGUF",
                                         file: "Qwen3.5-2B-Q4_K_M.gguf"),
                    file: "Qwen3.5-2B-Q4_K_M.gguf",
-                   label: "Qwen3.5 2B", bytes: 1281 * 1_048_576, recommended: true,
-                   note: "The smallest size whose translation quality holds up. A sensible "
-                       + "default if you want an LLM doing this.",
+                   label: String(localized: "Qwen3.5 2B"), bytes: 1281 * 1_048_576, recommended: true,
+                   note: String(localized: "The smallest size whose translation quality holds up. A sensible default if you want an LLM doing this."),
                    licence: "Apache-2.0 (Alibaba Qwen) · huggingface.co/unsloth"),
         LocalModel(source: .huggingFace(repo: "unsloth/Qwen3.5-2B-GGUF",
                                         file: "Qwen3.5-2B-Q5_K_M.gguf"),
                    file: "Qwen3.5-2B-Q5_K_M.gguf",
-                   label: "Qwen3.5 2B (Q5)", bytes: 1435 * 1_048_576, recommended: false,
-                   note: "Slightly better quality than Q4 for ~150 MB more.",
+                   label: String(localized: "Qwen3.5 2B (Q5)"), bytes: 1435 * 1_048_576, recommended: false,
+                   note: String(localized: "Slightly better quality than Q4 for ~150 MB more."),
                    licence: "Apache-2.0 (Alibaba Qwen) · huggingface.co/unsloth"),
         LocalModel(source: .huggingFace(repo: "unsloth/Qwen3.5-4B-GGUF",
                                         file: "Qwen3.5-4B-Q4_K_M.gguf"),
                    file: "Qwen3.5-4B-Q4_K_M.gguf",
-                   label: "Qwen3.5 4B", bytes: 2741 * 1_048_576, recommended: false,
-                   note: "Best quality of the Qwen sizes, but roughly twice the time per "
-                       + "sentence — likely too slow to keep up.",
+                   label: String(localized: "Qwen3.5 4B"), bytes: 2741 * 1_048_576, recommended: false,
+                   note: String(localized: "Best quality of the Qwen sizes, but roughly twice the time per sentence — likely too slow to keep up."),
                    licence: "Apache-2.0 (Alibaba Qwen) · huggingface.co/unsloth"),
         // Gemma: repeatedly benchmarked as the strongest small translator, and
         // LLM.swift's template resolver recognises the family from the GGUF's
@@ -74,18 +71,14 @@ struct LocalModel: Identifiable, Sendable, Equatable, Codable {
         LocalModel(source: .huggingFace(repo: "unsloth/gemma-3-1b-it-GGUF",
                                         file: "gemma-3-1b-it-Q4_K_M.gguf"),
                    file: "gemma-3-1b-it-Q4_K_M.gguf",
-                   label: "Gemma 3 1B", bytes: 806_058_272, recommended: false,
-                   note: "Google's small model — noticeably better at translation per "
-                       + "parameter than same-size Qwen, and fast. Worth trying if 2B "
-                       + "feels slow.",
+                   label: String(localized: "Gemma 3 1B"), bytes: 806_058_272, recommended: false,
+                   note: String(localized: "Google's small model — noticeably better at translation per parameter than same-size Qwen, and fast. Worth trying if 2B feels slow."),
                    licence: "Gemma Terms of Use (Google) · huggingface.co/unsloth"),
         LocalModel(source: .huggingFace(repo: "unsloth/gemma-3-4b-it-GGUF",
                                         file: "gemma-3-4b-it-Q4_K_M.gguf"),
                    file: "gemma-3-4b-it-Q4_K_M.gguf",
-                   label: "Gemma 3 4B", bytes: 2_489_894_016, recommended: false,
-                   note: "The quality pick among the LLM options. About the speed of "
-                       + "Qwen 4B; the prompt heuristics here were tuned on Qwen, so "
-                       + "behaviour may differ slightly.",
+                   label: String(localized: "Gemma 3 4B"), bytes: 2_489_894_016, recommended: false,
+                   note: String(localized: "The quality pick among the LLM options. About the speed of Qwen 4B; the prompt heuristics here were tuned on Qwen, so behaviour may differ slightly."),
                    licence: "Gemma Terms of Use (Google) · huggingface.co/unsloth"),
     ]
 
@@ -123,17 +116,15 @@ struct LocalModel: Identifiable, Sendable, Equatable, Codable {
         let (_, response) = try await URLSession.shared.data(for: req)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw TranslationEngineError.notAvailable(
-                "That URL did not answer with a downloadable file "
-                + "(HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)).")
+                String(localized: "That URL did not answer with a downloadable file (HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0))."))
         }
         let length = http.expectedContentLength > 0 ? http.expectedContentLength : nil
 
         let m = LocalModel(source: .url(url.absoluteString), file: name,
                            label: name.replacingOccurrences(of: ".gguf", with: ""),
                            bytes: length, recommended: false,
-                           note: "Added by URL. The translation prompt was tuned on Qwen; "
-                               + "another family may behave differently.",
-                           licence: "Your own model — check its terms at the source")
+                           note: String(localized: "Added by URL. The translation prompt was tuned on Qwen; another family may behave differently."),
+                           licence: String(localized: "Your own model — check its terms at the source"))
         custom = custom + [m]
         return m
     }
@@ -146,7 +137,7 @@ struct LocalModel: Identifiable, Sendable, Equatable, Codable {
         let size = (try? FileManager.default.attributesOfItem(
             atPath: fileURL.path)[.size] as? Int64) ?? 0
         guard size > 0 else {
-            throw TranslationEngineError.notAvailable("That file is empty or unreadable.")
+            throw TranslationEngineError.notAvailable(String(localized: "That file is empty or unreadable."))
         }
         var name = fileURL.lastPathComponent
         // Ollama blobs are named sha256-…; give them a usable extension.
@@ -163,9 +154,8 @@ struct LocalModel: Identifiable, Sendable, Equatable, Codable {
         let m = LocalModel(source: .importedFile, file: name,
                            label: name.replacingOccurrences(of: ".gguf", with: ""),
                            bytes: size, recommended: false,
-                           note: "Imported from \(fileURL.lastPathComponent). The translation "
-                               + "prompt was tuned on Qwen; another family may behave differently.",
-                           licence: "Your own model — check its terms at the source")
+                           note: String(localized: "Imported from \(fileURL.lastPathComponent). The translation prompt was tuned on Qwen; another family may behave differently."),
+                           licence: String(localized: "Your own model — check its terms at the source"))
         custom = custom + [m]
         return m
     }

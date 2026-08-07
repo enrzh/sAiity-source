@@ -11,23 +11,17 @@ enum ASREngine: String, CaseIterable, Sendable {
 
     var displayName: String {
         switch self {
-        case .nemotron: return "Nemotron"
-        case .parakeetEou: return "Parakeet"
+        case .nemotron: return String(localized: "Nemotron")
+        case .parakeetEou: return String(localized: "Parakeet")
         }
     }
 
     var summary: String {
         switch self {
         case .nemotron:
-            return "One multilingual model, 634 MB, downloaded once. Its own metadata declares 121 "
-                 + "language tags — European, Asian and African — and it identifies the spoken "
-                 + "language from audio rather than being told, so there is no per-language "
-                 + "switching. Better on noisy and music-backed audio; slightly higher latency."
+            return String(localized: "One multilingual model, 634 MB, downloaded once. Its own metadata declares 121 language tags — European, Asian and African — and it identifies the spoken language from audio rather than being told, so there is no per-language switching. Better on noisy and music-backed audio; slightly higher latency.")
         case .parakeetEou:
-            return "English only, 437 MB. A fifth of Nemotron's parameters, so it reaches the "
-                 + "first word sooner, and it detects the end of an utterance itself, so sentences "
-                 + "break where the speaker actually stopped. Pick this if you only caption "
-                 + "English; it will produce confident nonsense on anything else."
+            return String(localized: "English only, 437 MB. A fifth of Nemotron's parameters, so it reaches the first word sooner, and it detects the end of an utterance itself, so sentences break where the speaker actually stopped. Pick this if you only caption English; it will produce confident nonsense on anything else.")
         }
     }
 
@@ -68,10 +62,10 @@ enum ASREngine: String, CaseIterable, Sendable {
     func makeBackend() -> TranscriptionBackend {
         switch self {
         case .nemotron:
-            return StreamingASRBackend(name: "NVIDIA Nemotron (streaming, on-device)",
+            return StreamingASRBackend(name: String(localized: "NVIDIA Nemotron (streaming, on-device)"),
                                        engine: NemotronEngine())
         case .parakeetEou:
-            return StreamingASRBackend(name: "Parakeet EOU (streaming, on-device)",
+            return StreamingASRBackend(name: String(localized: "Parakeet EOU (streaming, on-device)"),
                                        engine: ParakeetEouEngine())
         }
     }
@@ -89,12 +83,10 @@ enum ASREngine: String, CaseIterable, Sendable {
                 return ModelAsset(
                     id: fast ? "asr.nemotron.fast" : "asr.nemotron",
                     family: .recognition,
-                    title: fast ? "Nemotron (multilingual, fast)" : "Nemotron (multilingual)",
+                    title: fast ? String(localized: "Nemotron (multilingual, fast)")
+                                 : String(localized: "Nemotron (multilingual)"),
                     detail: fast
-                        ? "The same multilingual model decoding every \(ms) ms instead of "
-                          + "\(NemotronEngine.chunkMs) — captions appear about twice as fast, for "
-                          + "roughly double the encoder work per second of audio. Noticeable on "
-                          + "battery. A separate download; both tiers can be installed."
+                        ? String(localized: "The same multilingual model decoding every \(ms) ms instead of \(NemotronEngine.chunkMs) — captions appear about twice as fast, for roughly double the encoder work per second of audio. Noticeable on battery. A separate download; both tiers can be installed.")
                         : summary,
                     licence: "NVIDIA Open Model License · huggingface.co/FluidInference",
                     advertisedBytes: 634 * 1_048_576,
@@ -113,7 +105,7 @@ enum ASREngine: String, CaseIterable, Sendable {
             return [ModelAsset(
                 id: "asr.parakeetEou",
                 family: .recognition,
-                title: "Parakeet EOU (English)",
+                title: String(localized: "Parakeet EOU (English)"),
                 detail: summary,
                 licence: "NVIDIA / CC-BY-4.0 · huggingface.co/FluidInference",
                 advertisedBytes: 437 * 1_048_576,

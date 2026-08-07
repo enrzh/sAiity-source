@@ -77,8 +77,8 @@ final class HotKeyCenter {
 
         var title: String {
             switch self {
-            case .toggleCaptions: return "Start / stop captions"
-            case .copyLastLine:   return "Copy the current caption"
+            case .toggleCaptions: return String(localized: "Start / stop captions")
+            case .copyLastLine:   return String(localized: "Copy the current caption")
             }
         }
         var defaultShortcut: Shortcut? {

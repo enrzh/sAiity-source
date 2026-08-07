@@ -67,7 +67,35 @@ is meant to be readable a year from now.
 
 German is a translation; English is the source. New user-facing strings go
 through the string catalog at `Resources/Localizable.xcstrings`. SwiftUI keys
-`Text("literal")` automatically, but **`Text("a" + "b")` does not** — the
-concatenation resolves to `String` and hits the verbatim overload, bypassing
-localisation entirely. AppKit needs `String(localized:)` explicitly. Several
-paragraphs in Settings are still English for exactly this reason.
+`Text("literal")` automatically. Four things silently bypass that, and each one
+looks exactly like a working translation until you launch in German:
+
+1. **`Text("a" + "b")`.** The concatenation resolves to `String` and hits the
+   verbatim overload. Write the sentence as one literal, however long.
+2. **`Text(someString)`.** Same overload. If the value comes from a model or an
+   enum, wrap it at the definition site with `String(localized:)` — that is why
+   `ASREngine.summary`, `LocalModel.note` and friends are wrapped there and not
+   where they are displayed.
+3. **A `String` parameter on a view wrapper.** `LabeledToggle`, `SheetShell` and
+   `ResetButton` take `LocalizedStringKey`; as `String` they bind the caller's
+   literal to the verbatim overload, and every explanation under every switch in
+   Settings stayed English while the section headers around them translated.
+4. **Interpolating a number.** `"Step \(n) of \(total)"` produces the key
+   `Step %lld of %lld`, not `%@` — an `Int` is not a `String`. A catalog entry
+   written with `%@` never matches and falls back to English. `Double` gives
+   `%lf`. When unsure, print `LocalizedStringResource(value).key` rather than
+   guessing.
+
+AppKit (`NSAlert`, `NSOpenPanel`, `stringValue`) always needs `String(localized:)`
+explicitly. Proper nouns — model and licence names — carry
+`"shouldTranslate": false` in the catalog instead of a German value.
+
+Verify by rendering, not by counting keys:
+
+```bash
+defaults write de.aiity.saiity AppleLanguages '(de)'
+open --env SAIITY_OPEN_SETTINGS=1 -a /Applications/sAiity.app
+```
+
+Delete the key again afterwards, or the app stays German regardless of the
+system setting.

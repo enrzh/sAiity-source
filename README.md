@@ -105,10 +105,10 @@ Worth saying plainly before you clone it:
   shown or translated, but a speaker who pauses hard mid-sentence still gets a
   break there, and the recogniser's own chunk boundary decides which clause a
   word lands in. Better than it was, not exact.
-- **It is not fully localised.** German covers the menus, tabs, onboarding and
-  every control; several long explanatory paragraphs are still English because
-  they are assembled by concatenation and never reach the string catalog. You
-  can see one in the screenshots.
+- **German is not finished.** Settings, the model catalogue and the first-run
+  setup are translated in full, verified by rendering every pane in German
+  rather than by counting keys. The menu bar, the export formats and the
+  download status lines are not, and fall back to English.
 - **It is not audited**, and captions are not a transcript of record. On-device
   recognition of unclear speech is still recognition of unclear speech.
 

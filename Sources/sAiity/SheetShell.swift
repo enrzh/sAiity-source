@@ -7,8 +7,11 @@ import SwiftUI
 /// buttons in different places, different paddings, one sheet with an extra
 /// header control the others lacked. A change to the chrome now happens once.
 struct SheetShell<Content: View, HeaderAccessory: View>: View {
-    let title: String
-    let subtitle: String
+    // LocalizedStringKey, not String: a String parameter binds the literal at
+    // the call site to Text's verbatim overload and the sheet header silently
+    // stops being translated.
+    let title: LocalizedStringKey
+    let subtitle: LocalizedStringKey
     let width: CGFloat
     let height: CGFloat
     @ViewBuilder var headerAccessory: HeaderAccessory
@@ -16,7 +19,8 @@ struct SheetShell<Content: View, HeaderAccessory: View>: View {
 
     @Environment(\.dismiss) private var dismiss
 
-    init(title: String, subtitle: String, width: CGFloat, height: CGFloat,
+    init(title: LocalizedStringKey, subtitle: LocalizedStringKey,
+         width: CGFloat, height: CGFloat,
          @ViewBuilder headerAccessory: () -> HeaderAccessory = { EmptyView() },
          @ViewBuilder content: () -> Content) {
         self.title = title

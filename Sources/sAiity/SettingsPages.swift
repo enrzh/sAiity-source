@@ -39,8 +39,7 @@ struct ModelsView: View {
                         Text("Downloaded models: \(state.ownedTotal)")
                             .font(.callout)
                         if let stray = state.strayTotal {
-                            Text("Other files: \(stray) — caches and leftovers from "
-                                 + "interrupted downloads.")
+                            Text("Other files: \(stray) — caches and leftovers from interrupted downloads.")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
@@ -52,9 +51,7 @@ struct ModelsView: View {
             } header: {
                 Text("Storage")
             } footer: {
-                Text("Everything runs on this Mac, so the models live here rather than "
-                     + "on a server. Removing them all frees the space; anything you "
-                     + "select again is downloaded once more.")
+                Text("Everything runs on this Mac, so the models live here rather than on a server. Removing them all frees the space; anything you select again is downloaded once more.")
                     .font(.caption)
             }
 
@@ -115,18 +112,17 @@ struct ModelsView: View {
     private func confirmRemoveAll() {
         let total = ModelRegistry.format(ModelRegistry.ownedTotalBytes())
         let a = NSAlert()
-        a.messageText = "Remove all downloaded models?"
-        a.informativeText = "This frees \(total).\n\nAnything you use again will "
-            + "be downloaded once more."
+        a.messageText = String(localized: "Remove all downloaded models?")
+        a.informativeText = String(localized: "This frees \(total).\n\nAnything you use again will be downloaded once more.")
         a.alertStyle = .warning
-        a.addButton(withTitle: "Remove All")
-        a.addButton(withTitle: "Cancel")
+        a.addButton(withTitle: String(localized: "Remove All"))
+        a.addButton(withTitle: String(localized: "Cancel"))
         guard a.runModal() == .alertFirstButtonReturn else { return }
         Task {
             if let freed = await state.removeAllDownloads() {
                 let done = NSAlert()
-                done.messageText = "Removed \(ModelRegistry.format(freed))."
-                done.addButton(withTitle: "OK")
+                done.messageText = String(localized: "Removed \(ModelRegistry.format(freed)).")
+                done.addButton(withTitle: String(localized: "OK"))
                 _ = done.runModal()
             }
         }
@@ -155,8 +151,7 @@ struct CaptionsView: View {
                 if case .only(let codes) = state.engine.coverage {
                     let names = codes.sorted()
                         .map { Locale.current.localizedString(forLanguageCode: $0) ?? $0 }
-                    Label("Recognises \(names.joined(separator: ", ")) only. Other languages come "
-                          + "out as nonsense rather than an error.",
+                    Label("Recognises \(names.joined(separator: ", ")) only. Other languages come out as nonsense rather than an error.",
                           systemImage: "exclamationmark.triangle")
                         .font(.caption).foregroundStyle(.orange)
                 }
@@ -167,14 +162,11 @@ struct CaptionsView: View {
                     }
                     .pickerStyle(.segmented)
                     Text(state.nemotronTier == 1120
-                         ? "Captions roughly twice as often, for about double the "
-                           + "recognition work per second of audio — noticeable on battery."
-                         : "The default. Captions arrive about every 2 seconds at the "
-                           + "lowest recognition cost.")
+                         ? "Captions roughly twice as often, for about double the recognition work per second of audio — noticeable on battery."
+                         : "The default. Captions arrive about every 2 seconds at the lowest recognition cost.")
                         .font(.caption).foregroundStyle(.secondary)
                     if !NemotronEngine.isDownloaded(chunkMs: state.nemotronTier) {
-                        Label("This tier is its own ~640 MB download — each latency has the "
-                              + "chunk size baked into its model. Fetch it under Models.",
+                        Label("This tier is its own ~640 MB download — each latency has the chunk size baked into its model. Fetch it under Models.",
                               systemImage: "arrow.down.circle")
                             .font(.caption).foregroundStyle(.orange)
                     }
@@ -191,7 +183,8 @@ struct CaptionsView: View {
                         state.showTranslationPicker = true
                     } label: {
                         HStack(spacing: 4) {
-                            Text(state.translateTo.map { AppLanguage(code: $0).displayName } ?? "Off")
+                            Text(state.translateTo.map { AppLanguage(code: $0).displayName }
+                                 ?? String(localized: "Off"))
                             Image(systemName: "chevron.up.chevron.down")
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
@@ -256,22 +249,17 @@ struct CaptionsView: View {
     private var appearanceSections: some View {
         Section {
             LabeledToggle("Show the caption bubble",
-                          "Hides the subtitles without stopping recognition, so you can "
-                          + "keep a transcript running with nothing on screen.",
+                          "Hides the subtitles without stopping recognition, so you can keep a transcript running with nothing on screen.",
                           isOn: Binding(get: { !state.style.hidden },
                                         set: { state.style.hidden = !$0 }))
             LabeledToggle("Let clicks pass through the bubble",
-                          "On, only the bubble's top strip can be grabbed and everything "
-                          + "else clicks straight through to the video underneath — which "
-                          + "matters, because the bubble sits over the scrubber. Off, you "
-                          + "can drag it by any part of it.",
+                          "On, only the bubble's top strip can be grabbed and everything else clicks straight through to the video underneath — which matters, because the bubble sits over the scrubber. Off, you can drag it by any part of it.",
                           isOn: $state.captionClickThrough)
             Picker("Background", selection: $state.style.glassStyle) {
                 Text("Glass").tag(0); Text("Clear").tag(1); Text("Solid").tag(2)
             }
             .pickerStyle(.segmented)
-            Text("Solid is the readable choice over bright video — glass leaves white "
-                 + "text on a white scene at roughly 2:1 contrast.")
+            Text("Solid is the readable choice over bright video — glass leaves white text on a white scene at roughly 2:1 contrast.")
                 .font(.caption).foregroundStyle(.secondary)
             ColorPicker("Background tint", selection: Binding(
                 get: { Color(nsColor: state.style.tintColor ?? .black) },
@@ -279,9 +267,7 @@ struct CaptionsView: View {
             slider("Corner radius", $state.style.cornerRadius, 0...40, "%.0f")
             slider("Width", $state.style.widthFraction, 0.3...1.0, "%.0f%%", scale: 100)
             slider("Gap to screen edge", $state.style.screenMargin, 0...160, "%.0f")
-            Text("Width is a setting rather than something measured from the text — that "
-                 + "is what stops the bubble resizing and re-centring on every line. Drag "
-                 + "an edge to override it; a dragged width may go right to the screen edge.")
+            Text("Width is a setting rather than something measured from the text — that is what stops the bubble resizing and re-centring on every line. Drag an edge to override it; a dragged width may go right to the screen edge.")
                 .font(.caption).foregroundStyle(.secondary)
         } header: {
             HStack {
@@ -302,15 +288,13 @@ struct CaptionsView: View {
         }
 
         textStyleSection("Original text", $state.style.original,
-                         note: "The recognised speech. It is dimmed while the engine may "
-                             + "still revise it — that is the second opacity below.",
+                         note: "The recognised speech. It is dimmed while the engine may still revise it — that is the second opacity below.",
                          volatile: true,
                          reset: { state.style.original = .original })
 
         Section {
             LabeledToggle("Show the translation line",
-                          "The second line under each caption. Turning this off keeps "
-                          + "translation running for the transcript but hides it on screen.",
+                          "The second line under each caption. Turning this off keeps translation running for the transcript but hides it on screen.",
                           isOn: $state.style.showTranslation)
         } header: {
             HStack {
@@ -342,8 +326,8 @@ struct CaptionsView: View {
 
     /// One group of text controls, used for both roles so they cannot drift.
     @ViewBuilder
-    private func textStyleSection(_ title: String, _ style: Binding<TextStyle>,
-                                  note: String, volatile: Bool,
+    private func textStyleSection(_ title: LocalizedStringKey, _ style: Binding<TextStyle>,
+                                  note: LocalizedStringKey, volatile: Bool,
                                   reset: @escaping () -> Void) -> some View {
         Section {
             textStyleControls(style, volatile: volatile)
@@ -380,7 +364,7 @@ struct CaptionsView: View {
     /// Sliders here are always label + track + read-out; writing that out five
     /// times invites them to drift apart.
     @ViewBuilder
-    private func slider(_ title: String, _ value: Binding<Double>,
+    private func slider(_ title: LocalizedStringKey, _ value: Binding<Double>,
                         _ range: ClosedRange<Double>, _ format: String,
                         scale: Double = 1) -> some View {
         LabeledContent(title) {
@@ -400,10 +384,10 @@ struct CaptionsView: View {
 /// font size, so in practice nobody presses it and the settings silently drift
 /// somewhere the user cannot get back from.
 struct ResetButton: View {
-    let title: String
+    let title: LocalizedStringKey
     let action: () -> Void
 
-    init(_ title: String = "Reset", action: @escaping () -> Void) {
+    init(_ title: LocalizedStringKey = "Reset", action: @escaping () -> Void) {
         self.title = title
         self.action = action
     }
@@ -421,11 +405,14 @@ struct ResetButton: View {
 /// guess what turning it off costs, and several of these have real consequences
 /// (a durable transcript, clicks reaching the video behind).
 struct LabeledToggle: View {
-    let title: String
-    let note: String
+    // Both are LocalizedStringKey. As String they would reach Text's verbatim
+    // overload, which is how every one of these explanations stayed English
+    // in the German build while the surrounding section was translated.
+    let title: LocalizedStringKey
+    let note: LocalizedStringKey
     @Binding var isOn: Bool
 
-    init(_ title: String, _ note: String, isOn: Binding<Bool>) {
+    init(_ title: LocalizedStringKey, _ note: LocalizedStringKey, isOn: Binding<Bool>) {
         self.title = title
         self.note = note
         self._isOn = isOn
@@ -455,7 +442,7 @@ private struct ShortcutRecorder: NSViewRepresentable {
             HotKeyCenter.setShortcut(s, for: action)
             HotKeyCenter.shared.rebind(action)
             state.shortcutError = (s != nil && HotKeyCenter.shortcut(for: action) == nil)
-                ? "That combination is already taken by another app." : nil
+                ? String(localized: "That combination is already taken by another app.") : nil
             ()
         }
         return v
@@ -491,13 +478,13 @@ private struct ShortcutRecorder: NSViewRepresentable {
 
         func refresh() {
             if recording {
-                label.stringValue = "Press keys…"
+                label.stringValue = String(localized: "Press keys…")
                 layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.25).cgColor
             } else if let s = HotKeyCenter.shortcut(for: action) {
                 label.stringValue = s.displayString
                 layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
             } else {
-                label.stringValue = "Not set"
+                label.stringValue = String(localized: "Not set")
                 layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
             }
         }
@@ -573,9 +560,10 @@ struct LibraryView: View {
                     }
                     Button("Delete all…", role: .destructive) {
                         let a = NSAlert()
-                        a.messageText = "Delete all transcripts?"
-                        a.informativeText = "Permanently removes \(state.sessions.count) sessions."
-                        a.addButton(withTitle: "Delete All"); a.addButton(withTitle: "Cancel")
+                        a.messageText = String(localized: "Delete all transcripts?")
+                        a.informativeText = String(localized: "Permanently removes \(state.sessions.count) sessions.")
+                        a.addButton(withTitle: String(localized: "Delete All"))
+                        a.addButton(withTitle: String(localized: "Cancel"))
                         a.alertStyle = .warning
                         if a.runModal() == .alertFirstButtonReturn {
                             TranscriptStore.deleteAll(); Task { await state.refresh() }
@@ -588,13 +576,13 @@ struct LibraryView: View {
             Section("Status") {
                 LabeledContent("Engine", value: state.engine.displayName)
                 LabeledContent("Screen Recording",
-                               value: CGPreflightScreenCaptureAccess() ? "Granted" : "Not granted")
+                               value: CGPreflightScreenCaptureAccess()
+                                   ? String(localized: "Granted")
+                                   : String(localized: "Not granted"))
                 Text("System-audio capture is gated behind Screen Recording — macOS has no audio-only permission.")
                     .font(.caption).foregroundStyle(.secondary)
                 LabeledToggle("Start sAiity when you log in",
-                              "Registers the app as a login item so captions are one keypress "
-                              + "away after a restart. Off by default — this app can capture "
-                              + "system audio, so being running should be your choice.",
+                              "Registers the app as a login item so captions are one keypress away after a restart. Off by default — this app can capture system audio, so being running should be your choice.",
                               isOn: Binding(get: { state.launchAtLogin },
                                             set: { state.setLaunchAtLogin($0) }))
                 if !state.launchAtLoginNote.isEmpty {
@@ -731,10 +719,7 @@ struct LocalModelsView: View {
                     .disabled(adding)
                 if adding { ProgressView().controlSize(.small) }
             }
-            Text("A link downloads through the app; a chosen file is copied in. Ollama "
-                 + "users: the blobs under ~/.ollama/models/blobs are GGUF files and can "
-                 + "be chosen directly. The translation prompt was tuned on Qwen — another "
-                 + "family may behave a little differently.")
+            Text("A link downloads through the app; a chosen file is copied in. Ollama users: the blobs under ~/.ollama/models/blobs are GGUF files and can be chosen directly. The translation prompt was tuned on Qwen — another family may behave a little differently.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .padding(14)
@@ -763,7 +748,7 @@ struct LocalModelsView: View {
         // Ollama blobs have no extension at all, so the filter cannot be strict.
         panel.allowsOtherFileTypes = true
         panel.canChooseDirectories = false
-        panel.message = "Choose a GGUF model file. Ollama blobs (sha256-…) work too."
+        panel.message = String(localized: "Choose a GGUF model file. Ollama blobs (sha256-…) work too.")
         guard panel.runModal() == .OK, let url = panel.url else { return }
         adding = true
         state.modelError = nil
