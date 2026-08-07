@@ -88,13 +88,48 @@ struct OnboardingView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            stepIndicator
+                .padding(.horizontal, 28)
+                .padding(.top, 22)
+                .padding(.bottom, 4)
+            // Centred rather than pinned to the top. Every step used to sit in
+            // the top third with two thirds of the window empty under it, which
+            // reads as a screen that has not finished loading.
             content
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(28)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                .padding(.horizontal, 28)
+                .animation(.smooth(duration: 0.28), value: model.step)
             Divider()
             footer
         }
         .frame(width: 640, height: 560)
+        .background(setupBackground)
+    }
+
+    /// Depth without cost. This window is redrawn on interaction, not per frame
+    /// like the caption bubble, so a gradient and a material here are free —
+    /// the same treatment in the bubble would be paid several times a second
+    /// while a speech model and a translator are already running.
+    /// Shared with Settings — see SettingsBackground. One window looking like a
+    /// different app from the next is how a small app reads as unfinished.
+    private var setupBackground: some View { SettingsBackground() }
+
+    /// Where you are, and how much is left. The step name alone in the corner
+    /// answered neither.
+    private var stepIndicator: some View {
+        let steps = OnboardingStep.allCases
+        let current = steps.firstIndex(of: model.step) ?? 0
+        return HStack(spacing: 6) {
+            ForEach(Array(steps.enumerated()), id: \.element) { i, step in
+                Capsule()
+                    .fill(i <= current ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary))
+                    .frame(height: 4)
+                    .animation(.smooth(duration: 0.3), value: model.step)
+                    .accessibilityHidden(true)
+            }
+        }
+        .accessibilityElement()
+        .accessibilityLabel(Text("Step \(current + 1) of \(steps.count)"))
     }
 
     @ViewBuilder
@@ -111,15 +146,28 @@ struct OnboardingView: View {
     // MARK: - Steps
 
     private var welcome: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("sAiity").font(.system(size: 34, weight: .semibold))
-            Text("Live subtitles for anything your Mac is playing.")
-                .font(.title3).foregroundStyle(.secondary)
-            Divider().padding(.vertical, 6)
-            bullet("microphone.slash", "It captures the audio your Mac plays, not your microphone.")
-            bullet("lock", "Everything runs on this Mac. No audio ever leaves it.")
-            bullet("arrow.down.circle", "That means a one-time model download — you choose which.")
-            Spacer()
+        VStack(spacing: 18) {
+            // The real app icon, not a glyph: this is the first thing a new
+            // user sees, and it should look like the thing they installed.
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable().frame(width: 96, height: 96)
+                .shadow(color: .black.opacity(0.28), radius: 12, y: 5)
+            VStack(spacing: 6) {
+                Text("sAiity").font(.system(size: 36, weight: .semibold))
+                Text("Live subtitles for anything your Mac is playing.")
+                    .font(.title3).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                bullet("microphone.slash", "It captures the audio your Mac plays, not your microphone.")
+                bullet("lock", "Everything runs on this Mac. No audio ever leaves it.")
+                bullet("arrow.down.circle", "That means a one-time model download — you choose which.")
+            }
+            .padding(18)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14)
+                        .strokeBorder(.white.opacity(0.07), lineWidth: 1))
+            .padding(.top, 4)
         }
     }
 

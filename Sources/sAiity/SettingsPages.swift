@@ -62,6 +62,7 @@ struct ModelsView: View {
                 Section { Text(e).font(.caption).foregroundStyle(.red) }
             }
         }
+        .scrollContentBackground(.hidden)
         .formStyle(.grouped)
         .task { state.refreshModels() }
     }
@@ -242,6 +243,7 @@ struct CaptionsView: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
         .formStyle(.grouped)
         .task(id: "\(state.translateTo ?? "")|\(state.translationEngine.rawValue)") {
             await state.refreshTargetSupport()
@@ -616,6 +618,7 @@ struct LibraryView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
+        .scrollContentBackground(.hidden)
         .formStyle(.grouped)
     }
 

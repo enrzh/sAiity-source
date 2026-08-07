@@ -354,6 +354,27 @@ enum SettingsWindowController {
 
 // MARK: - Views
 
+/// The tint behind Settings and the setup wizard both.
+///
+/// Cheap on purpose, and cheap in the place it is used: these windows redraw
+/// when something is clicked, not several times a second like the caption
+/// bubble. The same gradient behind the bubble would be paid per caption while
+/// a speech model and a translator are already competing for the GPU.
+struct SettingsBackground: View {
+    var body: some View {
+        ZStack {
+            Rectangle().fill(.background)
+            LinearGradient(colors: [Color.accentColor.opacity(0.13),
+                                    Color.accentColor.opacity(0.02),
+                                    .clear],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            RadialGradient(colors: [Color.accentColor.opacity(0.14), .clear],
+                           center: .init(x: 0.08, y: 0.0), startRadius: 0, endRadius: 420)
+        }
+        .ignoresSafeArea()
+    }
+}
+
 private struct RootView: View {
     @Bindable var state: AppState
 
@@ -367,6 +388,7 @@ private struct RootView: View {
                 .tabItem { Label("Library", systemImage: "text.document") }
         }
         .frame(minWidth: 700, minHeight: 480)
+        .background(SettingsBackground())
         .task { await state.refresh() }
         // The menu bar writes the same preference while this window is open, so
         // follow it live rather than only on reopen.
