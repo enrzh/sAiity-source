@@ -23,6 +23,50 @@
         }
       }
     },
+    "%@ only": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "nur %@"
+          }
+        }
+      }
+    },
+    "%@ only recognises English. This sounds like %@ — switch engine in Settings → Captions.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ erkennt nur Englisch. Das klingt nach %@ – wechsle die Engine unter Einstellungen → Untertitel."
+          }
+        }
+      }
+    },
+    "%@ ready.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ ist bereit."
+          }
+        }
+      }
+    },
+    "%@ recognises English only — this sounds like %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ erkennt nur Englisch – das klingt nach %@"
+          }
+        }
+      }
+    },
     "%@ to download": {
       "extractionState": "manual",
       "localizations": {
@@ -30,6 +74,61 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ zu laden"
+          }
+        }
+      }
+    },
+    "%@ was imported from disk and its file is missing. Import it again from the original location.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ wurde von der Festplatte importiert und seine Datei fehlt. Importiere es erneut vom ursprünglichen Ort."
+          }
+        }
+      }
+    },
+    "%@ · %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · %@"
+          }
+        }
+      }
+    },
+    "%@ · %@ — not downloaded yet": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · %@ – noch nicht geladen"
+          }
+        }
+      }
+    },
+    "%@ · %lld lines · %lld min": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · %lld Zeilen · %lld Min."
+          }
+        }
+      }
+    },
+    "%@ — recommended, not chosen yet": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ – empfohlen, noch nicht gewählt"
           }
         }
       }
@@ -140,6 +239,17 @@
         }
       }
     },
+    "All transcripts deleted": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alle Transkripte gelöscht"
+          }
+        }
+      }
+    },
     "Allow Screen Recording": {
       "localizations": {
         "de": {
@@ -228,6 +338,17 @@
         }
       }
     },
+    "Audio stream stopped — press Stop, then Start": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Audiostream gestoppt – drücke Stoppen, dann Starten"
+          }
+        }
+      }
+    },
     "Available with %@": {
       "localizations": {
         "de": {
@@ -244,6 +365,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Zurück"
+          }
+        }
+      }
+    },
+    "Backend used before prepare() finished.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Engine wurde benutzt, bevor prepare() fertig war."
           }
         }
       }
@@ -413,6 +545,17 @@
         }
       }
     },
+    "Choose a recognition model in Settings → Models.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wähle unter Einstellungen → Modelle ein Erkennungsmodell."
+          }
+        }
+      }
+    },
     "Choose file…": {
       "localizations": {
         "de": {
@@ -443,6 +586,17 @@
         }
       }
     },
+    "Close": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Schließen"
+          }
+        }
+      }
+    },
     "Colour": {
       "localizations": {
         "de": {
@@ -459,6 +613,39 @@
           "stringUnit": {
             "state": "translated",
             "value": "Weiter"
+          }
+        }
+      }
+    },
+    "Copied": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kopiert"
+          }
+        }
+      }
+    },
+    "Copy": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kopieren"
+          }
+        }
+      }
+    },
+    "Copy as text": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Als Text kopieren"
           }
         }
       }
@@ -480,6 +667,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Aktuellen Untertitel kopieren"
+          }
+        }
+      }
+    },
+    "Copy this caption": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diesen Untertitel kopieren"
+          }
+        }
+      }
+    },
+    "Copy this line": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diese Zeile kopieren"
           }
         }
       }
@@ -511,6 +720,61 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ konnte nicht gelöscht werden."
+          }
+        }
+      }
+    },
+    "Could not load %@.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ konnte nicht geladen werden."
+          }
+        }
+      }
+    },
+    "Could not start recording": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aufzeichnung konnte nicht gestartet werden"
+          }
+        }
+      }
+    },
+    "Could not switch language": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sprache konnte nicht gewechselt werden"
+          }
+        }
+      }
+    },
+    "Credits file missing from this build.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Credits-Datei fehlt in diesem Build."
+          }
+        }
+      }
+    },
+    "Cut": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ausschneiden"
           }
         }
       }
@@ -547,12 +811,35 @@
         }
       }
     },
+    "Delete all transcripts…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alle Transkripte löschen …"
+          }
+        }
+      }
+    },
     "Delete all…": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Alle löschen …"
+          }
+        }
+      }
+    },
+    "Dies ist eine Beispiel-Untertitelzeile, um Größe und Lesbarkeit zu prüfen.": {
+      "extractionState": "manual",
+      "comment": "Crossed on purpose. This is the preview bubble's ORIGINAL row, which must read in a language other than the UI's — do not 'correct' it to a German value.",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This is a sample subtitle line, to check size and legibility."
           }
         }
       }
@@ -573,6 +860,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Fertig"
+          }
+        }
+      }
+    },
+    "Done.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fertig."
           }
         }
       }
@@ -598,6 +896,17 @@
         }
       }
     },
+    "Download failed (HTTP %lld) for %@.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Laden fehlgeschlagen (HTTP %lld) für %@."
+          }
+        }
+      }
+    },
     "Downloaded models: %@": {
       "localizations": {
         "de": {
@@ -608,12 +917,166 @@
         }
       }
     },
+    "Downloading %@ (%@)…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ wird geladen (%@) …"
+          }
+        }
+      }
+    },
+    "Downloading %@ before captions can start…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ wird geladen, bevor die Untertitel starten können …"
+          }
+        }
+      }
+    },
+    "Downloading %@…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ wird geladen …"
+          }
+        }
+      }
+    },
+    "Downloading %@… %lld%%": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ wird geladen … %lld%%"
+          }
+        }
+      }
+    },
+    "Downloading MADLAD (1.86 GB)…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MADLAD wird geladen (1,86 GB) …"
+          }
+        }
+      }
+    },
+    "Downloading MADLAD…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MADLAD wird geladen …"
+          }
+        }
+      }
+    },
+    "Downloading Nemotron model…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nemotron-Modell wird geladen …"
+          }
+        }
+      }
+    },
+    "Downloading Nemotron model… %lld%%": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nemotron-Modell wird geladen … %lld%%"
+          }
+        }
+      }
+    },
+    "Downloading Nemotron…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nemotron wird geladen …"
+          }
+        }
+      }
+    },
+    "Downloading Parakeet EOU…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parakeet EOU wird geladen …"
+          }
+        }
+      }
+    },
+    "Downloading Parakeet EOU… %lld%%": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parakeet EOU wird geladen … %lld%%"
+          }
+        }
+      }
+    },
+    "Downloading…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wird geladen …"
+          }
+        }
+      }
+    },
+    "Edit": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bearbeiten"
+          }
+        }
+      }
+    },
     "Engine": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Engine"
+          }
+        }
+      }
+    },
+    "Engine: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Engine: %@"
           }
         }
       }
@@ -645,6 +1108,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Fehler"
+          }
+        }
+      }
+    },
+    "Error: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fehler: %@"
           }
         }
       }
@@ -815,6 +1289,17 @@
         }
       }
     },
+    "Language": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sprache"
+          }
+        }
+      }
+    },
     "Let clicks pass through the bubble": {
       "localizations": {
         "de": {
@@ -855,12 +1340,100 @@
         }
       }
     },
+    "Line copied": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zeile kopiert"
+          }
+        }
+      }
+    },
+    "Lines: %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zeilen: %lld"
+          }
+        }
+      }
+    },
+    "Listening · %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hört zu · %@"
+          }
+        }
+      }
+    },
+    "Listening · nothing is playing": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hört zu · nichts wird abgespielt"
+          }
+        }
+      }
+    },
+    "Live caption": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Live-Untertitel"
+          }
+        }
+      }
+    },
     "Live subtitles for anything your Mac is playing.": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Live-Untertitel für alles, was dein Mac abspielt."
+          }
+        }
+      }
+    },
+    "Loading %@…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ wird vorbereitet …"
+          }
+        }
+      }
+    },
+    "Loading MADLAD…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MADLAD wird vorbereitet …"
+          }
+        }
+      }
+    },
+    "Loading Nemotron…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nemotron wird vorbereitet …"
           }
         }
       }
@@ -886,6 +1459,32 @@
         }
       }
     },
+    "MADLAD": {
+      "extractionState": "manual",
+      "shouldTranslate": false
+    },
+    "MADLAD cannot translate into %@.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MADLAD kann nicht nach %@ übersetzen."
+          }
+        }
+      }
+    },
+    "MADLAD ready.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MADLAD ist bereit."
+          }
+        }
+      }
+    },
     "MADLAD-400-3B": {
       "extractionState": "manual",
       "shouldTranslate": false
@@ -897,6 +1496,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "MADLAD-400-3B, ein reines Übersetzungsmodell auf MLX. Beste Qualität der lokalen Optionen und Apache-2.0, also mitlieferbar. 1,86 GB und gemessen etwa 0,2 Sekunden pro Satz, sobald es geladen ist – die schnellste der ladbaren Engines, und sie übersetzt ausschließlich, kann also nicht abschweifen und der sprechenden Person antworten."
+          }
+        }
+      }
+    },
+    "MADLAD: %@ %lld%%": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MADLAD: %@ %lld%%"
+          }
+        }
+      }
+    },
+    "MIT licensed. On-device live subtitles.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MIT-lizenziert. Live-Untertitel direkt auf dem Gerät."
           }
         }
       }
@@ -990,6 +1611,17 @@
         }
       }
     },
+    "Nemotron ready.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nemotron ist bereit."
+          }
+        }
+      }
+    },
     "No available translator covers this language.": {
       "extractionState": "manual",
       "localizations": {
@@ -997,6 +1629,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Kein verfügbarer Übersetzer deckt diese Sprache ab."
+          }
+        }
+      }
+    },
+    "No display available to attach audio capture to.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kein Bildschirm verfügbar, an den sich die Tonaufnahme koppeln lässt."
           }
         }
       }
@@ -1012,12 +1655,100 @@
         }
       }
     },
+    "No model chosen — %@ is the one to start with": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kein Modell gewählt – %@ ist der Einstieg"
+          }
+        }
+      }
+    },
+    "No recognition model chosen yet. %@ is the one to start with: it handles any language and identifies it from the audio. Download it under Models.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Noch kein Erkennungsmodell gewählt. %@ ist der Einstieg: Es kommt mit jeder Sprache zurecht und erkennt sie aus dem Ton. Lade es unter Modelle."
+          }
+        }
+      }
+    },
+    "No recognition model chosen — pick one in Settings → Models": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kein Erkennungsmodell gewählt – wähle eines unter Einstellungen → Modelle"
+          }
+        }
+      }
+    },
+    "No saved transcripts": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keine gespeicherten Transkripte"
+          }
+        }
+      }
+    },
+    "No translation model chosen. Pick one under Settings → Models.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kein Übersetzungsmodell gewählt. Wähle eines unter Einstellungen → Modelle."
+          }
+        }
+      }
+    },
+    "No translator chosen yet. %@ is the one to start with: fastest of the two, and it only ever translates. Download it under Models.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Noch kein Übersetzer gewählt. %@ ist der Einstieg: der schnellere von beiden, und er übersetzt ausschließlich. Lade ihn unter Modelle."
+          }
+        }
+      }
+    },
+    "No translator chosen — pick one in Settings → Captions": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kein Übersetzer gewählt – wähle einen unter Einstellungen → Untertitel"
+          }
+        }
+      }
+    },
+    "None chosen": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keines gewählt"
+          }
+        }
+      }
+    },
     "Not downloaded yet — see Models.": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Noch nicht geladen — siehe Modelle."
+            "value": "Noch nicht geladen – siehe Modelle."
           }
         }
       }
@@ -1191,6 +1922,28 @@
         }
       }
     },
+    "Open sAiity": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "sAiity öffnen"
+          }
+        }
+      }
+    },
+    "Open sAiity settings": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "sAiity-Einstellungen öffnen"
+          }
+        }
+      }
+    },
     "Open sAiity…": {
       "localizations": {
         "de": {
@@ -1259,6 +2012,17 @@
         }
       }
     },
+    "Parakeet ready.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parakeet ist bereit."
+          }
+        }
+      }
+    },
     "Partial download — %@, incomplete": {
       "extractionState": "manual",
       "localizations": {
@@ -1266,6 +2030,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Teilweise geladen – %@, unvollständig"
+          }
+        }
+      }
+    },
+    "Paste": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Einsetzen"
           }
         }
       }
@@ -1443,6 +2218,28 @@
         }
       }
     },
+    "Recording a transcript": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transkript wird aufgezeichnet"
+          }
+        }
+      }
+    },
+    "Redo": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wiederholen"
+          }
+        }
+      }
+    },
     "Registers the app as a login item so captions are one keypress away after a restart. Off by default — this app can capture system audio, so being running should be your choice.": {
       "extractionState": "manual",
       "localizations": {
@@ -1547,12 +2344,45 @@
         }
       }
     },
+    "Reveal in Finder": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Im Finder zeigen"
+          }
+        }
+      }
+    },
     "Run setup again…": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Einrichtung erneut ausführen …"
+          }
+        }
+      }
+    },
+    "Save as Markdown": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Als Markdown speichern"
+          }
+        }
+      }
+    },
+    "Save as SRT": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Als SRT speichern"
           }
         }
       }
@@ -1597,6 +2427,17 @@
         }
       }
     },
+    "Screen Recording permission needed (that is how macOS gates system audio). Allow sAiity in System Settings → Privacy & Security → Screen Recording, then relaunch.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Berechtigung für die Bildschirmaufnahme nötig (so regelt macOS den Zugriff auf den Systemton). Erlaube sAiity unter Systemeinstellungen → Datenschutz & Sicherheit → Bildschirmaufnahme und starte die App neu."
+          }
+        }
+      }
+    },
     "Search %lld languages": {
       "extractionState": "manual",
       "localizations": {
@@ -1608,12 +2449,45 @@
         }
       }
     },
+    "Select All": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alles auswählen"
+          }
+        }
+      }
+    },
     "Semibold": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Halbfett"
+          }
+        }
+      }
+    },
+    "Session copied (%lld lines)": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sitzung kopiert (%lld Zeilen)"
+          }
+        }
+      }
+    },
+    "Sessions are written to ~/Library/Application Support/de.aiity.saiity and never leave the device.\n\nSystem audio includes everyone on a call. Recording other people may require their consent, or be regulated where you are — it is worth telling them.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sitzungen werden nach ~/Library/Application Support/de.aiity.saiity geschrieben und verlassen dieses Gerät nie.\n\nDer Systemton nimmt alle in einem Anruf auf. Andere Personen aufzuzeichnen kann deren Einwilligung erfordern oder bei dir gesetzlich geregelt sein – es lohnt sich, es ihnen zu sagen."
           }
         }
       }
@@ -1697,6 +2571,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Deckend ist über hellem Video die lesbare Wahl – Glas lässt weißen Text auf heller Szene bei rund 2:1 Kontrast stehen."
+          }
+        }
+      }
+    },
+    "Space": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Leertaste"
           }
         }
       }
@@ -1812,6 +2697,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Speicher"
+          }
+        }
+      }
+    },
+    "Switching to %@…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wechselt zu %@ …"
           }
         }
       }
@@ -1959,6 +2855,18 @@
         }
       }
     },
+    "This is a sample subtitle line, to check size and legibility.": {
+      "extractionState": "manual",
+      "comment": "Crossed on purpose. This is the preview bubble's TRANSLATED row, which must read in the UI language — do not 'correct' it to an English value.",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dies ist eine Beispiel-Untertitelzeile, um Größe und Lesbarkeit zu prüfen."
+          }
+        }
+      }
+    },
     "This only picks a starting model. You can change it any time in Settings.": {
       "extractionState": "manual",
       "localizations": {
@@ -1981,12 +2889,67 @@
         }
       }
     },
+    "Transcribed on device by sAiity.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Auf diesem Mac mit sAiity transkribiert."
+          }
+        }
+      }
+    },
+    "Transcript copied": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transkript kopiert"
+          }
+        }
+      }
+    },
+    "Transcript deleted": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transkript gelöscht"
+          }
+        }
+      }
+    },
+    "Transcript — %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transkript – %@"
+          }
+        }
+      }
+    },
     "Transcripts": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Transkripte"
+          }
+        }
+      }
+    },
+    "Transcripts are saved to this Mac": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transkripte werden auf diesem Mac gespeichert"
           }
         }
       }
@@ -2031,12 +2994,45 @@
         }
       }
     },
+    "Translated to": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Übersetzt nach"
+          }
+        }
+      }
+    },
+    "Translating with %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Übersetzt mit %@"
+          }
+        }
+      }
+    },
     "Translation": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Übersetzung"
+          }
+        }
+      }
+    },
+    "Translation paused — the Mac is short of memory. It comes back on its own.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Übersetzung pausiert – der Mac hat zu wenig Arbeitsspeicher. Sie kommt von selbst zurück."
           }
         }
       }
@@ -2048,6 +3044,50 @@
           "stringUnit": {
             "state": "translated",
             "value": "Auch die Übersetzung läuft auf diesem Mac und braucht daher ein eigenes Modell – MADLAD, 1,86 GB, für rund 450 Sprachen. Es steht auf dem nächsten Schritt neben dem Erkennungsmodell."
+          }
+        }
+      }
+    },
+    "Translation unavailable: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Übersetzung nicht verfügbar: %@"
+          }
+        }
+      }
+    },
+    "Translation: %@ — loads on start": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Übersetzung: %@ – wird beim Start geladen"
+          }
+        }
+      }
+    },
+    "Two downloads and you are set": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zwei Downloads, dann kann es losgehen"
+          }
+        }
+      }
+    },
+    "Undo": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Widerrufen"
           }
         }
       }
@@ -2080,6 +3120,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Führt Berechtigung und Modelle von vorn durch."
+          }
+        }
+      }
+    },
+    "Warming up MADLAD…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MADLAD wird aufgewärmt …"
           }
         }
       }
@@ -2145,6 +3196,28 @@
         }
       }
     },
+    "Window": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fenster"
+          }
+        }
+      }
+    },
+    "Write this session to disk. Off by default.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Schreibt diese Sitzung auf die Festplatte. Standardmäßig aus."
+          }
+        }
+      }
+    },
     "You can skip this and let it download the first time you start captions — it just means waiting then instead of now.": {
       "extractionState": "manual",
       "localizations": {
@@ -2167,12 +3240,45 @@
         }
       }
     },
+    "audio stream stopped": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Audiostream gestoppt"
+          }
+        }
+      }
+    },
+    "detecting language": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "erkennt Sprache"
+          }
+        }
+      }
+    },
     "in use": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "aktiv"
+          }
+        }
+      }
+    },
+    "listening…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "hört zu …"
           }
         }
       }
@@ -2199,6 +3305,17 @@
         }
       }
     },
+    "nothing is playing": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "nichts wird abgespielt"
+          }
+        }
+      }
+    },
     "recommended": {
       "localizations": {
         "de": {
@@ -2220,6 +3337,39 @@
         }
       }
     },
+    "sAiity — on-device live subtitles": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "sAiity – Live-Untertitel direkt auf dem Gerät"
+          }
+        }
+      }
+    },
+    "sAiity, recording": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "sAiity, zeichnet auf"
+          }
+        }
+      }
+    },
+    "selected": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ausgewählt"
+          }
+        }
+      }
+    },
     "size unknown": {
       "extractionState": "manual",
       "localizations": {
@@ -2227,6 +3377,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Größe unbekannt"
+          }
+        }
+      }
+    },
+    "starting…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "startet …"
+          }
+        }
+      }
+    },
+    "● Recording · %lld min · %lld lines": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "● Aufzeichnung · %lld Min. · %lld Zeilen"
           }
         }
       }

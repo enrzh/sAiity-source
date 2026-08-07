@@ -27,9 +27,18 @@ struct TranslationTargetPicker: View {
     private var available: [AppLanguage] { matches.filter { supported.contains($0.code) } }
     private var elsewhere: [AppLanguage] { matches.filter { !supported.contains($0.code) } }
 
+    /// Whose language coverage this list reflects.
+    ///
+    /// With no translator chosen the sheet still has to list something, so it
+    /// previews the recommended one and says so in the subtitle — an empty list
+    /// would leave the user with no way to understand why.
+    private var engine: TranslationEngine { state.translationEngine ?? .recommended }
+
     var body: some View {
         SheetShell(title: "Translate captions to",
-                   subtitle: "Using \(state.translationEngine.displayName)",
+                   subtitle: state.translationEngine == nil
+                       ? "\(engine.displayName) — recommended, not chosen yet"
+                       : "Using \(engine.displayName)",
                    width: 500, height: 560,
                    headerAccessory: {
             Button("Off") {
@@ -67,7 +76,7 @@ struct TranslationTargetPicker: View {
     private var list: some View {
         List {
             if !available.isEmpty {
-                Section("Available with \(state.translationEngine.displayName)") {
+                Section("Available with \(engine.displayName)") {
                     ForEach(available) { row($0) }
                 }
             }
@@ -95,7 +104,7 @@ struct TranslationTargetPicker: View {
             HStack {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(lang.displayName)
-                    if state.translationEngine == .qwen,
+                    if engine == .qwen,
                        !LLMLanguageProvider.strongTier.contains(lang.code) {
                         Text("Outside Qwen's strongest languages — quality varies.")
                             .font(.caption2).foregroundStyle(.secondary)
@@ -124,7 +133,7 @@ struct TranslationTargetPicker: View {
 
     private func loadSupported() async {
         loading = true
-        supported = await state.translationEngine.languages.supportedCanonicalCodes()
+        supported = await engine.languages.supportedCanonicalCodes()
         loading = false
     }
 }
@@ -140,7 +149,7 @@ struct TargetUnsupportedNotice: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Label("\(state.translationEngine.displayName) cannot translate into \(AppLanguage(code: target).displayName).",
+            Label("\((state.translationEngine ?? .recommended).displayName) cannot translate into \(AppLanguage(code: target).displayName).",
                   systemImage: "exclamationmark.triangle")
                 .font(.caption).foregroundStyle(Color.orange)
             if engines.isEmpty {

@@ -128,18 +128,18 @@ final class BubbleContentView: NSView {
         // nothing when clicked. Now it opens the main window — the bubble is
         // often the only part of sAiity on screen.
         menuButton.image = NSImage(systemSymbolName: "slider.horizontal.3",
-                                   accessibilityDescription: "Open sAiity")?
+                                   accessibilityDescription: nil)?
             .withSymbolConfiguration(cfg)
         menuButton.contentTintColor = NSColor.white.withAlphaComponent(0.75)
         menuButton.alphaValue = 0
-        menuButton.toolTip = "Open sAiity"
+        menuButton.toolTip = String(localized: "Open sAiity")
 
         copyButton.image = NSImage(systemSymbolName: "doc.on.doc",
-                                   accessibilityDescription: "Copy caption")?
+                                   accessibilityDescription: nil)?
             .withSymbolConfiguration(cfg)
         copyButton.contentTintColor = NSColor.white.withAlphaComponent(0.75)
         copyButton.alphaValue = 0
-        copyButton.toolTip = "Copy this line"
+        copyButton.toolTip = String(localized: "Copy this line")
 
         // Recording writes a durable, permanent record — it gets a marker on the
         // one element guaranteed to be on screen.
@@ -152,11 +152,11 @@ final class BubbleContentView: NSView {
         // no roles, no labels — a subtitle app whose own subtitles and controls
         // a screen reader could not see.
         menuButton.setAccessibilityRole(.button)
-        menuButton.setAccessibilityLabel("Open sAiity settings")
+        menuButton.setAccessibilityLabel(String(localized: "Open sAiity settings"))
         copyButton.setAccessibilityRole(.button)
-        copyButton.setAccessibilityLabel("Copy this caption")
+        copyButton.setAccessibilityLabel(String(localized: "Copy this caption"))
         recordDot.setAccessibilityRole(.image)
-        recordDot.setAccessibilityLabel("Recording a transcript")
+        recordDot.setAccessibilityLabel(String(localized: "Recording a transcript"))
 
         for v in [menuButton, copyButton, recordDot] {
             v.translatesAutoresizingMaskIntoConstraints = false
@@ -347,14 +347,16 @@ final class BubbleContentView: NSView {
         copyFlashWork?.cancel()
         let cfg = NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
         copyButton.image = NSImage(systemSymbolName: "checkmark",
-                                   accessibilityDescription: "Copied")?
+                                   accessibilityDescription: nil)?
             .withSymbolConfiguration(cfg)
         copyButton.contentTintColor = NSColor.systemGreen
+        copyButton.setAccessibilityLabel(String(localized: "Copied"))
         let w = DispatchWorkItem { [weak self] in
             self?.copyButton.image = NSImage(systemSymbolName: "doc.on.doc",
-                                             accessibilityDescription: "Copy caption")?
+                                             accessibilityDescription: nil)?
                 .withSymbolConfiguration(cfg)
             self?.copyButton.contentTintColor = NSColor.white.withAlphaComponent(0.75)
+            self?.copyButton.setAccessibilityLabel(String(localized: "Copy this caption"))
         }
         copyFlashWork = w
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: w)
@@ -462,9 +464,9 @@ final class OverlayWindow: NSPanel {
         stack.spacing = 6
         stack.translatesAutoresizingMaskIntoConstraints = false
         label.setAccessibilityRole(.staticText)
-        label.setAccessibilityLabel("Live caption")
+        label.setAccessibilityLabel(String(localized: "Live caption"))
         translationLabel.setAccessibilityRole(.staticText)
-        translationLabel.setAccessibilityLabel("Translation")
+        translationLabel.setAccessibilityLabel(String(localized: "Translation"))
         stack.addArrangedSubview(label)
         stack.addArrangedSubview(translationLabel)
 

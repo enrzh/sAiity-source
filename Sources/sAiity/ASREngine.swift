@@ -7,7 +7,25 @@ enum ASREngine: String, CaseIterable, Sendable {
     case nemotron
     case parakeetEou
 
-    @Defaults(rawKey: "asrEngine") static var current: ASREngine = .nemotron
+    /// What the user has chosen — or nothing, which is the honest state of a
+    /// Mac where no recognition model has been downloaded yet.
+    ///
+    /// This was `= .nemotron`, and a non-optional default is not a small lie:
+    /// Settings painted Nemotron as the selected engine, the Models page badged
+    /// it "in use", and neither had any bytes behind it. Pressing Start then
+    /// committed to a 634 MB download nobody had agreed to. Nothing is chosen
+    /// on the user's behalf here; `recommended` is what the UI offers instead.
+    @Defaults(optionalRawKey: "asrEngine") static var selected: ASREngine?
+
+    /// The engine to suggest when nothing is chosen. A suggestion is not a
+    /// selection: it is rendered as a badge and a Download button, never as a
+    /// filled radio.
+    static let recommended: ASREngine = .nemotron
+
+    /// The engine the pipeline runs. Only reached once `selected` is non-nil —
+    /// `AppDelegate.start()` refuses to begin otherwise — so the fallback here
+    /// keeps the backend types non-optional without ever deciding anything.
+    static var effective: ASREngine { selected ?? recommended }
 
     var displayName: String {
         switch self {
@@ -85,9 +103,14 @@ enum ASREngine: String, CaseIterable, Sendable {
                     family: .recognition,
                     title: fast ? String(localized: "Nemotron (multilingual, fast)")
                                  : String(localized: "Nemotron (multilingual)"),
+                    // The balanced tier, not the fast one: its own detail text
+                    // warns the fast tier costs roughly double the encoder work.
                     detail: fast
                         ? String(localized: "The same multilingual model decoding every \(ms) ms instead of \(NemotronEngine.chunkMs) — captions appear about twice as fast, for roughly double the encoder work per second of audio. Noticeable on battery. A separate download; both tiers can be installed.")
                         : summary,
+                    // The balanced tier, not the fast one: its own detail text
+                    // warns the fast tier costs roughly double the encoder work.
+                    recommended: !fast,
                     licence: "NVIDIA Open Model License · huggingface.co/FluidInference",
                     advertisedBytes: 634 * 1_048_576,
                     // Each tier is measured and deleted as ITS OWN directory —
@@ -107,6 +130,9 @@ enum ASREngine: String, CaseIterable, Sendable {
                 family: .recognition,
                 title: String(localized: "Parakeet EOU (English)"),
                 detail: summary,
+                // A deliberate narrowing, not a first choice — it produces
+                // confident nonsense on anything but English.
+                recommended: false,
                 licence: "NVIDIA / CC-BY-4.0 · huggingface.co/FluidInference",
                 advertisedBytes: 437 * 1_048_576,
                 storage: .directory(ParakeetEouEngine.assetDirectory,

@@ -55,9 +55,14 @@ final class AppState {
     var launchAtLogin = false
     var launchAtLoginNote = ""
 
-    var engine = ASREngine.current {
+    /// Optional so a fresh install can show no engine selected at all, rather
+    /// than painting one segment of the picker and leaving the label underneath
+    /// to admit it is not downloaded.
+    var engine: ASREngine? = ASREngine.selected {
         didSet {
             guard engine != oldValue else { return }
+            ASREngine.selected = engine
+            guard let engine else { return }
             NotificationCenter.default.post(name: .saiityEngineChanged, object: nil,
                                             userInfo: ["engine": engine.rawValue,
                                                        "chunkMs": nemotronTier])
@@ -71,6 +76,7 @@ final class AppState {
         didSet {
             guard nemotronTier != oldValue else { return }
             NemotronEngine.selectedChunkMs = nemotronTier
+            guard let engine else { return }
             NotificationCenter.default.post(name: .saiityEngineChanged, object: nil,
                                             userInfo: ["engine": engine.rawValue,
                                                        "chunkMs": nemotronTier])
@@ -88,10 +94,10 @@ final class AppState {
     var activeDownload: String?
     var downloadProgress: DownloadProgress?
     var modelError: String?
-    var translationEngine = TranslationEngine.current {
+    var translationEngine: TranslationEngine? = TranslationEngine.selected {
         didSet {
             guard translationEngine != oldValue else { return }
-            TranslationEngine.current = translationEngine
+            TranslationEngine.selected = translationEngine
             // Whisper replaces recognition, so switching to or from it changes
             // which ASR backend runs.
             NotificationCenter.default.post(name: .saiityTranslateTargetChanged, object: nil,
@@ -232,10 +238,14 @@ final class AppState {
 
     func refreshTargetSupport() async {
         guard let t = translateTo else { targetSupportedByEngine = true; return }
-        targetSupportedByEngine = await translationEngine.languages
+        // Ask the engine that would actually run. Reporting "unsupported" when
+        // nothing is chosen produced a flatly false claim — "MADLAD cannot
+        // translate into English" — from an engine the user had not picked.
+        let asked = translationEngine ?? .recommended
+        targetSupportedByEngine = await asked.languages
             .supportedCanonicalCodes().contains(t)
     }
-    var llmModel = LocalModel.selected {
+    var llmModel: LocalModel? = LocalModel.selected {
         didSet {
             guard llmModel != oldValue else { return }
             LocalModel.selected = llmModel
@@ -253,7 +263,8 @@ final class AppState {
         // Re-read selections from defaults. Without this the window shows
         // whatever was current when the AppState singleton was created, which
         // is one of the ways "selecting a model appears to do nothing".
-        translationEngine = TranslationEngine.current
+        engine = ASREngine.selected
+        translationEngine = TranslationEngine.selected
         llmModel = LocalModel.selected
         // Was missing, so a target picked from the menu bar never appeared here.
         adoptTarget(UserDefaults.standard.string(forKey: "translateTo"))

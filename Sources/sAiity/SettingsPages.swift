@@ -14,8 +14,19 @@ import SwiftUI
 struct ModelsView: View {
     @Bindable var state: AppState
 
+    /// Recommended first, otherwise registry order. The Recognition section
+    /// used to open with the fast Nemotron tier — the ~640 MB variant whose own
+    /// description warns it costs roughly double the encoder work — above the
+    /// balanced one that is actually the right first download.
     private func assets(_ family: ModelAsset.Family) -> [AssetStatus] {
         state.assets.filter { $0.asset.family == family }
+            .enumerated()
+            .sorted { a, b in
+                a.element.asset.recommended == b.element.asset.recommended
+                    ? a.offset < b.offset
+                    : a.element.asset.recommended
+            }
+            .map(\.element)
     }
 
     var body: some View {
@@ -70,11 +81,20 @@ struct ModelsView: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(s.asset.title).font(.body.weight(.medium))
-                    if s.asset.use.isSelected {
-                        Text("in use").font(.caption2)
-                            .padding(.horizontal, 6).padding(.vertical, 1)
-                            .background(.tint.opacity(0.2), in: Capsule())
+                    // Two independent facts, two badges. State first: "in use"
+                    // used to be shown for the stored preference alone, so a
+                    // fresh install badged two rows that had no bytes behind
+                    // them, right next to their own "634 MB to download" line.
+                    if s.asset.use.isSelected, s.isInstalled {
+                        badge("in use")
+                    } else if s.asset.use.isSelected {
+                        badge("selected")
                     }
+                    // Then the suggestion, which is a property of the model and
+                    // not of this disk — so it stays visible after downloading,
+                    // where it answers "which of these should I pick?" rather
+                    // than "which should I fetch?".
+                    if s.asset.recommended { badge("recommended") }
                 }
                 Text(s.asset.detail).font(.caption).foregroundStyle(.secondary)
                 sizeLine(s)
@@ -88,6 +108,12 @@ struct ModelsView: View {
             trailingControl(s)
         }
         .padding(.vertical, 3)
+    }
+
+    private func badge(_ text: LocalizedStringKey) -> some View {
+        Text(text).font(.caption2)
+            .padding(.horizontal, 6).padding(.vertical, 1)
+            .background(.tint.opacity(0.2), in: Capsule())
     }
 
     @ViewBuilder
@@ -141,19 +167,33 @@ struct CaptionsView: View {
         Form {
             Section("Engine") {
                 Picker("Recognition", selection: $state.engine) {
-                    ForEach(ASREngine.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                    // Optional tags, so "nothing chosen" is a state the control
+                    // can express. A segmented picker always paints one segment,
+                    // which is how a fresh install came to claim an engine it had
+                    // not downloaded; with a nil selection it paints none.
+                    ForEach(ASREngine.allCases, id: \.self) {
+                        Text($0.displayName).tag(Optional($0))
+                    }
                 }
                 .pickerStyle(.segmented)
-                Text(state.engine.summary).font(.caption).foregroundStyle(.secondary)
-                // Stated here rather than left to be discovered, because a
-                // limited engine does not fail on the wrong language — it
-                // transcribes it into confident nonsense.
-                if case .only(let codes) = state.engine.coverage {
-                    let names = codes.sorted()
-                        .map { Locale.current.localizedString(forLanguageCode: $0) ?? $0 }
-                    Label("Recognises \(names.joined(separator: ", ")) only. Other languages come out as nonsense rather than an error.",
-                          systemImage: "exclamationmark.triangle")
-                        .font(.caption).foregroundStyle(.orange)
+                if let engine = state.engine {
+                    Text(engine.summary).font(.caption).foregroundStyle(.secondary)
+                    // Stated here rather than left to be discovered, because a
+                    // limited engine does not fail on the wrong language — it
+                    // transcribes it into confident nonsense.
+                    if case .only(let codes) = engine.coverage {
+                        let names = codes.sorted()
+                            .map { Locale.current.localizedString(forLanguageCode: $0) ?? $0 }
+                        Label("Recognises \(names.joined(separator: ", ")) only. Other languages come out as nonsense rather than an error.",
+                              systemImage: "exclamationmark.triangle")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
+                } else {
+                    // Nothing chosen. Name the good option instead of quietly
+                    // making the choice — a suggestion the user can act on.
+                    Label("No recognition model chosen yet. \(ASREngine.recommended.displayName) is the one to start with: it handles any language and identifies it from the audio. Download it under Models.",
+                          systemImage: "sparkles")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 if state.engine == .nemotron {
                     Picker("Caption latency", selection: $state.nemotronTier) {
@@ -171,7 +211,7 @@ struct CaptionsView: View {
                             .font(.caption).foregroundStyle(.orange)
                     }
                 }
-                if state.engine.needsDownload {
+                if state.engine?.needsDownload == true {
                     Label("Not downloaded yet — see Models.", systemImage: "arrow.down.circle")
                         .font(.caption).foregroundStyle(.orange)
                 }
@@ -193,12 +233,17 @@ struct CaptionsView: View {
                 if state.translateTo != nil {
                     Picker("Translated by", selection: $state.translationEngine) {
                         ForEach(TranslationEngine.allCases, id: \.self) { e in
-                            Text(e.displayName).tag(e)
+                            Text(e.displayName).tag(Optional(e))
                         }
                     }
                     .pickerStyle(.segmented)
-                    Text(state.translationEngine.summary)
-                        .font(.caption).foregroundStyle(.secondary)
+                    if let te = state.translationEngine {
+                        Text(te.summary).font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Label("No translator chosen yet. \(TranslationEngine.recommended.displayName) is the one to start with: fastest of the two, and it only ever translates. Download it under Models.",
+                              systemImage: "sparkles")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
 
                     // Any engine can be asked for a language it cannot do, not
                     // just Whisper — and a stored target survives an engine
@@ -210,12 +255,24 @@ struct CaptionsView: View {
                         HStack {
                             Button("Choose model…") { state.showLocalModels = true }
                                 .controlSize(.small)
-                            Text("\(state.llmModel.label) · \(state.llmModel.sizeText)")
-                                .font(.caption).foregroundStyle(.secondary)
+                            if let m = state.llmModel {
+                                // Say whether the bytes are here. The advertised
+                                // size alone read as "installed and this big".
+                                Text(m.isDownloaded
+                                     ? "\(m.label) · \(m.sizeText)"
+                                     : "\(m.label) · \(m.sizeText) — not downloaded yet")
+                                    .font(.caption)
+                                    .foregroundStyle(m.isDownloaded ? .secondary : Color.orange)
+                            } else if let s = LocalModel.suggested {
+                                Text("No model chosen — \(s.label) is the one to start with")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
                         }
                     }
-                    Text("Licence: \(state.translationEngine.licence)")
-                        .font(.caption2).foregroundStyle(.tertiary)
+                    if let te = state.translationEngine {
+                        Text("Licence: \(te.licence)")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                    }
                 }
             }
 
@@ -238,7 +295,7 @@ struct CaptionsView: View {
         }
         .scrollContentBackground(.hidden)
         .formStyle(.grouped)
-        .task(id: "\(state.translateTo ?? "")|\(state.translationEngine.rawValue)") {
+        .task(id: "\(state.translateTo ?? "")|\(state.translationEngine?.rawValue ?? "none")") {
             await state.refreshTargetSupport()
         }
         .sheet(isPresented: $state.showLocalModels) { LocalModelsView(state: state) }
@@ -574,7 +631,7 @@ struct LibraryView: View {
             }
 
             Section("Status") {
-                LabeledContent("Engine", value: state.engine.displayName)
+                LabeledContent("Engine", value: state.engine?.displayName ?? String(localized: "None chosen"))
                 LabeledContent("Screen Recording",
                                value: CGPreflightScreenCaptureAccess()
                                    ? String(localized: "Granted")

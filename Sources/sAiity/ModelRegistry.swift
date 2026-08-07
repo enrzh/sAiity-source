@@ -21,32 +21,6 @@ struct DownloadProgress: Sendable {
 
 typealias ProgressSink = @Sendable (DownloadProgress) -> Void
 
-/// A place in System Settings that can do something the app is not allowed to.
-enum SystemRoute: Sendable {
-    case storage
-    case languageAndRegion
-
-    var url: URL? {
-        switch self {
-        case .storage:
-            return URL(string: "x-apple.systempreferences:com.apple.settings.Storage")
-        case .languageAndRegion:
-            return URL(string: "x-apple.systempreferences:com.apple.Localization-Settings.extension")
-        }
-    }
-
-    var label: String {
-        switch self {
-        case .storage: return "Open Storage Settings"
-        case .languageAndRegion: return "Open Language & Region"
-        }
-    }
-
-    func open() {
-        if let url { NSWorkspace.shared.open(url) }
-    }
-}
-
 /// How an asset's bytes are laid out, and how "finished" is told from "started".
 enum AssetStorage: Sendable {
     /// A directory we own. `markers` are paths relative to it that must ALL be
@@ -87,13 +61,15 @@ enum AssetUse: Sendable {
         case .never:
             return false
         case .whenRecognitionEngine(let e):
-            return ASREngine.current == e
+            return ASREngine.selected == e
         case .whenNemotronTier(let ms):
-            return ASREngine.current == .nemotron && NemotronEngine.selectedChunkMs == ms
+            return ASREngine.selected == .nemotron && NemotronEngine.selectedChunkMs == ms
         case .whenTranslator(let t):
-            return TranslationEngine.current == t
+            return TranslationEngine.selected == t
         case .whenQwenVariant(let f):
-            return TranslationEngine.current == .qwen && LocalModel.selected.file == f
+            // `selected?.file == f`, never `selected!` and never `?? ""` — with
+            // nothing chosen this has to be false, not "matches the empty name".
+            return TranslationEngine.selected == .qwen && LocalModel.selected?.file == f
         }
     }
 }
@@ -109,6 +85,13 @@ struct ModelAsset: Identifiable, Sendable {
     let family: Family
     let title: String
     let detail: String
+    /// Worth downloading first, of the options in this family.
+    ///
+    /// The Models page is the only surface that lists everything together with
+    /// its price and a Download button — it is where "which of these do I
+    /// want?" is actually decided, and it had nothing to say. No default value:
+    /// a new descriptor has to answer.
+    let recommended: Bool
     /// The weights' own terms, and where they come from.
     ///
     /// These are downloaded at first use, not shipped inside the app, so this is

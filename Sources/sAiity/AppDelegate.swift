@@ -24,7 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                                        userDriverDelegate: nil)
     private let overlay = OverlayWindow()
     private let capture = SystemAudioCapture()
-    private var engine = ASREngine.current
+    private var engine = ASREngine.effective
     private var backend: TranscriptionBackend = AppDelegate.makeActiveBackend() {
         // The capture callback outlives any one backend — see BackendSink.
         didSet { captureSink.point(at: backend) }
@@ -40,10 +40,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// every session (its sliding window slid but its commit index never
     /// rebased), and it was slower than Nemotron plus a real translator anyway.
     static func makeActiveBackend() -> TranscriptionBackend {
-        ASREngine.current.makeBackend()
+        ASREngine.effective.makeBackend()
     }
 
-    private var activeTranslator: Translating? = TranslationEngine.current.makeTranslator()
+    private var activeTranslator: Translating? = TranslationEngine.effective.makeTranslator()
     private var translatorReady = false
 
     /// Serialises translator replacement, and lets a superseded swap bow out.
@@ -73,7 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // A newer choice landed while we were releasing. Let that one do the
             // loading rather than paying for a model already superseded.
             guard generation == translatorGeneration else { return }
-            activeTranslator = TranslationEngine.current.makeTranslator()
+            activeTranslator = TranslationEngine.effective.makeTranslator()
             await prepareTranslatorIfNeeded()
         }
     }
@@ -86,7 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         activeTranslator = nil
         translatorReady = false
         await outgoing?.stop()
-        activeTranslator = TranslationEngine.current.makeTranslator()
+        activeTranslator = TranslationEngine.effective.makeTranslator()
         MemoryPolicy.releaseCaches()
         NSLog("sAiity memory: released translator (\(reason)) — \(MemoryPolicy.describeFootprint())")
     }
@@ -128,8 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in
                 await unloadTranslator(reason: "system memory pressure")
                 if state.isActive {
-                    setStatus("Translation paused — the Mac is short of memory. "
-                              + "It comes back on its own.")
+                    setStatus("Translation paused — the Mac is short of memory. It comes back on its own.")
                 }
             }
         }
@@ -146,8 +145,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `translate()` quietly returned nil forever.
     @MainActor
     private func prepareTranslatorIfNeeded() async {
-        guard let target = translateTo,
-              let engine = activeTranslator, !translatorReady else { return }
+        guard let target = translateTo, !translatorReady else { return }
+        guard TranslationEngine.selected != nil, let engine = activeTranslator else {
+            // A target without a translator: honest, and recoverable in one step.
+            setStatus("No translator chosen — pick one in Settings → Captions")
+            return
+        }
         // Loading is deferred until a session is actually running, deliberately.
         // Choosing a target used to load the model there and then — 1.9 GB for
         // MADLAD, up to 2.5 GB for a large GGUF — and hold it for as long as the
@@ -159,14 +162,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         let src = detectedLanguage ?? locale.identifier(.bcp47)
-        NSLog("sAiity translator: selected=\(TranslationEngine.current.rawValue) object=\(engine.name) src=\(src) dst=\(target)")
+        NSLog("sAiity translator: selected=\(TranslationEngine.effective.rawValue) object=\(engine.name) src=\(src) dst=\(target)")
         do {
             try await engine.prepare(from: src, to: target) { [weak self] msg in
                 NSLog("sAiity translator progress: \(msg)")
-                Task { @MainActor in self?.setStatus(msg) }
+                Task { @MainActor in self?.setStatus(localized: msg) }
             }
             translatorReady = true
-            setStatus("Translating with \(TranslationEngine.current.displayName)")
+            setStatus("Translating with \(TranslationEngine.effective.displayName)")
         } catch {
             translatorReady = false
             setStatus("Translation unavailable: \(error.localizedDescription)")
@@ -211,7 +214,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var translateTo: String? = UserDefaults.standard.string(forKey: "translateTo") {
         didSet { UserDefaults.standard.set(translateTo, forKey: "translateTo") }
     }
-    private var statusLine = "Idle"
+    private var statusLine = String(localized: "Idle")
     private var showedAnyCaption = false
 
     // Recording is deliberately separate from captioning and defaults to OFF:
@@ -351,13 +354,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 string: text,
                 attributes: [.font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)])
         } else {
-            credits = NSAttributedString(string: "Credits file missing from this build.")
+            credits = NSAttributedString(string: String(localized: "Credits file missing from this build."))
         }
         ForegroundActivation.begin()
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "sAiity",
             .credits: credits,
-            .init(rawValue: "Copyright"): "MIT licensed. On-device live subtitles.",
+            .init(rawValue: "Copyright"): String(localized: "MIT licensed. On-device live subtitles."),
         ])
         // The standard About panel has no close callback, so give up the Dock
         // presence when the app next loses focus. One-shot: the token has to be
@@ -391,8 +394,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         updateStatusItemIcon()
+        // Deliberately not localised: a two-glyph fallback that only appears if
+        // icon rendering fails, and a stable marker beats a per-locale one.
         if statusItem.button?.image == nil { statusItem.button?.title = "CC" }
-        statusItem.button?.toolTip = "sAiity — on-device live subtitles"
+        statusItem.button?.toolTip = String(localized: "sAiity — on-device live subtitles")
         overlay.onCopy = { [weak self] in self?.copyCurrentLine() }
         overlay.onOpenWindow = { SettingsWindowController.show() }
         NotificationCenter.default.addObserver(
@@ -455,7 +460,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Nemotron is one multilingual model that identifies the language from
         // audio, so there is no locale to choose and nothing to query. This used
         // to round-trip the system speech daemon on every launch.
-        statusLine = "Idle"
+        statusLine = String(localized: "Idle")
         rebuildMenu()
         // First run: explain, get the permission, and download deliberately —
         // rather than the old behaviour of doing all three silently behind a
@@ -517,6 +522,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Shown for discoverability. The real binding is the global hot key —
             // a menu keyEquivalent only fires while this app is frontmost, which
             // a menu-bar app never is.
+            // Glue only. The modifier glyphs and the brackets read the same in every
+            // locale, so this deliberately does not go through the catalog.
             toggleItem.title += "  (\(sc.displayString))"
         }
         menu.addItem(toggleItem)
@@ -536,7 +543,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let rec = NSMenuItem(title: String(localized: "Save transcript"), action: #selector(toggleSaveTranscript),
                              keyEquivalent: "")
         rec.state = saveTranscript ? .on : .off
-        rec.toolTip = "Write this session to disk. Off by default."
+        rec.toolTip = String(localized: "Write this session to disk. Off by default.")
         menu.addItem(rec)
         menu.addItem(transcriptsMenuItem())
 
@@ -610,7 +617,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func setStatus(_ text: String) {
+    /// The menu-bar status line.
+    ///
+    /// Takes a `String.LocalizationValue` rather than a `String` on purpose: a
+    /// bare literal at a call site then goes through the catalog automatically,
+    /// and forgetting one becomes a compile-time question instead of something
+    /// you only discover by launching in German. Every status the user reads
+    /// while captions start, run and fail comes through here.
+    private func setStatus(_ text: String.LocalizationValue) {
+        setStatus(localized: String(localized: text))
+    }
+
+    /// For text that is already localised — the ASR and translator progress
+    /// sinks, whose messages carry runtime percentages and so are localised at
+    /// the producer.
+    private func setStatus(localized text: String) {
         statusLine = text
         rebuildMenu()
     }
@@ -620,7 +641,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var recordingLine: String? {
         guard let since = recordingSince else { return nil }
         let m = Int(Date().timeIntervalSince(since) / 60)
-        return "● Recording · \(m) min · \(recordedLines) lines"
+        return String(localized: "● Recording · \(m) min · \(recordedLines) lines")
     }
 
     // MARK: - Actions
@@ -633,7 +654,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let sessions = TranscriptStore.list()
 
         if sessions.isEmpty {
-            let n = NSMenuItem(title: "No saved transcripts", action: nil, keyEquivalent: "")
+            let n = NSMenuItem(title: String(localized: "No saved transcripts"), action: nil, keyEquivalent: "")
             n.isEnabled = false
             menu.addItem(n)
         }
@@ -644,15 +665,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let mins = Int((s.meta.endedAt ?? s.meta.startedAt)
                 .timeIntervalSince(s.meta.startedAt) / 60)
             let mi = NSMenuItem(
-                title: "\(df.string(from: s.meta.startedAt)) · \(s.meta.lineCount) lines · \(mins) min",
+                title: String(localized: "\(df.string(from: s.meta.startedAt)) · \(s.meta.lineCount) lines · \(mins) min"),
                 action: nil, keyEquivalent: "")
             let sub = NSMenu()
-            for (title, sel) in [("Copy as text", #selector(exportCopy(_:))),
-                                 ("Save as Markdown", #selector(exportMarkdown(_:))),
-                                 ("Save as SRT", #selector(exportSRT(_:))),
-                                 ("Reveal in Finder", #selector(revealSession(_:))),
-                                 ("Delete", #selector(deleteSession(_:)))] {
-                let a = NSMenuItem(title: title, action: sel, keyEquivalent: "")
+            // Typed as LocalizationValue, not String: as String these five
+            // titles would be verbatim and the whole submenu would ship English.
+            let actions: [(String.LocalizationValue, Selector)] =
+                [("Copy as text", #selector(exportCopy(_:))),
+                 ("Save as Markdown", #selector(exportMarkdown(_:))),
+                 ("Save as SRT", #selector(exportSRT(_:))),
+                 ("Reveal in Finder", #selector(revealSession(_:))),
+                 ("Delete", #selector(deleteSession(_:)))]
+            for (title, sel) in actions {
+                let a = NSMenuItem(title: String(localized: title), action: sel, keyEquivalent: "")
                 a.representedObject = s.id
                 sub.addItem(a)
             }
@@ -662,7 +687,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if !sessions.isEmpty {
             menu.addItem(.separator())
-            menu.addItem(NSMenuItem(title: "Delete all transcripts…",
+            menu.addItem(NSMenuItem(title: String(localized: "Delete all transcripts…"),
                                     action: #selector(deleteAllSessions), keyEquivalent: ""))
         }
         assignTargets(menu)
@@ -732,16 +757,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if saveTranscript, !UserDefaults.standard.bool(forKey: "recordingNoticeShown") {
             UserDefaults.standard.set(true, forKey: "recordingNoticeShown")
             let a = NSAlert()
-            a.messageText = "Transcripts are saved to this Mac"
-            a.informativeText = """
+            a.messageText = String(localized: "Transcripts are saved to this Mac")
+            a.informativeText = String(localized: """
                 Sessions are written to ~/Library/Application Support/de.aiity.saiity \
                 and never leave the device.
 
                 System audio includes everyone on a call. Recording other people may \
                 require their consent, or be regulated where you are — it is worth \
                 telling them.
-                """
-            a.addButton(withTitle: "OK")
+                """)
+            a.addButton(withTitle: String(localized: "OK"))
             a.alertStyle = .informational
             a.runModal()
         }
@@ -826,7 +851,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Never a template: templates are flattened to a silhouette, which would
         // throw away the whole point of using the app icon.
         img.isTemplate = source == nil
-        img.accessibilityDescription = recording ? "sAiity, recording" : "sAiity"
+        img.accessibilityDescription = recording ? String(localized: "sAiity, recording") : "sAiity"
         statusItem.button?.image = img
     }
 
@@ -842,7 +867,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard new != engine || newTier != engineTier else { return }
         engine = new
         engineTier = newTier
-        ASREngine.current = new
+        ASREngine.selected = new
         let wasRunning = state.isActive
         Task { @MainActor in
             if wasRunning { await backend.stop() }
@@ -882,6 +907,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // and two pumps calling process() concurrently is the exact overlap
         // StreamingASRBackend documents as a reproduced crash.
         guard state == .idle else { return }
+        // Nothing chosen means nothing to run. This used to proceed on a
+        // defaulted engine and turn Start into consent for a 634 MB download the
+        // user had never been shown — the whole reason the selection is now
+        // allowed to be empty. Say what to do instead of doing it.
+        guard let chosen = ASREngine.selected else {
+            setStatus("No recognition model chosen — pick one in Settings → Models")
+            overlay.show(text: String(localized: "Choose a recognition model in Settings → Models."),
+                         isFinal: true)
+            return
+        }
+        // A chosen engine whose bytes are missing is a different case: the user
+        // picked it, so downloading is what they asked for — but say so first.
+        if chosen.needsDownload {
+            setStatus("Downloading \(chosen.displayName) before captions can start…")
+        }
         state = .starting
         showedAnyCaption = false
         overlay.reservesTranslationRow =
@@ -896,7 +936,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         detector.reset()
         detectedLanguage = nil
         setStatus("Starting…")
-        overlay.show(text: "starting…", isFinal: false)
+        overlay.show(text: String(localized: "starting…"), isFinal: false)
 
         sessionTask = Task { @MainActor in
             do {
@@ -904,7 +944,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 try await backend.prepare(locale: locale) { msg in
                     Task { @MainActor [self] in
                         guard self.state == .starting else { return }
-                        self.setStatus(msg)
+                        self.setStatus(localized: msg)
                         self.overlay.show(text: msg, isFinal: false)
                     }
                 }
@@ -948,14 +988,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 setStatus("Listening · \(Self.coverageNote())")
                 NSLog("sAiity engine: started; preparing translator")
                 await prepareTranslatorIfNeeded()
-                overlay.show(text: "listening…", isFinal: false)
+                overlay.show(text: String(localized: "listening…"), isFinal: false)
             } catch is CancellationError {
                 // stopAsync() is awaiting us; it owns the teardown from here.
                 NSLog("sAiity engine: start cancelled before capture began")
             } catch {
                 state = .idle
                 let msg = error.localizedDescription
-                setStatus("Error")
+                // The bubble can be switched off entirely (Settings → Captions),
+                // and a bare "Error" in the menu is then the only thing a failed
+                // first download says. Put the reason where it is always visible.
+                setStatus("Error: \(msg)")
                 overlay.show(text: msg, isFinal: true)
                 NSLog("sAiity start failed: \(msg)")
             }
@@ -1021,14 +1064,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// fires, and Parakeet has no audio-level language identification to ask.
     /// So the constraint is stated when captions start, not discovered later.
     private static func coverageNote() -> String {
-        switch ASREngine.current.coverage {
+        switch ASREngine.effective.coverage {
         case .manyDetectedFromAudio:
-            return "detecting language"
+            return String(localized: "detecting language")
         case .only(let codes):
             let names = codes.sorted().map {
                 Locale.current.localizedString(forLanguageCode: $0) ?? $0
             }
-            return "\(names.joined(separator: ", ")) only"
+            return String(localized: "\(names.joined(separator: ", ")) only")
         }
     }
 
@@ -1037,11 +1080,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // An engine that cannot hear this language does not fail — it produces
         // fluent nonsense, which looks like the app working badly rather than
         // being pointed at the wrong model. Say so plainly.
-        let engine = ASREngine.current
+        let engine = ASREngine.effective
         guard engine.canHear(code) else {
             setStatus("\(engine.displayName) recognises English only — this sounds like \(name)")
-            overlay.show(text: "\(engine.displayName) only recognises English. "
-                             + "This sounds like \(name) — switch engine in Settings → Captions.",
+            overlay.show(text: String(localized: "\(engine.displayName) only recognises English. This sounds like \(name) — switch engine in Settings → Captions."),
                          isFinal: true)
             return
         }
@@ -1073,7 +1115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 try await backend.prepare(locale: locale) { [weak self] msg in
                     Task { @MainActor in
                         guard let self, self.state.isActive else { return }
-                        self.setStatus(msg)
+                        self.setStatus(localized: msg)
                     }
                 }
                 try await backend.start { chunk in
@@ -1166,7 +1208,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Rebuild rather than reuse: a backend that has been stopped is not
         // guaranteed to restart cleanly, and this path is rare.
         backend = AppDelegate.makeActiveBackend()
-        activeTranslator = TranslationEngine.current.makeTranslator()
+        activeTranslator = TranslationEngine.effective.makeTranslator()
         translatorReady = false
     }
 
@@ -1183,7 +1225,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if TestHooks.verboseLogging {
             NSLog("sAiity capture state: \(audio)")
         }
-        let tag = locale.identifier(.bcp47)
+        let tag = AppLanguage(code: locale.identifier(.bcp47)).displayName
         switch audio {
         case .audible:
             setStatus("Listening · \(tag)")
@@ -1192,10 +1234,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // transcript and the translator.
             Task { await backend.flushPending() }
             setStatus("Listening · nothing is playing")
-            if !showedAnyCaption { overlay.show(text: "nothing is playing", isFinal: false) }
+            if !showedAnyCaption { overlay.show(text: String(localized: "nothing is playing"), isFinal: false) }
         case .stalled:
             setStatus("Audio stream stopped — press Stop, then Start")
-            overlay.show(text: "audio stream stopped", isFinal: true)
+            overlay.show(text: String(localized: "audio stream stopped"), isFinal: true)
         }
     }
 
@@ -1349,7 +1391,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return nil
             }
             if TestHooks.verboseLogging {
-                NSLog("sAiity translated [\(TranslationEngine.current.rawValue)]: \(out)")
+                NSLog("sAiity translated [\(TranslationEngine.effective.rawValue)]: \(out)")
             }
             // Guard the generation: Stop clears sessionLines, and a translation
             // resolving across that boundary would patch a line of the NEXT

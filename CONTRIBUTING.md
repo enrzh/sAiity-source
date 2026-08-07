@@ -86,9 +86,18 @@ looks exactly like a working translation until you launch in German:
    `%lf`. When unsure, print `LocalizedStringResource(value).key` rather than
    guessing.
 
-AppKit (`NSAlert`, `NSOpenPanel`, `stringValue`) always needs `String(localized:)`
-explicitly. Proper nouns — model and licence names — carry
-`"shouldTranslate": false` in the catalog instead of a German value.
+AppKit (`NSAlert`, `NSOpenPanel`, `stringValue`, `NSMenuItem(title:)`) always
+needs `String(localized:)` explicitly. Proper nouns — model and licence names —
+carry `"shouldTranslate": false` in the catalog instead of a German value.
+
+Where a whole channel is user-facing, type the channel rather than trusting each
+caller. `AppDelegate.setStatus` takes a `String.LocalizationValue`, so its ~30
+literal call sites key themselves and a missed one is a compile error;
+`setStatus(localized:)` is the separate door for text the producer already
+localised. The ASR and translator progress sinks stay `(String) -> Void` on
+purpose — their messages carry runtime percentages — so they localise at the
+producer instead, which is why `NemotronBackend`, `ParakeetEouEngine` and
+`Translators` all wrap their own progress literals.
 
 Verify by rendering, not by counting keys:
 

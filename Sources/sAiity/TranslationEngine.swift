@@ -24,7 +24,18 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
     case madlad
     case qwen
 
-    @Defaults(rawKey: "translationEngine") static var current: TranslationEngine = .madlad
+    /// The chosen translator, or nothing. Same reasoning as `ASREngine.selected`:
+    /// defaulting to MADLAD badged a 1.86 GB model "in use" on a Mac that had
+    /// never downloaded it and had translation switched off.
+    @Defaults(optionalRawKey: "translationEngine") static var selected: TranslationEngine?
+
+    /// Suggested when nothing is chosen: the fastest of the two, the best
+    /// quality, and the only one whose licence lets it ship.
+    static let recommended: TranslationEngine = .madlad
+
+    /// The translator to build once one is needed. Guarded by `selected` at the
+    /// point translation is switched on.
+    static var effective: TranslationEngine { selected ?? recommended }
 
     var displayName: String {
         switch self {
@@ -71,6 +82,9 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
                 family: .translation,
                 title: "MADLAD-400-3B",
                 detail: summary,
+                // Fastest of the downloadable translators, best quality, and
+                // the only one that only ever translates.
+                recommended: true,
                 licence: "Apache-2.0 (Google MADLAD-400) · huggingface.co/aufklarer",
                 advertisedBytes: 1_860 * 1_048_576,
                 storage: .directory(
@@ -87,6 +101,9 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
                     family: .translation,
                     title: m.label,
                     detail: m.note,
+                    // The one line where the catalogue's own recommendation
+                    // used to die on the way to the Models page.
+                    recommended: m.recommended,
                     licence: m.licence,
                     advertisedBytes: m.bytes,
                     storage: .file(m.localURL, expectedBytes: m.bytes),

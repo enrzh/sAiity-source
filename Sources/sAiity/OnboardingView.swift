@@ -64,10 +64,14 @@ final class OnboardingModel {
     /// Write the choices through the same paths Settings uses, so nothing here
     /// is a special case that can drift.
     func apply() {
-        ASREngine.current = purpose.engine
+        ASREngine.selected = purpose.engine
         state.engine = purpose.engine
         if wantsTranslation {
             state.translateTo = target
+            // The wizard names MADLAD and offers its download, so it is also the
+            // thing that should record the choice — otherwise the user finishes
+            // setup with a translation target and no translator selected.
+            state.translationEngine = .recommended
         } else {
             state.translateTo = nil
         }
@@ -78,7 +82,26 @@ final class OnboardingModel {
     /// default (balanced) one, so `.first` matching the selection is right.
     var recognitionAsset: ModelAsset {
         let all = purpose.engine.assetDescriptors
-        return all.first { $0.use.isSelected } ?? all[0]
+        // `?? all.first { $0.recommended }` and not `?? all[0]`: with nothing
+        // selected yet, index 0 is the fast tier — the ~640 MB variant whose own
+        // description warns it costs roughly double the encoder work.
+        return all.first { $0.use.isSelected }
+            ?? all.first { $0.recommended }
+            ?? all[0]
+    }
+
+    /// Everything this run should offer to download, in the order it is offered.
+    ///
+    /// The purpose step promises, in so many words, that the translation model
+    /// is "listed on the next screen alongside the recognition model" — and it
+    /// was not. The 1.86 GB then arrived mid-session on the first Start, after
+    /// the recognition download, with audio capture already live.
+    var assetsToOffer: [ModelAsset] {
+        var out = [recognitionAsset]
+        if wantsTranslation {
+            out += TranslationEngine.recommended.assetDescriptors
+        }
+        return out
     }
 }
 
@@ -248,29 +271,37 @@ struct OnboardingView: View {
 
     private var models: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("One download and you are set").font(.title2.weight(.semibold))
+            // At most two: the recognition model, plus MADLAD when translation
+            // was asked for. Saying "one" while showing two was the small
+            // version of the same dishonesty as promising a row and not
+            // rendering it.
+            Text(model.assetsToOffer.count > 1
+                 ? "Two downloads and you are set"
+                 : "One download and you are set")
+                .font(.title2.weight(.semibold))
             Text("Recognition always needs a model on this Mac — that is the price of not sending your audio to a server.")
                 .foregroundStyle(.secondary)
 
-            let asset = model.recognitionAsset
-            let status = ModelRegistry.status(of: asset)
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(asset.title).font(.body.weight(.medium))
-                    Text(asset.detail).font(.caption).foregroundStyle(.secondary)
+            ForEach(model.assetsToOffer) { asset in
+                let status = ModelRegistry.status(of: asset)
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(asset.title).font(.body.weight(.medium))
+                        Text(asset.detail).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 12)
+                    if status.isInstalled {
+                        // Onboarding says Ready rather than offering Delete — the
+                        // one place the shared control's installed state is wrong.
+                        Label("Ready", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green).font(.callout)
+                    } else {
+                        AssetControl(state: model.state, status: status, prominent: true)
+                    }
                 }
-                Spacer(minLength: 12)
-                if status.isInstalled {
-                    // Onboarding says Ready rather than offering Delete — the
-                    // one place the shared control's installed state is wrong.
-                    Label("Ready", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green).font(.callout)
-                } else {
-                    AssetControl(state: model.state, status: status, prominent: true)
-                }
+                .padding(12)
+                .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
             }
-            .padding(12)
-            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
 
             if let e = model.state.modelError {
                 Text(e).font(.caption).foregroundStyle(.red)

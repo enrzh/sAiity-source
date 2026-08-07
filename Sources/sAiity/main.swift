@@ -29,7 +29,7 @@ if args.count > 1, args[1].hasPrefix("--") {
         let segs = TranscriptStore.segments(of: session)
         switch format {
         case "srt": print(Export.srt(segs))
-        case "md":  print(Export.markdown(segs, meta: session.meta))
+        case "md":  print(Export.markdown(segs, meta: session.meta, localized: false))
         default:    print(Export.txt(segs))
         }
     default:
@@ -67,21 +67,21 @@ MainActor.assumeIsolated {
     // is no menu bar to show it in) but the key equivalents route through it.
     let main = NSMenu()
     let editItem = NSMenuItem()
-    let edit = NSMenu(title: "Edit")
-    edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
-    edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+    let edit = NSMenu(title: String(localized: "Edit"))
+    edit.addItem(withTitle: String(localized: "Undo"), action: Selector(("undo:")), keyEquivalent: "z")
+    edit.addItem(withTitle: String(localized: "Redo"), action: Selector(("redo:")), keyEquivalent: "Z")
     edit.addItem(.separator())
-    edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-    edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-    edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-    edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)),
+    edit.addItem(withTitle: String(localized: "Cut"), action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+    edit.addItem(withTitle: String(localized: "Copy"), action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+    edit.addItem(withTitle: String(localized: "Paste"), action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+    edit.addItem(withTitle: String(localized: "Select All"), action: #selector(NSText.selectAll(_:)),
                  keyEquivalent: "a")
     editItem.submenu = edit
     main.addItem(editItem)
 
     let windowItem = NSMenuItem()
-    let window = NSMenu(title: "Window")
-    window.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)),
+    let window = NSMenu(title: String(localized: "Window"))
+    window.addItem(withTitle: String(localized: "Close"), action: #selector(NSWindow.performClose(_:)),
                    keyEquivalent: "w")
     windowItem.submenu = window
     main.addItem(windowItem)

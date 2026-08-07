@@ -51,7 +51,7 @@ final class ParakeetEouEngine: FluidStreamingEngine, @unchecked Sendable {
         // making the user discover the download by starting captions.
         let m = StreamingEouAsrManager(chunkSize: chunk)
         try await m.loadModels(to: downloadBase, progressHandler: { p in
-            progress(DownloadProgress(fraction: p.fractionCompleted, note: "Downloading Parakeet EOU…"))
+            progress(DownloadProgress(fraction: p.fractionCompleted, note: String(localized: "Downloading Parakeet EOU…")))
         })
         await m.cleanup()
     }
@@ -60,11 +60,11 @@ final class ParakeetEouEngine: FluidStreamingEngine, @unchecked Sendable {
     let sampleRate: Double = 16_000
 
     func load(progress: @escaping @Sendable (String) -> Void) async throws {
-        if !Self.isDownloaded() { progress("Downloading Parakeet EOU…") }
+        if !Self.isDownloaded() { progress(String(localized: "Downloading Parakeet EOU…")) }
         try await manager.loadModels(to: Self.downloadBase, progressHandler: { p in
-            progress("Downloading Parakeet EOU… \(Int(p.fractionCompleted * 100))%")
+            progress(String(localized: "Downloading Parakeet EOU… \(Int(p.fractionCompleted * 100))%"))
         })
-        progress("Parakeet ready.")
+        progress(String(localized: "Parakeet ready."))
     }
 
     func setPartial(_ callback: @escaping @Sendable (String) -> Void) async {

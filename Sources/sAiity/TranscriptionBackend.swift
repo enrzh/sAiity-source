@@ -111,18 +111,12 @@ extension TranscriptionBackend {
 }
 
 enum BackendError: LocalizedError {
-    case localeUnsupported(Locale)
-    case modelUnavailable(String)
     case notPrepared
 
     var errorDescription: String? {
         switch self {
-        case .localeUnsupported(let l):
-            return "No on-device speech model for \(l.identifier(.bcp47))."
-        case .modelUnavailable(let why):
-            return "Speech model unavailable: \(why)"
         case .notPrepared:
-            return "Backend used before prepare() finished."
+            return String(localized: "Backend used before prepare() finished.")
         }
     }
 }

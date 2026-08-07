@@ -40,4 +40,25 @@ struct Defaults<Value>: Sendable where Value: Sendable {
         self.read = { d, k in d.string(forKey: k).flatMap(Value.init(rawValue:)) }
         self.write = { d, k, v in d.set(v.rawValue, forKey: k) }
     }
+
+    /// A choice that may genuinely never have been made.
+    ///
+    /// The difference from `rawKey` is the whole point: with a non-optional
+    /// fallback there is no way to say "nothing chosen", so a fresh install
+    /// reported a model as selected that it had not downloaded. Writing nil
+    /// removes the key, so "never chosen" and "chosen, then cleared" are the
+    /// same state — which is what the UI needs in order to show neither.
+    ///
+    /// An unrecognised stored value also reads as nil rather than as a
+    /// substitute, so a model that has been removed from the catalogue leaves
+    /// the user with no selection instead of a silent replacement.
+    init<Wrapped>(wrappedValue: Value = nil, optionalRawKey key: String)
+    where Value == Wrapped?, Wrapped: RawRepresentable, Wrapped.RawValue == String {
+        self.key = key
+        self.fallback = wrappedValue
+        self.read = { d, k in d.string(forKey: k).flatMap(Wrapped.init(rawValue:)).map { .some($0) } }
+        self.write = { d, k, v in
+            if let v { d.set(v.rawValue, forKey: k) } else { d.removeObject(forKey: k) }
+        }
+    }
 }

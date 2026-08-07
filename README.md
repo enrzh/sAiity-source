@@ -79,9 +79,9 @@ the whole failure, including the two measurement traps that made it hard to see.
   Screen Recording permission is how macOS gates system audio — there is no
   audio-only permission, and your microphone is never touched.
 - **Recognises on-device**, with two streaming engines:
-  - **Nemotron 3.5 multilingual** (default, 634 MB) — one model, 121 language
-    tags, identifying the spoken language from the audio itself. Two latency
-    tiers, Balanced (2240 ms) and Fast (1120 ms), each its own download.
+  - **Nemotron 3.5 multilingual** (recommended, 634 MB) — one model, 121
+    language tags, identifying the spoken language from the audio itself. Two
+    latency tiers, Balanced (2240 ms) and Fast (1120 ms), each its own download.
   - **Parakeet EOU** (437 MB) — English only, quicker to the first word, and it
     detects end-of-utterance itself.
 - **Translates on-device**, optionally, as a second line:
@@ -105,10 +105,12 @@ Worth saying plainly before you clone it:
   shown or translated, but a speaker who pauses hard mid-sentence still gets a
   break there, and the recogniser's own chunk boundary decides which clause a
   word lands in. Better than it was, not exact.
-- **German is not finished.** Settings, the model catalogue and the first-run
-  setup are translated in full, verified by rendering every pane in German
-  rather than by counting keys. The menu bar, the export formats and the
-  download status lines are not, and fall back to English.
+- **German is a translation, and only German.** Every user-facing surface is
+  covered — menus, settings, setup, the caption bubble's VoiceOver labels, the
+  download and failure lines — verified by rendering them in German rather than
+  by counting keys. But it is one translation by one author, and a third locale
+  would surface list-formatting and pluralisation the catalog does not model
+  yet.
 - **It is not audited**, and captions are not a transcript of record. On-device
   recognition of unclear speech is still recognition of unclear speech.
 

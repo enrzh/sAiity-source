@@ -182,15 +182,37 @@ struct LocalModel: Identifiable, Sendable, Equatable, Codable {
 
     // MARK: - Selection and paths
 
-    static var selected: LocalModel {
+    /// The GGUF the user picked, or nothing.
+    ///
+    /// This used to force-unwrap the recommended built-in whenever nothing was
+    /// stored, so a machine that had downloaded no GGUF at all still showed
+    /// Qwen3.5 2B with its radio filled and its advertised size beside it —
+    /// indistinguishable from an installed model, and a 1.25 GB surprise on the
+    /// first Start. Nothing is chosen on the user's behalf now.
+    ///
+    /// An explicit choice is still honoured before its bytes arrive: the sheet
+    /// is where you both choose and download, so un-choosing a model the moment
+    /// it is picked would make the list impossible to use. What is gone is the
+    /// invented choice.
+    static var selected: LocalModel? {
         get {
             // The key keeps its historical name; renaming it would silently
             // reset every existing user's choice.
-            let f = UserDefaults.standard.string(forKey: "qwenModelFile") ?? ""
-            return all.first { $0.file == f } ?? builtIn.first { $0.recommended }!
+            guard let f = UserDefaults.standard.string(forKey: "qwenModelFile"),
+                  !f.isEmpty else { return nil }
+            // A stored file that is no longer in the catalogue reads as nothing
+            // rather than as a substitute — a silent swap to a different model
+            // is worse than an empty selection the user can see and fix.
+            return all.first { $0.file == f }
         }
-        set { UserDefaults.standard.set(newValue.file, forKey: "qwenModelFile") }
+        set {
+            if let newValue { UserDefaults.standard.set(newValue.file, forKey: "qwenModelFile") }
+            else { UserDefaults.standard.removeObject(forKey: "qwenModelFile") }
+        }
     }
+
+    /// What to suggest when nothing is chosen. A suggestion, never a selection.
+    static var suggested: LocalModel? { builtIn.first { $0.recommended } }
 
     static var directory: URL {
         ModelRegistry.root.appendingPathComponent("qwen", isDirectory: true)

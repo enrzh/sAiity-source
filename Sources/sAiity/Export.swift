@@ -24,20 +24,36 @@ enum Export {
         }.joined(separator: "\n")
     }
 
-    static func markdown(_ segments: [Segment], meta: SessionMeta) -> String {
+    /// The Markdown a person reads.
+    ///
+    /// `localized` exists because this one function serves two audiences. The
+    /// GUI's Save-as-Markdown writes a document for the user, in the user's
+    /// language. `sAiity --export md` writes to stdout, where a script may be
+    /// matching on `- Lines:` — so the CLI keeps stable English headers. Only
+    /// the labels vary; every structural token is outside the localised span,
+    /// and the transcript body is whatever was said either way.
+    static func markdown(_ segments: [Segment], meta: SessionMeta,
+                         localized: Bool = true) -> String {
+        func t(_ key: String.LocalizationValue, _ english: String) -> String {
+            localized ? String(localized: key) : english
+        }
         let df = DateFormatter()
         df.dateStyle = .long
         df.timeStyle = .short
-        var out = "# Transcript — \(df.string(from: meta.startedAt))\n\n"
-        out += "- Language: `\(meta.locale)`\n"
-        if let t = meta.translateTo { out += "- Translated to: `\(t)`\n" }
-        out += "- Lines: \(segments.count)\n\n---\n\n"
+        let started = df.string(from: meta.startedAt)
+        var out = "# " + t("Transcript — \(started)", "Transcript — \(started)") + "\n\n"
+        out += "- " + t("Language", "Language") + ": `\(meta.locale)`\n"
+        if let tr = meta.translateTo {
+            out += "- " + t("Translated to", "Translated to") + ": `\(tr)`\n"
+        }
+        out += "- " + t("Lines: \(segments.count)", "Lines: \(segments.count)") + "\n\n---\n\n"
         for seg in segments {
             out += "**\(clock(seg.t0))** \(seg.text)\n"
             if let tr = seg.tr, !tr.isEmpty { out += "> \(tr)\n" }
             out += "\n"
         }
-        out += "\n_Transcribed on device by sAiity._\n"
+        out += "\n_" + t("Transcribed on device by sAiity.",
+                          "Transcribed on device by sAiity.") + "_\n"
         return out
     }
 

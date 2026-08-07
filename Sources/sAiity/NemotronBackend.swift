@@ -98,7 +98,7 @@ final class NemotronEngine: FluidStreamingEngine, @unchecked Sendable {
             chunkMs: chunkMs,
             to: downloadBase,
             progressHandler: { p in
-                progress(DownloadProgress(fraction: p.fractionCompleted, note: "Downloading Nemotron…"))
+                progress(DownloadProgress(fraction: p.fractionCompleted, note: String(localized: "Downloading Nemotron…")))
             })
     }
 
@@ -109,21 +109,21 @@ final class NemotronEngine: FluidStreamingEngine, @unchecked Sendable {
         // language, with the language identified from audio. That removes the
         // per-locale model juggling — and the 5-slot allocation cap — that
         // Apple's engine forces on us.
-        if !Self.isDownloaded(chunkMs: tierChunkMs) { progress("Downloading Nemotron model…") }
+        if !Self.isDownloaded(chunkMs: tierChunkMs) { progress(String(localized: "Downloading Nemotron model…")) }
         let dir = try await StreamingNemotronMultilingualAsrManager.downloadVariant(
             languageCode: "auto",
             chunkMs: tierChunkMs,
             to: Self.downloadBase,
             progressHandler: { p in
-                progress("Downloading Nemotron model… \(Int(p.fractionCompleted * 100))%")
+                progress(String(localized: "Downloading Nemotron model… \(Int(p.fractionCompleted * 100))%"))
             })
 
-        progress("Loading Nemotron…")
+        progress(String(localized: "Loading Nemotron…"))
         try await manager.loadModels(from: dir)
         // nil = let the model identify the language itself, rather than forcing
         // one. Forcing is available via setLanguage if we ever want it.
         await manager.setLanguage(nil)
-        progress("Nemotron ready.")
+        progress(String(localized: "Nemotron ready."))
     }
 
     func setPartial(_ callback: @escaping @Sendable (String) -> Void) async {

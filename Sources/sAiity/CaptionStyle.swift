@@ -104,6 +104,14 @@ struct CaptionStyle: Equatable, Codable, Sendable {
 
     /// A realistic two-line sample, so the preview exercises wrapping and the
     /// translation row rather than a single short word.
-    static let sampleOriginal = "Dies ist eine Beispiel-Untertitelzeile, um Größe und Lesbarkeit zu prüfen."
-    static let sampleTranslation = "This is a sample subtitle line, to check size and legibility."
+    /// Localised as a pair, and deliberately crossed: the *translated* row has
+    /// to read in the UI language, so on a German Mac the original line is the
+    /// English one. Two fixed literals showed a German user a German caption
+    /// being "translated" into English.
+    static var sampleOriginal: String {
+        String(localized: "Dies ist eine Beispiel-Untertitelzeile, um Größe und Lesbarkeit zu prüfen.")
+    }
+    static var sampleTranslation: String {
+        String(localized: "This is a sample subtitle line, to check size and legibility.")
+    }
 }

@@ -76,7 +76,7 @@ struct ModelRegistryTests {
 
         let asset = ModelAsset(
             id: "test", family: .translation, title: "T", detail: "",
-            licence: nil, advertisedBytes: nil,
+            recommended: false, licence: nil, advertisedBytes: nil,
             storage: .directory(tmp, markers: ["weights.bin"]),
             removal: .remove(tmp), use: .never, install: nil)
 

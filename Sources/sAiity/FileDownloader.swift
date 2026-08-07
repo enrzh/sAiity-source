@@ -36,7 +36,7 @@ enum FileDownloader {
         if let http = response as? HTTPURLResponse, http.statusCode != 200 {
             try? fm.removeItem(at: tmp)
             throw TranslationEngineError.notAvailable(
-                "Download failed (HTTP \(http.statusCode)) for \(destination.lastPathComponent).")
+                String(localized: "Download failed (HTTP \(http.statusCode)) for \(destination.lastPathComponent)."))
         }
 
         do {
@@ -52,7 +52,7 @@ enum FileDownloader {
             try? fm.removeItem(at: part)
             throw error
         }
-        progress(DownloadProgress(fraction: 1, note: "Done."))
+        progress(DownloadProgress(fraction: 1, note: String(localized: "Done.")))
     }
 
     /// Remove leftovers from an interrupted download. Called at launch, because
@@ -104,7 +104,7 @@ private final class ProgressDelegate: NSObject, URLSessionDownloadDelegate, @unc
         let total = totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : (expected ?? -1)
         let fraction = total > 0 ? min(1, Double(totalBytesWritten) / Double(total)) : nil
         sink(DownloadProgress(fraction: fraction,
-                              note: "Downloading…",
+                              note: String(localized: "Downloading…"),
                               completed: totalBytesWritten,
                               total: total > 0 ? total : nil))
     }

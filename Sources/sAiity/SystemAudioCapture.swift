@@ -107,8 +107,7 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
             CGRequestScreenCaptureAccess()
             throw NSError(domain: "sAiity", code: 2, userInfo: [
                 NSLocalizedDescriptionKey:
-                    "Screen Recording permission needed (that is how macOS gates system audio). "
-                    + "Allow sAiity in System Settings → Privacy & Security → Screen Recording, then relaunch."
+                    String(localized: "Screen Recording permission needed (that is how macOS gates system audio). Allow sAiity in System Settings → Privacy & Security → Screen Recording, then relaunch.")
             ])
         }
 
@@ -118,7 +117,7 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
                                                                           onScreenWindowsOnly: false)
         guard let display = content.displays.first else {
             throw NSError(domain: "sAiity", code: 1,
-                          userInfo: [NSLocalizedDescriptionKey: "No display available to attach audio capture to."])
+                          userInfo: [NSLocalizedDescriptionKey: String(localized: "No display available to attach audio capture to.")])
         }
         let filter = SCContentFilter(display: display, excludingWindows: [])
 

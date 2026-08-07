@@ -40,7 +40,7 @@ final class MADLADTranslator: Translating, @unchecked Sendable {
             to: modelsDirectory,
             additionalFiles: weightFiles,
             progressHandler: { f in
-                progress(DownloadProgress(fraction: f, note: "Downloading MADLAD…"))
+                progress(DownloadProgress(fraction: f, note: String(localized: "Downloading MADLAD…")))
             })
     }
 
@@ -66,7 +66,7 @@ final class MADLADTranslator: Translating, @unchecked Sendable {
         // else. Resolve before loading 1.86 GB for a target we cannot use.
         guard let native = MADLADLanguageProvider.nativeCode(for: target) else {
             throw TranslationEngineError.notAvailable(
-                "MADLAD cannot translate into \(AppLanguage(code: target).displayName).")
+                String(localized: "MADLAD cannot translate into \(AppLanguage(code: target).displayName)."))
         }
 
         // Two defects in speech-swift's loader shape this, both verified against
@@ -92,19 +92,19 @@ final class MADLADTranslator: Translating, @unchecked Sendable {
 
         let madlad = MADLADTranslation.MADLADTranslator.self
         if Self.isDownloaded() {
-            progress("Loading MADLAD…")
+            progress(String(localized: "Loading MADLAD…"))
             translator = try await madlad.fromLocal(
                 directory: Self.weightsDirectory, bits: 4, progressHandler: nil)
         } else {
             // First run only. The progress closure is safe here because this
             // method is nonisolated, so the closure carries no isolation for the
             // runtime to assert against.
-            progress("Downloading MADLAD (1.86 GB)…")
+            progress(String(localized: "Downloading MADLAD (1.86 GB)…"))
             translator = try await madlad.fromPretrained(
                 quantization: .int4,
                 cacheDir: Self.modelsDirectory,
                 progressHandler: { fraction, note in
-                    progress("MADLAD: \(note) \(Int(fraction * 100))%")
+                    progress(String(localized: "MADLAD: \(note) \(Int(fraction * 100))%"))
                 })
         }
         // The first translation pays a one-off ~2.9 s graph warm-up. Spend it
@@ -114,9 +114,9 @@ final class MADLADTranslator: Translating, @unchecked Sendable {
         // shipped language table still matches the weights on disk, since it
         // resolves the token against the real vocabulary. Swallowing it meant
         // reporting "MADLAD ready." and then translating nothing, forever.
-        progress("Warming up MADLAD…")
+        progress(String(localized: "Warming up MADLAD…"))
         _ = try translator?.translate("Guten Morgen.", to: native)
-        progress("MADLAD ready.")
+        progress(String(localized: "MADLAD ready."))
     }
 
     /// MLX evaluation is not safe to enter concurrently, and `translate` is
@@ -174,7 +174,6 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
     private static let timeout: TimeInterval = 15
 
     private var llm: LLM?
-    private var model = LocalModel.selected
     private var systemPrompt = ""
     /// Human-readable target ("English"), for the prompt and the retry nudge.
     private var targetName = ""
@@ -183,7 +182,7 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
     private var preparedTarget: String?
 
     static var isAvailable: Bool { true }
-    static func isDownloaded() -> Bool { LocalModel.selected.isDownloaded }
+    static func isDownloaded() -> Bool { LocalModel.selected?.isDownloaded ?? false }
 
     /// The language name to put in the prompt, always in English.
     ///
@@ -255,22 +254,27 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
 
     func prepare(from source: String, to target: String,
                  progress: @escaping @Sendable (String) -> Void) async throws {
-        let m = LocalModel.selected
-        model = m
+        guard let m = LocalModel.selected else {
+            // Better than quietly translating with whatever the catalogue would
+            // have picked: the user has not chosen a model, and saying so is the
+            // only thing that leads anywhere.
+            throw TranslationEngineError.notAvailable(
+                String(localized: "No translation model chosen. Pick one under Settings → Models."))
+        }
         if !m.isDownloaded {
             let label = m.label
-            progress("Downloading \(label) (\(m.sizeText))…")
+            progress(String(localized: "Downloading \(label) (\(m.sizeText))…"))
             try await Self.download(m) { p in
                 if let f = p.fraction {
-                    progress("Downloading \(label)… \(Int(f * 100))%")
+                    progress(String(localized: "Downloading \(label)… \(Int(f * 100))%"))
                 } else {
-                    progress("Downloading \(label)…")
+                    progress(String(localized: "Downloading \(label)…"))
                 }
             }
         }
 
         retarget(to: target)
-        progress("Loading \(m.label)…")
+        progress(String(localized: "Loading \(m.label)…"))
 
         // No GGML/Metal environment variables: ghost-pepper sets none, and the
         // ones tried here previously were treating a symptom of the template bug.
@@ -294,10 +298,10 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
         }.value
 
         guard let l = loaded else {
-            throw TranslationEngineError.notAvailable("Could not load \(m.label).")
+            throw TranslationEngineError.notAvailable(String(localized: "Could not load \(m.label)."))
         }
         llm = l
-        progress("\(m.label) ready.")
+        progress(String(localized: "\(m.label) ready."))
     }
 
     /// Single-flight: a slow generation drops newer lines rather than queueing
@@ -518,8 +522,7 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
     static func download(_ m: LocalModel, progress: @escaping ProgressSink) async throws {
         guard let url = m.downloadURL else {
             throw TranslationEngineError.notAvailable(
-                "\(m.label) was imported from disk and its file is missing. "
-                + "Import it again from the original location.")
+                String(localized: "\(m.label) was imported from disk and its file is missing. Import it again from the original location."))
         }
         try await FileDownloader.download(from: url, to: m.localURL,
                                           expectedBytes: m.bytes, progress: progress)
