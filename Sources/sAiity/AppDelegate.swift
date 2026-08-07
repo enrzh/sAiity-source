@@ -96,14 +96,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     private func handleMemoryPressure(_ level: MemoryPolicy.Pressure) {
         switch level {
+        case .normal:
+            // Pressure passed. Put translation back, if pressure is what took
+            // it away — a spike that lasts seconds should not disable a feature
+            // for the rest of the session, which is exactly what the first
+            // version of this did. Measured on a busy Mac: one critical event
+            // during a build, and translation was off until the app restarted.
+            guard translationSuspendedByMemory else { return }
+            translationSuspendedByMemory = false
+            guard state.isActive, translateTo != nil else { return }
+            NSLog("sAiity memory: pressure normal — restoring translation")
+            Task { @MainActor in
+                await prepareTranslatorIfNeeded()
+            }
         case .warning:
             // Pooled buffers only. Nothing the user can perceive.
             MemoryPolicy.releaseCaches()
         case .critical:
             // Captions are the point of the app; translation is the expensive
-            // extra. Shedding the translator keeps the session alive instead of
-            // losing it, and it is said out loud rather than left to look like
-            // translation quietly breaking.
+            // extra. Shedding it keeps the session alive instead of losing it,
+            // and it is said out loud rather than left to look like translation
+            // quietly breaking.
             // `activeTranslator` is non-nil even when no weights are loaded, so
             // readiness is the only honest test of whether there is anything
             // here worth shedding.
@@ -111,17 +124,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 MemoryPolicy.releaseCaches()
                 return
             }
+            translationSuspendedByMemory = true
             Task { @MainActor in
                 await unloadTranslator(reason: "system memory pressure")
                 if state.isActive {
-                    // It stays off for the rest of this session: reloading into
-                    // a machine that just said it was out of memory is how you
-                    // get killed instead of throttled.
-                    setStatus("Translation off — low memory. Restart captions to resume.")
+                    setStatus("Translation paused — the Mac is short of memory. "
+                              + "It comes back on its own.")
                 }
             }
         }
     }
+
+    /// True while translation is off *because of* memory pressure, so the
+    /// recovery in `.normal` only undoes what pressure did — it must not switch
+    /// translation on for someone who never asked for it.
+    private var translationSuspendedByMemory = false
 
     /// Load (and if necessary download) the selected translator. This was the
     /// missing link: the translator object was constructed but `prepare()` was
@@ -1044,7 +1061,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await previous?.value
             await backend.stop()
             do {
-                try await backend.prepare(locale: locale) { _ in }
+                // Progress goes to the status line rather than the bin.
+                //
+                // Switching engine mid-session can mean fetching a model that
+                // is not on disk yet — Parakeet is 437 MB — and with the
+                // progress discarded the app looked broken for the length of
+                // that download: the old engine had stopped, the new one had
+                // not started, captions had stopped arriving, and nothing said
+                // why. Reported as "switching models does nothing".
+                setStatus("Switching to \(backend.name)…")
+                try await backend.prepare(locale: locale) { [weak self] msg in
+                    Task { @MainActor in
+                        guard let self, self.state.isActive else { return }
+                        self.setStatus(msg)
+                    }
+                }
                 try await backend.start { chunk in
                     Task { @MainActor [self] in self.render(chunk) }
                 }

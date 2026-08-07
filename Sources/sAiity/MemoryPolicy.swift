@@ -146,6 +146,8 @@ enum MemoryPolicy {
 
     /// How urgently the system wants memory back.
     enum Pressure {
+        /// Pressure has passed. Whatever was shed can come back.
+        case normal
         /// Shed what is free to shed. Nothing the user notices.
         case warning
         /// Shed everything not needed for captions to keep running. The user
@@ -164,10 +166,14 @@ enum MemoryPolicy {
     /// back a cache it was not using.
     static func startMonitoring(handler: @escaping @MainActor (Pressure) -> Void) {
         guard source == nil else { return }
+        // .normal is listened for too, and that is the whole difference between
+        // shedding and breaking: without it a single transient spike turned
+        // translation off for the rest of the session with no way back.
         let s = DispatchSource.makeMemoryPressureSource(
-            eventMask: [.warning, .critical], queue: .main)
+            eventMask: [.normal, .warning, .critical], queue: .main)
         s.setEventHandler {
-            let level: Pressure = s.mask.contains(.critical) ? .critical : .warning
+            let level: Pressure = s.mask.contains(.critical) ? .critical
+                                : s.mask.contains(.warning) ? .warning : .normal
             NSLog("sAiity memory: system pressure \(level) — \(describeFootprint())")
             MainActor.assumeIsolated { handler(level) }
         }
