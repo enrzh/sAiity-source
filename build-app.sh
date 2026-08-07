@@ -127,17 +127,46 @@ fi
 #                                makes TCC permission survive a rebuild
 #   ad-hoc                     -> fallback; permission resets on every rebuild
 # Override with SAIITY_SIGN_ID="Developer ID Application: ..." or SAIITY_SIGN_ID=-
-# Nested code must be signed BEFORE the app that contains it, or codesign
-# rejects the bundle with "code object is not signed at all". The vendored
-# llama.framework arrives unsigned.
+sign_code() {   # $1 = bundle or Mach-O to sign
+    if [ -n "${SIGN_ID:-}" ] && [ "${SIGN_ID:-}" != "-" ]; then
+        codesign --force --options runtime --timestamp --sign "$SIGN_ID" "$1"
+    else
+        codesign --force --sign - "$1"
+    fi
+}
+
+# Signing runs INSIDE-OUT, and that ordering is the whole point.
+#
+# Nested code must be signed before the bundle containing it, or codesign
+# rejects the outer one with "code object is not signed at all". The vendored
+# llama.framework arrives unsigned, and Sparkle.framework arrives carrying
+# Sparkle's own signature on four *separate* nested executables — an
+# Updater.app, two XPC services, and a bare Autoupdate helper. Signing the
+# framework does not reach any of them: they keep whatever signature they
+# shipped with, which has no Team ID and no secure timestamp.
+#
+# Nothing local catches that. The app builds, signs, launches and updates
+# perfectly with the inner code left alone — Apple's notary service is the
+# first thing that looks, and it rejected the first submission with sixteen
+# errors across exactly those four binaries.
 if [ -d "$APP/Contents/Frameworks" ]; then
+    # 1. Nested bundles, deepest first.
+    while IFS= read -r -d '' nested; do
+        sign_code "$nested"
+    done < <(find "$APP/Contents/Frameworks" -depth \( -name "*.xpc" -o -name "*.app" \) -print0)
+
+    # 2. Loose Mach-O helpers inside a framework (Sparkle's Autoupdate). Anything
+    #    inside a bundle from step 1 is already covered by that bundle.
+    while IFS= read -r -d '' exe; do
+        case "$exe" in *.app/*|*.xpc/*) continue ;; esac
+        file -b "$exe" 2>/dev/null | grep -q "Mach-O" || continue
+        sign_code "$exe"
+    done < <(find "$APP/Contents/Frameworks" -type f -perm +111 -print0)
+
+    # 3. The frameworks themselves, now that everything within them is signed.
     for fw in "$APP/Contents/Frameworks"/*.framework; do
         [ -d "$fw" ] || continue
-        if [ -n "${SIGN_ID:-}" ] && [ "${SIGN_ID:-}" != "-" ]; then
-            codesign --force --options runtime --timestamp --sign "$SIGN_ID" "$fw"
-        else
-            codesign --force --sign - "$fw"
-        fi
+        sign_code "$fw"
     done
 fi
 
