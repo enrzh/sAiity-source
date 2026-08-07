@@ -15,12 +15,19 @@ download from huggingface.co.
   <img src="docs/screenshots/04-library.png" width="32%" alt="Library">
 </p>
 
-> **Status: in development.** Not notarised yet, so there is no download you can
-> double-click — you build it yourself (one command, below). 54 unit tests. The
-> notes in this file try to be honest about what is verified and what isn't,
-> including the parts that aren't.
+### [Download sAiity](https://github.com/enrzh/sAiity/releases/latest)
 
-Requires macOS 26 and Apple Silicon.
+Open the disk image and drag sAiity to Applications. It is signed, notarised and
+stapled, so it opens without a Gatekeeper detour — including on a Mac with no
+network. Updates arrive in the app after that, or from the menu under
+**Check for Updates…**
+
+Requires **macOS 26** on Apple Silicon. On first launch it asks for Screen
+Recording permission: that is how macOS gates system audio, there is no
+audio-only permission to ask for, and the microphone is never opened.
+
+> 60 unit tests. The notes in this file try to be honest about what is verified
+> and what isn't, including the parts that aren't.
 
 ---
 
@@ -89,11 +96,13 @@ the whole failure, including the two measurement traps that made it hard to see.
 
 Worth saying plainly before you clone it:
 
-- **It is not signed or notarised.** There is no Developer ID certificate on
-  this project yet, so a build you make runs on your machine and nowhere else
-  without Gatekeeper complaining. That also means the in-app updater, which is
-  wired up and embedded, has never been exercised end to end — that needs two
-  builds signed with the same identity.
+- **It runs on macOS 26 and Apple Silicon only.** That is a narrow audience,
+  deliberately: the streaming recognisers are CoreML and MLX builds for Apple
+  GPUs, and there is no Intel path.
+- **Sentence boundaries follow pauses.** Clauses are assembled before they are
+  shown or translated, but a speaker who pauses hard mid-sentence still gets a
+  break there, and the recogniser's own chunk boundary decides which clause a
+  word lands in. Better than it was, not exact.
 - **It is not fully localised.** German covers the menus, tabs, onboarding and
   every control; several long explanatory paragraphs are still English because
   they are assembled by concatenation and never reach the string catalog. You

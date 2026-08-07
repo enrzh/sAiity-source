@@ -15,7 +15,7 @@ The release configuration and the two flags are not optional — a plain
 `swift test` fails on this toolchain's debug C targets, and `-enable-testing` is
 what makes `@testable import` resolve.
 
-Check the **test count**, not just the exit code. 54 tests in 11 suites at the
+Check the **test count**, not just the exit code. 60 tests in 12 suites at the
 time of writing; a target that silently stops being compiled still exits zero.
 
 If the change is visible in the caption bubble, verify it in the running app
