@@ -164,6 +164,54 @@ struct DownloadCoordinatorTests {
         #expect(await counter.value == 2, "the id was never released")
     }
 
+    /// The bug this exists for: the first version joined with
+    /// `try await task.value`, which is NOT a cancellation point for the
+    /// awaiting task — a caller cancelled 0.5 s into a 3 s transfer returned
+    /// normally at 3.25 s. Since `stopAsync()` cancels the session task and then
+    /// awaits it, that hung Stop for the length of a 634 MB download.
+    @Test("A cancelled caller stops waiting instead of blocking on the transfer")
+    func cancelledCallerReturnsPromptly() async throws {
+        let c = DownloadCoordinator()
+        let started = Date()
+        let waiter = Task<Bool, Never> {
+            do {
+                try await c.run("slow") { try await Task.sleep(for: .seconds(5)) }
+                return false
+            } catch is CancellationError {
+                return true
+            } catch {
+                return false
+            }
+        }
+        try await Task.sleep(for: .milliseconds(150))
+        waiter.cancel()
+        let threw = await waiter.value
+        let elapsed = Date().timeIntervalSince(started)
+        #expect(threw, "a cancelled caller must be resumed, not left waiting")
+        #expect(elapsed < 2.0, "took \(elapsed)s — the caller was blocked on the transfer")
+    }
+
+    /// The other half: one caller leaving must not abort a transfer somebody
+    /// else is still waiting for.
+    @Test("A transfer survives one of two callers cancelling")
+    func othersKeepTheTransfer() async throws {
+        let counter = Counter()
+        let c = DownloadCoordinator()
+        let stayer = Task<Bool, Never> {
+            do { try await c.run("shared") { await counter.bumpAndWait() }; return true }
+            catch { return false }
+        }
+        try await Task.sleep(for: .milliseconds(30))
+        let leaver = Task<Void, Never> {
+            try? await c.run("shared") { await counter.bumpAndWait() }
+        }
+        try await Task.sleep(for: .milliseconds(30))
+        leaver.cancel()
+        let finished = await stayer.value
+        #expect(finished, "the remaining caller lost its transfer when the other left")
+        #expect(await counter.value == 1)
+    }
+
     /// Ids are constructed in one place now; the descriptors and the engines
     /// used to spell them separately, which is why the engines never used them.
     @Test("Asset ids match the descriptors that carry them")

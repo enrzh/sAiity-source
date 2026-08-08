@@ -31,7 +31,9 @@ GIT_COUNT=$(git rev-list --count HEAD 2>/dev/null || echo "1")
 # --notarize. That is the path nobody could run until there was a Developer ID
 # certificate to run it with, so the first real release attempt was also the
 # first time this line executed.
-if [ "${1:-}" = "--notarize" ]; then
+NOTARIZE=0
+for arg in "$@"; do [ "$arg" = "--notarize" ] && NOTARIZE=1; done
+if [ "$NOTARIZE" = 1 ]; then
     swift build -c release
 else
     swift build -c release -Xswiftc -DSAIITY_TEST_HOOKS
@@ -87,6 +89,16 @@ if [ -n "$GIT_VERSION" ]; then
         "$APP/Contents/Info.plist" >/dev/null 2>&1 || true
     /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $GIT_COUNT" \
         "$APP/Contents/Info.plist" >/dev/null 2>&1 || true
+
+    # Assert the stamp landed. Both Sets above swallow their errors, and the
+    # fallbacks in Resources/Info.plist are 0.1.0/1 — which the appcast would
+    # then out-rank forever, so Sparkle would offer the same update after every
+    # install, in a loop, with the About window reading 0.1.0.
+    STAMPED=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP/Contents/Info.plist")
+    [ "$STAMPED" = "$GIT_COUNT" ] || {
+        echo "FATAL: CFBundleVersion is '$STAMPED', expected '$GIT_COUNT' — the"
+        echo "       appcast advertises the latter, so shipping this builds an"
+        echo "       app that re-offers its own update forever."; exit 1; }
 fi
 
 # Third-party notices. The binary statically links Apache-2.0 code (FluidAudio,
@@ -201,6 +213,14 @@ echo "built: $APP"
 # Notarisation. Requires a Developer ID Application certificate and a stored
 # credential profile — create that yourself, once, so no secret ever passes
 # through this script:
+#   # Nothing with a test hook in it may be notarised. SAIITY_AUTOSTART starts
+#   # system-audio capture with no window and no consent, so a hook surviving
+#   # into a signed, stapled build is the one mistake here that is a security
+#   # problem rather than an inconvenience.
+#   if strings "$APP/Contents/MacOS/sAiity" | grep -q "SAIITY_AUTOSTART"; then
+#       echo "FATAL: test hooks are compiled into this binary; refusing to notarise."
+#       exit 1
+#   fi
 #   xcrun notarytool store-credentials "saiity" \
 #         --apple-id <you@example.com> --team-id <TEAMID> --password <app-specific-password>
 if [ "${1:-}" = "--notarize" ]; then

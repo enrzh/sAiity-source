@@ -2,8 +2,10 @@
 
 **Subtitles for whatever your Mac is playing.** Captured from system audio,
 recognised and translated entirely on this machine — no account, no API key, and
-no audio ever leaving the device. The only network traffic is a one-time model
-download from huggingface.co.
+no audio ever leaving the device. It reaches the network twice: once to download
+the models from huggingface.co, and thereafter only to ask aiity.de whether
+there is a newer version — which is off unless you turn it on, and which sends
+no audio, no transcripts and no identifiers.
 
 <p align="center">
   <img src="docs/screenshots/01-bubble.png" width="92%" alt="A German caption with its English translation beneath it">
@@ -26,7 +28,7 @@ Requires **macOS 26** on Apple Silicon. On first launch it asks for Screen
 Recording permission: that is how macOS gates system audio, there is no
 audio-only permission to ask for, and the microphone is never opened.
 
-> 60 unit tests. The notes in this file try to be honest about what is verified
+> 68 unit tests. The notes in this file try to be honest about what is verified
 > and what isn't, including the parts that aren't.
 
 ---

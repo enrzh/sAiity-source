@@ -172,8 +172,15 @@ enum MemoryPolicy {
         let s = DispatchSource.makeMemoryPressureSource(
             eventMask: [.normal, .warning, .critical], queue: .main)
         s.setEventHandler {
-            let level: Pressure = s.mask.contains(.critical) ? .critical
-                                : s.mask.contains(.warning) ? .warning : .normal
+            // `data`, not `mask`. `mask` is the mask we REGISTERED — with all
+            // three levels requested it reads 7 forever, so `mask.contains(.critical)`
+            // was unconditionally true: every event, including the one that says
+            // pressure has passed, arrived as .critical. That made the .normal
+            // recovery branch dead code, so translation shed under pressure and
+            // never came back, while the status line promised it would.
+            let event = DispatchSource.MemoryPressureEvent(rawValue: s.data)
+            let level: Pressure = event.contains(.critical) ? .critical
+                                : event.contains(.warning) ? .warning : .normal
             NSLog("sAiity memory: system pressure \(level) — \(describeFootprint())")
             MainActor.assumeIsolated { handler(level) }
         }

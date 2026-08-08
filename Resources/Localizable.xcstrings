@@ -2855,13 +2855,13 @@
         }
       }
     },
-    "The smallest size whose translation quality holds up. A sensible default if you want an LLM doing this.": {
+    "The smallest size whose translation quality holds up. A sensible first choice if you want an LLM doing this.": {
       "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Die kleinste Größe, deren Übersetzungsqualität standhält. Eine sinnvolle Voreinstellung, wenn ein LLM das übernehmen soll."
+            "value": "Die kleinste Größe, deren Übersetzungsqualität standhält. Eine sinnvolle erste Wahl, wenn ein LLM das übernehmen soll."
           }
         }
       }

@@ -51,7 +51,7 @@ struct LocalModel: Identifiable, Sendable, Equatable, Codable {
                                         file: "Qwen3.5-2B-Q4_K_M.gguf"),
                    file: "Qwen3.5-2B-Q4_K_M.gguf",
                    label: String(localized: "Qwen3.5 2B"), bytes: 1281 * 1_048_576, recommended: true,
-                   note: String(localized: "The smallest size whose translation quality holds up. A sensible default if you want an LLM doing this."),
+                   note: String(localized: "The smallest size whose translation quality holds up. A sensible first choice if you want an LLM doing this."),
                    licence: "Apache-2.0 (Alibaba Qwen) · huggingface.co/unsloth"),
         LocalModel(source: .huggingFace(repo: "unsloth/Qwen3.5-2B-GGUF",
                                         file: "Qwen3.5-2B-Q5_K_M.gguf"),
