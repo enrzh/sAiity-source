@@ -134,10 +134,16 @@ final class AppState {
         downloadProgress = DownloadProgress(note: "Starting…")
         modelError = nil
 
+        let id = asset.id
         let task = Task {
             do {
-                try await install { p in
-                    Task { @MainActor in self.downloadProgress = p }
+                // The same door the engines use, so pressing Download on a row a
+                // running session is already fetching joins that transfer rather
+                // than starting a second one into the same staging file.
+                try await DownloadCoordinator.shared.run(id) {
+                    try await install { p in
+                        Task { @MainActor in self.downloadProgress = p }
+                    }
                 }
             } catch is CancellationError {
                 // The user pressed Cancel; not an error, so no red text.
@@ -158,6 +164,12 @@ final class AppState {
     /// Stop the in-flight download. Cancellation propagates through the
     /// URLSession awaits, so the transfer stops rather than running on unseen.
     func cancelDownload() {
+        // Both, and in this order. Cancelling only our own await would leave the
+        // shared transfer running with nobody watching it; cancelling only the
+        // shared task would leave this one awaiting a task that is already gone.
+        if let id = activeDownload {
+            Task { await DownloadCoordinator.shared.cancel(id) }
+        }
         downloadTask?.cancel()
     }
 

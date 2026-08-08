@@ -611,7 +611,9 @@ struct LibraryView: View {
                                 NSWorkspace.shared.activateFileViewerSelecting([s.url])
                             } label: { Image(systemName: "folder") }.controlSize(.small)
                             Button(role: .destructive) {
-                                TranscriptStore.delete(s); Task { await state.refresh() }
+                                TranscriptStore.delete(s)
+                                    SessionCatalog.invalidate()
+                                    Task { await state.refresh() }
                             } label: { Image(systemName: "trash") }.controlSize(.small)
                         }
                     }
@@ -623,7 +625,9 @@ struct LibraryView: View {
                         a.addButton(withTitle: String(localized: "Cancel"))
                         a.alertStyle = .warning
                         if a.runModal() == .alertFirstButtonReturn {
-                            TranscriptStore.deleteAll(); Task { await state.refresh() }
+                            TranscriptStore.deleteAll()
+                            SessionCatalog.invalidate()
+                            Task { await state.refresh() }
                         }
                     }
                     .controlSize(.small)

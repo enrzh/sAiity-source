@@ -78,7 +78,7 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
         switch self {
         case .madlad:
             return [ModelAsset(
-                id: "mt.madlad",
+                id: AssetID.madlad,
                 family: .translation,
                 title: "MADLAD-400-3B",
                 detail: summary,
@@ -97,7 +97,7 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
         case .qwen:
             return LocalModel.all.map { m in
                 ModelAsset(
-                    id: "mt.llm.\(m.file)",
+                    id: AssetID.llm(file: m.file),
                     family: .translation,
                     title: m.label,
                     detail: m.note,

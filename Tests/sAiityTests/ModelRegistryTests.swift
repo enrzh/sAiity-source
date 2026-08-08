@@ -124,3 +124,63 @@ struct ModelRegistryTests {
                 == FileManager.default.fileExists(atPath: marker.path))
     }
 }
+
+@Suite("Download coordination")
+struct DownloadCoordinatorTests {
+
+    /// The defect: two callers wanting the same model each ran their own
+    /// transfer, and for a GGUF that means each deleting the other's staging
+    /// file. One run, two callers.
+    @Test("A second caller joins the transfer instead of starting another")
+    func secondCallerJoins() async throws {
+        let counter = Counter()
+        let c = DownloadCoordinator()
+        async let a: Void = c.run("test.asset") { await counter.bumpAndWait() }
+        async let b: Void = c.run("test.asset") { await counter.bumpAndWait() }
+        _ = try await (a, b)
+        #expect(await counter.value == 1, "the work ran more than once")
+    }
+
+    @Test("Different assets are not serialised against each other")
+    func differentAssetsRunTogether() async throws {
+        let counter = Counter()
+        let c = DownloadCoordinator()
+        async let a: Void = c.run("one") { await counter.bumpAndWait() }
+        async let b: Void = c.run("two") { await counter.bumpAndWait() }
+        _ = try await (a, b)
+        // Two assets, two runs. A single global slot would still give 2 here,
+        // so this pins intent rather than mechanism: nothing queues.
+        #expect(await counter.value == 2)
+    }
+
+    @Test("A finished transfer is forgotten, so the next call really runs")
+    func slotIsReleased() async throws {
+        let counter = Counter()
+        let c = DownloadCoordinator()
+        try await c.run("test.asset") { await counter.bumpAndWait() }
+        // Give the actor's cleanup hop a chance to land before asking again.
+        try await Task.sleep(for: .milliseconds(50))
+        try await c.run("test.asset") { await counter.bumpAndWait() }
+        #expect(await counter.value == 2, "the id was never released")
+    }
+
+    /// Ids are constructed in one place now; the descriptors and the engines
+    /// used to spell them separately, which is why the engines never used them.
+    @Test("Asset ids match the descriptors that carry them")
+    func idsAgreeWithDescriptors() {
+        #expect(AssetID.parakeetEou == "asr.parakeetEou")
+        #expect(AssetID.madlad == "mt.madlad")
+        #expect(AssetID.llm(file: "x.gguf") == "mt.llm.x.gguf")
+        let ids = Set(ModelRegistry.snapshot().map(\.asset.id))
+        #expect(ids.contains(AssetID.parakeetEou))
+        #expect(ids.contains(AssetID.madlad))
+    }
+}
+
+private actor Counter {
+    var value = 0
+    func bumpAndWait() async {
+        value += 1
+        try? await Task.sleep(for: .milliseconds(80))
+    }
+}

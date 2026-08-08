@@ -60,10 +60,22 @@ final class ParakeetEouEngine: FluidStreamingEngine, @unchecked Sendable {
     let sampleRate: Double = 16_000
 
     func load(progress: @escaping @Sendable (String) -> Void) async throws {
-        if !Self.isDownloaded() { progress(String(localized: "Downloading Parakeet EOU…")) }
-        try await manager.loadModels(to: Self.downloadBase, progressHandler: { p in
-            progress(String(localized: "Downloading Parakeet EOU… \(Int(p.fractionCompleted * 100))%"))
-        })
+        // FluidAudio has no download-only entry point for EOU — loading is what
+        // fetches — so the coordinator holds this whole call for the asset. A
+        // Settings download of Parakeet then waits for the session's load rather
+        // than fetching the same tree alongside it.
+        let base = Self.downloadBase
+        let mgr = manager
+        if Self.isDownloaded() {
+            try await mgr.loadModels(to: base, progressHandler: { _ in })
+        } else {
+            progress(String(localized: "Downloading Parakeet EOU…"))
+            try await DownloadCoordinator.shared.run(AssetID.parakeetEou) {
+                try await mgr.loadModels(to: base, progressHandler: { p in
+                    progress(String(localized: "Downloading Parakeet EOU… \(Int(p.fractionCompleted * 100))%"))
+                })
+            }
+        }
         progress(String(localized: "Parakeet ready."))
     }
 

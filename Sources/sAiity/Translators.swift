@@ -100,12 +100,23 @@ final class MADLADTranslator: Translating, @unchecked Sendable {
             // method is nonisolated, so the closure carries no isolation for the
             // runtime to assert against.
             progress(String(localized: "Downloading MADLAD (1.86 GB)…"))
-            translator = try await madlad.fromPretrained(
-                quantization: .int4,
-                cacheDir: Self.modelsDirectory,
-                progressHandler: { fraction, note in
-                    progress(String(localized: "MADLAD: \(note) \(Int(fraction * 100))%"))
-                })
+            // Fetch through the coordinator, then load locally — rather than
+            // fromPretrained, which does both and so cannot be shared with a
+            // Settings download of the same tree. downloadWeights is the same
+            // call the registry's install uses, with the file list pinned so it
+            // does not also pull the int8 copy nobody asked for.
+            try await DownloadCoordinator.shared.run(AssetID.madlad) {
+                try await Self.downloadWeights { p in
+                    if let f = p.fraction {
+                        progress(String(localized: "MADLAD: \(p.note) \(Int(f * 100))%"))
+                    } else {
+                        progress(String(localized: "Downloading MADLAD (1.86 GB)…"))
+                    }
+                }
+            }
+            progress(String(localized: "Loading MADLAD…"))
+            translator = try await madlad.fromLocal(
+                directory: Self.weightsDirectory, bits: 4, progressHandler: nil)
         }
         // The first translation pays a one-off ~2.9 s graph warm-up. Spend it
         // here rather than on the viewer's first subtitle.
@@ -264,11 +275,16 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
         if !m.isDownloaded {
             let label = m.label
             progress(String(localized: "Downloading \(label) (\(m.sizeText))…"))
-            try await Self.download(m) { p in
-                if let f = p.fraction {
-                    progress(String(localized: "Downloading \(label)… \(Int(f * 100))%"))
-                } else {
-                    progress(String(localized: "Downloading \(label)…"))
+            // The GGUF path is the one that physically corrupts: FileDownloader
+            // stages into "<file>.part" and clears it unconditionally on entry,
+            // so two transfers of the same model delete each other's bytes.
+            try await DownloadCoordinator.shared.run(AssetID.llm(file: m.file)) {
+                try await Self.download(m) { p in
+                    if let f = p.fraction {
+                        progress(String(localized: "Downloading \(label)… \(Int(f * 100))%"))
+                    } else {
+                        progress(String(localized: "Downloading \(label)…"))
+                    }
                 }
             }
         }

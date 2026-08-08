@@ -154,6 +154,8 @@ actor TranscriptStore {
         }
     }
 
+
+
     nonisolated static func segments(of session: SessionRef) -> [Segment] {
         guard let text = try? String(contentsOf: session.url.appendingPathComponent("segments.jsonl"),
                                      encoding: .utf8) else { return [] }
@@ -172,5 +174,75 @@ actor TranscriptStore {
 
     nonisolated static func deleteAll() {
         for s in list() { delete(s) }
+    }
+}
+
+/// The session list, remembered.
+///
+/// `TranscriptStore.list()` is one `contentsOfDirectory` plus a read and a JSON
+/// decode per session, and the status menu was rebuilding from it on every
+/// status change — which during a model download means several times a second,
+/// synchronously, on the main actor, for as many sessions as the user has ever
+/// recorded.
+///
+/// The cache slots are `Optional` rather than counts on purpose: `Sessions/`
+/// does not exist until the first recording and `list()` returns `[]` for a
+/// missing directory, so a cache that read "empty" as "not computed yet" would
+/// re-scan forever — on exactly the fresh install where the flood is worst.
+///
+/// Invalidation only ever assigns nil; it never re-scans. Two of the four
+/// invalidation points sit inside the teardown that `stopAsync()` awaits, and a
+/// directory scan there would be trading one stall for another.
+///
+/// Not invalidated on `append`: it rewrites `meta.json` only every twentieth
+/// line, so the in-progress session's line count in this list was already
+/// approximate before the cache existed. The live counter the user actually
+/// reads is `recordingLine`, which is computed fresh on every rebuild.
+@MainActor
+enum SessionCatalog {
+    /// A menu row with its title already rendered, so a rebuild is object
+    /// construction and nothing else — no I/O, no DateFormatter.
+    struct Row: Sendable { let id: String; let title: String }
+
+    private static var cachedSessions: [SessionRef]?
+    private static var cachedRows: [Row]?
+    private static var formatter: DateFormatter?
+
+    static func sessions() -> [SessionRef] {
+        if let cachedSessions { return cachedSessions }
+        let s = TranscriptStore.list()
+        cachedSessions = s
+        return s
+    }
+
+    static func rows(limit: Int) -> [Row] {
+        if let cachedRows { return cachedRows }
+        let df = formatter ?? {
+            let f = DateFormatter()
+            f.dateStyle = .medium
+            f.timeStyle = .short
+            formatter = f
+            return f
+        }()
+        let r = sessions().prefix(limit).map { s -> Row in
+            let mins = Int((s.meta.endedAt ?? s.meta.startedAt)
+                .timeIntervalSince(s.meta.startedAt) / 60)
+            return Row(id: s.id,
+                       title: String(localized: "\(df.string(from: s.meta.startedAt)) · \(s.meta.lineCount) lines · \(mins) min"))
+        }
+        cachedRows = r
+        return r
+    }
+
+    /// Call after anything that adds, removes or closes a session.
+    static func invalidate() {
+        cachedSessions = nil
+        cachedRows = nil
+    }
+
+    /// The rendered titles are locale-dependent; the scan behind them is not.
+    static func invalidateRendering() {
+        cachedRows = nil
+        formatter = nil
     }
 }

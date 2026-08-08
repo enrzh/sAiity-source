@@ -2670,6 +2670,17 @@
         }
       }
     },
+    "Still stopping — try again in a moment": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stoppt noch – versuche es gleich noch einmal"
+          }
+        }
+      }
+    },
     "Stop captions": {
       "localizations": {
         "de": {
@@ -2687,6 +2698,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Diesen Download stoppen. Es wird nichts behalten; Laden startet ihn erneut."
+          }
+        }
+      }
+    },
+    "Stopping…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wird gestoppt …"
           }
         }
       }

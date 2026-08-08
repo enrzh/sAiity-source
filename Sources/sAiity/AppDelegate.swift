@@ -651,22 +651,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func transcriptsMenuItem() -> NSMenuItem {
         let item = NSMenuItem(title: String(localized: "Transcripts"), action: nil, keyEquivalent: "")
         let menu = NSMenu()
-        let sessions = TranscriptStore.list()
+        // Rows come pre-rendered from the catalogue, so building this menu is
+        // object construction and nothing else. It used to begin with a full
+        // directory scan plus a JSON decode per session — on the main actor, on
+        // every status change, which during a model download is several times a
+        // second.
+        let rows = SessionCatalog.rows(limit: 15)
 
-        if sessions.isEmpty {
+        if rows.isEmpty {
             let n = NSMenuItem(title: String(localized: "No saved transcripts"), action: nil, keyEquivalent: "")
             n.isEnabled = false
             menu.addItem(n)
         }
-        let df = DateFormatter()
-        df.dateStyle = .medium
-        df.timeStyle = .short
-        for s in sessions.prefix(15) {
-            let mins = Int((s.meta.endedAt ?? s.meta.startedAt)
-                .timeIntervalSince(s.meta.startedAt) / 60)
-            let mi = NSMenuItem(
-                title: String(localized: "\(df.string(from: s.meta.startedAt)) · \(s.meta.lineCount) lines · \(mins) min"),
-                action: nil, keyEquivalent: "")
+        for row in rows {
+            let mi = NSMenuItem(title: row.title, action: nil, keyEquivalent: "")
             let sub = NSMenu()
             // Typed as LocalizationValue, not String: as String these five
             // titles would be verbatim and the whole submenu would ship English.
@@ -678,14 +676,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                  ("Delete", #selector(deleteSession(_:)))]
             for (title, sel) in actions {
                 let a = NSMenuItem(title: String(localized: title), action: sel, keyEquivalent: "")
-                a.representedObject = s.id
+                a.representedObject = row.id
                 sub.addItem(a)
             }
             assignTargets(sub)
             mi.submenu = sub
             menu.addItem(mi)
         }
-        if !sessions.isEmpty {
+        if !rows.isEmpty {
             menu.addItem(.separator())
             menu.addItem(NSMenuItem(title: String(localized: "Delete all transcripts…"),
                                     action: #selector(deleteAllSessions), keyEquivalent: ""))
@@ -697,7 +695,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func session(for sender: NSMenuItem) -> SessionRef? {
         guard let id = sender.representedObject as? String else { return nil }
-        return TranscriptStore.list().first { $0.id == id }
+        return SessionCatalog.sessions().first { $0.id == id }
     }
 
     @objc private func exportCopy(_ sender: NSMenuItem) {
@@ -730,11 +728,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func deleteSession(_ sender: NSMenuItem) {
         guard let s = session(for: sender) else { return }
         TranscriptStore.delete(s)
+        SessionCatalog.invalidate()
         setStatus("Transcript deleted")
     }
 
     @objc private func deleteAllSessions() {
         TranscriptStore.deleteAll()
+        SessionCatalog.invalidate()
         setStatus("All transcripts deleted")
     }
 
@@ -798,6 +798,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             try await TranscriptStore.shared.begin(locale: locale.identifier(.bcp47),
                                                    translateTo: translateTo)
+            SessionCatalog.invalidate()
             recordingSince = Date()
             recordedLines = 0
             overlay.isRecording = true
@@ -810,6 +811,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func endRecording() async {
         try? await TranscriptStore.shared.end()
+        SessionCatalog.invalidate()
         recordingSince = nil
         overlay.isRecording = false
         updateStatusItemIcon()
@@ -868,7 +870,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         engine = new
         engineTier = newTier
         ASREngine.selected = new
-        let wasRunning = state.isActive
+        // `.running`, not `isActive`. `isActive` includes `.starting`, so
+        // changing engine while the first download was in flight spawned this
+        // untracked task to stop and rebuild the backend the start Task was at
+        // that moment loading into.
+        let wasRunning = state == .running
         Task { @MainActor in
             if wasRunning { await backend.stop() }
             backend = new.makeBackend()
@@ -906,7 +912,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // two starts each brought up their own SCStream and their own ASR pump,
         // and two pumps calling process() concurrently is the exact overlap
         // StreamingASRBackend documents as a reproduced crash.
-        guard state == .idle else { return }
+        guard state == .idle else {
+            // Silently returning here is what made the wedge invisible: during a
+            // teardown the menu said Idle and offered Start, and every press did
+            // nothing at all.
+            if state == .stopping { setStatus("Still stopping — try again in a moment") }
+            return
+        }
         // Nothing chosen means nothing to run. This used to proceed on a
         // defaulted engine and turn Start into consent for a 634 MB download the
         // user had never been shown — the whole reason the selection is now
@@ -927,6 +939,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlay.reservesTranslationRow =
             translateTo != nil && CaptionStyle.current.showTranslation
         sessionLines.removeAll()
+        pendingTranslations = 0
         sessionGeneration += 1
         transcriptWriteChain = nil
         lastFinalText = ""
@@ -992,12 +1005,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } catch is CancellationError {
                 // stopAsync() is awaiting us; it owns the teardown from here.
                 NSLog("sAiity engine: start cancelled before capture began")
+            } catch let e as URLError where e.code == .cancelled {
+                // The same event, spelled differently. FluidAudio's downloader
+                // cancels the underlying URLSessionDataTask, so a Stop pressed
+                // during the first model download surfaces as URLError.cancelled
+                // and not CancellationError — which used to fall through to the
+                // branch below, stomp `state` back to .idle while stopAsync was
+                // mid-teardown holding .stopping, and show the user "Error:
+                // cancelled" for something they had just asked for.
+                NSLog("sAiity engine: start cancelled during download")
             } catch {
-                state = .idle
                 let msg = error.localizedDescription
+                // Claim the teardown before the first await. `state` is only
+                // touched on the main actor, so this pair is atomic against
+                // stopAsync — whichever gets here first owns it, and the other
+                // sees .stopping and leaves the resources alone.
+                let ownsTeardown = (state == .starting)
+                if ownsTeardown { state = .stopping }
+                // The failure most likely on a first run — Screen Recording not
+                // granted, thrown from capture.start — happens AFTER prepare and
+                // start have both succeeded, so the model is loaded and the pump
+                // is looping. Setting .idle and returning left both running with
+                // the menu claiming there was no session.
+                if ownsTeardown {
+                    await releaseSessionResources()
+                    state = .idle
+                }
                 // The bubble can be switched off entirely (Settings → Captions),
                 // and a bare "Error" in the menu is then the only thing a failed
                 // first download says. Put the reason where it is always visible.
+                // After the teardown, so nothing it does overwrites the reason.
                 setStatus("Error: \(msg)")
                 overlay.show(text: msg, isFinal: true)
                 NSLog("sAiity start failed: \(msg)")
@@ -1152,7 +1189,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func stopAsync() async {
         guard state != .stopping else { return }
         state = .stopping
-        setStatus("Idle")
+        // Not "Idle". Cancelling a model download in flight can take a moment,
+        // and this await used to sit behind a menu that already said Idle and
+        // offered Start — while `start()` bailed on `guard state == .idle`, so
+        // every press was silently ignored.
+        setStatus("Stopping…")
 
         // Cancel an in-flight start and WAIT for it. Cancellation alone is not
         // enough: the start Task may be suspended inside a model download, and
@@ -1171,34 +1212,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         await restartTask?.value
         restartTask = nil
 
+        // A translator swap is fired and forgotten from the notification, so it
+        // can be mid-load right now and would otherwise finish onto a session
+        // that no longer exists.
+        translatorSwap?.cancel()
+        await translatorSwap?.value
+        translatorSwap = nil
+
+        // Order inside: backend.stop() emits whatever was still volatile, and
+        // closeSentence() catches the sentence it lands in, so the last thing
+        // said reaches the transcript instead of being dropped with the session.
+        // Queued transcript writes then have to land before the recording
+        // closes: TranscriptStore is an actor, so once end() has closed the
+        // handle a still-pending append is silently dropped.
+        await releaseSessionResources()
+        overlay.clear()
+        state = .idle
+        // The status said "Stopping…" for the whole teardown; say what is true
+        // now that it has finished.
+        setStatus("Idle")
+    }
+
+    /// Hand back everything a session holds.
+    ///
+    /// Split out of `stopAsync()` so the failed-start path can share it. The
+    /// property that makes that safe is what it does NOT do: it never touches
+    /// `sessionTask`. Calling `stopAsync()` from inside the start Task would
+    /// make that task await its own `sessionTask?.value` and never return.
+    ///
+    /// Every step is safe on a session that never got that far — `capture.stop()`
+    /// nils a stream that was never created, `backend.stop()` no-ops on a nil
+    /// pump, `TranscriptStore.end()` returns on a nil handle — which is why the
+    /// two callers can both run it without coordinating.
+    @MainActor
+    private func releaseSessionResources() async {
         await capture.stop()
         await backend.stop()
-        // backend.stop() emits whatever was still volatile; close the sentence
-        // it lands in so the last thing said reaches the transcript instead of
-        // being dropped with the session.
         closeSentence()
         await activeTranslator?.stop()
         translatorReady = false
-        // Queued transcript writes have to land before the recording closes:
-        // TranscriptStore is an actor, so once end() has closed the handle a
-        // still-pending append is silently dropped and the session loses its
-        // tail. Only worth waiting for when a transcript is actually being
-        // written — otherwise there is nothing at stake, and this is a wait on
-        // however long the last translation takes. The translator was stopped
-        // just above, so anything still queued behind it now returns at once;
-        // at most one generation is genuinely in flight.
         if await TranscriptStore.shared.isRecording {
             await transcriptWriteChain?.value
         }
         transcriptWriteChain = nil
         await endRecording()
-        // Anything still pooled goes back to the system now, not at some
-        // unspecified later point. Stop is exactly when a user expects an app
-        // to stop costing them memory.
         MemoryPolicy.releaseCaches()
-        NSLog("sAiity memory: session stopped — \(MemoryPolicy.describeFootprint())")
-        overlay.clear()
-        state = .idle
+        NSLog("sAiity memory: session released — \(MemoryPolicy.describeFootprint())")
     }
 
     /// Stop and drop every loaded model, so their files can be removed for real.
@@ -1365,19 +1424,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let idx = sessionLines.count
         let generation = sessionGeneration
 
-        // Backpressure: see maxPendingTranslations. Decided before the segment
-        // is recorded so the stored `trLoc` says what actually happened rather
-        // than promising a translation that was never attempted.
-        let translating = wantsTranslation && pendingTranslations < Self.maxPendingTranslations
+        // Frozen here, not re-read after the awaits below. The translate task
+        // and the write chain both used to read the mutable `translateTo`, so a
+        // target changed from the menu bar mid-flight could translate a line
+        // into one language and record another.
+        let target = translateTo
+
+        // Backpressure: see maxPendingTranslations. `translatorReady` is in the
+        // test as well, so a line is not queued against a translator that has
+        // not loaded — it kept a slot and produced nothing.
+        let translating = wantsTranslation && translatorReady
+            && pendingTranslations < Self.maxPendingTranslations
         if translating {
             pendingTranslations += 1
         } else if wantsTranslation {
-            NSLog("sAiity translate: skipped, \(pendingTranslations) already queued")
+            NSLog("sAiity translate: skipped, ready=\(translatorReady), \(pendingTranslations) queued")
         }
 
+        // `trLoc` is nil here on purpose. It is a record of OUTCOME, not of
+        // intent, so only the site that assigns `tr` may assign it — otherwise
+        // every line of a session whose translator failed to load claims a
+        // translation that was never attempted. Session-level intent already
+        // has a home in SessionMeta.translateTo.
         sessionLines.append(Segment(i: idx, t0: chunk.start, t1: chunk.end,
                                     text: text, loc: locale.identifier(.bcp47),
-                                    tr: nil, trLoc: translating ? translateTo : nil,
+                                    tr: nil, trLoc: nil,
                                     words: chunk.words.isEmpty ? nil : chunk.words))
 
         // Translate concurrently; the result is patched in by index.
@@ -1385,11 +1456,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let translation: Task<String?, Never> = Task { @MainActor in
             guard translating else { return nil }
             defer { self.pendingTranslations -= 1 }
-            guard let target = translateTo,
-                  let engine = activeTranslator else { return nil }
-            guard let out = await engine.translate(text, from: srcCode, to: target) else {
-                return nil
-            }
+            guard let target, let engine = activeTranslator else { return nil }
+            // Empty counts as nothing translated. MADLAD returns "" for a short
+            // or noisy caption — it has no emptiness check, unlike the LLM path's
+            // sanitizer — and an empty string is non-nil, so it would otherwise
+            // record a translation that is not there.
+            guard let out = await engine.translate(text, from: srcCode, to: target),
+                  !out.isEmpty else { return nil }
             if TestHooks.verboseLogging {
                 NSLog("sAiity translated [\(TranslationEngine.effective.rawValue)]: \(out)")
             }
@@ -1398,6 +1471,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // session that happens to share the index.
             if self.sessionGeneration == generation, idx < self.sessionLines.count {
                 self.sessionLines[idx].tr = out
+                // Assigned beside `tr`, never before it.
+                self.sessionLines[idx].trLoc = target
             }
             // Only if this sentence is still the one on screen. A translation
             // that resolves after the speaker has moved on belongs to text the
@@ -1418,9 +1493,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await previous?.value
             let tr = await translation.value
             if await TranscriptStore.shared.isRecording {
+                // Same rule on disk: the target is recorded only when there is a
+                // translation to attach it to. This path never saw `translating`
+                // at all, so it was the one that always claimed one.
                 await TranscriptStore.shared.append(chunk, locale: self.locale.identifier(.bcp47),
                                                     translation: tr,
-                                                    translateTo: self.translateTo)
+                                                    translateTo: tr == nil ? nil : target)
                 self.recordedLines += 1
             }
         }

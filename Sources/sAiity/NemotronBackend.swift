@@ -109,14 +109,25 @@ final class NemotronEngine: FluidStreamingEngine, @unchecked Sendable {
         // language, with the language identified from audio. That removes the
         // per-locale model juggling — and the 5-slot allocation cap — that
         // Apple's engine forces on us.
-        if !Self.isDownloaded(chunkMs: tierChunkMs) { progress(String(localized: "Downloading Nemotron model…")) }
+        // Through the coordinator, so a Download pressed on this row in Settings
+        // joins the fetch a session start is already doing rather than writing
+        // into the same tree behind it.
+        let ms = tierChunkMs
+        let base = Self.downloadBase
+        if !Self.isDownloaded(chunkMs: ms) {
+            progress(String(localized: "Downloading Nemotron model…"))
+            try await DownloadCoordinator.shared.run(AssetID.nemotron(chunkMs: ms)) {
+                _ = try await StreamingNemotronMultilingualAsrManager.downloadVariant(
+                    languageCode: "auto", chunkMs: ms, to: base,
+                    progressHandler: { p in
+                        progress(String(localized: "Downloading Nemotron model… \(Int(p.fractionCompleted * 100))%"))
+                    })
+            }
+        }
+        // Resolve the directory once the bytes are certainly there. A second
+        // downloadVariant on an installed tree is a no-op lookup.
         let dir = try await StreamingNemotronMultilingualAsrManager.downloadVariant(
-            languageCode: "auto",
-            chunkMs: tierChunkMs,
-            to: Self.downloadBase,
-            progressHandler: { p in
-                progress(String(localized: "Downloading Nemotron model… \(Int(p.fractionCompleted * 100))%"))
-            })
+            languageCode: "auto", chunkMs: ms, to: base, progressHandler: { _ in })
 
         progress(String(localized: "Loading Nemotron…"))
         try await manager.loadModels(from: dir)

@@ -99,7 +99,7 @@ enum ASREngine: String, CaseIterable, Sendable {
             return NemotronEngine.availableChunkMs.map { ms in
                 let fast = ms < NemotronEngine.chunkMs
                 return ModelAsset(
-                    id: fast ? "asr.nemotron.fast" : "asr.nemotron",
+                    id: AssetID.nemotron(chunkMs: ms),
                     family: .recognition,
                     title: fast ? String(localized: "Nemotron (multilingual, fast)")
                                  : String(localized: "Nemotron (multilingual)"),
@@ -126,7 +126,7 @@ enum ASREngine: String, CaseIterable, Sendable {
 
         case .parakeetEou:
             return [ModelAsset(
-                id: "asr.parakeetEou",
+                id: AssetID.parakeetEou,
                 family: .recognition,
                 title: String(localized: "Parakeet EOU (English)"),
                 detail: summary,
