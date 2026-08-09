@@ -576,6 +576,17 @@
         }
       }
     },
+    "Clause pauses in ordinary speech run 200–500 ms and the pause at the end of a sentence is longer, so %lld ms is the measured default. Shorter splits sentences at commas and hands the translator fragments; longer delays every translation and eventually lets the length cap cut one mid-word.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pausen zwischen Satzteilen dauern in normaler Rede 200–500 ms, die Pause am Satzende ist länger – %lld ms ist der gemessene Standardwert. Kürzer trennt Sätze an Kommas und übergibt dem Übersetzer Bruchstücke; länger verzögert jede Übersetzung und lässt am Ende das Längenlimit mitten im Wort trennen."
+          }
+        }
+      }
+    },
     "Clear": {
       "localizations": {
         "de": {
@@ -1056,6 +1067,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Bearbeiten"
+          }
+        }
+      }
+    },
+    "End a sentence on a pause": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Satz bei einer Pause beenden"
           }
         }
       }
@@ -1564,6 +1586,17 @@
         }
       }
     },
+    "Most of what the multilingual engine emits carries no punctuation, so a pause is what tells the app a thought has finished — and a finished sentence is what gets translated. Off, sentences close only on real punctuation and on the length cap, which suits a speaker who pauses mid-thought.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Das meiste, was die mehrsprachige Engine ausgibt, hat keine Satzzeichen – eine Pause ist also das, was der App sagt, dass ein Gedanke fertig ist, und übersetzt wird ein fertiger Satz. Aus schließen Sätze nur bei echten Satzzeichen und beim Längenlimit, was zu jemandem passt, der mitten im Gedanken Pausen macht."
+          }
+        }
+      }
+    },
     "NVIDIA Nemotron (streaming, on-device)": {
       "extractionState": "manual",
       "localizations": {
@@ -2045,6 +2078,17 @@
         }
       }
     },
+    "Pause length": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pausenlänge"
+          }
+        }
+      }
+    },
     "Per model — shown on each row under Models": {
       "extractionState": "manual",
       "localizations": {
@@ -2466,6 +2510,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Halbfett"
+          }
+        }
+      }
+    },
+    "Sentences": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sätze"
           }
         }
       }

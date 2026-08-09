@@ -106,6 +106,24 @@ final class AppState {
     }
     var shortcutError: String?
 
+    /// Whether a pause in speech ends a sentence, and how long a pause has to
+    /// be. Mirrored here so the controls are bindings; the notification is what
+    /// makes a running capture pick the change up.
+    var speechGapEnabled = SpeechGap.enabled {
+        didSet {
+            guard speechGapEnabled != oldValue else { return }
+            SpeechGap.enabled = speechGapEnabled
+            NotificationCenter.default.post(name: .saiitySpeechGapChanged, object: nil)
+        }
+    }
+    var speechGapHoldMs = Double(SpeechGap.holdMs) {
+        didSet {
+            guard Int(speechGapHoldMs) != SpeechGap.holdMs else { return }
+            SpeechGap.holdMs = Int(speechGapHoldMs)
+            NotificationCenter.default.post(name: .saiitySpeechGapChanged, object: nil)
+        }
+    }
+
     /// Writing back to CaptionStyle.current persists AND posts the change
     /// notification, so the live bubble updates as the slider moves.
     var style: CaptionStyle = CaptionStyle.current {

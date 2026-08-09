@@ -217,6 +217,28 @@ struct CaptionsView: View {
                 }
             }
 
+            Section {
+                LabeledToggle("End a sentence on a pause",
+                              "Most of what the multilingual engine emits carries no punctuation, so a pause is what tells the app a thought has finished — and a finished sentence is what gets translated. Off, sentences close only on real punctuation and on the length cap, which suits a speaker who pauses mid-thought.",
+                              isOn: $state.speechGapEnabled)
+                if state.speechGapEnabled {
+                    slider("Pause length", $state.speechGapHoldMs,
+                           Double(SpeechGap.range.lowerBound)...Double(SpeechGap.range.upperBound),
+                           "%.0f ms")
+                    Text("Clause pauses in ordinary speech run 200–500 ms and the pause at the end of a sentence is longer, so \(SpeechGap.defaultHoldMs) ms is the measured default. Shorter splits sentences at commas and hands the translator fragments; longer delays every translation and eventually lets the length cap cut one mid-word.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            } header: {
+                HStack {
+                    Text("Sentences")
+                    Spacer()
+                    ResetButton {
+                        state.speechGapEnabled = true
+                        state.speechGapHoldMs = Double(SpeechGap.defaultHoldMs)
+                    }
+                }
+            }
+
             Section("Translation") {
                 LabeledContent("Translate to") {
                     Button {
@@ -428,7 +450,11 @@ struct CaptionsView: View {
             HStack {
                 Slider(value: value, in: range)
                 Text(String(format: format, value.wrappedValue * scale))
-                    .monospacedDigit().frame(width: 44, alignment: .trailing)
+                    // 44 was sized for "22" and "62%"; "750 ms" wrapped onto two
+                    // lines. Right-aligned, so the extra width costs the slider
+                    // a few points and nothing else.
+                    .monospacedDigit().fixedSize()
+                    .frame(width: 62, alignment: .trailing)
             }
         }
     }

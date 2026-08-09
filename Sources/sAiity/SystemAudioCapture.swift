@@ -80,11 +80,33 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
     /// Clause pauses in ordinary speech run 200-500 ms; the pause at the end of
     /// a sentence is longer. Raising this costs about a third of a second before
     /// a finished sentence is translated, and buys sentences that are whole.
-    private static let gapHoldFrames = 36_000
+    ///
+    /// No longer a constant — `SpeechGap.holdMs` is a setting, and this is it
+    /// converted to frames at the stream's own rate. Recomputed on `start()` and
+    /// whenever the setting changes, rather than read per buffer: `classify` runs
+    /// ~50 times a second on the capture queue.
+    private var gapHoldFrames = 36_000
+    /// Mirrors `SpeechGap.enabled` for the same reason.
+    private var gapEnabled = true
     private var quietFrames = 0
     /// Fires once per pause. Re-arms only after speech resumes, so a long
     /// silence does not flush repeatedly.
     private var gapArmed = false
+
+    /// Re-read the speech-gap setting. Called on start, and again whenever the
+    /// user moves the slider, so a change lands on the running session instead
+    /// of waiting for the next one.
+    func applySpeechGapSettings() {
+        gapEnabled = SpeechGap.enabled
+        gapHoldFrames = SpeechGap.holdFrames(at: Self.streamSampleRate)
+        // A shortened threshold must not fire immediately on quiet already
+        // accumulated under the old, longer one.
+        quietFrames = 0
+    }
+
+    /// SCStream delivers 48 kHz; the gap threshold is measured against the
+    /// stream, not the resampled buffer the recogniser receives.
+    private static let streamSampleRate: Double = 48_000
 
     // Diagnostics: audio seconds captured vs audio seconds actually delivered.
     private var inSeconds = 0.0
@@ -99,6 +121,10 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
         self.targetFormat = targetFormat
         self.onBuffer = onBuffer
         self.onState = onState
+        // The stream is 48 kHz regardless of the target format the recogniser
+        // wants, and `classify` measures the stream, so the conversion uses the
+        // stream's rate rather than the target's.
+        applySpeechGapSettings()
 
         // Ask up front rather than letting SCK fail with a generic error. The
         // first call raises the system prompt; macOS only actually grants it
@@ -246,9 +272,10 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
         // of a sentence.
         var rms: Float = 0
         vDSP_rmsqv(ch[0], 1, &rms, vDSP_Length(pcm.frameLength))
+        guard gapEnabled else { return }
         if rms < Self.gapRMSThreshold {
             quietFrames += Int(pcm.frameLength)
-            if gapArmed, quietFrames >= Self.gapHoldFrames {
+            if gapArmed, quietFrames >= gapHoldFrames {
                 gapArmed = false
                 onSpeechGap?()
             }

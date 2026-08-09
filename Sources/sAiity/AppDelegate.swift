@@ -403,6 +403,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(
             self, selector: #selector(saveTranscriptChangedExternally(_:)),
             name: .saiitySaveTranscriptChanged, object: nil)
+        // The gap threshold decides where sentences break, so a change should
+        // land on the session the user is watching rather than the next one.
+        NotificationCenter.default.addObserver(
+            forName: .saiitySpeechGapChanged, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.capture.applySpeechGapSettings() }
+            }
         rebuildMenu()
 
         // Lets the Settings window stop the session and drop loaded models
