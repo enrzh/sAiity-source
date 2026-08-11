@@ -106,6 +106,16 @@ final class AppState {
     }
     var shortcutError: String?
 
+    /// Sentence-at-close or live retranslation of the growing sentence. Read
+    /// by the caption pipeline per clause, so no notification is needed — the
+    /// next clause simply behaves the new way.
+    var translationTiming = TranslationTiming.current {
+        didSet {
+            guard translationTiming != oldValue else { return }
+            TranslationTiming.current = translationTiming
+        }
+    }
+
     /// Whether a pause in speech ends a sentence, and how long a pause has to
     /// be. Mirrored here so the controls are bindings; the notification is what
     /// makes a running capture pick the change up.

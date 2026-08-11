@@ -879,10 +879,24 @@ final class OverlayWindow: NSPanel {
     ///
     /// While translation is switched on the row keeps its height even when it is
     /// empty — see `reservesTranslationRow`.
-    func showTranslation(_ text: String) {
+    ///
+    /// `stale` dims the row: the source line has already moved on, so this
+    /// translation belongs to the *previous* sentence. Dimming says so without
+    /// removing it — a late translation the viewer can still attach to what
+    /// they just read beats an empty row, which is what translating slower
+    /// than recognising used to produce.
+    func showTranslation(_ text: String, stale: Bool = false) {
         translationLabel.stringValue = text
         translationLabel.isHidden = text.isEmpty && !reservesTranslationRow
+        translationLabel.alphaValue = CaptionStyle.current.translation.opacity * (stale ? 0.55 : 1)
         sizeToFit()
+    }
+
+    /// The source moved on while this translation stayed. Same dimming as
+    /// `showTranslation(stale: true)` without re-setting the text.
+    func markTranslationStale() {
+        guard !translationLabel.stringValue.isEmpty else { return }
+        translationLabel.alphaValue = CaptionStyle.current.translation.opacity * 0.55
     }
 
     /// Hold a line of space for the translation for as long as translation is

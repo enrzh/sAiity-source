@@ -291,6 +291,16 @@ struct CaptionsView: View {
                             }
                         }
                     }
+                    Picker("Translation mode", selection: $state.translationTiming) {
+                        ForEach(TranslationTiming.allCases, id: \.self) { t in
+                            Text(t.displayName).tag(t)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    Text(state.translationTiming == .live
+                         ? "Retranslates the sentence as it grows, so a rough translation appears within a couple of seconds and settles when the sentence closes. Noticeably more translator work — with a local LLM every update takes a second or more, so this suits MADLAD."
+                         : "One translation per sentence, when the pause or the punctuation closes it. Best quality for the least work — the translator always sees the whole thought.")
+                        .font(.caption).foregroundStyle(.secondary)
                     if let te = state.translationEngine {
                         Text("Licence: \(te.licence)")
                             .font(.caption2).foregroundStyle(.tertiary)

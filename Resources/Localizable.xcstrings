@@ -1406,6 +1406,17 @@
         }
       }
     },
+    "Live": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Live"
+          }
+        }
+      }
+    },
     "Live caption": {
       "extractionState": "manual",
       "localizations": {
@@ -1914,6 +1925,17 @@
         }
       }
     },
+    "One translation per sentence, when the pause or the punctuation closes it. Best quality for the least work — the translator always sees the whole thought.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eine Übersetzung pro Satz, wenn die Pause oder das Satzzeichen ihn beendet. Beste Qualität bei geringstem Aufwand – der Übersetzer sieht immer den ganzen Gedanken."
+          }
+        }
+      }
+    },
     "Only one translator runs at a time — pick it under Captions.": {
       "extractionState": "manual",
       "localizations": {
@@ -2384,6 +2406,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Position zurücksetzen"
+          }
+        }
+      }
+    },
+    "Retranslates the sentence as it grows, so a rough translation appears within a couple of seconds and settles when the sentence closes. Noticeably more translator work — with a local LLM every update takes a second or more, so this suits MADLAD.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Übersetzt den Satz immer wieder, während er wächst – eine grobe Übersetzung erscheint nach wenigen Sekunden und setzt sich, wenn der Satz endet. Deutlich mehr Übersetzungsarbeit: Mit einem lokalen LLM dauert jedes Update über eine Sekunde, das passt also zu MADLAD."
           }
         }
       }
@@ -3103,6 +3136,17 @@
         }
       }
     },
+    "Translation mode": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Übersetzungsmodus"
+          }
+        }
+      }
+    },
     "Translation paused — the Mac is short of memory. It comes back on its own.": {
       "extractionState": "manual",
       "localizations": {
@@ -3248,6 +3292,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Was möchtest du untertiteln?"
+          }
+        }
+      }
+    },
+    "Whole sentences": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ganze Sätze"
           }
         }
       }

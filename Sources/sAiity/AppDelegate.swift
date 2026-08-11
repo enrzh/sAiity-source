@@ -237,6 +237,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // made without the rest. These hold the clauses until they form something
     // worth reading.
     private var sentenceParts: [String] = []
+    /// Which sentence the translation on screen belongs to, so a stale one can
+    /// be dimmed rather than cleared, and cleared only once it is two sentences
+    /// behind. Nil when the row is empty.
+    private var shownTranslationID: Int?
+    /// Live-mode translation of the still-open sentence: single-flight with
+    /// latest-wins, because neither translator can be cancelled mid-decode —
+    /// queueing every clause would fall permanently behind, and what matters is
+    /// only ever the newest text.
+    private var liveTranslationBusy = false
+    private var pendingLiveText: (text: String, sentenceID: Int)?
     private var sentenceWords: [TimedWord] = []
     private var sentenceStart: Double = 0
     private var sentenceEnd: Double = 0
@@ -946,6 +956,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             translateTo != nil && CaptionStyle.current.showTranslation
         sessionLines.removeAll()
         pendingTranslations = 0
+        shownTranslationID = nil
+        pendingLiveText = nil
         sessionGeneration += 1
         transcriptWriteChain = nil
         lastFinalText = ""
@@ -1322,14 +1334,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         showedAnyCaption = true
 
-        // The first words of a new sentence replace the last one on screen, so
-        // the translation under them no longer belongs to what is above it.
-        // Clear it here rather than letting it sit under unrelated text; the
-        // row keeps its height, so nothing jumps.
+        // The first words of a new sentence replace the last one on screen. The
+        // translation under them belongs to the sentence that just left — but
+        // clearing it here was wrong: recognition is faster than translation,
+        // so with continuous speech the next sentence's first chunk always beat
+        // the 0.2–1.2 s translation, which was then also discarded for having
+        // the wrong ID. The row was blanked and then never filled — visible as
+        // "the update removes the translation".
+        //
+        // So the rows are decoupled. The old translation stays, dimmed to say
+        // it belongs to the previous line, until its successor replaces it —
+        // and only a translation two or more sentences stale is cleared, since
+        // under two newer sentences it no longer helps anyone.
         if sentenceClosed, sentenceParts.isEmpty {
             sentenceClosed = false
             displaySentenceID += 1
-            overlay.showTranslation("")
+            if let shown = shownTranslationID, displaySentenceID - shown >= 2 {
+                overlay.showTranslation("")
+                shownTranslationID = nil
+            } else {
+                overlay.markTranslationStale()
+            }
         }
 
         guard chunk.isFinal else {
@@ -1361,7 +1386,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // what the multilingual model emits — is closed by the pause instead,
         // from commitAtSpeechGap().
         let ended = lastFinalText.last.map(Self.sentenceTerminators.contains) ?? false
-        if ended || lastFinalText.count >= Self.maxSentenceChars { closeSentence() }
+        if ended || lastFinalText.count >= Self.maxSentenceChars {
+            closeSentence()
+        } else if TranslationTiming.current == .live {
+            // The sentence is still open; in live mode, translate what exists
+            // of it so far. The close will produce the authoritative version.
+            kickLiveTranslation(of: lastFinalText, sentenceID: displaySentenceID)
+        }
+    }
+
+    /// Live-mode translation of the still-open sentence: display only, never
+    /// the transcript. Single-flight with latest-wins — neither translator can
+    /// be cancelled mid-decode, so queueing every clause would fall permanently
+    /// behind, and only the newest text is ever worth translating. A request
+    /// arriving while one runs replaces whatever was waiting, and the newest
+    /// waiter runs when the current one finishes.
+    @MainActor
+    private func kickLiveTranslation(of text: String, sentenceID: Int) {
+        guard sentenceID == displaySentenceID,
+              translateTo != nil, translatorReady,
+              CaptionStyle.current.showTranslation else { return }
+        if liveTranslationBusy {
+            pendingLiveText = (text, sentenceID)
+            return
+        }
+        liveTranslationBusy = true
+        let srcCode = detectedLanguage ?? locale.identifier(.bcp47)
+        let generation = sessionGeneration
+        Task { @MainActor in
+            defer {
+                liveTranslationBusy = false
+                if let next = pendingLiveText {
+                    pendingLiveText = nil
+                    kickLiveTranslation(of: next.text, sentenceID: next.sentenceID)
+                }
+            }
+            guard let target = translateTo, let engine = activeTranslator else { return }
+            guard let out = await engine.translate(text, from: srcCode, to: target),
+                  !out.isEmpty else { return }
+            // Same guards as the authoritative path: not across a session
+            // boundary, and only under the sentence it translates.
+            guard sessionGeneration == generation,
+                  displaySentenceID == sentenceID,
+                  CaptionStyle.current.showTranslation else { return }
+            if TestHooks.verboseLogging {
+                NSLog("sAiity live translated: \(out)")
+            }
+            overlay.showTranslation(out)
+            shownTranslationID = sentenceID
+        }
     }
 
     /// Hand the assembled sentence on: language detection, translation, and the
@@ -1480,12 +1553,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Assigned beside `tr`, never before it.
                 self.sessionLines[idx].trLoc = target
             }
-            // Only if this sentence is still the one on screen. A translation
-            // that resolves after the speaker has moved on belongs to text the
-            // viewer can no longer see, and stacking it under the next sentence
-            // reads as a mistranslation of that sentence.
-            if CaptionStyle.current.showTranslation, self.displaySentenceID == sentenceID {
-                self.overlay.showTranslation(out)
+            // Current sentence: show it plainly. One sentence late: still show
+            // it, dimmed — the viewer just read that line, and a slightly late
+            // translation they can attach to it beats the empty row that
+            // discarding produced. Older than that: drop, it helps nobody.
+            if CaptionStyle.current.showTranslation {
+                let behind = self.displaySentenceID - sentenceID
+                if behind <= 0 {
+                    self.overlay.showTranslation(out)
+                    self.shownTranslationID = sentenceID
+                } else if behind == 1 {
+                    self.overlay.showTranslation(out, stale: true)
+                    self.shownTranslationID = sentenceID
+                }
             }
             return out
         }
