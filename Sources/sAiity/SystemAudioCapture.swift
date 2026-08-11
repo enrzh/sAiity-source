@@ -62,46 +62,32 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
     /// 2 s at 48 kHz — long enough not to trip on the gap between two words.
     private static let silenceHoldFrames = 96_000
 
-    /// Speech-gap detection. RMS, not peak: a single click during a pause should
-    /// not reset it. The threshold sits well below speech and above room tone —
-    /// −45 dBFS — and the hold is long enough to ignore the gaps *between words*
-    /// while still catching the gap between sentences.
-    private static let gapRMSThreshold: Float = 0.0056     // ≈ -45 dBFS
-    /// 750 ms at 48 kHz.
-    ///
-    /// This is the line between a breath and a full stop, and it decides where
-    /// sentences end: the caption pipeline treats a gap as the end of a thought,
-    /// because most of what the multilingual recogniser emits carries no
-    /// punctuation to end it with. At 450 ms it fired on the pause a speaker
-    /// leaves at a comma — "Untertitel für alles, was der Mac abspielt, direkt
-    /// auf dem Gerät." was split into three, and each third was translated
-    /// without the other two.
-    ///
-    /// Clause pauses in ordinary speech run 200-500 ms; the pause at the end of
-    /// a sentence is longer. Raising this costs about a third of a second before
-    /// a finished sentence is translated, and buys sentences that are whole.
-    ///
-    /// No longer a constant — `SpeechGap.holdMs` is a setting, and this is it
-    /// converted to frames at the stream's own rate. Recomputed on `start()` and
-    /// whenever the setting changes, rather than read per buffer: `classify` runs
-    /// ~50 times a second on the capture queue.
-    private var gapHoldFrames = 36_000
-    /// Mirrors `SpeechGap.enabled` for the same reason.
+    /// Speech-gap detection lives in `SpeechGapDetector` — pure, unit-tested,
+    /// and adaptive to the material's own noise floor. RMS, not peak: a single
+    /// click during a pause should not reset it. The hold decides where
+    /// sentences end (the caption pipeline treats a gap as the end of a
+    /// thought), and its default is measured: at 450 ms it fired on the pause a
+    /// speaker leaves at a comma, and "Untertitel für alles, was der Mac
+    /// abspielt, direkt auf dem Gerät." was split into three, each translated
+    /// without the others.
+    private var gapDetector = SpeechGapDetector(holdFrames: 36_000)
+    /// Mirrors `SpeechGap.enabled`; cached because `classify` runs ~50×/s on
+    /// the capture queue.
     private var gapEnabled = true
-    private var quietFrames = 0
-    /// Fires once per pause. Re-arms only after speech resumes, so a long
-    /// silence does not flush repeatedly.
-    private var gapArmed = false
+    /// Quietest RMS seen in the current diagnostic window, and its length.
+    private var rmsFloor: Float = .greatestFiniteMagnitude
+    private var rmsWindowFrames = 0
 
     /// Re-read the speech-gap setting. Called on start, and again whenever the
     /// user moves the slider, so a change lands on the running session instead
     /// of waiting for the next one.
     func applySpeechGapSettings() {
         gapEnabled = SpeechGap.enabled
-        gapHoldFrames = SpeechGap.holdFrames(at: Self.streamSampleRate)
-        // A shortened threshold must not fire immediately on quiet already
-        // accumulated under the old, longer one.
-        quietFrames = 0
+        gapDetector.holdFrames = SpeechGap.holdFrames(at: Self.streamSampleRate)
+        // Forget both the accumulated quiet — a shortened threshold must not
+        // fire immediately on silence banked under the longer one — and the
+        // learned noise floor, since a new session may be different material.
+        gapDetector.reset()
     }
 
     /// SCStream delivers 48 kHz; the gap threshold is measured against the
@@ -273,15 +259,30 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
         var rms: Float = 0
         vDSP_rmsqv(ch[0], 1, &rms, vDSP_Length(pcm.frameLength))
         guard gapEnabled else { return }
-        if rms < Self.gapRMSThreshold {
-            quietFrames += Int(pcm.frameLength)
-            if gapArmed, quietFrames >= gapHoldFrames {
-                gapArmed = false
-                onSpeechGap?()
+        // Diagnostics for "it only translates when I stop the video". The gap is
+        // measured on the whole mix, so continuously scored material — a film,
+        // most anime — can keep the RMS above the threshold through every pause
+        // in speech, and then no sentence ever closes on a pause. Logging the
+        // floor actually reached says whether that is what is happening, rather
+        // than leaving it to be guessed at.
+        if debug {
+            rmsFloor = min(rmsFloor, rms)
+            rmsWindowFrames += Int(pcm.frameLength)
+            if rmsWindowFrames >= 48_000 * 5 {
+                let db = rmsFloor > 0 ? 20 * log10(rmsFloor) : -.infinity
+                let th = gapDetector.currentThreshold
+                NSLog(String(format:
+                    "sAiity gap: quietest RMS in 5s %.5f (%.1f dBFS), adaptive threshold %.5f (%.1f dBFS) — %@",
+                    rmsFloor, db, th, 20 * log10(th),
+                    rmsFloor < th ? "crosses" : "NEVER crosses"))
+                rmsFloor = .greatestFiniteMagnitude
+                rmsWindowFrames = 0
             }
-        } else {
-            quietFrames = 0
-            gapArmed = true
+        }
+        if gapDetector.process(rms: rms, frames: Int(pcm.frameLength),
+                               sampleRate: Float(Self.streamSampleRate)) {
+            if debug { NSLog("sAiity gap: FIRED (floor \(gapDetector.noiseFloor))") }
+            onSpeechGap?()
         }
     }
 

@@ -47,13 +47,15 @@ removed from the four lines of clamping that caused it.
 **Captions commit on a pause in speech, not on a timer.** A finished sentence is
 translated when the speaker stops. The alternative — flushing when a time or
 length budget runs out — cuts sentences in half and hands the translator a
-fragment, which is how you get confident nonsense. Silence is detected as RMS
-below −45 dBFS held for 750 ms by default, which is a different thing from the
-digital silence of a paused video, and both are handled. That threshold is the
-line between a breath and a full stop: at 450 ms it fired on the pause a speaker
-leaves at a comma, and a sentence with commas in it was split at every one. It
-is adjustable under Captions → Sentences, and can be switched off for material
-where the pause means nothing.
+fragment, which is how you get confident nonsense. Quiet is measured against
+the material's own noise floor, not an absolute level: a fixed −45 dBFS
+threshold never fired under a continuous music bed — measured, the same speech
+fired with silent pauses and never over a −34 dBFS bed — which meant scored
+material only ever translated when the video was paused. The hold, 750 ms by
+default, is the line between a breath and a full stop: at 450 ms it fired on
+the pause a speaker leaves at a comma, and a sentence with commas in it was
+split at every one. Both are under Captions → Sentences, and the pause commit
+can be switched off for material where the pause means nothing.
 
 **Chinese, Japanese and Korean actually work.** Sentence detection originally
 required `[.!?]` followed by a space, and the rolling commit looked for the last
