@@ -12,6 +12,9 @@ extension Notification.Name {
     static let saiityEngineChanged = Notification.Name("sAiityEngineChanged")
     static let saiityTranslateTargetChanged = Notification.Name("sAiityTranslateTargetChanged")
     static let saiityResetBubble = Notification.Name("sAiityResetBubble")
+    /// Settings → General asks the delegate to raise the standard About panel;
+    /// the panel and its credits belong to AppKit, not to a SwiftUI page.
+    static let saiityShowAbout = Notification.Name("sAiityShowAbout")
 }
 
 /// Shared so non-UI types can report disk usage honestly.
@@ -86,6 +89,24 @@ final class AppState {
                                             userInfo: ["engine": engine.rawValue,
                                                        "chunkMs": nemotronTier])
         }
+    }
+
+    /// Languages to offer when translating an already-recorded transcript:
+    /// the current target first, then recently used ones, then what this Mac
+    /// is set up for. Same sources the menu bar draws on, so the two agree.
+    var recentTargetsForMenu: [String] {
+        var out: [String] = []
+        func add(_ c: String?) {
+            guard let c, !c.isEmpty, !out.contains(c) else { return }
+            out.append(c)
+        }
+        add(translateTo)
+        (UserDefaults.standard.stringArray(forKey: "recentTranslateTargets") ?? []).forEach(add)
+        Locale.preferredLanguages.prefix(4).forEach {
+            add(Locale(identifier: $0).language.languageCode?.identifier)
+        }
+        ["en", "de"].forEach(add)
+        return Array(out.prefix(8))
     }
 
     /// Every downloadable asset with its live disk state, from one registry.

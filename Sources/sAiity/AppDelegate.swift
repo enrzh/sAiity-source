@@ -420,6 +420,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // home. If the user says yes the process relaunches from
         // /Applications and nothing below this line matters for this one.
         MoveToApplications.offerIfNeeded()
+        // Apply the retention policy before anything can list transcripts, so
+        // an expired session never appears and then vanishes.
+        TranscriptRetention.sweep()
         // Before anything can allocate: cap MLX's buffer pool, and start
         // listening for the system asking for memory back. See MemoryPolicy —
         // this app can hold several gigabytes of models, and on a 16 GB machine
@@ -462,6 +465,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                                queue: .main) { [weak self] _ in
             self?.overlay.resetPosition()
         }
+        NotificationCenter.default.addObserver(forName: .saiityShowAbout, object: nil,
+                                               queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.showAbout() }
+        }
 
         HotKeyCenter.shared.register(.toggleCaptions) { [weak self] in
             self?.toggle()
@@ -474,6 +481,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         HotKeyCenter.shared.register(.recentCaptions) { [weak self] in
             self?.showRecentCaptions()
+        }
+        HotKeyCenter.shared.register(.clearCaption) { [weak self] in
+            self?.clearCaption()
         }
 
         // Keep the menu-bar picker and the window in step — they write the same
@@ -563,9 +573,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func rebuildMenu() {
         let menu = NSMenu()
-        let header = NSMenuItem(title: backend.name, action: nil, keyEquivalent: "")
-        header.isEnabled = false
-        menu.addItem(header)
+        // The engine's full name ("NVIDIA Nemotron (streaming, on-device)")
+        // used to head the menu. It never changes while you work and it is on
+        // the Captions page anyway; the status line below says the thing that
+        // actually varies.
         if let rl = recordingLine {
             let r = NSMenuItem(title: rl, action: nil, keyEquivalent: "")
             r.isEnabled = false
@@ -592,27 +603,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         translate.image = Self.menuSymbol("globe")
         menu.addItem(translate)
 
-        menu.addItem(.separator())
-        let copyLine = NSMenuItem(title: String(localized: "Copy current line"), action: #selector(copyCurrentLine),
-                                  keyEquivalent: "c")
-        copyLine.isEnabled = !(lastFinalText.isEmpty && lastVolatileText.isEmpty)
-        copyLine.image = Self.menuSymbol("doc.on.doc")
-        menu.addItem(copyLine)
-        let copyAll = NSMenuItem(title: String(localized: "Copy whole session"), action: #selector(copyWholeSession),
-                                 keyEquivalent: "C")
-        copyAll.isEnabled = !sessionLines.isEmpty
-        copyAll.image = Self.menuSymbol("list.clipboard")
-        menu.addItem(copyAll)
-
-        let rec = NSMenuItem(title: String(localized: "Save transcript"), action: #selector(toggleSaveTranscript),
-                             keyEquivalent: "")
-        rec.state = saveTranscript ? .on : .off
-        rec.toolTip = String(localized: "Write this session to disk. Off by default.")
-        rec.image = Self.menuSymbol("record.circle")
-        menu.addItem(rec)
-        let transcripts = transcriptsMenuItem()
-        transcripts.image = Self.menuSymbol("text.document")
-        menu.addItem(transcripts)
+        // Everything about transcripts has left this menu: the saved-session
+        // submenu, the Save-transcript toggle, and both Copy commands. They
+        // live on the Transcripts page, which can do what a menu never could —
+        // show the lines, search them, export them. Copying the current line
+        // is still one click away on the bubble itself, where you are already
+        // looking when you want it.
 
         menu.addItem(.separator())
         // "Settings…" with ⌘, — the name and the shortcut every Mac app uses
@@ -621,8 +617,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                   keyEquivalent: ",")
         settings.image = Self.menuSymbol("gear")
         menu.addItem(settings)
-        menu.addItem(NSMenuItem(title: String(localized: "About sAiity"), action: #selector(showAbout),
-                                keyEquivalent: ""))
+        // About moved to Settings → General. It is not a thing you reach for
+        // mid-session, but it must stay reachable *somewhere*: it is the only
+        // surface for the third-party licences and the credits this app ships.
         let update = NSMenuItem(title: String(localized: "Check for Updates…"),
                                 action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)),
                                 keyEquivalent: "")
@@ -716,102 +713,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: - Actions
-
-    /// Past sessions, newest first. Everything is local; "Reveal in Finder" is
-    /// there so what exists on disk is never a mystery.
-    private func transcriptsMenuItem() -> NSMenuItem {
-        let item = NSMenuItem(title: String(localized: "Transcripts"), action: nil, keyEquivalent: "")
-        let menu = NSMenu()
-        // Rows come pre-rendered from the catalogue, so building this menu is
-        // object construction and nothing else. It used to begin with a full
-        // directory scan plus a JSON decode per session — on the main actor, on
-        // every status change, which during a model download is several times a
-        // second.
-        let rows = SessionCatalog.rows(limit: 15)
-
-        if rows.isEmpty {
-            let n = NSMenuItem(title: String(localized: "No saved transcripts"), action: nil, keyEquivalent: "")
-            n.isEnabled = false
-            menu.addItem(n)
-        }
-        for row in rows {
-            let mi = NSMenuItem(title: row.title, action: nil, keyEquivalent: "")
-            let sub = NSMenu()
-            // Typed as LocalizationValue, not String: as String these five
-            // titles would be verbatim and the whole submenu would ship English.
-            let actions: [(String.LocalizationValue, Selector)] =
-                [("Copy as text", #selector(exportCopy(_:))),
-                 ("Save as Markdown", #selector(exportMarkdown(_:))),
-                 ("Save as SRT", #selector(exportSRT(_:))),
-                 ("Reveal in Finder", #selector(revealSession(_:))),
-                 ("Delete", #selector(deleteSession(_:)))]
-            for (title, sel) in actions {
-                let a = NSMenuItem(title: String(localized: title), action: sel, keyEquivalent: "")
-                a.representedObject = row.id
-                sub.addItem(a)
-            }
-            assignTargets(sub)
-            mi.submenu = sub
-            menu.addItem(mi)
-        }
-        if !rows.isEmpty {
-            menu.addItem(.separator())
-            menu.addItem(NSMenuItem(title: String(localized: "Delete all transcripts…"),
-                                    action: #selector(deleteAllSessions), keyEquivalent: ""))
-        }
-        assignTargets(menu)
-        item.submenu = menu
-        return item
-    }
-
-    private func session(for sender: NSMenuItem) -> SessionRef? {
-        guard let id = sender.representedObject as? String else { return nil }
-        return SessionCatalog.sessions().first { $0.id == id }
-    }
-
-    @objc private func exportCopy(_ sender: NSMenuItem) {
-        guard let s = session(for: sender) else { return }
-        Clipboard.copy(Export.txt(TranscriptStore.segments(of: s)))
-        setStatus("Transcript copied")
-    }
-
-    @objc private func exportMarkdown(_ sender: NSMenuItem) {
-        guard let s = session(for: sender) else { return }
-        let out = Export.markdown(TranscriptStore.segments(of: s), meta: s.meta)
-        if let url = Export.write(out, named: "transcript.md", in: s.url) {
-            NSWorkspace.shared.activateFileViewerSelecting([url])
-        }
-    }
-
-    @objc private func exportSRT(_ sender: NSMenuItem) {
-        guard let s = session(for: sender) else { return }
-        let out = Export.srt(TranscriptStore.segments(of: s))
-        if let url = Export.write(out, named: "transcript.srt", in: s.url) {
-            NSWorkspace.shared.activateFileViewerSelecting([url])
-        }
-    }
-
-    @objc private func revealSession(_ sender: NSMenuItem) {
-        guard let s = session(for: sender) else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([s.url])
-    }
-
-    @objc private func deleteSession(_ sender: NSMenuItem) {
-        guard let s = session(for: sender) else { return }
-        TranscriptStore.delete(s)
-        SessionCatalog.invalidate()
-        setStatus("Transcript deleted")
-    }
-
-    @objc private func deleteAllSessions() {
-        TranscriptStore.deleteAll()
-        SessionCatalog.invalidate()
-        setStatus("All transcripts deleted")
-    }
-
-    @objc private func toggleSaveTranscript() {
-        applySaveTranscript(!saveTranscript)
-    }
 
     @objc private func saveTranscriptChangedExternally(_ note: Notification) {
         guard let on = note.userInfo?["on"] as? Bool, on != saveTranscript else { return }
@@ -1076,6 +977,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case "start": if !state.isActive { start() }
             case "stop": if state.isActive { stop() }
             case "copy": copyCurrentLine()
+            // The whole running session, which no other surface can reach: it
+            // has not been written to disk yet, and will not be at all unless
+            // saving is on. Off the menu, still scriptable.
+            case "copyall": copyWholeSession()
             case "bubble": toggleBubbleHidden()
             case "recent": showRecentCaptions()
             default:

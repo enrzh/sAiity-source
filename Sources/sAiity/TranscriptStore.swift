@@ -166,13 +166,45 @@ actor TranscriptStore {
 
 
     nonisolated static func segments(of session: SessionRef) -> [Segment] {
-        guard let text = try? String(contentsOf: session.url.appendingPathComponent("segments.jsonl"),
-                                     encoding: .utf8) else { return [] }
+        let url = session.url.appendingPathComponent("segments.jsonl")
+        // Cached on (path, mtime, size). Searching across sessions calls this
+        // for every session on every keystroke, and each call was a full file
+        // read plus a JSON decode per line — fine for a handful of sessions,
+        // quadratic-feeling by a few hundred. The stamp means an edited or
+        // still-recording file is re-read rather than served stale.
+        let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+        let stamp = SegmentCache.Stamp(
+            modified: (attrs?[.modificationDate] as? Date) ?? .distantPast,
+            size: (attrs?[.size] as? Int) ?? 0)
+        if let hit = SegmentCache.shared.value(for: url.path, stamp: stamp) { return hit }
+
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
         let dec = JSONDecoder()
-        return text.split(separator: "\n").compactMap {
+        let segs: [Segment] = text.split(separator: "\n").compactMap {
             guard let d = $0.data(using: .utf8) else { return nil }
             return try? dec.decode(Segment.self, from: d)
         }
+        SegmentCache.shared.store(segs, for: url.path, stamp: stamp)
+        return segs
+    }
+
+    /// Delete sessions older than `days`. Returns how many went.
+    ///
+    /// A transcript is a durable record of a conversation other people were
+    /// part of, and until now nothing ever expired one. Age is taken from the
+    /// session's own start date rather than the file's mtime, which an export
+    /// written into the session directory would otherwise reset.
+    @discardableResult
+    nonisolated static func deleteOlderThan(days: Int) -> Int {
+        guard days > 0 else { return 0 }
+        let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
+        var removed = 0
+        for s in list() where s.meta.startedAt < cutoff {
+            delete(s)
+            removed += 1
+        }
+        if removed > 0 { NSLog("sAiity retention: removed \(removed) session(s) older than \(days) days") }
+        return removed
     }
 
     /// Deletion is real: the directory goes, no tombstone, nothing else refers

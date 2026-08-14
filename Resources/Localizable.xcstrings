@@ -1750,6 +1750,35 @@
         }
       }
     },
+    "Cancelled — the transcript was not changed.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abgebrochen – das Transkript wurde nicht verändert."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancelado: la transcripción no se modificó."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Annulé — la transcription n’a pas été modifiée."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "キャンセルしました。文字起こしは変更されていません。"
+          }
+        }
+      }
+    },
     "Caption latency": {
       "localizations": {
         "de": {
@@ -2205,6 +2234,35 @@
           "stringUnit": {
             "state": "translated",
             "value": "GGUFモデルファイルを選択してください。Ollamaのblob（sha256-…）も使えます。"
+          }
+        }
+      }
+    },
+    "Choose a folder for every saved transcript.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wähle einen Ordner für alle gesicherten Transkripte."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Elige una carpeta para todas las transcripciones guardadas."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisis un dossier pour toutes les transcriptions enregistrées."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保存済みのすべての文字起こしを入れるフォルダを選択します。"
           }
         }
       }
@@ -3008,6 +3066,35 @@
           "stringUnit": {
             "state": "translated",
             "value": "すべて削除"
+          }
+        }
+      }
+    },
+    "Delete after %lld days": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nach %lld Tagen löschen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eliminar después de %lld días"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Supprimer après %lld jours"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld日後に削除"
           }
         }
       }
@@ -4107,6 +4194,93 @@
         }
       }
     },
+    "Export all…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alle exportieren …"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exportar todo…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tout exporter…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "すべて書き出す…"
+          }
+        }
+      }
+    },
+    "Exported %lld transcripts.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld Transkripte exportiert."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld transcripciones exportadas."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld transcriptions exportées."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld件の文字起こしを書き出しました。"
+          }
+        }
+      }
+    },
+    "Exported %lld; %lld could not be written.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld exportiert; %lld konnten nicht geschrieben werden."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld exportadas; %lld no se pudieron escribir."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld exportées ; %lld n’ont pas pu être écrites."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld件を書き出しました。%lld件は書き込めませんでした。"
+          }
+        }
+      }
+    },
     "Fast": {
       "localizations": {
         "de": {
@@ -4539,6 +4713,64 @@
           "stringUnit": {
             "state": "translated",
             "value": "Macが再生する音声をキャプチャします — マイクは、後で「設定」→「字幕」でオンにしない限りオフのままです。"
+          }
+        }
+      }
+    },
+    "Keep everything": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alles behalten"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conservar todo"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tout conserver"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "すべて保存"
+          }
+        }
+      }
+    },
+    "Keep transcripts": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transkripte aufbewahren"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conservar transcripciones"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conserver les transcriptions"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文字起こしの保存期間"
           }
         }
       }
@@ -4998,6 +5230,35 @@
           "stringUnit": {
             "state": "translated",
             "value": "Nemotronを読み込み中…"
+          }
+        }
+      }
+    },
+    "Loading the translator…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Übersetzer wird geladen …"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cargando el traductor…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chargement du traducteur…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "翻訳エンジンを読み込み中…"
           }
         }
       }
@@ -5884,6 +6145,35 @@
         }
       }
     },
+    "No translator chosen. Pick one under Settings → Captions.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kein Übersetzer gewählt. Wähle einen unter Einstellungen → Untertitel."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No hay traductor elegido. Elige uno en Ajustes → Subtítulos."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucun traducteur choisi. Choisis-en un dans Réglages → Sous-titres."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "翻訳エンジンが選択されていません。設定→字幕で選択してください。"
+          }
+        }
+      }
+    },
     "None chosen": {
       "extractionState": "manual",
       "localizations": {
@@ -6170,31 +6460,31 @@
         }
       }
     },
-    "Off by default. A transcript is a durable record of a conversation other people were part of, and system audio captures everyone on the call.": {
+    "Off by default. A transcript is a durable record of a conversation other people were part of, and system audio captures everyone on the call. Nothing is ever deleted unless you choose an age above.": {
       "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Standardmäßig aus. Ein Transkript ist eine dauerhafte Aufzeichnung eines Gesprächs, an dem andere beteiligt waren, und der Systemton nimmt alle im Anruf auf."
+            "value": "Standardmäßig aus. Ein Transkript ist eine dauerhafte Aufzeichnung eines Gesprächs, an dem andere beteiligt waren, und der Systemton nimmt alle in einem Anruf auf. Es wird nie etwas gelöscht, solange du oben kein Alter wählst."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Desactivado de forma predeterminada. Una transcripción es un registro duradero de una conversación en la que participaron otras personas, y el audio del sistema capta a todos los de la llamada."
+            "value": "Desactivado por omisión. Una transcripción es un registro duradero de una conversación en la que participaron otras personas, y el audio del sistema capta a todos en una llamada. Nunca se elimina nada a menos que elijas una antigüedad arriba."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Désactivé par défaut. Une transcription est une trace durable d'une conversation à laquelle d'autres personnes ont participé, et l'audio système capture tous les participants de l'appel."
+            "value": "Désactivé par défaut. Une transcription est un enregistrement durable d’une conversation à laquelle d’autres ont pris part, et l’audio système capte tout le monde lors d’un appel. Rien n’est jamais supprimé tant que tu ne choisis pas une durée ci-dessus."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "初期設定ではオフです。文字起こしは、ほかの人も参加した会話の永続的な記録であり、システムオーディオには通話の全員の声が入ります。"
+            "value": "標準ではオフです。文字起こしは他の人も参加した会話の恒久的な記録であり、システムオーディオは通話の全員を捉えます。上で期間を選ばないかぎり、何も削除されません。"
           }
         }
       }
@@ -7042,6 +7332,35 @@
           "stringUnit": {
             "state": "translated",
             "value": "権限"
+          }
+        }
+      }
+    },
+    "Plain text": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nur Text"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Texto simple"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Texte brut"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "プレーンテキスト"
           }
         }
       }
@@ -9075,6 +9394,35 @@
         }
       }
     },
+    "Stop the captions first — the translator is busy with the live session.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stoppe zuerst die Untertitel – der Übersetzer ist mit der laufenden Sitzung beschäftigt."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Detén primero los subtítulos: el traductor está ocupado con la sesión en curso."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arrête d’abord les sous-titres : le traducteur est occupé par la session en cours."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "先に字幕を停止してください。翻訳エンジンは実行中のセッションで使用されています。"
+          }
+        }
+      }
+    },
     "Stop this download. The part already fetched is kept, and Download resumes from it.": {
       "extractionState": "manual",
       "localizations": {
@@ -9389,6 +9737,35 @@
           "stringUnit": {
             "state": "translated",
             "value": "つまり、モデルを一度だけダウンロードする必要があります — どのモデルにするかは選べます。"
+          }
+        }
+      }
+    },
+    "That transcript has no lines.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dieses Transkript hat keine Zeilen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esa transcripción no tiene líneas."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cette transcription ne contient aucune ligne."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "その文字起こしには行がありません。"
           }
         }
       }
@@ -9944,6 +10321,35 @@
         }
       }
     },
+    "Translate": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Übersetzen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Traducir"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Traduire"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "翻訳"
+          }
+        }
+      }
+    },
     "Translate captions to": {
       "localizations": {
         "de": {
@@ -10024,6 +10430,35 @@
           "stringUnit": {
             "state": "translated",
             "value": "翻訳エンジン"
+          }
+        }
+      }
+    },
+    "Translated into %@.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ins %@ übersetzt."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Traducido al %@."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Traduit en %@."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@に翻訳しました。"
           }
         }
       }
@@ -10110,6 +10545,35 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@で翻訳中"
+          }
+        }
+      }
+    },
+    "Translating…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wird übersetzt …"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Traduciendo…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Traduction…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "翻訳中…"
           }
         }
       }
@@ -10460,6 +10924,35 @@
         }
       }
     },
+    "Version, licence, and the credits for the models and libraries this app is built on.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Version, Lizenz und die Credits für die Modelle und Bibliotheken, auf denen diese App aufbaut."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Versión, licencia y los créditos de los modelos y bibliotecas en los que se basa esta app."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Version, licence et les crédits des modèles et bibliothèques sur lesquels cette app repose."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "バージョン、ライセンス、このアプリが利用しているモデルとライブラリのクレジット。"
+          }
+        }
+      }
+    },
     "Walks through permission and models from the start.": {
       "extractionState": "manual",
       "localizations": {
@@ -10774,6 +11267,35 @@
           "stringUnit": {
             "state": "translated",
             "value": "このセッションをディスクに書き込みます。初期設定ではオフです。"
+          }
+        }
+      }
+    },
+    "Writes every saved session into one folder.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Schreibt jede gesicherte Sitzung in einen Ordner."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Escribe cada sesión guardada en una carpeta."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Écrit chaque session enregistrée dans un seul dossier."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保存されたすべてのセッションを1つのフォルダに書き出します。"
           }
         }
       }

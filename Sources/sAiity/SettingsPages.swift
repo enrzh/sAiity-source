@@ -711,15 +711,33 @@ struct TranscriptsView: View {
     @State private var query = ""
     /// The session open in the transcript viewer sheet.
     @State private var viewing: SessionRef?
+    @State private var retentionDays = TranscriptRetention.days
+    @State private var retranslator = Retranslator()
+    @State private var retranslateProgress: Retranslator.Progress?
+    @State private var retranslateNote: String?
+    @State private var retranslating: SessionRef?
 
     var body: some View {
         Form {
             Section {
                 Toggle("Save transcripts of sessions", isOn: $state.saveTranscript)
+                Picker("Keep transcripts", selection: $retentionDays) {
+                    ForEach(TranscriptRetention.choices, id: \.self) { d in
+                        Text(TranscriptRetention.label(d)).tag(d)
+                    }
+                }
+                .onChange(of: retentionDays) { _, new in
+                    TranscriptRetention.days = new
+                    // Applied immediately, not at the next launch: a person
+                    // setting this is asking for something to be gone now.
+                    if TranscriptRetention.sweep() > 0 {
+                        Task { await state.refresh() }
+                    }
+                }
             } header: {
                 Text("Recording")
             } footer: {
-                Text("Off by default. A transcript is a durable record of a conversation other people were part of, and system audio captures everyone on the call.")
+                Text("Off by default. A transcript is a durable record of a conversation other people were part of, and system audio captures everyone on the call. Nothing is ever deleted unless you choose an age above.")
                     .font(.caption)
             }
 
@@ -783,6 +801,19 @@ struct TranscriptsView: View {
                             }
                             .controlSize(.small)
                             .fixedSize()
+                            // Translate a transcript after the fact — into a
+                            // language you did not choose at record time, or
+                            // at all if translation was off then.
+                            Menu("Translate") {
+                                ForEach(state.recentTargetsForMenu, id: \.self) { code in
+                                    Button(AppLanguage(code: code).displayName) {
+                                        startRetranslate(s, to: code)
+                                    }
+                                }
+                            }
+                            .controlSize(.small)
+                            .fixedSize()
+                            .disabled(retranslator.running || state.sessions.isEmpty)
                             Button {
                                 NSWorkspace.shared.activateFileViewerSelecting([s.url])
                             } label: { Image(systemName: "folder") }.controlSize(.small)
@@ -794,7 +825,40 @@ struct TranscriptsView: View {
                         }
                     }
                 }
+                if let p = retranslateProgress {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ProgressView(value: Double(p.done), total: Double(max(p.total, 1)))
+                        HStack {
+                            Text("\(p.note) \(p.done)/\(p.total)")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Cancel") { retranslator.cancel() }
+                                .controlSize(.small)
+                        }
+                    }
+                }
+                if let note = retranslateNote {
+                    // Both branches boxed: a ternary mixing .secondary
+                    // (HierarchicalShapeStyle) with .orange (Color) has no
+                    // common type for the compiler to settle on.
+                    Text(note).font(.caption)
+                        .foregroundStyle(note.hasPrefix("✓")
+                                         ? AnyShapeStyle(.secondary)
+                                         : AnyShapeStyle(Color.orange))
+                }
                 if !state.sessions.isEmpty, trimmedQuery.isEmpty {
+                    HStack {
+                        Menu("Export all…") {
+                            Button("Plain text") { exportLibrary("txt") }
+                            Button("Markdown") { exportLibrary("md") }
+                            Button("SRT") { exportLibrary("srt") }
+                            Button("WebVTT") { exportLibrary("vtt") }
+                        }
+                        .controlSize(.small)
+                        .fixedSize()
+                        Text("Writes every saved session into one folder.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     Button("Delete all…", role: .destructive) {
                         let a = NSAlert()
                         a.messageText = String(localized: "Delete all transcripts?")
@@ -843,6 +907,38 @@ struct TranscriptsView: View {
             }
         }
         return out
+    }
+
+    private func startRetranslate(_ s: SessionRef, to code: String) {
+        retranslateNote = nil
+        retranslating = s
+        retranslator.run(session: s, target: code) { p in
+            retranslateProgress = p
+        } onFinish: { err in
+            retranslateProgress = nil
+            retranslating = nil
+            if let err {
+                retranslateNote = err
+            } else {
+                retranslateNote = "✓ " + String(localized: "Translated into \(AppLanguage(code: code).displayName).")
+                Task { await state.refresh() }
+            }
+        }
+    }
+
+    private func exportLibrary(_ format: String) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = String(localized: "Export")
+        panel.message = String(localized: "Choose a folder for every saved transcript.")
+        guard panel.runModal() == .OK, let dir = panel.url else { return }
+        let r = Export.writeLibrary(state.sessions, format: format, to: dir)
+        retranslateNote = r.failed == 0
+            ? "✓ " + String(localized: "Exported \(r.written) transcripts.")
+            : String(localized: "Exported \(r.written); \(r.failed) could not be written.")
+        NSWorkspace.shared.activateFileViewerSelecting([dir])
     }
 
     private func export(_ s: SessionRef, _ kind: String) {
@@ -908,6 +1004,17 @@ struct GeneralView: View {
                     Button("Save diagnostics…") { Diagnostics.save() }
                         .controlSize(.small)
                     Text("Writes one text file with the app's state and this run's log, for bug reports. Review it before sharing.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                // Moved off the menu bar, which had grown into a second copy
+                // of the app. It still has to live somewhere: this panel is
+                // where the third-party licences and credits are shown.
+                HStack {
+                    Button("About sAiity") {
+                        NotificationCenter.default.post(name: .saiityShowAbout, object: nil)
+                    }
+                    .controlSize(.small)
+                    Text("Version, licence, and the credits for the models and libraries this app is built on.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }

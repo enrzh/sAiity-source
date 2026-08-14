@@ -78,6 +78,7 @@ final class HotKeyCenter {
         // index, so reordering would silently re-route existing shortcuts.
         case toggleBubble
         case recentCaptions
+        case clearCaption
 
         var title: String {
             switch self {
@@ -85,14 +86,25 @@ final class HotKeyCenter {
             case .copyLastLine:   return String(localized: "Copy the current caption")
             case .toggleBubble:   return String(localized: "Show / hide the caption bubble")
             case .recentCaptions: return String(localized: "Show the last few captions")
+            case .clearCaption:   return String(localized: "Clear the caption")
             }
         }
+        /// Bound out of the box, because an unbound shortcut is one nobody
+        /// finds: these three shipped blank and the features behind them were
+        /// effectively invisible. They sit on the same ⌥⌘ row as the start/stop
+        /// key, which is unclaimed by macOS. A binding that another app already
+        /// owns simply fails to register and logs — and any shortcut the user
+        /// has set is stored, so it wins over these.
         var defaultShortcut: Shortcut? {
             switch self {
             case .toggleCaptions: return .defaultToggle
             case .copyLastLine:   return nil
-            case .toggleBubble:   return nil
-            case .recentCaptions: return nil
+            case .toggleBubble:   return Shortcut(keyCode: UInt32(kVK_ANSI_B),
+                                                  modifiers: UInt32(optionKey | cmdKey))
+            case .recentCaptions: return Shortcut(keyCode: UInt32(kVK_ANSI_R),
+                                                  modifiers: UInt32(optionKey | cmdKey))
+            case .clearCaption:   return Shortcut(keyCode: UInt32(kVK_ANSI_X),
+                                                  modifiers: UInt32(optionKey | cmdKey))
             }
         }
         var defaultsKey: String { "shortcut.\(rawValue)" }
