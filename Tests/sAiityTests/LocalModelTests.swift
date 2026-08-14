@@ -165,4 +165,46 @@ struct LocalModelTests {
         // And something is still suggested, or the user is told nothing at all.
         #expect(ModelRegistry.snapshot().contains { $0.asset.recommended })
     }
+
+    /// A model filename is one path component, whatever arrived.
+    ///
+    /// `URL.lastPathComponent` percent-DECODES, so a pasted custom-model URL
+    /// ending in `a%2F..%2F..%2Fevil.gguf` hands back `a/../../evil.gguf` —
+    /// which, joined onto the models directory, resolves outside it, and the
+    /// downloader then creates directories and replaces files there in full
+    /// trust. The user pastes the URL, but "the link I was given wrote
+    /// outside the app's folder" is not something this app may allow.
+    @Test("A custom model's filename cannot escape the models directory")
+    func filenamesStayInsideTheModelsDirectory() {
+        let root = URL(fileURLWithPath: "/tmp/models")
+        let hostile = [
+            "a%2F..%2F..%2Fevil.gguf",     // encoded separators
+            "..%2F..%2Fboom.gguf",
+            "../../escape.gguf",           // already decoded
+            "sub/dir/model.gguf",
+            "..",
+            "",
+        ]
+        for raw in hostile {
+            let decoded = URL(string: "https://h/\(raw)")?.lastPathComponent ?? raw
+            let safe = LocalModel.safeFilename(decoded)
+            #expect(!safe.isEmpty)
+            #expect(!safe.contains("/"), "\(raw) -> \(safe) kept a separator")
+            // The property that actually matters — and the only one worth
+            // asserting. Dots INSIDE a name are harmless ("a_.._evil.gguf"
+            // is one component); what must never happen is the joined path
+            // resolving anywhere but this directory. Asserting "contains no
+            // .." instead would be testing a proxy, and would fail on a name
+            // that is perfectly safe.
+            let resolved = root.appendingPathComponent(safe).standardized
+            #expect(resolved.deletingLastPathComponent().path == root.path,
+                    "\(raw) resolved to \(resolved.path)")
+            // And a name that is nothing but dots is not a name at all: it
+            // would resolve to the parent directory itself.
+            #expect(safe != ".." && safe != ".", "\(raw) -> \(safe)")
+        }
+        // Ordinary names survive untouched.
+        #expect(LocalModel.safeFilename("qwen2.5-3b-instruct-q4.gguf")
+                == "qwen2.5-3b-instruct-q4.gguf")
+    }
 }

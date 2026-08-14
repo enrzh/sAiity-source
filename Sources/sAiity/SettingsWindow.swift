@@ -51,6 +51,11 @@ final class AppState {
     var captionClickThrough = UserDefaults.standard.bool(forKey: "captionClickThrough") {
         didSet { UserDefaults.standard.set(captionClickThrough, forKey: "captionClickThrough") }
     }
+    /// Speak each finished sentence through VoiceOver. Read per sentence by
+    /// the caption pipeline, so no notification is needed.
+    var announceCaptions = UserDefaults.standard.bool(forKey: "announceCaptions") {
+        didSet { UserDefaults.standard.set(announceCaptions, forKey: "announceCaptions") }
+    }
 
     var launchAtLogin = false
     var launchAtLoginNote = ""
@@ -85,6 +90,52 @@ final class AppState {
 
     /// Every downloadable asset with its live disk state, from one registry.
     var assets: [AssetStatus] = []
+    /// Assets whose files are present but refused to load, by id → reason.
+    /// Fed by LoadHealth; the observer keeps an open Models page truthful when
+    /// a session fails in the background.
+    var loadFailures: [String: String] = LoadHealth.all
+    @ObservationIgnored private var loadHealthObserver: NSObjectProtocol?
+
+    @ObservationIgnored private var gapObserver: NSObjectProtocol?
+    @ObservationIgnored private var targetObserver: NSObjectProtocol?
+
+    init() {
+        loadHealthObserver = NotificationCenter.default.addObserver(
+            forName: LoadHealth.changed, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.loadFailures = LoadHealth.all }
+        }
+        // The menu bar writes the same translate-target preference while the
+        // Settings window is open, so follow it live rather than only on
+        // reopen. Owned here, not by a root view — the toolbar-tabbed window
+        // has no single SwiftUI root to hang an onReceive on.
+        targetObserver = NotificationCenter.default.addObserver(
+            forName: .saiityTranslateTargetChanged, object: nil,
+            queue: .main) { [weak self] note in
+            let t = note.userInfo?["target"] as? String
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.adoptTarget(t)
+                Task { await self.refreshTargetSupport() }
+            }
+        }
+        gapObserver = NotificationCenter.default.addObserver(
+            forName: SystemAudioCapture.gapDiagnostics, object: nil,
+            queue: .main) { [weak self] note in
+            MainActor.assumeIsolated {
+                guard let floor = note.userInfo?["floor"] as? Float,
+                      let th = note.userInfo?["threshold"] as? Float else {
+                    self?.gapReadout = nil
+                    return
+                }
+                let fires = note.userInfo?["fires"] as? Int ?? 0
+                // Digital silence is RMS 0; clamp so the dB stays displayable.
+                self?.gapReadout = GapReadout(
+                    floorDb: Double(20 * log10(max(floor, 1e-8))),
+                    thresholdDb: Double(20 * log10(max(th, 1e-8))),
+                    fires: fires)
+            }
+        }
+    }
     var ownedTotal: String = "—"
     /// Bytes under our models root that belong to no known asset.
     var strayTotal: String?
@@ -116,6 +167,38 @@ final class AppState {
         }
     }
 
+    /// Capture scope: one app's audio, or nil for the whole mix. Applies when
+    /// captions next start.
+    var captureApp: String? = CaptureScope.appBundleID {
+        didSet {
+            guard captureApp != oldValue else { return }
+            CaptureScope.appBundleID = captureApp
+        }
+    }
+
+    /// Mix the microphone into recognition — the one deliberate exception to
+    /// "the microphone is never opened". Opt-in, loudly labelled, and the
+    /// permission prompt only ever appears after this is switched on.
+    var includeMic = MicMix.enabled {
+        didSet {
+            guard includeMic != oldValue else { return }
+            MicMix.enabled = includeMic
+        }
+    }
+    struct RunningApp: Sendable {
+        let bundleID: String
+        let name: String
+    }
+    var runningApps: [RunningApp] = []
+
+    /// Live speech-gap readout while a session runs, cleared when it stops.
+    struct GapReadout {
+        var floorDb: Double
+        var thresholdDb: Double
+        var fires: Int
+    }
+    var gapReadout: GapReadout?
+
     /// Whether a pause in speech ends a sentence, and how long a pause has to
     /// be. Mirrored here so the controls are bindings; the notification is what
     /// makes a running capture pick the change up.
@@ -142,6 +225,7 @@ final class AppState {
 
     func refreshModels() {
         assets = ModelRegistry.snapshot()
+        loadFailures = LoadHealth.all
         let total = ModelRegistry.ownedTotalBytes()
         ownedTotal = total > 0 ? ModelRegistry.format(total) : String(localized: "nothing downloaded")
         let stray = ModelRegistry.strayBytes()
@@ -173,6 +257,10 @@ final class AppState {
                         Task { @MainActor in self.downloadProgress = p }
                     }
                 }
+                // Fresh bytes supersede whatever damage was recorded against
+                // the old ones. Only on success — a cancelled or failed fetch
+                // changed nothing about the files the record describes.
+                LoadHealth.clear(id)
             } catch is CancellationError {
                 // The user pressed Cancel; not an error, so no red text.
             } catch let e as URLError where e.code == .cancelled {
@@ -187,6 +275,14 @@ final class AppState {
         activeDownload = nil
         downloadProgress = nil
         refreshModels()
+    }
+
+    /// Delete the damaged files, then fetch fresh — the one recovery path for
+    /// an asset that is present on disk but refuses to load.
+    func redownload(_ asset: ModelAsset) async {
+        await delete(asset)
+        guard modelError == nil else { return }
+        await download(asset)
     }
 
     /// Stop the in-flight download. Cancellation propagates through the
@@ -314,9 +410,31 @@ final class AppState {
         // that was the whole reason this window opened slowly. With Apple's
         // engine gone, nothing needs them.
         refreshModels()
+        refreshRunningApps()
         sessions = TranscriptStore.list()
         diskUsage = Self.folderSize(TranscriptStore.sessionsDir)
         refreshLaunchAtLogin()
+    }
+
+    /// Candidates for the capture-scope picker: ordinary windowed apps, plus
+    /// the persisted choice even when that app is not running — the picker
+    /// must never silently show "Everything" while capture is scoped.
+    func refreshRunningApps() {
+        var apps = NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular }
+            .filter { $0.bundleIdentifier != Bundle.main.bundleIdentifier }
+            .compactMap { a in
+                a.bundleIdentifier.map {
+                    RunningApp(bundleID: $0, name: a.localizedName ?? $0)
+                }
+            }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        if let chosen = captureApp, !apps.contains(where: { $0.bundleID == chosen }) {
+            apps.insert(RunningApp(bundleID: chosen,
+                                   name: String(localized: "\(CaptureScope.displayName(for: chosen)) (not running)")),
+                        at: 0)
+        }
+        runningApps = apps
     }
 
     /// `keepNote` preserves a message set by `setLaunchAtLogin` — otherwise the
@@ -373,6 +491,21 @@ final class AppState {
 
 // MARK: - Window
 
+/// Puts the selected pane's name in the title bar, the way every Apple
+/// preferences window does.
+///
+/// `NSTabViewController` does NOT do this on its own — verified, not assumed:
+/// a window whose contentViewController is a toolbar-style tab controller
+/// keeps whatever title it had (empty, if never set) no matter which child
+/// carries a `title`. Only the window's own contentViewController title is
+/// tracked, and that is the tab controller's.
+private final class PaneTitlingTabViewController: NSTabViewController {
+    override func tabView(_ tabView: NSTabView, didSelect item: NSTabViewItem?) {
+        super.tabView(tabView, didSelect: item)
+        if let label = item?.label { view.window?.title = label }
+    }
+}
+
 @MainActor
 enum SettingsWindowController {
     private static var window: NSWindow?
@@ -390,10 +523,42 @@ enum SettingsWindowController {
             contentRect: NSRect(x: 0, y: 0, width: 760, height: 540),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered, defer: false)
-        w.title = "sAiity"
-        w.center()
         w.isReleasedWhenClosed = false
-        w.contentViewController = NSHostingController(rootView: RootView(state: state))
+        // NSTabViewController's toolbar style, not SwiftUI's TabView: this is
+        // what every Apple preferences window is made of — toolbar items as
+        // panes, the window title following the selected pane. TabView drew a
+        // centred segmented control, which is a content control, not window
+        // chrome.
+        let tabs = PaneTitlingTabViewController()
+        tabs.tabStyle = .toolbar
+        let pages: [(String, String, AnyView)] = [
+            (String(localized: "Captions"), "captions.bubble",
+             AnyView(CaptionsView(state: state))),
+            (String(localized: "Models"), "shippingbox",
+             AnyView(ModelsView(state: state))),
+            (String(localized: "Library"), "text.document",
+             AnyView(LibraryView(state: state))),
+        ]
+        for (title, symbol, view) in pages {
+            let host = NSHostingController(
+                rootView: view.frame(minWidth: 700, minHeight: 480))
+            host.title = title
+            let item = NSTabViewItem(viewController: host)
+            item.label = title
+            item.image = NSImage(systemSymbolName: symbol,
+                                 accessibilityDescription: title)
+            tabs.addTabViewItem(item)
+        }
+        w.contentViewController = tabs
+        // AFTER the assignment, and not optional: setting a tab controller as
+        // contentViewController resizes the window to that controller's own
+        // fitting size — measured at 500×500 here, which clipped ~200 pt off
+        // every 700 pt-wide pane. The requested size has to be restated, and
+        // a minimum enforced so a drag cannot reproduce the clipping.
+        w.setContentSize(NSSize(width: 760, height: 540))
+        w.contentMinSize = NSSize(width: 720, height: 480)
+        w.title = tabs.tabViewItems.first?.label ?? "sAiity"
+        w.center()
         window = w
         // Deliberate: this is the one window the user explicitly asked for, so
         // unlike the caption bubble it may take focus.
@@ -405,47 +570,10 @@ enum SettingsWindowController {
 
 // MARK: - Views
 
-/// The tint behind Settings and the setup wizard both.
-///
-/// Cheap on purpose, and cheap in the place it is used: these windows redraw
-/// when something is clicked, not several times a second like the caption
-/// bubble. The same gradient behind the bubble would be paid per caption while
-/// a speech model and a translator are already competing for the GPU.
-struct SettingsBackground: View {
-    var body: some View {
-        ZStack {
-            Rectangle().fill(.background)
-            LinearGradient(colors: [Color.accentColor.opacity(0.13),
-                                    Color.accentColor.opacity(0.02),
-                                    .clear],
-                           startPoint: .topLeading, endPoint: .bottomTrailing)
-            RadialGradient(colors: [Color.accentColor.opacity(0.14), .clear],
-                           center: .init(x: 0.08, y: 0.0), startRadius: 0, endRadius: 420)
-        }
-        .ignoresSafeArea()
-    }
-}
-
-private struct RootView: View {
-    @Bindable var state: AppState
-
-    var body: some View {
-        TabView {
-            CaptionsView(state: state)
-                .tabItem { Label("Captions", systemImage: "captions.bubble") }
-            ModelsView(state: state)
-                .tabItem { Label("Models", systemImage: "shippingbox") }
-            LibraryView(state: state)
-                .tabItem { Label("Library", systemImage: "text.document") }
-        }
-        .frame(minWidth: 700, minHeight: 480)
-        .background(SettingsBackground())
-        .task { await state.refresh() }
-        // The menu bar writes the same preference while this window is open, so
-        // follow it live rather than only on reopen.
-        .onReceive(NotificationCenter.default.publisher(for: .saiityTranslateTargetChanged)) { note in
-            state.adoptTarget(note.userInfo?["target"] as? String)
-            Task { await state.refreshTargetSupport() }
-        }
-    }
-}
+// There is deliberately no custom window chrome anywhere in Settings. It used
+// to share an accent-tinted gradient wash ("SettingsBackground") with the
+// setup wizard, with every Form's own background suppressed so it showed
+// through — which read as a web page wearing a Mac costume. Native grouped
+// Forms inside a toolbar-tabbed preferences window are what Apple's own apps
+// do; this app's personality lives in its words and the caption bubble, not
+// in tinted air.

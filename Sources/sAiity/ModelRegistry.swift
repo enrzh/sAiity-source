@@ -180,7 +180,8 @@ enum ModelRegistry {
                                isPartial: !complete && bytes > 0, bytesOnDisk: bytes)
 
         case .file(let url, let expected):
-            let bytes = Int64((try? FileManager.default.attributesOfItem(
+            let fm = FileManager.default
+            let bytes = Int64((try? fm.attributesOfItem(
                 atPath: url.path)[.size] as? Int) ?? 0)
             // A GGUF that is short is a truncated download, not a model. With
             // no expected size, presence is the signal — see the case comment.
@@ -189,6 +190,18 @@ enum ModelRegistry {
                 complete = bytes > 0 && Double(bytes) >= Double(expected) * 0.98
             } else {
                 complete = bytes > 0
+            }
+            // Resume state counts. FileDownloader now keeps `<file>.part` and
+            // its validator across a cancel or a quit, deliberately — but a
+            // row that says "not downloaded" while gigabytes sit beside it is
+            // the same dishonesty this page was built to end. Reported as a
+            // partial, which is exactly what it is, and what gives the row
+            // its Remove button.
+            let partBytes = Int64((try? fm.attributesOfItem(
+                atPath: url.appendingPathExtension("part").path)[.size] as? Int) ?? 0)
+            if !complete, partBytes > 0 {
+                return AssetStatus(asset: asset, isInstalled: false,
+                                   isPartial: true, bytesOnDisk: bytes + partBytes)
             }
             return AssetStatus(asset: asset, isInstalled: complete,
                                isPartial: !complete && bytes > 0, bytesOnDisk: bytes)
@@ -224,6 +237,15 @@ enum ModelRegistry {
     @discardableResult
     static func remove(_ asset: ModelAsset) -> Bool {
         guard case .remove(let url) = asset.removal else { return false }
+        // Whatever damage was recorded belonged to the files now leaving.
+        LoadHealth.clear(asset.id)
+        // Resume state goes with the asset it belongs to. Deleting a model
+        // and leaving a multi-gigabyte `.part` behind — invisible to every
+        // per-asset control, swept by nothing since sweepPartials now
+        // deliberately preserves validator-backed partials — is a leak the
+        // user has no way to find.
+        try? FileManager.default.removeItem(at: url.appendingPathExtension("part"))
+        try? FileManager.default.removeItem(at: url.appendingPathExtension("part.etag"))
         do {
             try FileManager.default.removeItem(at: url)
             return true

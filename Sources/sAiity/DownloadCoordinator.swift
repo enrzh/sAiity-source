@@ -120,8 +120,9 @@ actor DownloadCoordinator {
               let continuation = t.waiters.removeValue(forKey: ticket) else { return }
         continuation.resume(throwing: CancellationError())
         // Nobody is waiting for these bytes any more, so stop paying for them.
-        // FluidAudio and FileDownloader both keep their partial file, so a later
-        // attempt resumes rather than starting over.
+        // FileDownloader keeps its `.part` and validator on cancellation and
+        // resumes from them next attempt; the FluidAudio-backed assets manage
+        // their own per-file cache directories.
         if t.waiters.isEmpty { t.task?.cancel() }
     }
 }

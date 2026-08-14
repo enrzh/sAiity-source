@@ -26,9 +26,13 @@ network. Updates arrive in the app after that, or from the menu under
 
 Requires **macOS 26** on Apple Silicon. On first launch it asks for Screen
 Recording permission: that is how macOS gates system audio, there is no
-audio-only permission to ask for, and the microphone is never opened.
+audio-only permission to ask for. The microphone stays closed unless you
+explicitly turn on **Include my microphone** (off by default) — system audio
+on a call carries only the other side, so that setting is what makes a
+meeting transcript contain your own half. Its permission prompt only ever
+appears after you flip it.
 
-> 68 unit tests. The notes in this file try to be honest about what is verified
+> 87 unit tests. The notes in this file try to be honest about what is verified
 > and what isn't, including the parts that aren't.
 
 ---
@@ -81,9 +85,12 @@ the whole failure, including the two measurement traps that made it hard to see.
 
 ## What it does
 
-- **Captions system audio.** ScreenCaptureKit taps what the Mac is playing.
-  Screen Recording permission is how macOS gates system audio — there is no
-  audio-only permission, and your microphone is never touched.
+- **Captions system audio.** ScreenCaptureKit taps what the Mac is playing —
+  optionally scoped to a single app, so notification pings and a second video
+  stay out of a meeting's captions. Screen Recording permission is how macOS
+  gates system audio; there is no audio-only permission. Your microphone is
+  only opened if you switch on **Include my microphone** (off by default),
+  which mixes your side of a call into recognition.
 - **Recognises on-device**, with two streaming engines:
   - **Nemotron 3.5 multilingual** (recommended, 634 MB) — one model, 121
     language tags, identifying the spoken language from the audio itself. Two
@@ -95,9 +102,16 @@ the whole failure, including the two measurement traps that made it hard to see.
     languages, including broad Asian and African coverage.
   - **A local LLM** — curated Qwen and Gemma GGUF builds, or your own added by
     URL or picked from disk. Ollama's blobs are GGUF files and work directly.
-- **Records transcripts** (off by default), exportable as SRT, Markdown or plain
-  text, also from the command line.
-- **Speaks German and English**, and honours Reduce Transparency and Increase
+- **Records transcripts** (off by default) with turn breaks where the audio
+  actually paused, readable and searchable inside the app, exportable as SRT,
+  WebVTT, Markdown or plain text — bilingual when translation ran — also from
+  the command line.
+- **Stays out of the way**: global hot keys for start/stop, hide/show, copy,
+  and a "what did I miss" recap of the last few sentences; a `saiity://`
+  scheme for Shortcuts, Raycast and scripts; downloads that resume where they
+  stopped; a diagnostics file one click away when something misbehaves.
+- **Speaks German and English**, announces captions
+  to VoiceOver on request, and honours Reduce Transparency and Increase
   Contrast.
 
 ## What it is not
@@ -113,10 +127,8 @@ Worth saying plainly before you clone it:
   word lands in. Better than it was, not exact.
 - **German is a translation, and only German.** Every user-facing surface is
   covered — menus, settings, setup, the caption bubble's VoiceOver labels, the
-  download and failure lines — verified by rendering them in German rather than
-  by counting keys. But it is one translation by one author, and a third locale
-  would surface list-formatting and pluralisation the catalog does not model
-  yet.
+  download and failure lines — and a test now enforces that no string escapes
+  the catalog. But it is one translation by one author.
 - **It is not audited**, and captions are not a transcript of record. On-device
   recognition of unclear speech is still recognition of unclear speech.
 

@@ -1,6 +1,17 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%@ (not running)": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ (läuft nicht)"
+          }
+        }
+      }
+    },
     "%@ cannot translate into %@.": {
       "extractionState": "manual",
       "localizations": {
@@ -8,6 +19,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ kann nicht nach %@ übersetzen."
+          }
+        }
+      }
+    },
+    "%@ is not a GGUF model file. Use the direct download link from the model page.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ ist keine GGUF-Modelldatei. Verwende den direkten Download-Link von der Modellseite."
           }
         }
       }
@@ -117,7 +139,97 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ · %lld Zeilen · %lld Min."
+            "value": "%1$@ · %#@lines@ · %#@min@"
+          },
+          "substitutions": {
+            "lines": {
+              "argNum": 2,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%arg Zeile"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%arg Zeilen"
+                    }
+                  }
+                }
+              }
+            },
+            "min": {
+              "argNum": 3,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%arg Min."
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%arg Min."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ · %#@lines@ · %#@min@"
+          },
+          "substitutions": {
+            "lines": {
+              "argNum": 2,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%arg line"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%arg lines"
+                    }
+                  }
+                }
+              }
+            },
+            "min": {
+              "argNum": 3,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%arg min"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%arg min"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -139,7 +251,109 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld Zeilen · %@"
+            "value": "%#@lines@ · %2$@"
+          },
+          "substitutions": {
+            "lines": {
+              "argNum": 1,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%arg Zeile"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%arg Zeilen"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%#@lines@ · %2$@"
+          },
+          "substitutions": {
+            "lines": {
+              "argNum": 1,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%arg line"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%arg lines"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld sentences ended on a pause this session.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld Satz wurde in dieser Sitzung durch eine Pause abgeschlossen."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld Sätze wurden in dieser Sitzung durch eine Pause abgeschlossen."
+                }
+              }
+            }
+          }
+        },
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld sentence ended on a pause this session."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld sentences ended on a pause this session."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld%%": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld%%"
           }
         }
       }
@@ -287,6 +501,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Zusätzlich eine Übersetzung unter jedem Untertitel anzeigen"
+          }
+        }
+      }
+    },
+    "Announce captions to VoiceOver": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Untertitel über VoiceOver ankündigen"
           }
         }
       }
@@ -489,6 +714,83 @@
           "stringUnit": {
             "state": "translated",
             "value": "Etwa doppelt so häufig Untertitel, bei ungefähr doppelter Erkennungsarbeit pro Sekunde Ton – im Akkubetrieb spürbar."
+          }
+        }
+      }
+    },
+    "Captions run without your microphone — allow sAiity under System Settings → Privacy & Security → Microphone": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Untertitel laufen ohne dein Mikrofon – erlaube sAiity unter Systemeinstellungen → Datenschutz & Sicherheit → Mikrofon"
+          }
+        }
+      }
+    },
+    "Captions run without your microphone — it could not be started": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Untertitel laufen ohne dein Mikrofon – es ließ sich nicht starten"
+          }
+        }
+      }
+    },
+    "Captions started": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Untertitel gestartet"
+          }
+        }
+      }
+    },
+    "Captions stopped": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Untertitel gestoppt"
+          }
+        }
+      }
+    },
+    "Capture": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aufnahme"
+          }
+        }
+      }
+    },
+    "Capture audio from": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Audio aufnehmen von"
+          }
+        }
+      }
+    },
+    "Capture is set to %@ only, and it is not running. Start it, or set capture back to Everything in Settings → Captions.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Aufnahme ist auf %@ beschränkt, und diese App läuft nicht. Starte sie, oder stelle die Aufnahme unter Einstellungen → Untertitel wieder auf Alles."
           }
         }
       }
@@ -746,6 +1048,17 @@
         }
       }
     },
+    "Could not move sAiity": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "sAiity konnte nicht bewegt werden"
+          }
+        }
+      }
+    },
     "Could not start recording": {
       "extractionState": "manual",
       "localizations": {
@@ -786,6 +1099,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ausschneiden"
+          }
+        }
+      }
+    },
+    "Damaged": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Beschädigt"
           }
         }
       }
@@ -839,6 +1163,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Alle löschen …"
+          }
+        }
+      }
+    },
+    "Delete the damaged files and fetch %@ again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Löscht die beschädigten Dateien und lädt %@ neu."
           }
         }
       }
@@ -914,6 +1249,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Laden fehlgeschlagen (HTTP %lld) für %@."
+          }
+        }
+      }
+    },
+    "Download of %@ ended incomplete. Try again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Der Download von %@ blieb unvollständig. Versuche es erneut."
           }
         }
       }
@@ -1145,6 +1491,17 @@
         }
       }
     },
+    "Everything is in place.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alles ist eingerichtet."
+          }
+        }
+      }
+    },
     "Everything runs on this Mac, so the models live here rather than on a server. Removing them all frees the space; anything you select again is downloaded once more.": {
       "extractionState": "manual",
       "localizations": {
@@ -1163,6 +1520,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Alles läuft auf diesem Mac. Es verlässt ihn kein Ton."
+          }
+        }
+      }
+    },
+    "Everything the Mac plays": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alles, was der Mac abspielt"
+          }
+        }
+      }
+    },
+    "Export": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exportieren"
           }
         }
       }
@@ -1300,13 +1679,24 @@
         }
       }
     },
-    "It captures the audio your Mac plays, not your microphone.": {
+    "Include my microphone": {
       "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Es nimmt den Ton auf, den dein Mac abspielt – nicht dein Mikrofon."
+            "value": "Mein Mikrofon einbeziehen"
+          }
+        }
+      }
+    },
+    "It captures the audio your Mac plays — the microphone stays off unless you later opt in under Settings → Captions.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Es nimmt den Ton auf, den dein Mac abspielt – das Mikrofon bleibt aus, solange du es nicht später unter Einstellungen → Untertitel einschaltest."
           }
         }
       }
@@ -1438,6 +1828,17 @@
         }
       }
     },
+    "Live: quietest %lld dBFS in the last 5 s · pause threshold %lld dBFS": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Live: leiseste %lld dBFS in den letzten 5 s · Pausenschwelle %lld dBFS"
+          }
+        }
+      }
+    },
     "Loading %@…": {
       "extractionState": "manual",
       "localizations": {
@@ -1555,6 +1956,10 @@
         }
       }
     },
+    "Markdown": {
+      "extractionState": "manual",
+      "shouldTranslate": false
+    },
     "Maximum lines: %lld": {
       "extractionState": "manual",
       "localizations": {
@@ -1604,6 +2009,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Das meiste, was die mehrsprachige Engine ausgibt, hat keine Satzzeichen – eine Pause ist also das, was der App sagt, dass ein Gedanke fertig ist, und übersetzt wird ein fertiger Satz. Aus schließen Sätze nur bei echten Satzzeichen und beim Längenlimit, was zu jemandem passt, der mitten im Gedanken Pausen macht."
+          }
+        }
+      }
+    },
+    "Move sAiity to the Applications folder?": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "sAiity in den Ordner „Programme“ bewegen?"
+          }
+        }
+      }
+    },
+    "Move to Applications": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "In „Programme“ bewegen"
           }
         }
       }
@@ -1699,6 +2126,17 @@
         }
       }
     },
+    "No microphone is available on this Mac.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Auf diesem Mac ist kein Mikrofon verfügbar."
+          }
+        }
+      }
+    },
     "No model chosen — %@ is the one to start with": {
       "extractionState": "manual",
       "localizations": {
@@ -1787,6 +2225,17 @@
         }
       }
     },
+    "Not Now": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Später"
+          }
+        }
+      }
+    },
     "Not downloaded yet — see Models.": {
       "localizations": {
         "de": {
@@ -1828,13 +2277,13 @@
         }
       }
     },
-    "Nothing saved yet.": {
+    "Nothing saved yet": {
       "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Noch nichts gespeichert."
+            "value": "Noch nichts gesichert"
           }
         }
       }
@@ -1878,6 +2327,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Standardmäßig aus. Ein Transkript ist eine dauerhafte Aufzeichnung eines Gesprächs, an dem andere beteiligt waren, und der Systemton nimmt alle im Anruf auf."
+          }
+        }
+      }
+    },
+    "Off by default. Each finished sentence is posted as a VoiceOver announcement, which also reaches a connected braille display. In-progress text is never announced — it would arrive faster than speech or braille can render it.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Standardmäßig aus. Jeder fertige Satz wird als VoiceOver-Ankündigung gemeldet und erreicht so auch eine angeschlossene Braillezeile. Noch laufender Text wird nie angekündigt – er käme schneller an, als Sprache oder Braille ihn wiedergeben können."
+          }
+        }
+      }
+    },
+    "Off by default. System audio on a call carries only the other participants — your own voice never enters the mix, so a saved transcript is missing your half of the conversation. On, sAiity also opens the microphone (macOS asks once) and mixes it into recognition. Audio still never leaves this Mac. Takes effect when captions next start.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Standardmäßig aus. Systemaudio eines Anrufs enthält nur die anderen Teilnehmer – die eigene Stimme gelangt nie in den Mix, einem gesicherten Transkript fehlt also deine Hälfte des Gesprächs. Eingeschaltet öffnet sAiity zusätzlich das Mikrofon (macOS fragt einmal) und mischt es in die Erkennung. Audio verlässt diesen Mac weiterhin nie. Gilt ab dem nächsten Start der Untertitel."
           }
         }
       }
@@ -1947,6 +2418,17 @@
         }
       }
     },
+    "Only this app's audio reaches the captions; notification sounds, other videos and games stay out. Takes effect when captions next start, and Start will say so if the app is not running.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nur der Ton dieser App erreicht die Untertitel; Benachrichtigungstöne, andere Videos und Spiele bleiben draußen. Gilt ab dem nächsten Start der Untertitel – Start sagt Bescheid, wenn die App nicht läuft."
+          }
+        }
+      }
+    },
     "Opacity": {
       "localizations": {
         "de": {
@@ -1999,12 +2481,13 @@
         }
       }
     },
-    "Open sAiity…": {
+    "Open this transcript": {
+      "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiity öffnen …"
+            "value": "Dieses Transkript öffnen"
           }
         }
       }
@@ -2126,9 +2609,39 @@
       "extractionState": "manual",
       "localizations": {
         "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Entfernt %lld Sitzungen dauerhaft."
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Entfernt %lld Sitzung dauerhaft."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Entfernt %lld Sitzungen dauerhaft."
+                }
+              }
+            }
+          }
+        },
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Permanently removes %lld session."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Permanently removes %lld sessions."
+                }
+              }
+            }
           }
         }
       }
@@ -2150,6 +2663,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Tasten drücken …"
+          }
+        }
+      }
+    },
+    "Press to record a new shortcut. Delete clears it; Escape cancels.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Drücken, um ein neues Kürzel aufzunehmen. Entf löscht es; Esc bricht ab."
           }
         }
       }
@@ -2231,6 +2755,17 @@
     "Qwen3.5 4B": {
       "extractionState": "manual",
       "shouldTranslate": false
+    },
+    "Re-download": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Neu laden"
+          }
+        }
+      }
     },
     "Ready": {
       "localizations": {
@@ -2442,6 +2977,10 @@
         }
       }
     },
+    "SRT": {
+      "extractionState": "manual",
+      "shouldTranslate": false
+    },
     "Save as Markdown": {
       "extractionState": "manual",
       "localizations": {
@@ -2460,6 +2999,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Als SRT speichern"
+          }
+        }
+      }
+    },
+    "Save diagnostics…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diagnose sichern …"
           }
         }
       }
@@ -2515,6 +3065,17 @@
         }
       }
     },
+    "Search": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Suchen"
+          }
+        }
+      }
+    },
     "Search %lld languages": {
       "extractionState": "manual",
       "localizations": {
@@ -2522,6 +3083,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "%lld Sprachen durchsuchen"
+          }
+        }
+      }
+    },
+    "Search all transcripts": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alle Transkripte durchsuchen"
           }
         }
       }
@@ -2562,20 +3134,50 @@
       "extractionState": "manual",
       "localizations": {
         "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sitzung kopiert (%lld Zeilen)"
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Sitzung kopiert (%lld Zeile)"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Sitzung kopiert (%lld Zeilen)"
+                }
+              }
+            }
+          }
+        },
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Session copied (%lld line)"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Session copied (%lld lines)"
+                }
+              }
+            }
           }
         }
       }
     },
-    "Sessions are written to ~/Library/Application Support/de.aiity.saiity and never leave the device.\n\nSystem audio includes everyone on a call. Recording other people may require their consent, or be regulated where you are — it is worth telling them.": {
+    "Sessions are written to ~/Library/Application Support/de.aiity.saiity and never leave the device.\n\nSystem audio includes everyone on a call — and with \"Include my microphone\" switched on, your own side as well. Recording other people may require their consent, or be regulated where you are — it is worth telling them.": {
       "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Sitzungen werden nach ~/Library/Application Support/de.aiity.saiity geschrieben und verlassen dieses Gerät nie.\n\nDer Systemton nimmt alle in einem Anruf auf. Andere Personen aufzuzeichnen kann deren Einwilligung erfordern oder bei dir gesetzlich geregelt sein – es lohnt sich, es ihnen zu sagen."
+            "value": "Sitzungen werden nach ~/Library/Application Support/de.aiity.saiity geschrieben und verlassen dieses Gerät nie.\n\nDer Systemton nimmt alle in einem Anruf auf – und mit eingeschaltetem „Mein Mikrofon einbeziehen“ auch deine eigene Seite. Andere Personen aufzuzeichnen kann deren Einwilligung erfordern oder bei dir gesetzlich geregelt sein – es lohnt sich, es ihnen zu sagen."
           }
         }
       }
@@ -2591,6 +3193,17 @@
         }
       }
     },
+    "Settings…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Einstellungen …"
+          }
+        }
+      }
+    },
     "Shortcuts": {
       "localizations": {
         "de": {
@@ -2601,12 +3214,34 @@
         }
       }
     },
+    "Show / hide the caption bubble": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Untertitelblase ein-/ausblenden"
+          }
+        }
+      }
+    },
     "Show the caption bubble": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Sprechblase anzeigen"
+          }
+        }
+      }
+    },
+    "Show the last few captions": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die letzten Untertitel zeigen"
           }
         }
       }
@@ -2779,13 +3414,13 @@
         }
       }
     },
-    "Stop this download. Nothing is kept; Download starts it again.": {
+    "Stop this download. The part already fetched is kept, and Download resumes from it.": {
       "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Diesen Download stoppen. Es wird nichts behalten; Laden startet ihn erneut."
+            "value": "Diesen Download stoppen. Der bereits geladene Teil bleibt erhalten; Laden setzt ihn fort."
           }
         }
       }
@@ -2840,6 +3475,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Systemweit. Klicke ein Feld an und drücke die Kombination; ⌫ löscht sie. Benötigt ⌃, ⌥ oder ⌘."
+          }
+        }
+      }
+    },
+    "That URL answers with a web page, not a model file. Use the direct download link.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diese URL liefert eine Webseite, keine Modelldatei. Verwende den direkten Download-Link."
           }
         }
       }
@@ -2954,6 +3600,28 @@
         }
       }
     },
+    "The whole system mix — notification sounds and every other app land in the captions too. Scope to one app to caption a meeting or a film without interference.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Der gesamte Systemmix – auch Benachrichtigungstöne und jede andere App landen in den Untertiteln. Beschränke die Aufnahme auf eine App, um ein Meeting oder einen Film ohne Störgeräusche zu untertiteln."
+          }
+        }
+      }
+    },
+    "This audio has not dropped below the threshold yet — sentences will close on the length cap instead. A longer pause length will not help; scoping capture to one app might.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dieses Audio ist bisher nie unter die Schwelle gefallen – Sätze schließen stattdessen über die Längengrenze. Eine längere Pausenlänge hilft nicht; die Aufnahme auf eine App zu beschränken vielleicht."
+          }
+        }
+      }
+    },
     "This frees %@.\n\nAnything you use again will be downloaded once more.": {
       "extractionState": "manual",
       "localizations": {
@@ -2995,6 +3663,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Diese Stufe ist ein eigener Download von ~640 MB – jede Latenz hat die Blockgröße fest im Modell. Lade sie unter Modelle."
+          }
+        }
+      }
+    },
+    "Times count from the session start. Text can be selected and copied.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zeiten zählen ab Sitzungsbeginn. Text lässt sich auswählen und kopieren."
           }
         }
       }
@@ -3191,6 +3870,17 @@
         }
       }
     },
+    "Turn on “Save transcripts of sessions” and every captioned session appears here.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Schalte „Transkripte von Sitzungen sichern“ ein, und jede untertitelte Sitzung erscheint hier."
+          }
+        }
+      }
+    },
     "Two downloads and you are set": {
       "extractionState": "manual",
       "localizations": {
@@ -3255,6 +3945,10 @@
           }
         }
       }
+    },
+    "WebVTT": {
+      "extractionState": "manual",
+      "shouldTranslate": false
     },
     "Weight": {
       "localizations": {
@@ -3350,6 +4044,17 @@
         }
       }
     },
+    "Writes one text file with the app's state and this run's log, for bug reports. Review it before sharing.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Schreibt eine Textdatei mit dem Zustand der App und dem Protokoll dieses Laufs, für Fehlerberichte. Sieh sie vor dem Teilen durch."
+          }
+        }
+      }
+    },
     "You can skip this and let it download the first time you start captions — it just means waiting then instead of now.": {
       "extractionState": "manual",
       "localizations": {
@@ -3368,6 +4073,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Dein eigenes Modell – prüfe seine Bedingungen an der Quelle"
+          }
+        }
+      }
+    },
+    "a temporary location": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ein temporärer Ort"
           }
         }
       }
@@ -3469,6 +4185,17 @@
         }
       }
     },
+    "sAiity is running from %@. From Applications, the Screen Recording permission sticks across launches and updates can install themselves. This is one copy, done once.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "sAiity läuft gerade von hier: %@. Aus dem Ordner „Programme“ bleibt die Bildschirmaufnahme-Berechtigung über Starts hinweg erhalten, und Updates können sich installieren. Eine Kopie, einmalig."
+          }
+        }
+      }
+    },
     "sAiity — on-device live subtitles": {
       "extractionState": "manual",
       "localizations": {
@@ -3524,13 +4251,136 @@
         }
       }
     },
+    "the Desktop": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "der Schreibtisch"
+          }
+        }
+      }
+    },
+    "the Downloads folder": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "der Ordner „Downloads“"
+          }
+        }
+      }
+    },
+    "the disk image": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "das Disk-Image"
+          }
+        }
+      }
+    },
     "● Recording · %lld min · %lld lines": {
       "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "● Aufzeichnung · %lld Min. · %lld Zeilen"
+            "value": "● Aufzeichnung · %#@min@ · %#@lines@"
+          },
+          "substitutions": {
+            "lines": {
+              "argNum": 2,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%arg Zeile"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%arg Zeilen"
+                    }
+                  }
+                }
+              }
+            },
+            "min": {
+              "argNum": 1,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%arg Min."
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%arg Min."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "● Recording · %#@min@ · %#@lines@"
+          },
+          "substitutions": {
+            "lines": {
+              "argNum": 2,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%arg line"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%arg lines"
+                    }
+                  }
+                }
+              }
+            },
+            "min": {
+              "argNum": 1,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%arg min"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%arg min"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }

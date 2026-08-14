@@ -77,6 +77,18 @@ enum ASREngine: String, CaseIterable, Sendable {
         }
     }
 
+    /// The registry id of the files this engine would load right now. The
+    /// selected Nemotron tier matters: each tier is its own model directory,
+    /// so damage in one says nothing about the other.
+    var activeAssetID: String {
+        switch self {
+        case .nemotron:
+            return AssetID.nemotron(chunkMs: NemotronEngine.selectedChunkMs)
+        case .parakeetEou:
+            return AssetID.parakeetEou
+        }
+    }
+
     func makeBackend() -> TranscriptionBackend {
         switch self {
         case .nemotron:

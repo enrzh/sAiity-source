@@ -65,4 +65,46 @@ struct OrderingTests {
         #expect(starts == starts.sorted(), "cue starts were \(starts)")
         #expect(!starts.isEmpty)
     }
+
+    /// SRT was the one export that dropped translations — txt and Markdown
+    /// both carried them. A translated segment is one bilingual cue; an
+    /// untranslated one still splits along its word timings.
+    @Test("SRT carries the translation as a second cue line")
+    func srtCarriesTranslations() {
+        let translated = Segment(i: 0, t0: 0, t1: 3, text: "Guten Morgen allerseits.",
+                                 loc: "de-DE", tr: "Good morning everyone.",
+                                 trLoc: "en", words: nil)
+        let plain = Segment(i: 1, t0: 4, t1: 7, text: "Ohne Übersetzung.",
+                            loc: "de-DE", tr: nil, trLoc: nil, words: nil)
+        let srt = Export.srt([translated, plain])
+
+        let cues = srt.split(separator: "\n\n").map { $0.split(separator: "\n") }
+        #expect(cues.count == 2)
+        // Cue 1: index, timing, original, translation.
+        #expect(cues[0].count == 4, "bilingual cue was \(cues[0])")
+        #expect(cues[0][2] == "Guten Morgen allerseits.")
+        #expect(cues[0][3] == "Good morning everyone.")
+        // Cue 2: no translation, no fourth line.
+        #expect(cues[1].count == 3, "plain cue was \(cues[1])")
+
+        // An empty-string translation counts as no translation, same rule as
+        // the transcript record.
+        let empty = Segment(i: 0, t0: 0, t1: 2, text: "Hallo.",
+                            loc: "de-DE", tr: "", trLoc: nil, words: nil)
+        let single = Export.srt([empty]).split(separator: "\n\n").map { $0.split(separator: "\n") }
+        #expect(single.first?.count == 3)
+    }
+
+    /// WebVTT shares the SRT cue logic; what differs is the header and the
+    /// decimal separator — the two things a picky player rejects a file over.
+    @Test("WebVTT has its header, period timings, and the translation line")
+    func vttFormat() {
+        let seg = Segment(i: 0, t0: 1.5, t1: 4, text: "Guten Morgen.",
+                          loc: "de-DE", tr: "Good morning.", trLoc: "en", words: nil)
+        let vtt = Export.vtt([seg])
+        #expect(vtt.hasPrefix("WEBVTT\n\n"))
+        #expect(vtt.contains("00:00:01.500 --> 00:00:04.000"))
+        #expect(!vtt.contains(","), "VTT timings use periods, not SRT commas")
+        #expect(vtt.contains("Guten Morgen.\nGood morning.\n"))
+    }
 }

@@ -74,17 +74,25 @@ final class HotKeyCenter {
     enum Action: String, CaseIterable {
         case toggleCaptions
         case copyLastLine
+        // Appended, never inserted: the Carbon hot-key id is this enum's
+        // index, so reordering would silently re-route existing shortcuts.
+        case toggleBubble
+        case recentCaptions
 
         var title: String {
             switch self {
             case .toggleCaptions: return String(localized: "Start / stop captions")
             case .copyLastLine:   return String(localized: "Copy the current caption")
+            case .toggleBubble:   return String(localized: "Show / hide the caption bubble")
+            case .recentCaptions: return String(localized: "Show the last few captions")
             }
         }
         var defaultShortcut: Shortcut? {
             switch self {
             case .toggleCaptions: return .defaultToggle
             case .copyLastLine:   return nil
+            case .toggleBubble:   return nil
+            case .recentCaptions: return nil
             }
         }
         var defaultsKey: String { "shortcut.\(rawValue)" }

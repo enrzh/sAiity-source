@@ -197,8 +197,11 @@ fi
 
 if [ -n "$SIGN_ID" ] && [ "$SIGN_ID" != "-" ]; then
     # Hardened runtime + secure timestamp are both required for notarisation, and
-    # harmless before it.
-    codesign --force --options runtime --timestamp --sign "$SIGN_ID" "$APP"
+    # harmless before it. The entitlements file matters under hardened runtime:
+    # without audio-input there, the opt-in microphone mixing fails silently in
+    # exactly the signed builds users run.
+    codesign --force --options runtime --timestamp \
+             --entitlements Resources/sAiity.entitlements --sign "$SIGN_ID" "$APP"
     echo "signed: $SIGN_ID"
 else
     codesign --force --sign - "$APP"

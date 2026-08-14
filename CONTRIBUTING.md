@@ -99,7 +99,13 @@ purpose — their messages carry runtime percentages — so they localise at the
 producer instead, which is why `NemotronBackend`, `ParakeetEouEngine` and
 `Translators` all wrap their own progress literals.
 
-Verify by rendering, not by counting keys:
+`LocalizationTests` now enforces the mechanical half of this continuously:
+every catalog key must carry a finished German localization (or
+`shouldTranslate: false`), and every single-line literal it finds in a
+localized position must resolve to a catalog key. Its scanner deliberately
+does not see triple-quoted strings, ternary literals, or values passed
+through variables — for those, and for layout, still verify by rendering
+rather than by counting keys:
 
 ```bash
 defaults write de.aiity.saiity AppleLanguages '(de)'

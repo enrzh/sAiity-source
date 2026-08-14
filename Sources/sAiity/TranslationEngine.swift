@@ -94,6 +94,16 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
         }
     }
 
+    /// The registry id of the files this engine would load right now — nil
+    /// for the LLM path when no model is selected, in which case there is no
+    /// asset whose health could be in question.
+    var activeAssetID: String? {
+        switch self {
+        case .madlad: return AssetID.madlad
+        case .qwen: return LocalModel.selected.map { AssetID.llm(file: $0.file) }
+        }
+    }
+
     /// This engine's registry entries. Plural because Qwen offers several model
     /// sizes, each a separate download.
     var assetDescriptors: [ModelAsset] {
@@ -136,7 +146,9 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
                     install: m.downloadURL.map { url in
                         { sink in
                             try await FileDownloader.download(from: url, to: m.localURL,
-                                                              expectedBytes: m.bytes, progress: sink)
+                                                              expectedBytes: m.bytes,
+                                                              requireMagic: FileDownloader.ggufMagic,
+                                                              progress: sink)
                         }
                     })
             }

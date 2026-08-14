@@ -73,6 +73,29 @@ enum FrameStore {
     }
 }
 
+/// An image view that is a real button to assistive tech, not just one that
+/// claims the role. VoiceOver announced "button" (the role was set) but
+/// VO-Space did nothing: NSImageView has no AXPress action, and every actual
+/// activation ran through mouseDown hit-testing on a window that rests
+/// click-through — a path a screen reader can never drive.
+final class AccessibleIconButton: NSImageView {
+    var onPress: (() -> Void)?
+    /// Fired when the VoiceOver cursor lands here, so the bubble can reveal
+    /// controls that otherwise rest at alpha 0 until a literal mouse hover.
+    var onAccessibilityFocus: (() -> Void)?
+
+    override func accessibilityPerformPress() -> Bool {
+        guard let onPress else { return false }
+        onPress()
+        return true
+    }
+
+    override func setAccessibilityFocused(_ flag: Bool) {
+        super.setAccessibilityFocused(flag)
+        if flag { onAccessibilityFocus?() }
+    }
+}
+
 /// The view inside the glass. Owns hover tracking, the control strip, and
 /// dragging.
 ///
@@ -107,8 +130,8 @@ final class BubbleContentView: NSView {
     /// hidden, and just right of the icon once it fades in.
     private var dotAtIconSpot: NSLayoutConstraint!
     private var dotBesideIcon: NSLayoutConstraint!
-    private let menuButton = NSImageView()
-    private let copyButton = NSImageView()
+    private let menuButton = AccessibleIconButton()
+    private let copyButton = AccessibleIconButton()
     private let recordDot = NSView()
     private var copyFlashWork: DispatchWorkItem?
 
@@ -157,6 +180,17 @@ final class BubbleContentView: NSView {
         copyButton.setAccessibilityLabel(String(localized: "Copy this caption"))
         recordDot.setAccessibilityRole(.image)
         recordDot.setAccessibilityLabel(String(localized: "Recording a transcript"))
+
+        // The AX press and the mouse click share the same handlers, so the
+        // two input paths cannot drift apart.
+        menuButton.onPress = { [weak self] in self?.onOpenWindow?() }
+        copyButton.onPress = { [weak self] in
+            self?.onCopy?()
+            self?.flashCopied()
+        }
+        for b in [menuButton, copyButton] {
+            b.onAccessibilityFocus = { [weak self] in self?.setControls(visible: true) }
+        }
 
         for v in [menuButton, copyButton, recordDot] {
             v.translatesAutoresizingMaskIntoConstraints = false
@@ -316,12 +350,11 @@ final class BubbleContentView: NSView {
         let p = convert(event.locationInWindow, from: nil)
 
         if copyRect.contains(p) {
-            onCopy?()
-            flashCopied()
+            copyButton.onPress?()
             return
         }
         if menuRect.contains(p) {
-            onOpenWindow?()
+            menuButton.onPress?()
             return
         }
         // Edges first, and regardless of the drag region: the system's resize
@@ -506,7 +539,7 @@ final class OverlayWindow: NSPanel {
                     self.hasCustomFrame = true
                     // The one place a deliberate width is recorded.
                     FrameStore.saveUserWidth(w)
-                    self.sizeToFit()
+                    self.sizeToFit(immediateShrink: true)
                     self.keepOnScreen()
                     FrameStore.save(self.frame)
                 }
@@ -630,7 +663,7 @@ final class OverlayWindow: NSPanel {
         userWidth = userWidth.map { min($0, (FrameStore.bestScreen(for: frame)
                                              ?? NSScreen.main)?.visibleFrame.width ?? $0) }
         keepOnScreen()
-        sizeToFit()
+        sizeToFit(immediateShrink: true)
     }
 
     private static let hPadding: CGFloat = 24      // each side
@@ -685,9 +718,23 @@ final class OverlayWindow: NSPanel {
     /// edge stays put, so a bubble the user has placed does not walk around as
     /// the caption length changes.
     ///
+    /// Grow-fast/shrink-slow for the height. The next sentence's first
+    /// volatile replaces the whole previous sentence, so a three-line caption
+    /// used to collapse to the minimum and regrow word by word — a glass-slab
+    /// pulse at every sentence boundary, worst in rapid dialogue where
+    /// turnovers come every couple of seconds. Growth stays immediate; a
+    /// shrink only lands once the smaller need has persisted for this long.
+    private static let shrinkHold: TimeInterval = 1.5
+    private var shrinkWork: DispatchWorkItem?
+    private var allowShrink = false
+
     /// Gated on an actual size change: glass costs more per resize than a
     /// visual-effect view, and captions update several times a second.
-    private func sizeToFit() {
+    ///
+    /// `immediateShrink` bypasses the shrink hold — for deliberate user
+    /// actions (style change, reset, resize, display change), where a bubble
+    /// that answers 1.5 s late reads as broken rather than calm.
+    private func sizeToFit(immediateShrink: Bool = false) {
         guard let screen = FrameStore.bestScreen(for: frame) ?? NSScreen.main else { return }
         let v = screen.visibleFrame
         // The same adjusted style applyStyle draws with — measuring with the raw
@@ -722,8 +769,33 @@ final class OverlayWindow: NSPanel {
         let targetH = min(max(110, contentH + Self.topPadding + Self.bottomPadding),
                           v.height * 0.4)
 
+        var height = targetH
+        if immediateShrink || allowShrink || targetH >= frame.height - 0.5 {
+            // Growing, matching, or explicitly allowed to shrink: no hold.
+            shrinkWork?.cancel()
+            shrinkWork = nil
+        } else {
+            // Smaller than what is on screen: hold the current height and
+            // remeasure in a beat. Deliberately NOT re-armed per caption —
+            // rapid short captions would push the deadline forever and the
+            // bubble would never come down.
+            height = frame.height
+            if shrinkWork == nil {
+                let w = DispatchWorkItem { [weak self] in
+                    guard let self else { return }
+                    self.shrinkWork = nil
+                    self.allowShrink = true
+                    self.sizeToFit()
+                    self.allowShrink = false
+                }
+                shrinkWork = w
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.shrinkHold,
+                                              execute: w)
+            }
+        }
+
         var f = frame
-        f.size = NSSize(width: targetW, height: targetH)
+        f.size = NSSize(width: targetW, height: height)
         // Width only changes when a SETTING changes, so re-centring on it is
         // now a deliberate response to the user, not per-caption jitter.
         if abs(targetW - frame.width) > 0.5 { f.origin.x = frame.midX - targetW / 2 }
@@ -796,8 +868,20 @@ final class OverlayWindow: NSPanel {
             st.translation.weight = max(st.translation.weight, 0.3)
             st.original.opacity = 1.0
             st.translation.opacity = 1.0
+            // The volatile dim says "the engine may still revise this", but
+            // 0.72-alpha text on glass is exactly the legibility loss the
+            // setting exists to forbid. Contrast wins over the hint.
+            st.original.volatileOpacity = 1.0
+            st.translation.volatileOpacity = 1.0
         }
         return st
+    }
+
+    /// The stale-translation dim factor. Increase Contrast lifts it for the
+    /// same reason effectiveStyle lifts the volatile dim: dimming is how the
+    /// row says "previous sentence", and legibility outranks the hint.
+    private var staleDim: CGFloat {
+        NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? 1.0 : 0.55
     }
 
     func applyStyle(_ ignored: CaptionStyle) {
@@ -828,8 +912,16 @@ final class OverlayWindow: NSPanel {
         } else {
             glass.tintColor = st.tintColor
         }
-        if st.hidden { orderOut(nil) }
-        sizeToFit()
+        // Both directions. Only the hide half existed, so un-hiding — which
+        // now has its own global hot key — did nothing visible until the next
+        // caption chunk happened to arrive, which during a pause in speech
+        // reads as a broken shortcut.
+        if st.hidden {
+            orderOut(nil)
+        } else if !label.stringValue.isEmpty, !isVisible {
+            orderFrontRegardless()
+        }
+        sizeToFit(immediateShrink: true)
     }
 
     /// Show sample text so legibility can be judged without waiting for someone
@@ -859,7 +951,7 @@ final class OverlayWindow: NSPanel {
         // sizeToFit does the centring too, now that hasCustomFrame is false:
         // it puts the bubble at the default spot with the width the settings
         // ask for, which is the whole point of this button.
-        sizeToFit()
+        sizeToFit(immediateShrink: true)
     }
 
     // MARK: - Content
@@ -868,10 +960,14 @@ final class OverlayWindow: NSPanel {
     /// engine may still revise it.
     func show(text: String, isFinal: Bool) {
         label.stringValue = text
-        let st = CaptionStyle.current
+        // effectiveStyle, not CaptionStyle.current: captions update several
+        // times a second, and reading the raw style here dropped the
+        // accessibility adjustments applyStyle had just made — Increase
+        // Contrast survived only until the next caption arrived.
+        let st = effectiveStyle
         label.alphaValue = isFinal ? st.original.opacity : st.original.volatileOpacity
         sizeToFit()
-        guard !CaptionStyle.current.hidden else { orderOut(nil); return }
+        guard !st.hidden else { orderOut(nil); return }
         if !text.isEmpty, !isVisible { orderFrontRegardless() }
     }
 
@@ -888,7 +984,7 @@ final class OverlayWindow: NSPanel {
     func showTranslation(_ text: String, stale: Bool = false) {
         translationLabel.stringValue = text
         translationLabel.isHidden = text.isEmpty && !reservesTranslationRow
-        translationLabel.alphaValue = CaptionStyle.current.translation.opacity * (stale ? 0.55 : 1)
+        translationLabel.alphaValue = effectiveStyle.translation.opacity * (stale ? staleDim : 1)
         sizeToFit()
     }
 
@@ -896,7 +992,7 @@ final class OverlayWindow: NSPanel {
     /// `showTranslation(stale: true)` without re-setting the text.
     func markTranslationStale() {
         guard !translationLabel.stringValue.isEmpty else { return }
-        translationLabel.alphaValue = CaptionStyle.current.translation.opacity * 0.55
+        translationLabel.alphaValue = effectiveStyle.translation.opacity * staleDim
     }
 
     /// Hold a line of space for the translation for as long as translation is
@@ -914,7 +1010,7 @@ final class OverlayWindow: NSPanel {
             } else if translationLabel.stringValue.isEmpty {
                 translationLabel.isHidden = true
             }
-            sizeToFit()
+            sizeToFit(immediateShrink: true)
         }
     }
 

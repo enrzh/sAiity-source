@@ -70,7 +70,6 @@ struct ModelsView: View {
                 Section { Text(e).font(.caption).foregroundStyle(.red) }
             }
         }
-        .scrollContentBackground(.hidden)
         .formStyle(.grouped)
         .task { state.refreshModels() }
     }
@@ -218,6 +217,28 @@ struct CaptionsView: View {
             }
 
             Section {
+                Picker("Capture audio from", selection: $state.captureApp) {
+                    Text("Everything the Mac plays").tag(String?.none)
+                    ForEach(state.runningApps, id: \.bundleID) { app in
+                        Text(app.name).tag(Optional(app.bundleID))
+                    }
+                }
+                LabeledToggle("Include my microphone",
+                              "Off by default. System audio on a call carries only the other participants — your own voice never enters the mix, so a saved transcript is missing your half of the conversation. On, sAiity also opens the microphone (macOS asks once) and mixes it into recognition. Audio still never leaves this Mac. Takes effect when captions next start.",
+                              isOn: $state.includeMic)
+            } header: {
+                Text("Capture")
+            } footer: {
+                // A footer, not a caption row: the explanation describes the
+                // whole section, and the footer is where the OS's own settings
+                // put exactly this kind of text.
+                Text(state.captureApp == nil
+                     ? "The whole system mix — notification sounds and every other app land in the captions too. Scope to one app to caption a meeting or a film without interference."
+                     : "Only this app's audio reaches the captions; notification sounds, other videos and games stay out. Takes effect when captions next start, and Start will say so if the app is not running.")
+                    .font(.caption)
+            }
+
+            Section {
                 LabeledToggle("End a sentence on a pause",
                               "Most of what the multilingual engine emits carries no punctuation, so a pause is what tells the app a thought has finished — and a finished sentence is what gets translated. Off, sentences close only on real punctuation and on the length cap, which suits a speaker who pauses mid-thought.",
                               isOn: $state.speechGapEnabled)
@@ -227,6 +248,22 @@ struct CaptionsView: View {
                            "%.0f ms")
                     Text("Clause pauses in ordinary speech run 200–500 ms and the pause at the end of a sentence is longer, so \(SpeechGap.defaultHoldMs) ms is the measured default. Shorter splits sentences at commas and hands the translator fragments; longer delays every translation and eventually lets the length cap cut one mid-word.")
                         .font(.caption).foregroundStyle(.secondary)
+                    // The slider applies live to the running session; this is
+                    // the feedback loop it never had. Tuning used to mean
+                    // dragging blind and watching captions for a minute.
+                    if let r = state.gapReadout {
+                        Label("Live: quietest \(Int(r.floorDb)) dBFS in the last 5 s · pause threshold \(Int(r.thresholdDb)) dBFS",
+                              systemImage: r.fires > 0 ? "checkmark.circle" : "waveform")
+                            .font(.caption).foregroundStyle(.secondary)
+                        if r.fires > 0 {
+                            Text("\(r.fires) sentences ended on a pause this session.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else if r.floorDb > r.thresholdDb {
+                            Label("This audio has not dropped below the threshold yet — sentences will close on the length cap instead. A longer pause length will not help; scoping capture to one app might.",
+                                  systemImage: "exclamationmark.triangle")
+                                .font(.caption).foregroundStyle(.orange)
+                        }
+                    }
                 }
             } header: {
                 HStack {
@@ -325,7 +362,6 @@ struct CaptionsView: View {
                 }
             }
         }
-        .scrollContentBackground(.hidden)
         .formStyle(.grouped)
         .task(id: "\(state.translateTo ?? "")|\(state.translationEngine?.rawValue ?? "none")") {
             await state.refreshTargetSupport()
@@ -344,6 +380,9 @@ struct CaptionsView: View {
             LabeledToggle("Let clicks pass through the bubble",
                           "On, only the bubble's top strip can be grabbed and everything else clicks straight through to the video underneath — which matters, because the bubble sits over the scrubber. Off, you can drag it by any part of it.",
                           isOn: $state.captionClickThrough)
+            LabeledToggle("Announce captions to VoiceOver",
+                          "Off by default. Each finished sentence is posted as a VoiceOver announcement, which also reaches a connected braille display. In-progress text is never announced — it would arrive faster than speech or braille can render it.",
+                          isOn: $state.announceCaptions)
             Picker("Background", selection: $state.style.glassStyle) {
                 Text("Glass").tag(0); Text("Clear").tag(1); Text("Solid").tag(2)
             }
@@ -584,12 +623,51 @@ private struct ShortcutRecorder: NSViewRepresentable {
 
         override var acceptsFirstResponder: Bool { true }
         override func mouseDown(with event: NSEvent) {
+            arm()
+        }
+
+        private func arm() {
             recording = true
             window?.makeFirstResponder(self)
             refresh()
         }
 
+        // The ring is what tells a Full Keyboard Access user that Tab landed
+        // here; without it the control is focusable but looks inert.
+        override var focusRingMaskBounds: NSRect { bounds }
+        override func drawFocusRingMask() {
+            NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6).fill()
+        }
+
+        // A real control to assistive tech: role, a label naming the action,
+        // the current shortcut as the value, and an actual press action.
+        // Ironic history: the one control that exists to serve keyboard users
+        // was mouse-armed and invisible to VoiceOver.
+        override func isAccessibilityElement() -> Bool { true }
+        override func accessibilityRole() -> NSAccessibility.Role? { .button }
+        override func accessibilityLabel() -> String? { action.title }
+        override func accessibilityValue() -> Any? {
+            recording ? String(localized: "Press keys…")
+                : HotKeyCenter.shortcut(for: action)?.displayString
+                    ?? String(localized: "Not set")
+        }
+        override func accessibilityHelp() -> String? {
+            String(localized: "Press to record a new shortcut. Delete clears it; Escape cancels.")
+        }
+        override func accessibilityPerformPress() -> Bool {
+            arm()
+            return true
+        }
+
         override func keyDown(with event: NSEvent) {
+            // Arm from the keyboard too: Tab reaches this view, but recording
+            // used to start only in mouseDown — a keyboard user could focus
+            // the control and then do nothing with it.
+            if !recording,
+               event.keyCode == UInt16(kVK_Space) || event.keyCode == UInt16(kVK_Return) {
+                arm()
+                return
+            }
             guard recording else { super.keyDown(with: event); return }
             // ⌫ clears.
             if event.keyCode == UInt16(kVK_Delete) {
@@ -621,28 +699,84 @@ private struct ShortcutRecorder: NSViewRepresentable {
 /// subject — what this app has stored and what it can see.
 struct LibraryView: View {
     @Bindable var state: AppState
+    /// Cross-session search. Non-empty replaces the session list with the
+    /// matching lines — "what was said about X in yesterday's call" used to
+    /// require exporting to Markdown and searching in another app.
+    @State private var query = ""
+    /// The session open in the transcript viewer sheet.
+    @State private var viewing: SessionRef?
 
     var body: some View {
         Form {
-            Section("Recording") {
+            Section {
                 Toggle("Save transcripts of sessions", isOn: $state.saveTranscript)
+            } header: {
+                Text("Recording")
+            } footer: {
                 Text("Off by default. A transcript is a durable record of a conversation other people were part of, and system audio captures everyone on the call.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption)
             }
 
             Section("Saved sessions") {
                 if state.sessions.isEmpty {
-                    Text("Nothing saved yet.").foregroundStyle(.secondary)
+                    ContentUnavailableView(
+                        "Nothing saved yet",
+                        systemImage: "text.document",
+                        description: Text("Turn on “Save transcripts of sessions” and every captioned session appears here."))
                 } else {
+                    TextField("Search all transcripts", text: $query)
+                        .textFieldStyle(.roundedBorder)
+                }
+                if !state.sessions.isEmpty, !trimmedQuery.isEmpty {
+                    let found = hits
+                    if found.isEmpty {
+                        // The framework's own empty state, which localizes and
+                        // themes itself.
+                        ContentUnavailableView.search(text: query)
+                    }
+                    ForEach(found) { hit in
+                        Button {
+                            viewing = hit.session
+                        } label: {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(hit.session.meta.startedAt.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.caption).foregroundStyle(.secondary)
+                                Text(hit.seg.text).lineLimit(2)
+                                if let tr = hit.seg.tr, !tr.isEmpty {
+                                    Text(tr).font(.caption)
+                                        .foregroundStyle(.secondary).lineLimit(1)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Open this transcript")
+                    }
+                } else if !state.sessions.isEmpty {
                     ForEach(state.sessions, id: \.id) { s in
                         HStack {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(s.meta.startedAt.formatted(date: .abbreviated, time: .shortened))
-                                Text("\(s.meta.lineCount) lines · \(s.meta.locale)")
-                                    .font(.caption).foregroundStyle(.secondary)
+                            // A real Button, not a tap gesture: the row has to
+                            // open from the keyboard and VoiceOver too.
+                            Button {
+                                viewing = s
+                            } label: {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(s.meta.startedAt.formatted(date: .abbreviated, time: .shortened))
+                                    Text("\(s.meta.lineCount) lines · \(s.meta.locale)")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                .contentShape(Rectangle())
                             }
+                            .buttonStyle(.plain)
+                            .help("Open this transcript")
                             Spacer()
-                            Button("SRT") { export(s, "srt") }.controlSize(.small)
+                            Menu("Export") {
+                                Button("SRT") { export(s, "srt") }
+                                Button("WebVTT") { export(s, "vtt") }
+                                Button("Markdown") { export(s, "md") }
+                            }
+                            .controlSize(.small)
+                            .fixedSize()
                             Button {
                                 NSWorkspace.shared.activateFileViewerSelecting([s.url])
                             } label: { Image(systemName: "folder") }.controlSize(.small)
@@ -653,6 +787,8 @@ struct LibraryView: View {
                             } label: { Image(systemName: "trash") }.controlSize(.small)
                         }
                     }
+                }
+                if !state.sessions.isEmpty, trimmedQuery.isEmpty {
                     Button("Delete all…", role: .destructive) {
                         let a = NSAlert()
                         a.messageText = String(localized: "Delete all transcripts?")
@@ -694,6 +830,12 @@ struct LibraryView: View {
                     Text("Walks through permission and models from the start.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                HStack {
+                    Button("Save diagnostics…") { Diagnostics.save() }
+                        .controlSize(.small)
+                    Text("Writes one text file with the app's state and this run's log, for bug reports. Review it before sharing.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
 
             Section("Privacy") {
@@ -703,15 +845,101 @@ struct LibraryView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
-        .scrollContentBackground(.hidden)
         .formStyle(.grouped)
+        .sheet(item: $viewing) { TranscriptViewerSheet(session: $0) }
+    }
+
+    private var trimmedQuery: String {
+        query.trimmingCharacters(in: .whitespaces)
+    }
+
+    private struct SearchHit: Identifiable {
+        let id: String
+        let session: SessionRef
+        let seg: Segment
+    }
+
+    /// Every line in every saved session matching the query, original or
+    /// translation. Read fresh per keystroke — sessions are local JSONL files
+    /// and the working set is a person's own meetings, not a corpus.
+    private var hits: [SearchHit] {
+        let q = trimmedQuery
+        guard !q.isEmpty else { return [] }
+        var out: [SearchHit] = []
+        for s in state.sessions {
+            for seg in TranscriptStore.segments(of: s)
+            where seg.text.localizedCaseInsensitiveContains(q)
+                || (seg.tr?.localizedCaseInsensitiveContains(q) ?? false) {
+                out.append(SearchHit(id: "\(s.id)#\(seg.i)", session: s, seg: seg))
+            }
+        }
+        return out
     }
 
     private func export(_ s: SessionRef, _ kind: String) {
         let segs = TranscriptStore.segments(of: s)
-        let text = kind == "srt" ? Export.srt(segs) : Export.markdown(segs, meta: s.meta)
+        let text: String
+        switch kind {
+        case "srt": text = Export.srt(segs)
+        case "vtt": text = Export.vtt(segs)
+        default: text = Export.markdown(segs, meta: s.meta)
+        }
         if let url = Export.write(text, named: "transcript.\(kind)", in: s.url) {
             NSWorkspace.shared.activateFileViewerSelecting([url])
+        }
+    }
+}
+
+/// Read a saved transcript where it lives. Before this the app recorded
+/// durable transcripts and offered no way to look at one — the Library row
+/// showed only metadata, and reading a line meant exporting the session or
+/// opening segments.jsonl in Finder.
+private struct TranscriptViewerSheet: View {
+    let session: SessionRef
+    @State private var segments: [Segment] = []
+    @State private var query = ""
+
+    private var shown: [Segment] {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return segments }
+        return segments.filter {
+            $0.text.localizedCaseInsensitiveContains(q)
+                || ($0.tr?.localizedCaseInsensitiveContains(q) ?? false)
+        }
+    }
+
+    var body: some View {
+        SheetShell(title: "Transcript — \(session.meta.startedAt.formatted(date: .abbreviated, time: .shortened))",
+                   subtitle: "Times count from the session start. Text can be selected and copied.",
+                   width: 560, height: 480,
+                   headerAccessory: {
+                       TextField("Search", text: $query)
+                           .textFieldStyle(.roundedBorder)
+                           .frame(width: 160)
+                   }) {
+            List(shown, id: \.i) { seg in
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(Export.clock(seg.t0))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(seg.text).textSelection(.enabled)
+                        if let tr = seg.tr, !tr.isEmpty {
+                            Text(tr).foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+                // Extra air above a turn break — the reader sees the pause.
+                .padding(.top, seg.turn == true ? 12 : 1)
+                .padding(.bottom, 1)
+            }
+            .overlay {
+                if shown.isEmpty, !query.isEmpty {
+                    ContentUnavailableView.search(text: query)
+                }
+            }
+            .task { segments = TranscriptStore.segments(of: session) }
         }
     }
 }

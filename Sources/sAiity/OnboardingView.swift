@@ -46,6 +46,13 @@ final class OnboardingModel {
     var wantsAutoUpdates = false
     var target = "en"
 
+    /// Which way the last step change went, so the transition can match it.
+    var goingBack = false
+    /// When the permission step advanced itself. A Continue click already in
+    /// flight when that happens would land on the NEXT step's button — same
+    /// place, different meaning — and silently skip the purpose choice.
+    var lastAutoAdvance: Date?
+
     let state: AppState
     init(state: AppState) {
         self.state = state
@@ -118,7 +125,12 @@ struct OnboardingView: View {
             // Centred rather than pinned to the top. Every step used to sit in
             // the top third with two thirds of the window empty under it, which
             // reads as a screen that has not finished loading.
+            //
+            // Push, not crossfade: an assistant moves forward through pages,
+            // and the motion should say so.
             content
+                .id(model.step)
+                .transition(.push(from: model.goingBack ? .leading : .trailing))
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 .padding(.horizontal, 28)
                 .animation(.smooth(duration: 0.28), value: model.step)
@@ -126,16 +138,11 @@ struct OnboardingView: View {
             footer
         }
         .frame(width: 640, height: 560)
-        .background(setupBackground)
+        // The standard window background, on purpose. The tinted gradient
+        // this window used to share with Settings is gone: Apple's own setup
+        // assistants sit on plain chrome and let type and spacing carry the
+        // design.
     }
-
-    /// Depth without cost. This window is redrawn on interaction, not per frame
-    /// like the caption bubble, so a gradient and a material here are free —
-    /// the same treatment in the bubble would be paid several times a second
-    /// while a speech model and a translator are already running.
-    /// Shared with Settings — see SettingsBackground. One window looking like a
-    /// different app from the next is how a small app reads as unfinished.
-    private var setupBackground: some View { SettingsBackground() }
 
     /// Where you are, and how much is left. The step name alone in the corner
     /// answered neither.
@@ -169,36 +176,57 @@ struct OnboardingView: View {
     // MARK: - Steps
 
     private var welcome: some View {
-        VStack(spacing: 18) {
+        VStack(spacing: 20) {
             // The real app icon, not a glyph: this is the first thing a new
             // user sees, and it should look like the thing they installed.
+            // No added shadow — the icon carries its own depth, and painting
+            // more under it is exactly the decoration this window shed.
             Image(nsImage: NSApp.applicationIconImage)
-                .resizable().frame(width: 96, height: 96)
-                .shadow(color: .black.opacity(0.28), radius: 12, y: 5)
+                .resizable().frame(width: 100, height: 100)
             VStack(spacing: 6) {
-                Text("sAiity").font(.system(size: 36, weight: .semibold))
+                Text("sAiity").font(.system(size: 34, weight: .bold))
                 Text("Live subtitles for anything your Mac is playing.")
                     .font(.title3).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
-            VStack(alignment: .leading, spacing: 12) {
-                bullet("microphone.slash", "It captures the audio your Mac plays, not your microphone.")
+            // Plain bullets on the plain window — the way Apple's own
+            // feature panels do it. The material card with its hairline
+            // stroke was chrome describing nothing.
+            VStack(alignment: .leading, spacing: 14) {
+                bullet("microphone.slash", "It captures the audio your Mac plays — the microphone stays off unless you later opt in under Settings → Captions.")
                 bullet("lock", "Everything runs on this Mac. No audio ever leaves it.")
                 bullet("arrow.down.circle", "That means a one-time model download — you choose which.")
             }
-            .padding(18)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14)
-                        .strokeBorder(.white.opacity(0.07), lineWidth: 1))
-            .padding(.top, 4)
+            .frame(maxWidth: 440)
+            .padding(.top, 12)
         }
+    }
+
+    /// The setup-assistant header every step past the welcome shares: symbol
+    /// over title over subtitle, centred — the grammar Apple's own assistants
+    /// use, so each page answers "where am I and why" before any control.
+    private func header(_ symbol: String, _ title: LocalizedStringKey,
+                        _ subtitle: LocalizedStringKey) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: symbol)
+                .font(.system(size: 38, weight: .regular))
+                .foregroundStyle(.tint)
+                .accessibilityHidden(true)
+            Text(title).font(.title2.weight(.semibold))
+            Text(subtitle)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 460)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.bottom, 16)
     }
 
     private var permission: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Allow Screen Recording").font(.title2.weight(.semibold))
-            Text("macOS has no separate permission for system audio — Screen Recording is the one that gates it. sAiity records no video and takes no screenshots.")
-                .foregroundStyle(.secondary)
+            header("lock.shield",
+                   "Allow Screen Recording",
+                   "macOS has no separate permission for system audio — Screen Recording is the one that gates it. sAiity records no video and takes no screenshots.")
 
             HStack(spacing: 8) {
                 Image(systemName: model.permissionGranted
@@ -237,13 +265,30 @@ struct OnboardingView: View {
             for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await model.refreshPermission() }
         }
+        // When the permission arrives, take the step: the user's only next
+        // action was Continue, and making them find it after a round-trip
+        // through System Settings is friction with no decision inside it. The
+        // beat is so the "Granted" checkmark is seen, not skipped past.
+        .onChange(of: model.permissionGranted) { _, granted in
+            guard granted, model.step == .permission else { return }
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                guard model.permissionGranted, model.step == .permission else { return }
+                model.lastAutoAdvance = Date()
+                model.goingBack = false
+                let steps = OnboardingStep.allCases
+                if let i = steps.firstIndex(of: model.step) {
+                    model.step = steps[min(i + 1, steps.count - 1)]
+                }
+            }
+        }
     }
 
     private var purpose: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("What will you caption?").font(.title2.weight(.semibold))
-            Text("This only picks a starting model. You can change it any time in Settings.")
-                .foregroundStyle(.secondary)
+            header("waveform",
+                   "What will you caption?",
+                   "This only picks a starting model. You can change it any time in Settings.")
 
             ForEach(OnboardingModel.Purpose.allCases, id: \.self) { p in
                 choice(title: p.title, detail: p.detail, selected: model.purpose == p) {
@@ -275,12 +320,11 @@ struct OnboardingView: View {
             // was asked for. Saying "one" while showing two was the small
             // version of the same dishonesty as promising a row and not
             // rendering it.
-            Text(model.assetsToOffer.count > 1
-                 ? "Two downloads and you are set"
-                 : "One download and you are set")
-                .font(.title2.weight(.semibold))
-            Text("Recognition always needs a model on this Mac — that is the price of not sending your audio to a server.")
-                .foregroundStyle(.secondary)
+            header("arrow.down.circle",
+                   model.assetsToOffer.count > 1
+                       ? "Two downloads and you are set"
+                       : "One download and you are set",
+                   "Recognition always needs a model on this Mac — that is the price of not sending your audio to a server.")
 
             ForEach(model.assetsToOffer) { asset in
                 let status = ModelRegistry.status(of: asset)
@@ -315,7 +359,9 @@ struct OnboardingView: View {
 
     private var finish: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Ready").font(.title2.weight(.semibold))
+            header("checkmark.seal",
+                   "Ready",
+                   "Everything is in place.")
             Toggle("Check for updates automatically", isOn: $model.wantsAutoUpdates)
             Text("Asks aiity.de about once a day whether a newer version exists. The check sends no audio, no transcripts and no identifiers — but it is a network request, so it is off unless you want it. You can always check by hand from the menu bar.")
                 .font(.caption).foregroundStyle(.secondary)
@@ -393,8 +439,15 @@ struct OnboardingView: View {
     }
 
     private func advance() {
+        // A click that arrives right after the permission step advanced
+        // itself was aimed at the step that just left — the primary button
+        // does not move, so the user cannot have meant this one.
+        if let auto = model.lastAutoAdvance, Date().timeIntervalSince(auto) < 0.7 {
+            return
+        }
         let steps = OnboardingStep.allCases
         guard let i = steps.firstIndex(of: model.step) else { return }
+        model.goingBack = false
         if model.step == .purpose { model.apply() }
         if model.step == .finish {
             // Sparkle reads this defaults key itself; no updater API needed.
@@ -409,6 +462,7 @@ struct OnboardingView: View {
     private func back() {
         let steps = OnboardingStep.allCases
         guard let i = steps.firstIndex(of: model.step), i > 0 else { return }
+        model.goingBack = true
         model.step = steps[i - 1]
     }
 }

@@ -25,16 +25,30 @@
   <key>SUFeedURL</key><string>https://aiity.de/saiity/appcast.xml</string>
   <key>SUPublicEDKey</key><string>DzbCne8eregDpstl+s0s7lID5lVvzbB8OrXorH7ccMQ=</string>
   <key>SUEnableAutomaticChecks</key><false/>
+  <!-- saiity://toggle|start|stop|copy|bubble — the automation surface for
+       Shortcuts, Raycast and scripts. App Intents cannot work here: the
+       bundle is assembled from `swift build`, so Xcode's intents metadata
+       step never runs and Shortcuts would not discover them. -->
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key><string>de.aiity.saiity.automation</string>
+      <key>CFBundleURLSchemes</key><array><string>saiity</string></array>
+    </dict>
+  </array>
   <key>NSHumanReadableCopyright</key><string>MIT licensed. See Credits in the app's About window.</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
   <!-- ScreenCaptureKit system-audio capture triggers the Screen Recording
        prompt, which macOS does not gate on an Info.plist string.
 
-       There are deliberately NO camera or microphone entries here. The app has
-       zero AVCaptureDevice and AVAudioEngine call sites — it captures the
-       system's output, never an input device — and declaring intent it does not
-       have is both untrue and, for the camera, an automatic App Store 5.1.1
-       rejection. -->
+       The microphone entry backs exactly ONE opt-in setting ("Include my
+       microphone", off by default): system audio on a call carries only the
+       remote side, so without it a transcript misses the user's own half.
+       The prompt is only ever triggered after the user turns that setting
+       on. There is deliberately NO camera entry — the app has no camera call
+       site, and declaring intent it does not have is both untrue and an
+       automatic App Store 5.1.1 rejection. -->
+  <key>NSMicrophoneUsageDescription</key><string>Only used if you turn on “Include my microphone”: your side of a call is mixed into the captions and transcript. Audio never leaves this Mac.</string>
   <key>NSSpeechRecognitionUsageDescription</key><string>Speech is transcribed entirely on this Mac. Nothing is uploaded.</string>
 </dict>
 </plist>

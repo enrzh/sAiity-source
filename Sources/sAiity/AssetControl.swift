@@ -27,7 +27,28 @@ struct AssetControl: View {
                 }
                 Button("Cancel") { state.cancelDownload() }
                     .controlSize(.small)
-                    .help("Stop this download. Nothing is kept; Download starts it again.")
+                    .help("Stop this download. The part already fetched is kept, and Download resumes from it.")
+            }
+        } else if status.isInstalled, status.asset.install != nil,
+                  let reason = state.loadFailures[status.asset.id] {
+            // Present on disk but refused to load. Without this row the
+            // failure loops forever: every Start repeats the error while this
+            // page keeps saying "installed" with only a generic Delete.
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .help(reason)
+                Text("Damaged").font(.caption).foregroundStyle(.orange)
+                Button("Re-download") {
+                    Task { await state.redownload(status.asset) }
+                }
+                .controlSize(.small)
+                .disabled(state.activeDownload != nil)
+                .help("Delete the damaged files and fetch \(status.asset.title) again.")
+                Button("Delete", role: .destructive) {
+                    Task { await state.delete(status.asset) }
+                }
+                .controlSize(.small)
             }
         } else if status.isInstalled || status.isPartial {
             Button(status.isPartial ? "Remove" : "Delete", role: .destructive) {

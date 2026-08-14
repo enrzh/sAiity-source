@@ -106,8 +106,7 @@ struct LocalModel: Identifiable, Sendable, Equatable, Codable {
     /// completeness can be judged later; a server that sends no Content-Length
     /// yields nil, which downstream treats as unknown rather than zero.
     static func addCustom(url: URL) async throws -> LocalModel {
-        var name = url.lastPathComponent
-        if name.isEmpty || name == "/" { name = "custom-model.gguf" }
+        var name = safeFilename(url.lastPathComponent)
         if !name.lowercased().hasSuffix(".gguf") { name += ".gguf" }
         name = uniqueFilename(name)
 
@@ -117,6 +116,14 @@ struct LocalModel: Identifiable, Sendable, Equatable, Codable {
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw TranslationEngineError.notAvailable(
                 String(localized: "That URL did not answer with a downloadable file (HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0))."))
+        }
+        // A 200 of type text/html is a model PAGE, not a model — the most
+        // likely paste. Refusing it here, at add time, beats installing the
+        // page as a .gguf that fails minutes later inside llama.cpp.
+        if let type = http.value(forHTTPHeaderField: "Content-Type"),
+           type.lowercased().contains("text/html") {
+            throw TranslationEngineError.notAvailable(
+                String(localized: "That URL answers with a web page, not a model file. Use the direct download link."))
         }
         let length = http.expectedContentLength > 0 ? http.expectedContentLength : nil
 
@@ -139,7 +146,7 @@ struct LocalModel: Identifiable, Sendable, Equatable, Codable {
         guard size > 0 else {
             throw TranslationEngineError.notAvailable(String(localized: "That file is empty or unreadable."))
         }
-        var name = fileURL.lastPathComponent
+        var name = safeFilename(fileURL.lastPathComponent)
         // Ollama blobs are named sha256-…; give them a usable extension.
         if !name.lowercased().hasSuffix(".gguf") { name += ".gguf" }
         name = uniqueFilename(name)
@@ -168,6 +175,36 @@ struct LocalModel: Identifiable, Sendable, Equatable, Codable {
         if UserDefaults.standard.string(forKey: "qwenModelFile") == m.file {
             UserDefaults.standard.removeObject(forKey: "qwenModelFile")
         }
+    }
+
+    /// Reduce anything that arrives as a "filename" to ONE path component.
+    ///
+    /// `URL.lastPathComponent` percent-DECODES, so a pasted custom-model URL
+    /// ending in `a%2F..%2F..%2Fevil.gguf` yields `a/../../evil.gguf` — a name
+    /// carrying separators and parent references. Joined onto the models
+    /// directory that resolves outside it, and the downloader then creates
+    /// directories and replaces files at that path in full trust. The user is
+    /// the one pasting the URL, but "the link I was given wrote outside the
+    /// app's folder" is not a thing this app gets to allow.
+    static func safeFilename(_ raw: String) -> String {
+        // Separators (both kinds — a colon is a path separator to the Finder)
+        // and NUL become underscores; the result is then re-reduced to its
+        // last component so no traversal survives, and a name that was only
+        // dots is refused outright.
+        var name = raw
+        for bad in ["/", "\\", ":", "\0"] {
+            name = name.replacingOccurrences(of: bad, with: "_")
+        }
+        name = (name as NSString).lastPathComponent
+        if name.isEmpty || name.allSatisfy({ $0 == "." }) || name.hasPrefix(".") {
+            name = "custom-model.gguf"
+        }
+        // Keep well under the 255-byte HFS+/APFS component limit while
+        // leaving room for the ".part"/".etag" suffixes staging adds.
+        if name.utf8.count > 200 {
+            name = String(name.prefix(120)) + ".gguf"
+        }
+        return name
     }
 
     private static func uniqueFilename(_ name: String) -> String {

@@ -541,7 +541,9 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
                 String(localized: "\(m.label) was imported from disk and its file is missing. Import it again from the original location."))
         }
         try await FileDownloader.download(from: url, to: m.localURL,
-                                          expectedBytes: m.bytes, progress: progress)
+                                          expectedBytes: m.bytes,
+                                          requireMagic: FileDownloader.ggufMagic,
+                                          progress: progress)
     }
 }
 

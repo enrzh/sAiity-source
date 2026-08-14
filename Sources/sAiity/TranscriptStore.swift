@@ -11,6 +11,13 @@ struct Segment: Codable, Sendable {
     var tr: String?           // translation, when enabled
     var trLoc: String?
     var words: [TimedWord]?
+    /// A turn BREAK, not a speaker id — the honest subset of diarization.
+    /// True when ≥2 s of audio-clock silence preceded this line: a gap that
+    /// long usually means the floor changed hands, and saying "a new turn
+    /// starts here" is defensible where naming who took it would be
+    /// invention. Optional so sessions written before the field decode
+    /// unchanged.
+    var turn: Bool? = nil
 }
 
 struct SessionMeta: Codable, Sendable {
@@ -24,7 +31,7 @@ struct SessionMeta: Codable, Sendable {
 }
 
 /// A saved session on disk, as listed in the menu.
-struct SessionRef: Sendable {
+struct SessionRef: Sendable, Identifiable {
     let id: String
     let url: URL
     let meta: SessionMeta
@@ -100,12 +107,14 @@ actor TranscriptStore {
     /// Appends one committed line. O(1) — a single write to a long-lived handle,
     /// so a two-hour meeting costs nothing per line.
     func append(_ chunk: TranscriptChunk, locale: String,
-                translation: String?, translateTo: String?) {
+                translation: String?, translateTo: String?,
+                turn: Bool = false) {
         guard let handle else { return }
         let seg = Segment(i: index, t0: chunk.start, t1: chunk.end,
                           text: chunk.text, loc: locale,
                           tr: translation, trLoc: translateTo,
-                          words: chunk.words.isEmpty ? nil : chunk.words)
+                          words: chunk.words.isEmpty ? nil : chunk.words,
+                          turn: turn ? true : nil)
         guard var data = try? JSONEncoder().encode(seg) else { return }
         data.append(0x0A)
         try? handle.write(contentsOf: data)

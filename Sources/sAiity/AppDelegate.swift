@@ -163,15 +163,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let src = detectedLanguage ?? locale.identifier(.bcp47)
         NSLog("sAiity translator: selected=\(TranslationEngine.effective.rawValue) object=\(engine.name) src=\(src) dst=\(target)")
+        // Frozen BEFORE the await, like `target` above and for the same
+        // reason: the user can switch translator — or Qwen model — while
+        // prepare() runs, and reading `.effective` again at the end would
+        // pin this load's outcome on whichever asset happens to be selected
+        // then. A health record against a model that never ran is worse than
+        // none: it offers "Re-download" for a file that is perfectly fine.
+        let assetID = TranslationEngine.effective.activeAssetID
         do {
             try await engine.prepare(from: src, to: target) { [weak self] msg in
                 NSLog("sAiity translator progress: \(msg)")
                 Task { @MainActor in self?.setStatus(localized: msg) }
             }
             translatorReady = true
+            if let assetID { LoadHealth.clear(assetID) }
             setStatus("Translating with \(TranslationEngine.effective.displayName)")
         } catch {
             translatorReady = false
+            // Bytes on disk that refuse to load are damage worth remembering —
+            // the Models page turns this into a "Re-download" the user can
+            // actually connect to the error, instead of the same status-line
+            // failure on every future session.
+            switch error {
+            case is CancellationError: break
+            case let e as URLError where e.code == .cancelled: break
+            default:
+                if let assetID {
+                    LoadHealth.recordFailureIfInstalled(assetID, reason: error.localizedDescription)
+                }
+            }
             setStatus("Translation unavailable: \(error.localizedDescription)")
             NSLog("sAiity translator prepare failed: \(error.localizedDescription)")
         }
@@ -392,6 +412,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var aboutResignObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ note: Notification) {
+        // First, before permissions or onboarding can be keyed to the wrong
+        // path: an app running off the DMG or out of Downloads should move
+        // home. If the user says yes the process relaunches from
+        // /Applications and nothing below this line matters for this one.
+        MoveToApplications.offerIfNeeded()
         // Before anything can allocate: cap MLX's buffer pool, and start
         // listening for the system asking for memory back. See MemoryPolicy —
         // this app can hold several gigabytes of models, and on a 16 GB machine
@@ -439,6 +464,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         HotKeyCenter.shared.register(.copyLastLine) { [weak self] in
             self?.copyCurrentLine()
+        }
+        HotKeyCenter.shared.register(.toggleBubble) { [weak self] in
+            self?.toggleBubbleHidden()
+        }
+        HotKeyCenter.shared.register(.recentCaptions) { [weak self] in
+            self?.showRecentCaptions()
         }
 
         // Keep the menu-bar picker and the window in step — they write the same
@@ -518,6 +549,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Menu
 
+    /// Template symbols for menu items: monochrome, sized by the system, so
+    /// they render like the OS's own menus in every appearance.
+    private static func menuSymbol(_ name: String) -> NSImage? {
+        let img = NSImage(systemSymbolName: name, accessibilityDescription: nil)
+        img?.isTemplate = true
+        return img
+    }
+
     private func rebuildMenu() {
         let menu = NSMenu()
         let header = NSMenuItem(title: backend.name, action: nil, keyEquivalent: "")
@@ -542,30 +581,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // locale, so this deliberately does not go through the catalog.
             toggleItem.title += "  (\(sc.displayString))"
         }
+        toggleItem.image = Self.menuSymbol("captions.bubble")
         menu.addItem(toggleItem)
 
-        menu.addItem(translationMenuItem())
+        let translate = translationMenuItem()
+        translate.image = Self.menuSymbol("globe")
+        menu.addItem(translate)
 
         menu.addItem(.separator())
         let copyLine = NSMenuItem(title: String(localized: "Copy current line"), action: #selector(copyCurrentLine),
                                   keyEquivalent: "c")
         copyLine.isEnabled = !(lastFinalText.isEmpty && lastVolatileText.isEmpty)
+        copyLine.image = Self.menuSymbol("doc.on.doc")
         menu.addItem(copyLine)
         let copyAll = NSMenuItem(title: String(localized: "Copy whole session"), action: #selector(copyWholeSession),
                                  keyEquivalent: "C")
         copyAll.isEnabled = !sessionLines.isEmpty
+        copyAll.image = Self.menuSymbol("list.clipboard")
         menu.addItem(copyAll)
 
         let rec = NSMenuItem(title: String(localized: "Save transcript"), action: #selector(toggleSaveTranscript),
                              keyEquivalent: "")
         rec.state = saveTranscript ? .on : .off
         rec.toolTip = String(localized: "Write this session to disk. Off by default.")
+        rec.image = Self.menuSymbol("record.circle")
         menu.addItem(rec)
-        menu.addItem(transcriptsMenuItem())
+        let transcripts = transcriptsMenuItem()
+        transcripts.image = Self.menuSymbol("text.document")
+        menu.addItem(transcripts)
 
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: String(localized: "Open sAiity…"), action: #selector(openMainWindow),
-                                keyEquivalent: ","))
+        // "Settings…" with ⌘, — the name and the shortcut every Mac app uses
+        // for this command. "Open sAiity…" described the window, not the verb.
+        let settings = NSMenuItem(title: String(localized: "Settings…"), action: #selector(openMainWindow),
+                                  keyEquivalent: ",")
+        settings.image = Self.menuSymbol("gear")
+        menu.addItem(settings)
         menu.addItem(NSMenuItem(title: String(localized: "About sAiity"), action: #selector(showAbout),
                                 keyEquivalent: ""))
         let update = NSMenuItem(title: String(localized: "Check for Updates…"),
@@ -778,9 +829,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Sessions are written to ~/Library/Application Support/de.aiity.saiity \
                 and never leave the device.
 
-                System audio includes everyone on a call. Recording other people may \
-                require their consent, or be regulated where you are — it is worth \
-                telling them.
+                System audio includes everyone on a call — and with "Include my \
+                microphone" switched on, your own side as well. Recording other \
+                people may require their consent, or be regulated where you are — \
+                it is worth telling them.
                 """)
             a.addButton(withTitle: String(localized: "OK"))
             a.alertStyle = .informational
@@ -923,6 +975,94 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         state.isActive ? stop() : start()
     }
 
+    /// Mirror of Settings → Captions → "Show the caption bubble", reachable
+    /// without opening Settings. Hiding the subtitles when a scene needs the
+    /// bottom of the screen is the one thing a viewer wants mid-film, and it
+    /// used to require the Settings window — while captions kept playing over
+    /// the video. Recognition keeps running either way.
+    private func toggleBubbleHidden() {
+        var st = CaptionStyle.current
+        st.hidden.toggle()
+        CaptionStyle.current = st
+    }
+
+    /// "What did I miss": flash the last few closed sentences in the bubble,
+    /// then hand the display back to the live caption. Recognition already
+    /// holds them — sessionLines is the in-memory session record whether or
+    /// not saving is on — the overlay just never looked back. A new chunk
+    /// arriving mid-flash simply overwrites it; live always wins.
+    private var recentFlashTask: Task<Void, Never>?
+    private func showRecentCaptions() {
+        guard state == .running else { return }
+        let recent = sessionLines.suffix(3).map(\.text)
+        guard !recent.isEmpty else { return }
+        recentFlashTask?.cancel()
+        overlay.show(text: recent.joined(separator: "\n"), isFinal: true)
+        let generation = sessionGeneration
+        recentFlashTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            // The generation guard, not just `.running`: Stop-then-Start
+            // inside the flash window leaves a NEW session running, and this
+            // task would otherwise paint the previous session's snapshot over
+            // its "listening…" line.
+            guard let self, !Task.isCancelled, self.state == .running,
+                  self.sessionGeneration == generation else { return }
+            var parts = self.sentenceParts
+            if !self.lastVolatileText.isEmpty { parts.append(self.lastVolatileText) }
+            let live = Self.trimmedForDisplay(parts)
+            // Falling back to lastFinalText is what keeps the display contract:
+            // between a closed sentence and the next one's first volatile,
+            // BOTH sentenceParts and lastVolatileText are empty, and showing
+            // that emptied the bubble — erasing the sentence that is supposed
+            // to stay on screen until its successor replaces it.
+            if live.isEmpty {
+                guard !self.lastFinalText.isEmpty else { return }
+                self.overlay.show(text: self.lastFinalText, isFinal: true)
+            } else {
+                self.overlay.show(text: live, isFinal: self.lastVolatileText.isEmpty)
+            }
+        }
+    }
+
+    /// The caption label's value changes silently — macOS has no SwiftUI-style
+    /// live region — so without explicit announcements assistive tech never
+    /// learns a caption arrived, and for a deaf-blind user on a braille
+    /// display the captions ARE the product. A no-op unless VoiceOver (or
+    /// another assistive client) is listening.
+    private func announce(_ text: String) {
+        NSAccessibility.post(element: NSApp as Any,
+                             notification: .announcementRequested,
+                             userInfo: [.announcement: text,
+                                        .priority: NSAccessibilityPriorityLevel.medium.rawValue])
+    }
+
+    /// `saiity://` automation: Shortcuts' Open-URL action, Raycast, and
+    /// script runners all drive URL schemes for free. App Intents would be
+    /// the nicer surface, but this bundle is hand-assembled from `swift
+    /// build` — appintentsmetadataprocessor never runs, so Shortcuts would
+    /// not discover intents. The URL scheme is the route that actually works
+    /// under this build system.
+    ///
+    /// Verbs are idempotent where they can be: `start` on a running session
+    /// and `stop` on an idle one do nothing, so an automation that fires
+    /// twice cannot invert the user's intent the way a bare toggle would.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls where url.scheme == "saiity" {
+            let verb = (url.host ?? url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))).lowercased()
+            NSLog("sAiity url: \(verb)")
+            switch verb {
+            case "toggle": toggle()
+            case "start": if !state.isActive { start() }
+            case "stop": if state.isActive { stop() }
+            case "copy": copyCurrentLine()
+            case "bubble": toggleBubbleHidden()
+            case "recent": showRecentCaptions()
+            default:
+                NSLog("sAiity url: unknown verb \(verb)")
+            }
+        }
+    }
+
     private func start() {
         // Ignore a second Start while one is already in flight. Without this,
         // two starts each brought up their own SCStream and their own ASR pump,
@@ -958,6 +1098,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pendingTranslations = 0
         shownTranslationID = nil
         pendingLiveText = nil
+        // A recap flash from the previous session has nothing to restore into
+        // this one; its generation guard would drop it anyway, but a pending
+        // task that outlives its subject is worth ending outright.
+        recentFlashTask?.cancel()
+        recentFlashTask = nil
         sessionGeneration += 1
         transcriptWriteChain = nil
         lastFinalText = ""
@@ -969,24 +1114,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setStatus("Starting…")
         overlay.show(text: String(localized: "starting…"), isFinal: false)
 
+        // Frozen with the backend this session starts WITH. Engine and tier
+        // are both user-switchable mid-load, and re-reading `.effective` at
+        // the end would attribute this load's outcome — damage or health —
+        // to whichever model happens to be selected by then.
+        let asrAssetID = ASREngine.effective.activeAssetID
+
         sessionTask = Task { @MainActor in
             do {
                 NSLog("sAiity engine: preparing \(backend.name)")
-                try await backend.prepare(locale: locale) { msg in
-                    Task { @MainActor [self] in
-                        guard self.state == .starting else { return }
-                        self.setStatus(localized: msg)
-                        self.overlay.show(text: msg, isFinal: false)
+                do {
+                    try await backend.prepare(locale: locale) { msg in
+                        Task { @MainActor [self] in
+                            guard self.state == .starting else { return }
+                            self.setStatus(localized: msg)
+                            self.overlay.show(text: msg, isFinal: false)
+                        }
                     }
-                }
-                // Every await below is a place the user may have pressed Stop —
-                // prepare() alone can be a multi-gigabyte download. Bail before
-                // touching the microphone-equivalent, not after.
-                try Task.checkCancellation()
+                    // Every await below is a place the user may have pressed
+                    // Stop — prepare() alone can be a multi-gigabyte download.
+                    // Bail before touching the microphone-equivalent, not after.
+                    try Task.checkCancellation()
 
-                try await backend.start { chunk in
-                    Task { @MainActor [self] in self.render(chunk) }
+                    try await backend.start { chunk in
+                        Task { @MainActor [self] in self.render(chunk) }
+                    }
+                } catch {
+                    // The inner catch exists to scope damage-recording to the
+                    // MODEL failing: everything after this point (capture,
+                    // permissions) fails for reasons no re-download fixes.
+                    switch error {
+                    case is CancellationError: break
+                    case let e as URLError where e.code == .cancelled: break
+                    default:
+                        LoadHealth.recordFailureIfInstalled(
+                            asrAssetID, reason: error.localizedDescription)
+                    }
+                    throw error
                 }
+                LoadHealth.clear(asrAssetID)
                 try Task.checkCancellation()
 
                 guard let fmt = await backend.inputFormat else {
@@ -1017,6 +1183,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if saveTranscript { await beginRecording() }
                 state = .running
                 setStatus("Listening · \(Self.coverageNote())")
+                // The global hotkey gives no feedback a screen reader can
+                // perceive; a no-op unless one is listening.
+                announce(String(localized: "Captions started"))
+                // The mic is an addition; its failure is reported, never
+                // propagated — but silently running without it would break
+                // the transcript the user turned it on for.
+                switch capture.micStatus {
+                case .denied:
+                    setStatus("Captions run without your microphone — allow sAiity under System Settings → Privacy & Security → Microphone")
+                case .failed:
+                    setStatus("Captions run without your microphone — it could not be started")
+                case .off, .mixing:
+                    break
+                }
                 NSLog("sAiity engine: started; preparing translator")
                 await prepareTranslatorIfNeeded()
                 overlay.show(text: String(localized: "listening…"), isFinal: false)
@@ -1206,7 +1386,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// them, for one — has to be able to wait for the teardown.
     private func stopAsync() async {
         guard state != .stopping else { return }
+        // Announce only what actually stopped. stopAsync is also the teardown
+        // path releaseEverything() takes when Settings deletes a model with
+        // nothing running, and a VoiceOver user was told "Captions stopped"
+        // for deleting weights while idle.
+        let wasRunning = state.isActive
         state = .stopping
+        if wasRunning { announce(String(localized: "Captions stopped")) }
         // Not "Idle". Cancelling a model download in flight can take a moment,
         // and this await used to sit behind a menu that already said Idle and
         // offered Start — while `start()` bailed on `guard state == .idle`, so
@@ -1403,9 +1589,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// waiter runs when the current one finishes.
     @MainActor
     private func kickLiveTranslation(of text: String, sentenceID: Int) {
-        guard sentenceID == displaySentenceID,
+        // `!sentenceClosed`: once the sentence closes, the authoritative
+        // translation from emitSentence owns the row. displaySentenceID does
+        // not bump until the NEXT sentence renders, so the ID check alone
+        // leaves a window where a stale partial still passes.
+        guard sentenceID == displaySentenceID, !sentenceClosed,
               translateTo != nil, translatorReady,
               CaptionStyle.current.showTranslation else { return }
+        // The close path skips lines already in the target language; making
+        // the same call about the same text here keeps live mode from filling
+        // the row with an LLM's paraphrase of a line the close path then
+        // deliberately refuses to translate — which would stand for two
+        // sentences with nothing to correct it.
+        if alreadyInTargetLanguage(text) { return }
         if liveTranslationBusy {
             pendingLiveText = (text, sentenceID)
             return
@@ -1425,9 +1621,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let out = await engine.translate(text, from: srcCode, to: target),
                   !out.isEmpty else { return }
             // Same guards as the authoritative path: not across a session
-            // boundary, and only under the sentence it translates.
+            // boundary, and only under the sentence it translates. The
+            // `!sentenceClosed` leg drops a partial that resolves after the
+            // sentence closed — it would race the authoritative translation
+            // behind the translator's serial lock, and landing second it
+            // rewrote the settled row with an older, shorter text.
             guard sessionGeneration == generation,
-                  displaySentenceID == sentenceID,
+                  displaySentenceID == sentenceID, !sentenceClosed,
                   CaptionStyle.current.showTranslation else { return }
             if TestHooks.verboseLogging {
                 NSLog("sAiity live translated: \(out)")
@@ -1450,7 +1650,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sentenceWords.removeAll()
         // Its original stays on screen until the next sentence starts rendering.
         sentenceClosed = true
+        // A live partial queued behind the busy slot is now superseded: the
+        // close translates the full sentence anyway, so re-kicking the queued
+        // partial would translate the same words twice and race the result.
+        pendingLiveText = nil
+        // Sentence-final is the natural throttle: volatile revisions would
+        // queue faster than VoiceOver speech or a braille display can render.
+        if UserDefaults.standard.bool(forKey: "announceCaptions") {
+            announce(text)
+        }
         emitSentence(text, chunk: chunk, sentenceID: displaySentenceID)
+    }
+
+    /// True when the line already reads as the target language. Shared by the
+    /// close path and live mode so both make the same call about the same
+    /// text. Under 12 characters detection is noise ("Ja." reads as Finnish),
+    /// so short lines never skip.
+    private func alreadyInTargetLanguage(_ text: String) -> Bool {
+        guard text.count >= 12,
+              let want = translateTo?.split(separator: "-").first else { return false }
+        let r = NLLanguageRecognizer()
+        r.processString(text)
+        guard let lang = r.dominantLanguage?.rawValue.split(separator: "-").first
+        else { return false }
+        return lang == want
     }
 
     private func emitSentence(_ text: String, chunk: TranscriptChunk, sentenceID: Int) {
@@ -1485,14 +1708,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // silently dropped the line from the transcript as well, so a session
         // in the target language recorded nothing at all.
         var wantsTranslation = translateTo != nil
-        if wantsTranslation, text.count >= 12 {
-            let r = NLLanguageRecognizer()
-            r.processString(text)
-            if let lang = r.dominantLanguage?.rawValue.split(separator: "-").first,
-               let want = translateTo?.split(separator: "-").first,
-               lang == want {
-                wantsTranslation = false
-            }
+        if wantsTranslation, alreadyInTargetLanguage(text) {
+            wantsTranslation = false
         }
 
         // The segment claims its index NOW, synchronously — never after an
@@ -1520,6 +1737,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSLog("sAiity translate: skipped, ready=\(translatorReady), \(pendingTranslations) queued")
         }
 
+        // A turn break when ≥2 s of audio-clock silence sits between this
+        // sentence and the last — measured on the segments' own timestamps,
+        // so it needs no extra state and no acoustic guesswork.
+        let turn = idx > 0 && chunk.start - sessionLines[idx - 1].t1 >= 2.0
+
         // `trLoc` is nil here on purpose. It is a record of OUTCOME, not of
         // intent, so only the site that assigns `tr` may assign it — otherwise
         // every line of a session whose translator failed to load claims a
@@ -1528,7 +1750,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sessionLines.append(Segment(i: idx, t0: chunk.start, t1: chunk.end,
                                     text: text, loc: locale.identifier(.bcp47),
                                     tr: nil, trLoc: nil,
-                                    words: chunk.words.isEmpty ? nil : chunk.words))
+                                    words: chunk.words.isEmpty ? nil : chunk.words,
+                                    turn: turn ? true : nil))
 
         // Translate concurrently; the result is patched in by index.
         let srcCode = detectedLanguage ?? locale.identifier(.bcp47)
@@ -1584,7 +1807,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // at all, so it was the one that always claimed one.
                 await TranscriptStore.shared.append(chunk, locale: self.locale.identifier(.bcp47),
                                                     translation: tr,
-                                                    translateTo: tr == nil ? nil : target)
+                                                    translateTo: tr == nil ? nil : target,
+                                                    turn: turn)
                 self.recordedLines += 1
             }
         }

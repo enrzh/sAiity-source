@@ -28,6 +28,19 @@ rm -rf "$STAGE" "$DMG"; mkdir -p "$STAGE"
 ditto "$APP" "$STAGE/$NAME.app"
 ln -s /Applications "$STAGE/Applications"
 
+# Finder background and volume icon. Presentation, so best-effort like the
+# icon layout below — a machine where the drawing script or SetFile fails
+# still ships a working image.
+BG_LINE=""
+mkdir -p "$STAGE/.background"
+if swift scripts/make-dmg-background.swift "$STAGE/.background/installer.png" 2>/dev/null; then
+    BG_LINE='set background picture of theViewOptions to file ".background:installer.png"'
+else
+    rm -rf "$STAGE/.background"
+    echo "note: dmg background skipped (drawing script failed); the image still works"
+fi
+cp Resources/AppIcon.icns "$STAGE/.VolumeIcon.icns" 2>/dev/null || true
+
 # A read-write image first, so the Finder can be told where the two icons go;
 # then convert to a compressed read-only one for distribution.
 RW="build/$NAME-rw.dmg"
@@ -37,6 +50,9 @@ hdiutil create -srcfolder "$STAGE" -volname "$VOLNAME" -fs HFS+ \
 
 MOUNT=$(hdiutil attach -readwrite -noverify -noautoopen "$RW" | grep -Eo '/Volumes/.*$' | head -1)
 [ -n "$MOUNT" ] || { echo "FATAL: could not mount $RW"; exit 1; }
+
+# The custom-icon flag is what makes the Finder honour .VolumeIcon.icns.
+SetFile -a C "$MOUNT" 2>/dev/null || true
 
 # Icon layout. Best-effort: this drives the Finder through AppleScript, which
 # needs Automation permission, and a build machine that has not granted it still
@@ -53,6 +69,7 @@ tell application "Finder"
         set theViewOptions to the icon view options of container window
         set arrangement of theViewOptions to not arranged
         set icon size of theViewOptions to 128
+        $BG_LINE
         set position of item "$NAME.app" of container window to {150, 190}
         set position of item "Applications" of container window to {450, 190}
         update without registering applications

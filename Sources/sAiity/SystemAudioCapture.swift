@@ -1,4 +1,5 @@
 import Accelerate
+import AppKit
 import AVFoundation
 import CoreGraphics
 import Foundation
@@ -25,6 +26,25 @@ import ScreenCaptureKit
 ///     a source peaking at 0.5 was captured at 0.49999687 in both cases. We
 ///     therefore keep transcribing audio the user cannot hear, and the UI has
 ///     to say so rather than let the user assume muting stops it.
+/// Which audio the stream captures: the whole system mix (the default), or a
+/// single application. Scoping is what keeps notification pings, a second
+/// video, or a game out of a meeting's captions — and it removes at the
+/// source the whole-mix failure mode where a music bed from another app holds
+/// RMS above the speech-gap threshold through every pause.
+enum CaptureScope {
+    /// Bundle id of the single app to capture, or nil for everything.
+    /// Applies when captions next start; the filter is built at that moment.
+    static var appBundleID: String? {
+        get { UserDefaults.standard.string(forKey: "captureAppBundleID") }
+        set { UserDefaults.standard.set(newValue, forKey: "captureAppBundleID") }
+    }
+
+    static func displayName(for bundleID: String) -> String {
+        NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            .first?.localizedName ?? bundleID
+    }
+}
+
 final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
     /// What the capture pipeline is currently doing, for the UI to display.
     enum State: Equatable {
@@ -32,6 +52,13 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
         case silent        // stream healthy, but the samples are digital silence
         case stalled       // no buffers at all — the stream itself died
     }
+
+    /// Live speech-gap numbers for the Settings page, posted every 5 s of
+    /// audio while running (userInfo: floor, threshold, fires) and once with
+    /// no userInfo on stop. This is the slider's missing feedback: tuning the
+    /// pause length used to mean dragging blind and watching captions for a
+    /// minute to infer whether sentences now close at commas or not at all.
+    static let gapDiagnostics = Notification.Name("saiityGapDiagnostics")
 
     /// A pause in speech, as distinct from "nothing is playing".
     ///
@@ -48,6 +75,13 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
     private var targetFormat: AVAudioFormat?
     private var onBuffer: (@Sendable (AVAudioPCMBuffer) -> Void)?
     private var onState: (@Sendable (State) -> Void)?
+
+    /// How the opt-in mic mixing fared at this session's start, for the UI.
+    /// A mic that cannot start never takes the captions down with it — the
+    /// mic is an addition, and its failure is reported, not propagated.
+    enum MicStatus: Equatable { case off, mixing, denied, failed }
+    private(set) var micStatus: MicStatus = .off
+    private var micMixer: MicMixer?
 
     private let lock = NSLock()
     private var lastBufferAt = Date.distantPast
@@ -77,6 +111,8 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
     /// Quietest RMS seen in the current diagnostic window, and its length.
     private var rmsFloor: Float = .greatestFiniteMagnitude
     private var rmsWindowFrames = 0
+    /// Pauses that actually ended a sentence this session. Capture-queue only.
+    private var gapFires = 0
 
     /// Re-read the speech-gap setting. Called on start, and again whenever the
     /// user moves the slider, so a change lands on the running session instead
@@ -131,7 +167,25 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
             throw NSError(domain: "sAiity", code: 1,
                           userInfo: [NSLocalizedDescriptionKey: String(localized: "No display available to attach audio capture to.")])
         }
-        let filter = SCContentFilter(display: display, excludingWindows: [])
+        let filter: SCContentFilter
+        if let bundleID = CaptureScope.appBundleID {
+            // Failing beats falling back: the user scoped capture to one app,
+            // and quietly capturing everything instead would break exactly the
+            // expectation ("only Zoom is being captured") the setting exists
+            // to give them.
+            guard let app = content.applications.first(where: {
+                $0.bundleIdentifier == bundleID
+            }) else {
+                throw NSError(domain: "sAiity", code: 3, userInfo: [
+                    NSLocalizedDescriptionKey: String(
+                        localized: "Capture is set to \(CaptureScope.displayName(for: bundleID)) only, and it is not running. Start it, or set capture back to Everything in Settings → Captions.")
+                ])
+            }
+            filter = SCContentFilter(display: display, including: [app],
+                                     exceptingWindows: [])
+        } else {
+            filter = SCContentFilter(display: display, excludingWindows: [])
+        }
 
         let config = SCStreamConfiguration()
         config.capturesAudio = true
@@ -144,12 +198,50 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
         config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
         config.queueDepth = 6
 
-        let s = SCStream(filter: filter, configuration: config, delegate: nil)
-        try s.addStreamOutput(self, type: .audio, sampleHandlerQueue: DispatchQueue(label: "captions.audio"))
-        try await s.startCapture()
-        self.stream = s
+        // Opt-in mic mixing, before the stream starts delivering. The system
+        // permission prompt appears here on first use — only ever after the
+        // user has explicitly turned the setting on, which is the privacy
+        // contract the README states.
+        micStatus = .off
+        if MicMix.enabled {
+            if await AVCaptureDevice.requestAccess(for: .audio) {
+                let m = MicMixer()
+                do {
+                    try m.start(sampleRate: Self.streamSampleRate)
+                    micMixer = m
+                    micStatus = .mixing
+                    NSLog("sAiity mic: mixing into recognition")
+                } catch {
+                    micStatus = .failed
+                    NSLog("sAiity mic: failed to start — \(error.localizedDescription)")
+                }
+            } else {
+                micStatus = .denied
+                NSLog("sAiity mic: permission denied")
+            }
+        }
+
+        // From here on the microphone may already be open, so every exit has
+        // to close it. Without this a failed stream start — or a Stop landing
+        // during one — left the engine running with nothing consuming it: the
+        // orange mic indicator lit, in an app that had just failed to start
+        // captions. Nothing outside this type can see micMixer, so the
+        // cleanup cannot be left to the caller.
+        do {
+            let s = SCStream(filter: filter, configuration: config, delegate: nil)
+            try s.addStreamOutput(self, type: .audio,
+                                  sampleHandlerQueue: DispatchQueue(label: "captions.audio"))
+            try await s.startCapture()
+            self.stream = s
+        } catch {
+            micMixer?.stop()
+            micMixer = nil
+            micStatus = .off
+            throw error
+        }
 
         lock.withLock { lastBufferAt = Date() }
+        gapFires = 0
         startWatchdog()
     }
 
@@ -157,6 +249,10 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
         watchdog?.cancel()
         watchdog = nil
         try? await stream?.stopCapture()
+        // After stopCapture, so no buffer callback can race the teardown.
+        micMixer?.stop()
+        micMixer = nil
+        micStatus = .off
         stream = nil
         converter = nil
         onBuffer = nil
@@ -164,6 +260,10 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
         lock.withLock {
             silentFrames = 0
             state = .silent
+        }
+        // No userInfo = "the session ended, take the readout down".
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: Self.gapDiagnostics, object: nil)
         }
     }
 
@@ -199,6 +299,13 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
               let pcm = Self.pcmBuffer(from: sampleBuffer) else { return }
 
         lock.withLock { lastBufferAt = Date() }
+
+        // Mic joins the stream BEFORE gap detection on purpose: the user
+        // speaking is not a pause, and their sentences should close on their
+        // own pauses like everyone else's.
+        if let micMixer, let ch = pcm.floatChannelData {
+            micMixer.mix(into: ch[0], count: Int(pcm.frameLength))
+        }
         classify(pcm)
 
         if debug {
@@ -260,28 +367,37 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
         vDSP_rmsqv(ch[0], 1, &rms, vDSP_Length(pcm.frameLength))
         guard gapEnabled else { return }
         // Diagnostics for "it only translates when I stop the video". The gap is
-        // measured on the whole mix, so continuously scored material — a film,
-        // most anime — can keep the RMS above the threshold through every pause
-        // in speech, and then no sentence ever closes on a pause. Logging the
-        // floor actually reached says whether that is what is happening, rather
-        // than leaving it to be guessed at.
-        if debug {
-            rmsFloor = min(rmsFloor, rms)
-            rmsWindowFrames += Int(pcm.frameLength)
-            if rmsWindowFrames >= 48_000 * 5 {
-                let db = rmsFloor > 0 ? 20 * log10(rmsFloor) : -.infinity
-                let th = gapDetector.currentThreshold
+        // measured on the scoped source, so continuously scored material — a
+        // film, most anime — can keep the RMS above the threshold through every
+        // pause in speech, and then no sentence ever closes on a pause. The
+        // floor actually reached says whether that is what is happening; it
+        // feeds the Settings readout next to the Pause-length slider (always)
+        // and the log (verbose builds), rather than leaving it to be guessed at.
+        rmsFloor = min(rmsFloor, rms)
+        rmsWindowFrames += Int(pcm.frameLength)
+        if rmsWindowFrames >= 48_000 * 5 {
+            let floor = rmsFloor
+            let th = gapDetector.currentThreshold
+            let fires = gapFires
+            if debug {
+                let db = floor > 0 ? 20 * log10(floor) : -.infinity
                 NSLog(String(format:
                     "sAiity gap: quietest RMS in 5s %.5f (%.1f dBFS), adaptive threshold %.5f (%.1f dBFS) — %@",
-                    rmsFloor, db, th, 20 * log10(th),
-                    rmsFloor < th ? "crosses" : "NEVER crosses"))
-                rmsFloor = .greatestFiniteMagnitude
-                rmsWindowFrames = 0
+                    floor, db, th, 20 * log10(th),
+                    floor < th ? "crosses" : "NEVER crosses"))
             }
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(
+                    name: Self.gapDiagnostics, object: nil,
+                    userInfo: ["floor": floor, "threshold": th, "fires": fires])
+            }
+            rmsFloor = .greatestFiniteMagnitude
+            rmsWindowFrames = 0
         }
         if gapDetector.process(rms: rms, frames: Int(pcm.frameLength),
                                sampleRate: Float(Self.streamSampleRate)) {
             if debug { NSLog("sAiity gap: FIRED (floor \(gapDetector.noiseFloor))") }
+            gapFires += 1
             onSpeechGap?()
         }
     }

@@ -18,9 +18,11 @@ enum Export {
 
     static func txt(_ segments: [Segment]) -> String {
         segments.map { seg in
-            let line = seg.text
-            if let tr = seg.tr, !tr.isEmpty { return "\(line)\n\(tr)" }
-            return line
+            var line = seg.text
+            if let tr = seg.tr, !tr.isEmpty { line += "\n\(tr)" }
+            // A turn break reads as a paragraph break — the silence was real,
+            // the paragraph is how text spells it.
+            return (seg.turn == true ? "\n" : "") + line
         }.joined(separator: "\n")
     }
 
@@ -48,6 +50,10 @@ enum Export {
         }
         out += "- " + t("Lines: \(segments.count)", "Lines: \(segments.count)") + "\n\n---\n\n"
         for seg in segments {
+            // A thematic break where ≥2 s of silence preceded the line — the
+            // reader sees the floor change hands without anyone claiming to
+            // know whose it became.
+            if seg.turn == true { out += "---\n\n" }
             out += "**\(clock(seg.t0))** \(seg.text)\n"
             if let tr = seg.tr, !tr.isEmpty { out += "> \(tr)\n" }
             out += "\n"
@@ -57,8 +63,10 @@ enum Export {
         return out
     }
 
-    /// `H:MM:SS` for headings, not the SRT form.
-    private static func clock(_ s: Double) -> String {
+    /// `H:MM:SS` for headings, not the SRT form. Internal — the in-app
+    /// transcript viewer stamps its rows with the same clock the Markdown
+    /// export uses, so the two never disagree about a line's time.
+    static func clock(_ s: Double) -> String {
         let t = Int(s.rounded(.down))
         return String(format: "%d:%02d:%02d", t / 3600, (t % 3600) / 60, t % 60)
     }
@@ -113,9 +121,45 @@ enum Export {
         var out = ""
         var n = 1                       // renumber from 1; never reuse Segment.i
         for seg in segments {
+            // A translated segment stays ONE bilingual cue, original over
+            // translation — the same pairing txt and Markdown already write.
+            // SRT used to be the only export that dropped the translation the
+            // user paid a model load and per-sentence latency for. It cannot
+            // go through cues(from:): the translation belongs to the whole
+            // sentence and has no per-word timings to split along, so a split
+            // would either repeat it under every part-cue or orphan it on one.
+            if let tr = seg.tr, !tr.isEmpty {
+                out += "\(n)\n\(srtTime(seg.t0)) --> \(srtTime(seg.t1))\n\(seg.text)\n\(tr)\n\n"
+                n += 1
+                continue
+            }
             for c in cues(from: seg) {
                 out += "\(n)\n\(srtTime(c.t0)) --> \(srtTime(c.t1))\n\(c.text)\n\n"
                 n += 1
+            }
+        }
+        return out
+    }
+
+    // MARK: - WebVTT
+
+    /// WebVTT wants `HH:MM:SS.mmm` — period where SRT has its comma — and a
+    /// file header. Cue identifiers are optional and add nothing here.
+    private static func vttTime(_ s: Double) -> String {
+        srtTime(s).replacingOccurrences(of: ",", with: ".")
+    }
+
+    /// Same cue logic as SRT, same bilingual rule: a translated segment is one
+    /// two-line cue, an untranslated one splits along its word timings.
+    static func vtt(_ segments: [Segment]) -> String {
+        var out = "WEBVTT\n\n"
+        for seg in segments {
+            if let tr = seg.tr, !tr.isEmpty {
+                out += "\(vttTime(seg.t0)) --> \(vttTime(seg.t1))\n\(seg.text)\n\(tr)\n\n"
+                continue
+            }
+            for c in cues(from: seg) {
+                out += "\(vttTime(c.t0)) --> \(vttTime(c.t1))\n\(c.text)\n\n"
             }
         }
         return out

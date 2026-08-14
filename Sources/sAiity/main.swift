@@ -29,11 +29,23 @@ if args.count > 1, args[1].hasPrefix("--") {
         let segs = TranscriptStore.segments(of: session)
         switch format {
         case "srt": print(Export.srt(segs))
+        case "vtt": print(Export.vtt(segs))
         case "md":  print(Export.markdown(segs, meta: session.meta, localized: false))
         default:    print(Export.txt(segs))
         }
+    case "--toggle", "--start", "--stop", "--copy":
+        // Routed through the saiity:// scheme so the verb lands in the RUNNING
+        // app — this CLI invocation is a separate process with no session of
+        // its own. LaunchServices starts the app first if it is not running,
+        // which is exactly right for --start and --toggle.
+        let verb = String(args[1].dropFirst(2))
+        guard let url = URL(string: "saiity://\(verb)") else { exit(1) }
+        NSWorkspace.shared.open(url)
+        // Give LaunchServices a beat to accept the open before this process
+        // exits; exiting immediately can drop the hand-off.
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
     default:
-        FileHandle.standardError.write(Data("usage: sAiity [--version | --list | --export srt|md|txt [id]]\n".utf8))
+        FileHandle.standardError.write(Data("usage: sAiity [--version | --list | --export srt|vtt|md|txt [id] | --toggle | --start | --stop | --copy]\n".utf8))
         exit(2)
     }
     exit(0)
