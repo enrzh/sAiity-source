@@ -138,10 +138,10 @@ struct OnboardingView: View {
             footer
         }
         .frame(width: 640, height: 560)
-        // The standard window background, on purpose. The tinted gradient
-        // this window used to share with Settings is gone: Apple's own setup
-        // assistants sit on plain chrome and let type and spacing carry the
-        // design.
+        // The window's own translucency, not a painted gradient — the same
+        // material Settings uses, so the two windows read as one app. See
+        // VibrantBackground for why this is the honest version of "fancy".
+        .background(VibrantBackground())
     }
 
     /// Where you are, and how much is left. The step name alone in the corner
@@ -485,6 +485,11 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
                          styleMask: [.titled, .closable],
                          backing: .buffered, defer: false)
         w.title = String(localized: "Set up sAiity")
+        // Without this the material in the view above is inert: an opaque
+        // window paints its solid backgroundColor over the blur before it is
+        // ever composited. Settings needs the same call — the two windows have
+        // to be told separately, which is precisely how this was missed here.
+        w.makeVibrant()
         w.center()
         w.isReleasedWhenClosed = false
         w.delegate = self

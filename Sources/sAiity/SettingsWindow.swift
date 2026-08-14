@@ -491,6 +491,51 @@ final class AppState {
 
 // MARK: - Window
 
+/// The window's own translucency, as the OS draws it.
+///
+/// This is deliberately NOT a painted background. The app used to wash its
+/// windows in an accent gradient, which is the thing that made them read as a
+/// web page wearing a Mac costume. `NSVisualEffectView` blending *behind the
+/// window* is the real effect: it samples the desktop and windows underneath,
+/// reacts to the window becoming inactive, and follows light/dark and the
+/// accessibility settings without being told. The grouped form's rounded
+/// section cards then float on it, which is exactly the composition System
+/// Settings uses.
+struct VibrantBackground: NSViewRepresentable {
+    /// `.windowBackground`, not `.underWindowBackground`. The latter is the
+    /// most transparent material AppKit has — measured on screen, text in the
+    /// window *behind* Settings stayed readable through the gaps between the
+    /// section cards, which is a legibility problem dressed up as a design.
+    /// This one still tints and blurs what is behind it; it just does not
+    /// compete with the settings on top of it.
+    var material: NSVisualEffectView.Material = .windowBackground
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let v = NSVisualEffectView()
+        v.material = material
+        v.blendingMode = .behindWindow
+        // Not `.active`: an inactive window whose background keeps sampling
+        // live content looks wrong next to every other window on the Mac.
+        v.state = .followsWindowActiveState
+        return v
+    }
+
+    func updateNSView(_ v: NSVisualEffectView, context: Context) {
+        v.material = material
+    }
+}
+
+extension NSWindow {
+    /// Let a behind-window material actually show. An opaque window with a
+    /// solid backgroundColor paints over the blur before it is ever composited
+    /// — the effect silently does nothing, which is the usual reason vibrancy
+    /// "doesn't work".
+    func makeVibrant() {
+        isOpaque = false
+        backgroundColor = .clear
+    }
+}
+
 /// Puts the selected pane's name in the title bar, the way every Apple
 /// preferences window does.
 ///
@@ -536,12 +581,20 @@ enum SettingsWindowController {
              AnyView(CaptionsView(state: state))),
             (String(localized: "Models"), "shippingbox",
              AnyView(ModelsView(state: state))),
-            (String(localized: "Library"), "text.document",
-             AnyView(LibraryView(state: state))),
+            (String(localized: "Transcripts"), "text.document",
+             AnyView(TranscriptsView(state: state))),
+            (String(localized: "General"), "gearshape",
+             AnyView(GeneralView(state: state))),
         ]
         for (title, symbol, view) in pages {
             let host = NSHostingController(
-                rootView: view.frame(minWidth: 700, minHeight: 480))
+                rootView: view
+                    .frame(minWidth: 700, minHeight: 480)
+                    .background(VibrantBackground()))
+            // The hosting view is opaque by default and would sit on top of
+            // the material like a sheet of paper.
+            host.view.wantsLayer = true
+            host.view.layer?.backgroundColor = .clear
             host.title = title
             let item = NSTabViewItem(viewController: host)
             item.label = title
@@ -558,6 +611,7 @@ enum SettingsWindowController {
         w.setContentSize(NSSize(width: 760, height: 540))
         w.contentMinSize = NSSize(width: 720, height: 480)
         w.title = tabs.tabViewItems.first?.label ?? "sAiity"
+        w.makeVibrant()
         w.center()
         window = w
         // Deliberate: this is the one window the user explicitly asked for, so

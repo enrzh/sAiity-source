@@ -109,6 +109,7 @@ final class AccessibleIconButton: NSImageView {
 final class BubbleContentView: NSView {
     var onCopy: (() -> Void)?
     var onOpenWindow: (() -> Void)?
+    var onClear: (() -> Void)?
 
     private let controlStripHeight: CGFloat = 38
     /// Matches OverlayWindow's cornerRadius. Content inset by the radius lines up
@@ -132,6 +133,7 @@ final class BubbleContentView: NSView {
     private var dotBesideIcon: NSLayoutConstraint!
     private let menuButton = AccessibleIconButton()
     private let copyButton = AccessibleIconButton()
+    private let clearButton = AccessibleIconButton()
     private let recordDot = NSView()
     private var copyFlashWork: DispatchWorkItem?
 
@@ -164,6 +166,16 @@ final class BubbleContentView: NSView {
         copyButton.alphaValue = 0
         copyButton.toolTip = String(localized: "Copy this line")
 
+        // Wipe what is on screen without stopping recognition — for the moment
+        // a caption is still sitting over something you want to see, or a line
+        // you would rather not leave on a shared screen.
+        clearButton.image = NSImage(systemSymbolName: "xmark.circle",
+                                    accessibilityDescription: nil)?
+            .withSymbolConfiguration(cfg)
+        clearButton.contentTintColor = NSColor.white.withAlphaComponent(0.75)
+        clearButton.alphaValue = 0
+        clearButton.toolTip = String(localized: "Clear the caption")
+
         // Recording writes a durable, permanent record — it gets a marker on the
         // one element guaranteed to be on screen.
         recordDot.wantsLayer = true
@@ -178,6 +190,8 @@ final class BubbleContentView: NSView {
         menuButton.setAccessibilityLabel(String(localized: "Open sAiity settings"))
         copyButton.setAccessibilityRole(.button)
         copyButton.setAccessibilityLabel(String(localized: "Copy this caption"))
+        clearButton.setAccessibilityRole(.button)
+        clearButton.setAccessibilityLabel(String(localized: "Clear the caption"))
         recordDot.setAccessibilityRole(.image)
         recordDot.setAccessibilityLabel(String(localized: "Recording a transcript"))
 
@@ -188,11 +202,12 @@ final class BubbleContentView: NSView {
             self?.onCopy?()
             self?.flashCopied()
         }
-        for b in [menuButton, copyButton] {
+        clearButton.onPress = { [weak self] in self?.onClear?() }
+        for b in [menuButton, copyButton, clearButton] {
             b.onAccessibilityFocus = { [weak self] in self?.setControls(visible: true) }
         }
 
-        for v in [menuButton, copyButton, recordDot] {
+        for v in [menuButton, copyButton, clearButton, recordDot] {
             v.translatesAutoresizingMaskIntoConstraints = false
             addSubview(v)
         }
@@ -212,6 +227,11 @@ final class BubbleContentView: NSView {
 
             copyButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
             copyButton.centerYAnchor.constraint(equalTo: menuButton.centerYAnchor),
+
+            // Immediately left of Copy, in the same right-hand action cluster.
+            clearButton.trailingAnchor.constraint(equalTo: copyButton.leadingAnchor,
+                                                  constant: -14),
+            clearButton.centerYAnchor.constraint(equalTo: menuButton.centerYAnchor),
         ])
 
         // While the controls are hidden the dot takes the settings icon's place
@@ -238,6 +258,7 @@ final class BubbleContentView: NSView {
 
     private var copyRect: NSRect { copyButton.frame.insetBy(dx: -10, dy: -10) }
     private var menuRect: NSRect { menuButton.frame.insetBy(dx: -10, dy: -10) }
+    private var clearRect: NSRect { clearButton.frame.insetBy(dx: -10, dy: -10) }
 
     // MARK: - Tracking
 
@@ -281,7 +302,7 @@ final class BubbleContentView: NSView {
         guard interactive else { return }
         if let resize = resizeCursor(at: p) {
             resize.set()
-        } else if copyRect.contains(p) || menuRect.contains(p) {
+        } else if copyRect.contains(p) || menuRect.contains(p) || clearRect.contains(p) {
             NSCursor.arrow.set()
         } else {
             NSCursor.openHand.set()
@@ -340,6 +361,7 @@ final class BubbleContentView: NSView {
             ctx.allowsImplicitAnimation = true
             menuButton.animator().alphaValue = visible ? 1 : 0
             copyButton.animator().alphaValue = visible ? 1 : 0
+            clearButton.animator().alphaValue = visible ? 1 : 0
             layoutSubtreeIfNeeded()
         }
     }
@@ -351,6 +373,10 @@ final class BubbleContentView: NSView {
 
         if copyRect.contains(p) {
             copyButton.onPress?()
+            return
+        }
+        if clearRect.contains(p) {
+            clearButton.onPress?()
             return
         }
         if menuRect.contains(p) {
@@ -428,6 +454,11 @@ final class OverlayWindow: NSPanel {
     var onOpenWindow: (() -> Void)? {
         get { host.onOpenWindow }
         set { host.onOpenWindow = newValue }
+    }
+
+    var onClear: (() -> Void)? {
+        get { host.onClear }
+        set { host.onClear = newValue }
     }
 
     var isRecording: Bool {

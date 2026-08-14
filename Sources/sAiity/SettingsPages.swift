@@ -70,6 +70,7 @@ struct ModelsView: View {
                 Section { Text(e).font(.caption).foregroundStyle(.red) }
             }
         }
+        .scrollContentBackground(.hidden)
         .formStyle(.grouped)
         .task { state.refreshModels() }
     }
@@ -362,6 +363,7 @@ struct CaptionsView: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
         .formStyle(.grouped)
         .task(id: "\(state.translateTo ?? "")|\(state.translationEngine?.rawValue ?? "none")") {
             await state.refreshTargetSupport()
@@ -692,12 +694,16 @@ private struct ShortcutRecorder: NSViewRepresentable {
     }
 }
 
-// MARK: - Library
+// MARK: - Transcripts
 
-/// Transcripts, recording, and the honest status of the app in one place.
-/// Previously "Transcripts" and "Status" were separate tabs; they are the same
-/// subject — what this app has stored and what it can see.
-struct LibraryView: View {
+/// Everything this app has recorded: whether it records at all, the sessions
+/// on disk, a search across all of them, and the reader.
+///
+/// Split out of the old combined "Library" page. Recording and reading back a
+/// conversation is a task in its own right — a person opening this looks for a
+/// transcript, not for a permission status, and the two had nothing to do with
+/// each other beyond both being "stuff the app keeps".
+struct TranscriptsView: View {
     @Bindable var state: AppState
     /// Cross-session search. Non-empty replaces the session list with the
     /// matching lines — "what was said about X in yesterday's call" used to
@@ -806,45 +812,8 @@ struct LibraryView: View {
                 }
             }
 
-            Section("Status") {
-                LabeledContent("Engine", value: state.engine?.displayName ?? String(localized: "None chosen"))
-                LabeledContent("Screen Recording",
-                               value: CGPreflightScreenCaptureAccess()
-                                   ? String(localized: "Granted")
-                                   : String(localized: "Not granted"))
-                Text("System-audio capture is gated behind Screen Recording — macOS has no audio-only permission.")
-                    .font(.caption).foregroundStyle(.secondary)
-                LabeledToggle("Start sAiity when you log in",
-                              "Registers the app as a login item so captions are one keypress away after a restart. Off by default — this app can capture system audio, so being running should be your choice.",
-                              isOn: Binding(get: { state.launchAtLogin },
-                                            set: { state.setLaunchAtLogin($0) }))
-                if !state.launchAtLoginNote.isEmpty {
-                    Text(state.launchAtLoginNote).font(.caption).foregroundStyle(.orange)
-                }
-                HStack {
-                    Button("Run setup again…") {
-                        Onboarding.reset()
-                        OnboardingWindowController.shared.show(state: state)
-                    }
-                    .controlSize(.small)
-                    Text("Walks through permission and models from the start.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                HStack {
-                    Button("Save diagnostics…") { Diagnostics.save() }
-                        .controlSize(.small)
-                    Text("Writes one text file with the app's state and this run's log, for bug reports. Review it before sharing.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-
-            Section("Privacy") {
-                Text("Audio never leaves this Mac. Recognition, translation and transcripts are all processed and stored locally — no account, no API key.")
-                    .font(.caption)
-                Text("Model files are downloaded once from huggingface.co. Nothing you say is ever uploaded.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
         }
+        .scrollContentBackground(.hidden)
         .formStyle(.grouped)
         .sheet(item: $viewing) { TranscriptViewerSheet(session: $0) }
     }
@@ -890,8 +859,74 @@ struct LibraryView: View {
     }
 }
 
+// MARK: - General
+
+/// What the app can see, what it will do on its own, and what it promises —
+/// permissions, the login item, setup, diagnostics, privacy.
+///
+/// The counterpart to the Transcripts split: this page answers "is it set up
+/// correctly", which is a different question from "what did it record".
+struct GeneralView: View {
+    @Bindable var state: AppState
+
+    var body: some View {
+        Form {
+            Section {
+                LabeledContent("Engine", value: state.engine?.displayName ?? String(localized: "None chosen"))
+                LabeledContent("Screen Recording",
+                               value: CGPreflightScreenCaptureAccess()
+                                   ? String(localized: "Granted")
+                                   : String(localized: "Not granted"))
+            } header: {
+                Text("Status")
+            } footer: {
+                Text("System-audio capture is gated behind Screen Recording — macOS has no audio-only permission.")
+                    .font(.caption)
+            }
+
+            Section("Startup") {
+                LabeledToggle("Start sAiity when you log in",
+                              "Registers the app as a login item so captions are one keypress away after a restart. Off by default — this app can capture system audio, so being running should be your choice.",
+                              isOn: Binding(get: { state.launchAtLogin },
+                                            set: { state.setLaunchAtLogin($0) }))
+                if !state.launchAtLoginNote.isEmpty {
+                    Text(state.launchAtLoginNote).font(.caption).foregroundStyle(.orange)
+                }
+            }
+
+            Section("Troubleshooting") {
+                HStack {
+                    Button("Run setup again…") {
+                        Onboarding.reset()
+                        OnboardingWindowController.shared.show(state: state)
+                    }
+                    .controlSize(.small)
+                    Text("Walks through permission and models from the start.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button("Save diagnostics…") { Diagnostics.save() }
+                        .controlSize(.small)
+                    Text("Writes one text file with the app's state and this run's log, for bug reports. Review it before sharing.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Privacy") {
+                Text("Audio never leaves this Mac. Recognition, translation and transcripts are all processed and stored locally — no account, no API key.")
+                    .font(.caption)
+                Text("Model files are downloaded once from huggingface.co. Nothing you say is ever uploaded.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .formStyle(.grouped)
+        .task { await state.refresh() }
+    }
+}
+
 /// Read a saved transcript where it lives. Before this the app recorded
-/// durable transcripts and offered no way to look at one — the Library row
+/// durable transcripts and offered no way to look at one — the session row
 /// showed only metadata, and reading a line meant exporting the session or
 /// opening segments.jsonl in Finder.
 private struct TranscriptViewerSheet: View {

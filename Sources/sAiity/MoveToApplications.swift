@@ -22,6 +22,10 @@ enum MoveToApplications {
         a.messageText = String(localized: "Move sAiity to the Applications folder?")
         a.informativeText = String(
             localized: "sAiity is running from \(source). From Applications, the Screen Recording permission sticks across launches and updates can install themselves. This is one copy, done once.")
+        // The app's own icon, not the generic alert badge: this is the first
+        // dialog a new user sees, and it should be recognisably the thing they
+        // just downloaded.
+        a.icon = NSApp.applicationIconImage
         a.addButton(withTitle: String(localized: "Move to Applications"))
         a.addButton(withTitle: String(localized: "Not Now"))
         // AppKit's own suppression checkbox, with its own localized title.
@@ -94,17 +98,51 @@ enum MoveToApplications {
 
         // A writable original (Downloads, Desktop) goes to the Trash so the
         // stale copy cannot be launched by habit next week — recoverable, not
-        // deleted. The disk image is read-only and simply gets ejected by the
-        // user; a translocated path is not the real original at all.
-        if !path.hasPrefix("/Volumes/"), !path.contains("/AppTranslocation/") {
+        // deleted. A translocated path is not the real original at all, so
+        // there is nothing there worth trashing.
+        if path.hasPrefix("/Volumes/") {
+            // Running from the disk image: eject it. Leaving a mounted volume
+            // on the desktop after an install is the loose end every good Mac
+            // installer ties off — and it also removes the copy the user would
+            // otherwise be most likely to launch again by habit.
+            ejectVolume(containing: path)
+        } else if !path.contains("/AppTranslocation/") {
             try? fm.trashItem(at: src, resultingItemURL: nil)
         }
 
         NSLog("sAiity moved to /Applications; relaunching from there")
         let cfg = NSWorkspace.OpenConfiguration()
         cfg.createsNewApplicationInstance = true
-        NSWorkspace.shared.openApplication(at: dest, configuration: cfg) { _, _ in
+        NSWorkspace.shared.openApplication(at: dest, configuration: cfg) { _, error in
+            if let error {
+                NSLog("sAiity relaunch failed: \(error.localizedDescription)")
+            }
             DispatchQueue.main.async { NSApp.terminate(nil) }
+        }
+    }
+
+    /// Eject the disk image this app is running from.
+    ///
+    /// Deferred until after the relaunch is requested and done on a detached
+    /// queue: unmounting the volume that holds the *currently executing*
+    /// binary while it is still running is what produces "the disk was not
+    /// ejected properly" — and a failure here must never be able to stop the
+    /// install that already succeeded, so every error is a log line.
+    private static func ejectVolume(containing path: String) {
+        // "/Volumes/sAiity 1.1.0/sAiity.app" → "/Volumes/sAiity 1.1.0"
+        let parts = path.split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count > 2 else { return }
+        let volume = "/" + parts[1...2].joined(separator: "/")
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1.5) {
+            do {
+                try NSWorkspace.shared.unmountAndEjectDevice(at: URL(fileURLWithPath: volume))
+                NSLog("sAiity ejected \(volume)")
+            } catch {
+                // Very likely "resource busy" because this process still has
+                // the bundle mapped. The user can eject it themselves; the app
+                // is installed either way.
+                NSLog("sAiity could not eject \(volume): \(error.localizedDescription)")
+            }
         }
     }
 }

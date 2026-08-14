@@ -261,6 +261,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// be dimmed rather than cleared, and cleared only once it is two sentences
     /// behind. Nil when the row is empty.
     private var shownTranslationID: Int?
+    /// The sentence the user cleared from the bubble, if any. Captions for it
+    /// stay suppressed; the next sentence renders normally.
+    private var clearedSentenceID: Int?
     /// Live-mode translation of the still-open sentence: single-flight with
     /// latest-wins, because neither translator can be cancelled mid-decode —
     /// queueing every clause would fall permanently behind, and what matters is
@@ -435,6 +438,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.toolTip = String(localized: "sAiity — on-device live subtitles")
         overlay.onCopy = { [weak self] in self?.copyCurrentLine() }
         overlay.onOpenWindow = { SettingsWindowController.show() }
+        overlay.onClear = { [weak self] in self?.clearCaption() }
         NotificationCenter.default.addObserver(
             self, selector: #selector(saveTranscriptChangedExternally(_:)),
             name: .saiitySaveTranscriptChanged, object: nil)
@@ -1024,6 +1028,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Wipe what is on screen, and keep it wiped until the next sentence.
+    ///
+    /// Display only: the sentence being assembled still reaches the transcript,
+    /// and the recogniser is untouched. Without the suppression the very next
+    /// volatile chunk would redraw the whole assembled sentence — including the
+    /// words just cleared — which makes the button look broken. Recording it
+    /// against the sentence ID means normal captions resume by themselves when
+    /// the speaker starts the next one; there is no state to get stuck in.
+    private func clearCaption() {
+        clearedSentenceID = displaySentenceID
+        recentFlashTask?.cancel()
+        recentFlashTask = nil
+        overlay.show(text: "", isFinal: true)
+        overlay.showTranslation("")
+        shownTranslationID = nil
+    }
+
     /// The caption label's value changes silently — macOS has no SwiftUI-style
     /// live region — so without explicit announcements assistive tech never
     /// learns a caption arrived, and for a deaf-blind user on a braille
@@ -1097,6 +1118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sessionLines.removeAll()
         pendingTranslations = 0
         shownTranslationID = nil
+        clearedSentenceID = nil
         pendingLiveText = nil
         // A recap flash from the previous session has nothing to restore into
         // this one; its generation guard would drop it anyway, but a pending
@@ -1535,6 +1557,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if sentenceClosed, sentenceParts.isEmpty {
             sentenceClosed = false
             displaySentenceID += 1
+            // A new sentence is the natural end of a manual clear.
+            if let cleared = clearedSentenceID, cleared < displaySentenceID {
+                clearedSentenceID = nil
+            }
             if let shown = shownTranslationID, displaySentenceID - shown >= 2 {
                 overlay.showTranslation("")
                 shownTranslationID = nil
@@ -1543,12 +1569,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // The user cleared this sentence off the screen. Keep tracking it —
+        // the transcript still gets it — but do not paint it back.
+        let suppressed = clearedSentenceID == displaySentenceID
+
         guard chunk.isFinal else {
             // Still being revised: show it after the part of the sentence that
             // has already settled, so the line reads forward instead of being
             // replaced by its own tail.
             lastVolatileText = text
-            overlay.show(text: Self.trimmedForDisplay(sentenceParts + [text]), isFinal: false)
+            if !suppressed {
+                overlay.show(text: Self.trimmedForDisplay(sentenceParts + [text]), isFinal: false)
+            }
             return
         }
 
@@ -1565,7 +1597,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sentenceWords.append(contentsOf: chunk.words)
         lastVolatileText = ""
         lastFinalText = Self.joinClauses(sentenceParts)
-        overlay.show(text: Self.trimmedForDisplay(sentenceParts), isFinal: true)
+        if !suppressed {
+            overlay.show(text: Self.trimmedForDisplay(sentenceParts), isFinal: true)
+        }
 
         // Finished, or run on for so long that waiting costs more than an
         // awkward break. Speech that carries no punctuation at all — most of
@@ -1594,6 +1628,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // not bump until the NEXT sentence renders, so the ID check alone
         // leaves a window where a stale partial still passes.
         guard sentenceID == displaySentenceID, !sentenceClosed,
+              clearedSentenceID != sentenceID,
               translateTo != nil, translatorReady,
               CaptionStyle.current.showTranslation else { return }
         // The close path skips lines already in the target language; making
@@ -1780,7 +1815,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // it, dimmed — the viewer just read that line, and a slightly late
             // translation they can attach to it beats the empty row that
             // discarding produced. Older than that: drop, it helps nobody.
-            if CaptionStyle.current.showTranslation {
+            // A sentence the user cleared does not get its translation painted
+            // back under the empty line a moment later.
+            if CaptionStyle.current.showTranslation, self.clearedSentenceID != sentenceID {
                 let behind = self.displaySentenceID - sentenceID
                 if behind <= 0 {
                     self.overlay.showTranslation(out)
