@@ -110,7 +110,7 @@ the whole failure, including the two measurement traps that made it hard to see.
   and a "what did I miss" recap of the last few sentences; a `saiity://`
   scheme for Shortcuts, Raycast and scripts; downloads that resume where they
   stopped; a diagnostics file one click away when something misbehaves.
-- **Speaks German and English**, announces captions
+- **Speaks English, German, French, Spanish and Japanese**, announces captions
   to VoiceOver on request, and honours Reduce Transparency and Increase
   Contrast.
 
@@ -125,10 +125,13 @@ Worth saying plainly before you clone it:
   shown or translated, but a speaker who pauses hard mid-sentence still gets a
   break there, and the recogniser's own chunk boundary decides which clause a
   word lands in. Better than it was, not exact.
-- **German is a translation, and only German.** Every user-facing surface is
-  covered — menus, settings, setup, the caption bubble's VoiceOver labels, the
-  download and failure lines — and a test now enforces that no string escapes
-  the catalog. But it is one translation by one author.
+- **Only German has been read by a human on screen.** Every user-facing
+  surface is covered in all four localizations — menus, settings, setup, the
+  caption bubble's VoiceOver labels, the download and failure lines — and a
+  test enforces that no string escapes the catalog. German was verified by
+  rendering every screen. French, Spanish and Japanese follow Apple's own
+  terminology and preserve every format placeholder, but they have not had a
+  native speaker's pass, and no layout has been checked in them.
 - **It is not audited**, and captions are not a transcript of record. On-device
   recognition of unclear speech is still recognition of unclear speech.
 

@@ -44,7 +44,7 @@ struct LocalizationTests {
     // MARK: - Catalog completeness
 
     /// Every language the app ships. CFBundleLocalizations must agree.
-    private static let shippedLanguages = ["de"]
+    private static let shippedLanguages = ["de", "fr", "es", "ja"]
 
     @Test("Every catalog key is localized in every shipped language, or deliberately untranslatable")
     func catalogIsComplete() throws {
