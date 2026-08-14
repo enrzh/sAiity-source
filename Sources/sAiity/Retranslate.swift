@@ -43,14 +43,30 @@ final class Retranslator {
             onFinish(String(localized: "Stop the captions first — the translator is busy with the live session."))
             return
         }
-        guard let engine = TranslationEngine.effective.makeTranslator() else {
+        // `makeTranslator()` never returns nil — both cases construct one — so
+        // the old `guard let` here was unreachable and the real failure went
+        // unhandled: with no weights on disk, prepare() quietly starts a
+        // 1.86 GB download from a menu item that said "Translate", with the
+        // progress sink thrown away. Ask the two questions that can actually
+        // be answered before committing to anything.
+        guard let chosen = TranslationEngine.selected else {
             onFinish(String(localized: "No translator chosen. Pick one under Settings → Captions."))
             return
         }
+        let installed = chosen.activeAssetID.map { id in
+            ModelRegistry.snapshot().first { $0.asset.id == id }?.isInstalled == true
+        } ?? false
+        guard installed else {
+            onFinish(String(localized: "\(chosen.displayName) is not downloaded yet. Fetch it under Settings → Models first."))
+            return
+        }
+        let engine = chosen.makeTranslator()!
 
         running = true
+        CaptionSession.shared.setRetranslating(true)
         task = Task { @MainActor [weak self] in
             defer {
+                CaptionSession.shared.setRetranslating(false)
                 self?.running = false
                 self?.task = nil
             }
@@ -64,7 +80,13 @@ final class Retranslator {
             onProgress(Progress(done: 0, total: segments.count,
                                 note: String(localized: "Loading the translator…")))
             do {
-                try await engine.prepare(from: source, to: target) { _ in }
+                // The sink was discarded before, so loading a multi-gigabyte
+                // model looked identical to a hang.
+                try await engine.prepare(from: source, to: target) { msg in
+                    Task { @MainActor in
+                        onProgress(Progress(done: 0, total: segments.count, note: msg))
+                    }
+                }
             } catch {
                 await engine.stop()
                 onFinish(error.localizedDescription)
@@ -72,17 +94,30 @@ final class Retranslator {
             }
 
             var out = segments
+            var translated = 0, skipped = 0, failed = 0
             for (i, seg) in segments.enumerated() {
                 if Task.isCancelled { break }
                 // Empty and punctuation-only lines cost a model round trip and
                 // return nothing useful.
-                if seg.text.rangeOfCharacter(from: .alphanumerics) != nil,
-                   let tr = await engine.translate(seg.text, from: source, to: target),
+                guard seg.text.rangeOfCharacter(from: .alphanumerics) != nil else {
+                    skipped += 1
+                    onProgress(Progress(done: i + 1, total: segments.count,
+                                        note: String(localized: "Translating…")))
+                    continue
+                }
+                if let tr = await engine.translate(seg.text, from: source, to: target),
                    !tr.isEmpty {
                     out[i].tr = tr
                     // Beside `tr`, never without it — the same rule the live
                     // path follows, so trLoc stays a record of outcome.
                     out[i].trLoc = target
+                    translated += 1
+                } else {
+                    // The translator declined this line. Leave whatever was
+                    // there rather than half-replacing it, and count it: a run
+                    // that silently produced a mixed-language transcript used
+                    // to report plain success.
+                    failed += 1
                 }
                 onProgress(Progress(done: i + 1, total: segments.count,
                                     note: String(localized: "Translating…")))
@@ -100,9 +135,35 @@ final class Retranslator {
                 onFinish(err)
                 return
             }
+            // The session's own record of what language it holds. Without
+            // this the Markdown export keeps printing the language from the
+            // original recording — a document that states the wrong thing
+            // about its own contents.
+            Self.updateMeta(of: session, translateTo: target)
             SegmentCache.shared.invalidate()
-            onFinish(nil)
+            SessionCatalog.invalidate()
+            // Say what actually happened. "Done" over a transcript where the
+            // translator declined half the lines is the kind of report that
+            // costs someone an hour later.
+            if failed > 0 {
+                onFinish(String(localized: "Translated \(translated) lines; \(failed) could not be translated and kept what they had."))
+            } else {
+                onFinish(nil)
+            }
         }
+    }
+
+    /// Record the transcript's new translation language in its own meta.json.
+    /// Best-effort: the lines are already written and correct, so a failure
+    /// here is a stale header, not lost work.
+    private static func updateMeta(of session: SessionRef, translateTo: String) {
+        var meta = session.meta
+        meta.translateTo = translateTo
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+        enc.dateEncodingStrategy = .iso8601
+        guard let data = try? enc.encode(meta) else { return }
+        try? data.write(to: session.url.appendingPathComponent("meta.json"), options: .atomic)
     }
 
     /// Rewrite segments.jsonl atomically. Returns a message on failure.

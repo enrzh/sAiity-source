@@ -726,13 +726,32 @@ struct TranscriptsView: View {
                         Text(TranscriptRetention.label(d)).tag(d)
                     }
                 }
-                .onChange(of: retentionDays) { _, new in
-                    TranscriptRetention.days = new
-                    // Applied immediately, not at the next launch: a person
-                    // setting this is asking for something to be gone now.
-                    if TranscriptRetention.sweep() > 0 {
-                        Task { await state.refresh() }
+                .onChange(of: retentionDays) { old, new in
+                    // Ask first. Choosing "7 days" used to delete every older
+                    // transcript the instant the menu closed — irreversible,
+                    // unannounced, and from a control that reads like a
+                    // preference rather than a command. Deleting all
+                    // transcripts has always required a confirmation; this
+                    // deletes a subset and had none.
+                    let doomed = TranscriptStore.sessionsOlderThan(days: new)
+                    guard !doomed.isEmpty else {
+                        TranscriptRetention.days = new
+                        return
                     }
+                    let a = NSAlert()
+                    a.messageText = String(localized: "Delete \(doomed.count) transcripts now?")
+                    a.informativeText = String(localized: "Keeping transcripts for \(new) days means \(doomed.count) already older than that are deleted immediately, and any future session is deleted once it reaches that age. This cannot be undone.")
+                    a.alertStyle = .warning
+                    a.addButton(withTitle: String(localized: "Delete and Keep Setting"))
+                    a.addButton(withTitle: String(localized: "Cancel"))
+                    guard a.runModal() == .alertFirstButtonReturn else {
+                        retentionDays = old      // put the control back
+                        return
+                    }
+                    TranscriptRetention.days = new
+                    let n = TranscriptRetention.sweep()
+                    retranslateNote = "✓ " + String(localized: "Deleted \(n) transcripts.")
+                    Task { await state.refresh() }
                 }
             } header: {
                 Text("Recording")
@@ -934,11 +953,22 @@ struct TranscriptsView: View {
         panel.prompt = String(localized: "Export")
         panel.message = String(localized: "Choose a folder for every saved transcript.")
         guard panel.runModal() == .OK, let dir = panel.url else { return }
-        let r = Export.writeLibrary(state.sessions, format: format, to: dir)
-        retranslateNote = r.failed == 0
-            ? "✓ " + String(localized: "Exported \(r.written) transcripts.")
-            : String(localized: "Exported \(r.written); \(r.failed) could not be written.")
-        NSWorkspace.shared.activateFileViewerSelecting([dir])
+        // Off the main actor: this reads, formats and writes every saved
+        // session, and a library of a few hundred long meetings would freeze
+        // the window for the duration with no way to tell it was working.
+        let sessions = state.sessions
+        retranslateProgress = Retranslator.Progress(
+            done: 0, total: sessions.count, note: String(localized: "Exporting…"))
+        Task {
+            let r = await Task.detached(priority: .userInitiated) {
+                Export.writeLibrary(sessions, format: format, to: dir)
+            }.value
+            retranslateProgress = nil
+            retranslateNote = r.failed == 0
+                ? "✓ " + String(localized: "Exported \(r.written) transcripts.")
+                : String(localized: "Exported \(r.written); \(r.failed) could not be written.")
+            NSWorkspace.shared.activateFileViewerSelecting([dir])
+        }
     }
 
     private func export(_ s: SessionRef, _ kind: String) {

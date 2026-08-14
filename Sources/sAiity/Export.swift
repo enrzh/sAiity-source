@@ -177,6 +177,11 @@ enum Export {
     @discardableResult
     static func writeLibrary(_ sessions: [SessionRef], format: String, to folder: URL) -> (written: Int, failed: Int) {
         let df = DateFormatter()
+        // POSIX, like every other machine-facing formatter here: without it a
+        // non-Gregorian regional calendar produces filenames that neither sort
+        // nor match the dates shown in the app.
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.calendar = Calendar(identifier: .gregorian)
         df.dateFormat = "yyyy-MM-dd-HHmm"
         var written = 0, failed = 0
         for s in sessions {

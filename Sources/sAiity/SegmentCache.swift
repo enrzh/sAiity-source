@@ -27,12 +27,26 @@ final class SegmentCache: @unchecked Sendable {
 
     private let lock = NSLock()
     private var entries: [String: Entry] = [:]
-    /// Bounded so a library of thousands cannot pin every transcript in RAM.
-    /// Evicting everything at the ceiling — rather than tracking an LRU — is
-    /// deliberate: a search sweeps all sessions in one pass, so the useful
-    /// working set is "this pass", and the next keystroke refills what it
-    /// needs. Simple, and it cannot leak.
-    private static let maxEntries = 400
+    /// Insertion order, oldest first — a plain LRU queue.
+    private var order: [String] = []
+    /// Bounded by BYTES, not entries.
+    ///
+    /// The first version capped entry count and flushed everything at the
+    /// ceiling. That is worse than no cache for exactly the library it was
+    /// built for: a search sweeps every session in one pass, so at 401
+    /// sessions the pass evicts the whole cache before it finishes and the
+    /// next keystroke starts from nothing — a provable 0% hit rate. Evicting
+    /// oldest-first keeps most of the pass. A byte budget rather than a count
+    /// is because transcripts differ by orders of magnitude: 400 two-line
+    /// sessions are nothing, 400 three-hour ones are not.
+    private static let maxBytes = 32 << 20     // 32 MB of transcript text
+    private var bytes = 0
+
+    /// Rough cost of an entry. Character count is the dominant term and is far
+    /// cheaper to compute than anything exact.
+    private static func cost(_ segments: [Segment]) -> Int {
+        segments.reduce(0) { $0 + $1.text.utf8.count + ($1.tr?.utf8.count ?? 0) + 64 }
+    }
 
     func value(for path: String, stamp: Stamp) -> [Segment]? {
         lock.withLock {
@@ -42,14 +56,37 @@ final class SegmentCache: @unchecked Sendable {
     }
 
     func store(_ segments: [Segment], for path: String, stamp: Stamp) {
+        let c = Self.cost(segments)
         lock.withLock {
-            if entries.count >= Self.maxEntries { entries.removeAll(keepingCapacity: true) }
+            if let old = entries[path] {
+                bytes -= Self.cost(old.segments)
+                order.removeAll { $0 == path }
+            }
             entries[path] = Entry(stamp: stamp, segments: segments)
+            order.append(path)
+            bytes += c
+            while bytes > Self.maxBytes, let oldest = order.first {
+                order.removeFirst()
+                if let e = entries.removeValue(forKey: oldest) { bytes -= Self.cost(e.segments) }
+            }
+        }
+    }
+
+    /// Drop one session's entry — used when a specific transcript is deleted
+    /// or rewritten, so the whole cache does not have to be thrown away.
+    func invalidate(path: String) {
+        lock.withLock {
+            if let e = entries.removeValue(forKey: path) { bytes -= Self.cost(e.segments) }
+            order.removeAll { $0 == path }
         }
     }
 
     func invalidate() {
-        lock.withLock { entries.removeAll(keepingCapacity: true) }
+        lock.withLock {
+            entries.removeAll(keepingCapacity: true)
+            order.removeAll(keepingCapacity: true)
+            bytes = 0
+        }
     }
 }
 
@@ -73,7 +110,26 @@ enum TranscriptRetention {
                   : String(localized: "Delete after \(days) days")
     }
 
-    /// Apply the policy. Called at launch and whenever the setting changes.
+    /// Keep applying the policy while the app runs.
+    ///
+    /// Sweeping only at launch and on change is a policy that quietly stops
+    /// being true: this is a menu-bar app that people leave running for weeks,
+    /// and "delete after 7 days" that only acts when you happen to relaunch is
+    /// not the promise the setting makes. Six hours is frequent enough that
+    /// nothing outlives its age by a meaningful margin, and rare enough to be
+    /// free.
+    @MainActor
+    static func startPeriodicSweep() {
+        guard timer == nil else { return }
+        let t = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { _ in
+            MainActor.assumeIsolated { _ = sweep() }
+        }
+        t.tolerance = 600      // let the OS coalesce it; nothing here is urgent
+        timer = t
+    }
+    @MainActor private static var timer: Timer?
+
+    /// Apply the policy. Called at launch, on change, and every six hours.
     ///
     /// Main-actor because `SessionCatalog` is: the catalogue backs the UI, and
     /// invalidating it from a background context would race the list the

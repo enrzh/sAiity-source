@@ -88,6 +88,35 @@
         }
       }
     },
+    "%@ is not downloaded yet. Fetch it under Settings → Models first.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ ist noch nicht geladen. Lade es zuerst unter Einstellungen → Modelle."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ aún no está descargado. Descárgalo primero en Ajustes → Modelos."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ n’est pas encore téléchargé. Récupère-le d’abord dans Réglages → Modèles."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ はまだダウンロードされていません。先に「設定 → モデル」で取得してください。"
+          }
+        }
+      }
+    },
     "%@ is running the live captions. Stop captions first.": {
       "extractionState": "manual",
       "localizations": {
@@ -3041,6 +3070,35 @@
         }
       }
     },
+    "Delete %lld transcripts now?": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jetzt %lld Transkripte löschen?"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "¿Eliminar %lld transcripciones ahora?"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Supprimer %lld transcriptions maintenant ?"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld件の文字起こしを今すぐ削除しますか？"
+          }
+        }
+      }
+    },
     "Delete All": {
       "extractionState": "manual",
       "localizations": {
@@ -3185,6 +3243,35 @@
         }
       }
     },
+    "Delete and Keep Setting": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Löschen und Einstellung behalten"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eliminar y mantener el ajuste"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Supprimer et conserver le réglage"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "削除して設定を保持"
+          }
+        }
+      }
+    },
     "Delete the damaged files and fetch %@ again.": {
       "extractionState": "manual",
       "localizations": {
@@ -3210,6 +3297,35 @@
           "stringUnit": {
             "state": "translated",
             "value": "破損したファイルを削除して、%@をもう一度取得してください。"
+          }
+        }
+      }
+    },
+    "Deleted %lld transcripts.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld Transkripte gelöscht."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld transcripciones eliminadas."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld transcriptions supprimées."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld件の文字起こしを削除しました。"
           }
         }
       }
@@ -4281,6 +4397,35 @@
         }
       }
     },
+    "Exporting…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wird exportiert …"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exportando…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exportation…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "書き出し中…"
+          }
+        }
+      }
+    },
     "Fast": {
       "localizations": {
         "de": {
@@ -4771,6 +4916,35 @@
           "stringUnit": {
             "state": "translated",
             "value": "文字起こしの保存期間"
+          }
+        }
+      }
+    },
+    "Keeping transcripts for %lld days means %lld already older than that are deleted immediately, and any future session is deleted once it reaches that age. This cannot be undone.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transkripte %lld Tage aufzubewahren bedeutet: %lld bereits ältere werden sofort gelöscht, und jede künftige Sitzung wird gelöscht, sobald sie dieses Alter erreicht. Das lässt sich nicht rückgängig machen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conservar las transcripciones %lld días significa que %lld ya más antiguas se eliminan de inmediato, y cualquier sesión futura se elimina al alcanzar esa antigüedad. Esto no se puede deshacer."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conserver les transcriptions %lld jours signifie que %lld déjà plus anciennes sont supprimées immédiatement, et que toute session future sera supprimée une fois cet âge atteint. Cette action est irréversible."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文字起こしを%lld日間保存するということは、すでにそれより古い%lld件が直ちに削除され、今後のセッションもその期間に達した時点で削除されるということです。取り消せません。"
           }
         }
       }
@@ -10406,6 +10580,35 @@
         }
       }
     },
+    "Translated %lld lines; %lld could not be translated and kept what they had.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld Zeilen übersetzt; %lld konnten nicht übersetzt werden und behielten ihren bisherigen Stand."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld líneas traducidas; %lld no se pudieron traducir y conservaron lo que tenían."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld lignes traduites ; %lld n’ont pas pu l’être et ont conservé leur contenu."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld行を翻訳しました。%lld行は翻訳できず、元の内容のままです。"
+          }
+        }
+      }
+    },
     "Translated by": {
       "localizations": {
         "de": {
@@ -10516,6 +10719,64 @@
           "stringUnit": {
             "state": "translated",
             "value": "翻訳先"
+          }
+        }
+      }
+    },
+    "Translating a saved transcript — wait for that to finish, or cancel it": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ein gesichertes Transkript wird übersetzt – warte, bis das fertig ist, oder brich es ab"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se está traduciendo una transcripción guardada: espera a que termine o cancélala"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Une transcription enregistrée est en cours de traduction — attends la fin ou annule-la"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保存済みの文字起こしを翻訳中です。完了を待つか、キャンセルしてください"
+          }
+        }
+      }
+    },
+    "Translating a saved transcript. Wait for it to finish, or cancel it under Transcripts.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ein gesichertes Transkript wird übersetzt. Warte, bis es fertig ist, oder brich es unter Transkripte ab."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se está traduciendo una transcripción guardada. Espera a que termine o cancélala en Transcripciones."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Une transcription enregistrée est en cours de traduction. Attends la fin, ou annule-la dans Transcriptions."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保存済みの文字起こしを翻訳中です。完了を待つか、「文字起こし」でキャンセルしてください。"
           }
         }
       }

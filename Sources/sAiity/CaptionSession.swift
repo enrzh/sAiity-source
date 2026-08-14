@@ -26,6 +26,15 @@ final class CaptionSession {
 
     func setRunning(_ on: Bool) { isRunning = on }
 
+    /// True while a saved transcript is being re-translated.
+    ///
+    /// The rule "only one translator at a time" was written one-directionally
+    /// — re-translation refused to start during a session, but a session was
+    /// free to start during a re-translation, which is the same two models in
+    /// memory at once by the other route. This is the other half.
+    private(set) var isRetranslating = false
+    func setRetranslating(_ on: Bool) { isRetranslating = on }
+
     /// Drop every loaded model so its files can actually be removed. No-op when
     /// nothing is loaded.
     func releaseEverything() async {

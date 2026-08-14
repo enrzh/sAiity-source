@@ -196,20 +196,32 @@ actor TranscriptStore {
     /// written into the session directory would otherwise reset.
     @discardableResult
     nonisolated static func deleteOlderThan(days: Int) -> Int {
-        guard days > 0 else { return 0 }
-        let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
-        var removed = 0
-        for s in list() where s.meta.startedAt < cutoff {
-            delete(s)
-            removed += 1
+        let doomed = sessionsOlderThan(days: days)
+        for s in doomed { delete(s) }
+        if !doomed.isEmpty {
+            NSLog("sAiity retention: removed \(doomed.count) session(s) older than \(days) days")
         }
-        if removed > 0 { NSLog("sAiity retention: removed \(removed) session(s) older than \(days) days") }
-        return removed
+        return doomed.count
+    }
+
+    /// What a retention setting WOULD delete. Separated from the deletion so
+    /// the UI can name the number before doing it — a count after the fact is
+    /// no use for a decision that cannot be undone.
+    nonisolated static func sessionsOlderThan(days: Int) -> [SessionRef] {
+        guard days > 0 else { return [] }
+        let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
+        return list().filter { $0.meta.startedAt < cutoff }
     }
 
     /// Deletion is real: the directory goes, no tombstone, nothing else refers
     /// to it.
     nonisolated static func delete(_ session: SessionRef) {
+        // Drop the cached lines with the file. Nothing else would: the stamp
+        // check only catches a file that still EXISTS and changed, so a
+        // deleted session's text would otherwise sit in memory until the app
+        // quit — and be served if a new session ever reused the path.
+        SegmentCache.shared.invalidate(
+            path: session.url.appendingPathComponent("segments.jsonl").path)
         try? FileManager.default.removeItem(at: session.url)
     }
 

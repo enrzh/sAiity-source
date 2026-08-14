@@ -95,6 +95,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// processes — quite possibly this one, mid-session.
     @MainActor
     private func handleMemoryPressure(_ level: MemoryPolicy.Pressure) {
+        // Cached transcript text is the cheapest thing in the process to give
+        // back — it is re-readable from disk, unlike a loaded model. It costs
+        // a slower next search and nothing else, so it goes first and on any
+        // pressure at all.
+        if level != .normal { SegmentCache.shared.invalidate() }
         switch level {
         case .normal:
             // Pressure passed. Put translation back, if pressure is what took
@@ -389,7 +394,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             credits = NSAttributedString(string: String(localized: "Credits file missing from this build."))
         }
-        ForegroundActivation.begin()
+        // Only take a Dock presence if we are not already holding one. begin()
+        // used to run on every invocation while end() ran once, so opening
+        // About twice left the agent app with a Dock icon for the rest of the
+        // run. The observer below is the single owner of that balance.
+        if aboutResignObserver == nil { ForegroundActivation.begin() }
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "sAiity",
             .credits: credits,
@@ -421,8 +430,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // /Applications and nothing below this line matters for this one.
         MoveToApplications.offerIfNeeded()
         // Apply the retention policy before anything can list transcripts, so
-        // an expired session never appears and then vanishes.
+        // an expired session never appears and then vanishes — then keep
+        // applying it, because this app is left running for weeks.
         TranscriptRetention.sweep()
+        TranscriptRetention.startPeriodicSweep()
         // Before anything can allocate: cap MLX's buffer pool, and start
         // listening for the system asking for memory back. See MemoryPolicy —
         // this app can hold several gigabytes of models, and on a 16 GB machine
@@ -999,6 +1010,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // teardown the menu said Idle and offered Start, and every press did
             // nothing at all.
             if state == .stopping { setStatus("Still stopping — try again in a moment") }
+            return
+        }
+        // The other half of "one translator at a time". Re-translation refuses
+        // to start during a session; without this, a session was free to start
+        // during a re-translation — the same two multi-gigabyte models in
+        // memory at once, by the other route, on a machine this app has
+        // already been taught not to push into swap.
+        guard !CaptionSession.shared.isRetranslating else {
+            setStatus("Translating a saved transcript — wait for that to finish, or cancel it")
+            overlay.show(text: String(localized: "Translating a saved transcript. Wait for it to finish, or cancel it under Transcripts."),
+                         isFinal: true)
             return
         }
         // Nothing chosen means nothing to run. This used to proceed on a
