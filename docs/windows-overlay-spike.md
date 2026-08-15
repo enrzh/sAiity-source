@@ -41,3 +41,11 @@ Record:
 The current source uses `WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE |
 WS_EX_TOOLWINDOW | WS_EX_TOPMOST`. These are the exact behaviors that must be
 verified on Windows; compiling the source on macOS cannot establish them.
+
+## Test package
+
+`.github/workflows/windows-package.yml` publishes a self-contained ZIP artifact
+for `win-x64`. It contains the prototype executable, `Install.ps1`,
+`Uninstall.ps1`, and a short README. The package is unsigned and contains no
+audio capture or ASR yet. Download the artifact from the workflow run, extract
+it, and run the install script from PowerShell.

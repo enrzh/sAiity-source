@@ -6,5 +6,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <Platforms>x64</Platforms>
+    <AssemblyName>sAiity.WindowsOverlayPrototype</AssemblyName>
+    <Version>0.1.0</Version>
+    <AssemblyVersion>0.1.0.0</AssemblyVersion>
   </PropertyGroup>
 </Project>

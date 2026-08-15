@@ -1,0 +1,47 @@
+name: Windows overlay package
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "windows/spike/**"
+      - "windows/package/**"
+      - ".github/workflows/windows-package.yml"
+
+jobs:
+  package-overlay:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Publish self-contained executable
+        run: >-
+          dotnet publish windows/spike/OverlaySpike.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:DebugType=None
+          -o staging/app
+
+      - name: Assemble install package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path staging/package | Out-Null
+          Copy-Item staging/app/sAiity.WindowsOverlayPrototype.exe staging/package/
+          Copy-Item windows/package/Install.ps1 staging/package/
+          Copy-Item windows/package/Uninstall.ps1 staging/package/
+          Copy-Item windows/package/README.txt staging/package/
+          Compress-Archive -Path staging/package/* -DestinationPath staging/sAiity-windows-overlay-prototype-win-x64.zip
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: saiity-windows-overlay-prototype-win-x64
+          path: staging/sAiity-windows-overlay-prototype-win-x64.zip
+          if-no-files-found: error
+          retention-days: 30
