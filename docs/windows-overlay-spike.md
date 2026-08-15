@@ -3,6 +3,11 @@
 Status: source added; Windows build and visual behavior are unverified on this
 Mac host because the .NET SDK and Windows runtime are not installed here.
 
+The repository now has a Windows GitHub Actions build at
+`.github/workflows/windows-overlay.yml`. That proves compilation on a hosted
+Windows runner once the workflow executes; it does not prove click-through,
+topmost behavior, or the DWM backdrop visually.
+
 ## Purpose
 
 `windows/spike` answers one narrow product question before the port grows:
