@@ -11,12 +11,24 @@ struct DiarizationProbe {
     static func main() async throws {
         let variant = LSEENDVariant.dihard3
         let step = LSEENDStepSize.step100ms
+        let fixture = CommandLine.arguments.dropFirst().first.map { URL(fileURLWithPath: $0) }
+        let loadStart = ContinuousClock.now
         let diarizer = try await LSEENDDiarizer(variant: variant, stepSize: step)
-        let silence = [Float](repeating: 0, count: 16_000 * 3)
-        let timeline = try diarizer.processComplete(silence, sourceSampleRate: 16_000)
+        let loadTime = ContinuousClock.now - loadStart
+        let inferenceStart = ContinuousClock.now
+        let timeline: DiarizerTimeline
+        if let fixture {
+            timeline = try diarizer.processComplete(audioFileURL: fixture)
+        } else {
+            let silence = [Float](repeating: 0, count: 16_000 * 3)
+            timeline = try diarizer.processComplete(silence, sourceSampleRate: 16_000)
+        }
+        let inferenceTime = ContinuousClock.now - inferenceStart
 
         print("model=\(variant.name(forStep: step))")
-        print("sampleRate=16_000")
+        print("fixture=\(fixture?.path ?? "generated-silence")")
+        print("modelLoad=\(loadTime)")
+        print("inference=\(inferenceTime)")
         print("speakers=\(timeline.speakers.count)")
         for speaker in timeline.speakers.values {
             for segment in speaker.finalizedSegments {

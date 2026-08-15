@@ -46,6 +46,15 @@ let package = Package(
             path: "Sources/sAiity",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        .executableTarget(
+            name: "DiarizationProbe",
+            dependencies: [
+                .product(name: "FluidAudio", package: "FluidAudio"),
+            ],
+            path: "Tools",
+            sources: ["DiarizationProbe.swift"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
         // Covers the pure logic only — the model registry and the per-engine
         // language mapping. Both are places where a wrong answer is silent:
         // a bad removal path deletes the wrong directory, and a bad language

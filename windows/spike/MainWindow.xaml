@@ -1,0 +1,30 @@
+<Window x:Class="Saiity.OverlaySpike.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Width="720" Height="132"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        ShowActivated="False"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Topmost="True">
+    <Border Margin="12"
+            Padding="22,16"
+            CornerRadius="18"
+            Background="#E817191D"
+            BorderBrush="#32FFFFFF"
+            BorderThickness="1">
+        <StackPanel>
+            <TextBlock Text="Speaker 1"
+                       Foreground="#A8FFFFFF"
+                       FontSize="13"
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,5" />
+            <TextBlock Text="This is a Windows caption overlay preview."
+                       Foreground="White"
+                       FontSize="24"
+                       TextWrapping="Wrap" />
+        </StackPanel>
+    </Border>
+</Window>
