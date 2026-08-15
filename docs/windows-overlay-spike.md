@@ -4,9 +4,10 @@ Status: source added; Windows build and visual behavior are unverified on this
 Mac host because the .NET SDK and Windows runtime are not installed here.
 
 The repository now has a Windows GitHub Actions build at
-`.github/workflows/windows-overlay.yml`. That proves compilation on a hosted
-Windows runner once the workflow executes; it does not prove click-through,
-topmost behavior, or the DWM backdrop visually.
+`.github/workflows/windows-overlay.yml`. Run `f6cd448` passed on
+`windows-latest`, including restore and Release compilation. That proves the
+source compiles on Windows; it does not prove click-through, topmost behavior,
+or the DWM backdrop visually.
 
 ## Purpose
 
