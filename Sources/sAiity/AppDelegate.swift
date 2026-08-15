@@ -480,6 +480,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                                queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.showAbout() }
         }
+        NotificationCenter.default.addObserver(forName: .saiityMicSettingChanged, object: nil,
+                                               queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                Task { @MainActor in
+                    await self.capture.applyMicSetting()
+                    // Say what happened: turning it off mid-session is exactly
+                    // the moment someone wants confirmation that it is off.
+                    switch self.capture.micStatus {
+                    case .off where self.state.isActive:
+                        self.setStatus("Microphone released — captions continue from system audio")
+                    case .mixing:
+                        self.setStatus("Microphone added to the captions")
+                    case .denied:
+                        self.setStatus("Captions run without your microphone — allow sAiity under System Settings → Privacy & Security → Microphone")
+                    case .failed:
+                        self.setStatus("Captions run without your microphone — it could not be started")
+                    default:
+                        break
+                    }
+                }
+            }
+        }
 
         HotKeyCenter.shared.register(.toggleCaptions) { [weak self] in
             self?.toggle()

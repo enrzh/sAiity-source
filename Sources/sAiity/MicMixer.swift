@@ -19,6 +19,12 @@ enum MicMix {
         get { UserDefaults.standard.bool(forKey: "includeMicrophone") }
         set { UserDefaults.standard.set(newValue, forKey: "includeMicrophone") }
     }
+
+    /// A permission request can outlive the setting change that started it.
+    /// Only the latest setting is allowed to open the input again.
+    static func shouldStart(requested: Bool, current: Bool) -> Bool {
+        requested && current
+    }
 }
 
 /// A bounded ring of 48 kHz mono mic samples, pure and testable.

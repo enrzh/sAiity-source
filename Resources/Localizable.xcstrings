@@ -5708,6 +5708,64 @@
         }
       }
     },
+    "Microphone added to the captions": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mikrofon zu den Untertiteln hinzugefügt"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Micrófono añadido a los subtítulos"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Microphone ajouté aux sous-titres"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "マイクを字幕に追加しました"
+          }
+        }
+      }
+    },
+    "Microphone released — captions continue from system audio": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mikrofon freigegeben – Untertitel laufen mit Systemton weiter"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Micrófono liberado: los subtítulos continúan con el audio del sistema"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Microphone libéré — les sous-titres continuent avec l’audio système"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "マイクを解放しました。字幕はシステムオーディオで続きます"
+          }
+        }
+      }
+    },
     "Model files are downloaded once from huggingface.co. Nothing you say is ever uploaded.": {
       "extractionState": "manual",
       "localizations": {
@@ -6692,31 +6750,31 @@
         }
       }
     },
-    "Off by default. System audio on a call carries only the other participants — your own voice never enters the mix, so a saved transcript is missing your half of the conversation. On, sAiity also opens the microphone (macOS asks once) and mixes it into recognition. Audio still never leaves this Mac. Takes effect when captions next start.": {
+    "Off by default. System audio on a call carries only the other participants — your own voice never enters the mix, so a saved transcript is missing your half of the conversation. On, sAiity also opens the microphone (macOS asks once) and mixes it into recognition. Audio still never leaves this Mac. Takes effect immediately, including mid-session: switching it off releases the microphone straight away.": {
       "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Standardmäßig aus. Systemaudio eines Anrufs enthält nur die anderen Teilnehmer – die eigene Stimme gelangt nie in den Mix, einem gesicherten Transkript fehlt also deine Hälfte des Gesprächs. Eingeschaltet öffnet sAiity zusätzlich das Mikrofon (macOS fragt einmal) und mischt es in die Erkennung. Audio verlässt diesen Mac weiterhin nie. Gilt ab dem nächsten Start der Untertitel."
+            "value": "Standardmäßig aus. Systemaudio eines Anrufs enthält nur die anderen Teilnehmer – die eigene Stimme gelangt nie in den Mix, einem gesicherten Transkript fehlt also deine Hälfte des Gesprächs. Eingeschaltet öffnet sAiity zusätzlich das Mikrofon (macOS fragt einmal) und mischt es in die Erkennung. Audio verlässt diesen Mac weiterhin nie. Gilt sofort, auch während einer Sitzung: Ausschalten gibt das Mikrofon umgehend frei."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Desactivado de forma predeterminada. El audio del sistema en una llamada lleva solo a los demás participantes — tu propia voz nunca entra en la mezcla, así que a una transcripción guardada le falta tu mitad de la conversación. Activado, sAiity abre también el micrófono (macOS lo pide una vez) y lo mezcla en el reconocimiento. El audio sigue sin salir de este Mac. Surte efecto la próxima vez que se inicien los subtítulos."
+            "value": "Desactivado por omisión. El audio del sistema en una llamada solo lleva a los demás participantes: tu propia voz nunca entra en la mezcla, así que a una transcripción guardada le falta tu mitad de la conversación. Activado, sAiity también abre el micrófono (macOS lo pregunta una vez) y lo mezcla en el reconocimiento. El audio sigue sin salir nunca de este Mac. Tiene efecto de inmediato, incluso a mitad de sesión: al desactivarlo se libera el micrófono al instante."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Désactivé par défaut. Sur un appel, l'audio système ne porte que les autres participants — votre propre voix n'entre jamais dans le mixage, donc une transcription enregistrée manque votre moitié de la conversation. Activé, sAiity ouvre aussi le microphone (macOS demande une fois) et le mélange à la reconnaissance. L'audio ne quitte toujours jamais ce Mac. Prend effet au prochain démarrage des sous-titres."
+            "value": "Désactivé par défaut. L’audio système d’un appel ne contient que les autres participants — ta propre voix n’entre jamais dans le mix, il manque donc ta moitié de la conversation à une transcription enregistrée. Activé, sAiity ouvre aussi le microphone (macOS demande une fois) et le mélange à la reconnaissance. L’audio ne quitte toujours jamais ce Mac. Effet immédiat, y compris en cours de session : le désactiver libère le microphone aussitôt."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "初期設定ではオフです。通話中のシステムオーディオに含まれるのは相手の声だけで、自分の声は入りません。そのため、保存した文字起こしには会話の自分側が残りません。オンにすると、sAiityはマイクも開き（macOSが一度だけ確認します）、その音声を認識に混ぜます。それでも音声がこのMacの外に出ることはありません。次に字幕を開始したときに有効になります。"
+            "value": "標準ではオフです。通話のシステムオーディオには相手の声しか含まれず、自分の声はミックスに入らないため、保存した文字起こしには自分の側が欠けています。オンにすると、sAiityはマイクも開いて（macOSが一度確認します）認識にミックスします。音声は引き続きこのMacから出ません。セッション中を含めて即座に反映され、オフにするとマイクはただちに解放されます。"
           }
         }
       }

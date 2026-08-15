@@ -114,6 +114,61 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
     /// Pauses that actually ended a sentence this session. Capture-queue only.
     private var gapFires = 0
 
+    /// Apply the microphone setting to a session that is already running.
+    ///
+    /// Switching it off has to take effect NOW, not at the next start. The
+    /// setting was read once in `start()`, so turning it off mid-session left
+    /// the input tap open — and macOS quite correctly went on showing the
+    /// microphone as in use, in an app whose whole argument is that it does
+    /// not listen to you unless you ask it to. A privacy control that applies
+    /// later is not a privacy control.
+    ///
+    /// Switching it on mid-session works too, and asks for permission the same
+    /// way `start()` does.
+    func applyMicSetting() async {
+        let wanted = MicMix.enabled
+        let running = lock.withLock { micMixer != nil }
+        guard wanted != running else { return }
+
+        if !wanted {
+            let m = lock.withLock { () -> MicMixer? in
+                let old = micMixer
+                micMixer = nil          // the audio callback sees nil from here
+                return old
+            }
+            m?.stop()
+            micStatus = .off
+            NSLog("sAiity mic: released mid-session (setting turned off)")
+            return
+        }
+        // Turning it on: only meaningful while a stream is actually running;
+        // otherwise the next start() will pick the setting up anyway.
+        guard stream != nil else { return }
+        guard await AVCaptureDevice.requestAccess(for: .audio) else {
+            micStatus = .denied
+            return
+        }
+        guard MicMix.shouldStart(requested: wanted, current: MicMix.enabled) else {
+            micStatus = .off
+            return
+        }
+        let m = MicMixer()
+        do {
+            try m.start(sampleRate: Self.streamSampleRate)
+            guard MicMix.shouldStart(requested: wanted, current: MicMix.enabled) else {
+                m.stop()
+                micStatus = .off
+                return
+            }
+            lock.withLock { micMixer = m }
+            micStatus = .mixing
+            NSLog("sAiity mic: mixing into a running session (setting turned on)")
+        } catch {
+            micStatus = .failed
+            NSLog("sAiity mic: failed to start mid-session — \(error.localizedDescription)")
+        }
+    }
+
     /// Re-read the speech-gap setting. Called on start, and again whenever the
     /// user moves the slider, so a change lands on the running session instead
     /// of waiting for the next one.
@@ -208,7 +263,7 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
                 let m = MicMixer()
                 do {
                     try m.start(sampleRate: Self.streamSampleRate)
-                    micMixer = m
+                    lock.withLock { micMixer = m }
                     micStatus = .mixing
                     NSLog("sAiity mic: mixing into recognition")
                 } catch {
@@ -234,8 +289,9 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
             try await s.startCapture()
             self.stream = s
         } catch {
-            micMixer?.stop()
-            micMixer = nil
+            lock.withLock { () -> MicMixer? in
+                let m = micMixer; micMixer = nil; return m
+            }?.stop()
             micStatus = .off
             throw error
         }
@@ -250,8 +306,9 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
         watchdog = nil
         try? await stream?.stopCapture()
         // After stopCapture, so no buffer callback can race the teardown.
-        micMixer?.stop()
-        micMixer = nil
+        lock.withLock { () -> MicMixer? in
+            let m = micMixer; micMixer = nil; return m
+        }?.stop()
         micStatus = .off
         stream = nil
         converter = nil
@@ -303,8 +360,14 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
         // Mic joins the stream BEFORE gap detection on purpose: the user
         // speaking is not a pause, and their sentences should close on their
         // own pauses like everyone else's.
-        if let micMixer, let ch = pcm.floatChannelData {
-            micMixer.mix(into: ch[0], count: Int(pcm.frameLength))
+        //
+        // Read under the lock: this runs on the capture queue ~50×/s while the
+        // setting can be switched off from the main actor, and tearing the
+        // mixer down underneath an unsynchronised read of the reference is a
+        // use-after-free waiting for a user who flips the toggle mid-sentence.
+        let mixer = lock.withLock { micMixer }
+        if let mixer, let ch = pcm.floatChannelData {
+            mixer.mix(into: ch[0], count: Int(pcm.frameLength))
         }
         classify(pcm)
 

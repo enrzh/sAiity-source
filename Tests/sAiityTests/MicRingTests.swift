@@ -10,6 +10,12 @@ import Testing
 /// unclamped sum folds two loud sources into noise.
 struct MicRingTests {
 
+    @Test("A stale microphone-on request is rejected after the setting turns off")
+    func staleMicRequestDoesNotReopenInput() {
+        #expect(!MicMix.shouldStart(requested: true, current: false))
+        #expect(MicMix.shouldStart(requested: true, current: true))
+    }
+
     @Test("Underrun mixes what exists and leaves the rest untouched")
     func underrunIsPartial() {
         var ring = MicRing()

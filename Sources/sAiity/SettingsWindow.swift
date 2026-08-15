@@ -15,6 +15,8 @@ extension Notification.Name {
     /// Settings → General asks the delegate to raise the standard About panel;
     /// the panel and its credits belong to AppKit, not to a SwiftUI page.
     static let saiityShowAbout = Notification.Name("sAiityShowAbout")
+    /// "Include my microphone" changed; a running capture must act on it now.
+    static let saiityMicSettingChanged = Notification.Name("sAiityMicSettingChanged")
 }
 
 /// Shared so non-UI types can report disk usage honestly.
@@ -204,6 +206,10 @@ final class AppState {
         didSet {
             guard includeMic != oldValue else { return }
             MicMix.enabled = includeMic
+            // Live, not at the next start. Switching this off must release the
+            // microphone immediately — leaving the input open after the user
+            // said stop is the one thing this app cannot be seen doing.
+            NotificationCenter.default.post(name: .saiityMicSettingChanged, object: nil)
         }
     }
     struct RunningApp: Sendable {
