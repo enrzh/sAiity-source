@@ -32,10 +32,19 @@ on a call carries only the other side, so that setting is what makes a
 meeting transcript contain your own half. Its permission prompt only ever
 appears after you flip it.
 
-> 87 unit tests. The notes in this file try to be honest about what is verified
+> 104 unit tests. The notes in this file try to be honest about what is verified
 > and what isn't, including the parts that aren't.
 
 ---
+
+## Press-to-talk dictation
+
+Hold **Control** while speaking to dictate into the app that currently has the
+keyboard focus. Release it to transcribe locally, clean the text, and paste it
+there. The original clipboard is restored after a successful paste; when
+Accessibility permission is unavailable, the dictated text remains copied so it
+is not lost. Dictation uses a separate microphone-only session and does not
+start while live captions are running.
 
 ## What is actually interesting here
 

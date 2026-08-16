@@ -23,6 +23,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                                        updaterDelegate: nil,
                                                        userDriverDelegate: nil)
     private let overlay = OverlayWindow()
+    private let dictationToast = DictationToastWindow(contentRect: .zero,
+                                                       styleMask: [.borderless],
+                                                       backing: .buffered,
+                                                       defer: true)
+    private let dictationCapture = DictationMicrophoneCapture()
+    private lazy var dictationController = DictationController(
+        makeBackend: AppDelegate.makeActiveBackend,
+        capture: dictationCapture,
+        inserter: TextInserter(),
+        captionsActive: { [weak self] in self?.state.isActive ?? false },
+        onPhaseChanged: { [weak self] phase in self?.updateDictationToast(phase) })
+    private let dictationHotkeyMonitor = DictationHotkeyMonitor()
     private let capture = SystemAudioCapture()
     private var engine = ASREngine.effective
     private var backend: TranscriptionBackend = AppDelegate.makeActiveBackend() {
@@ -463,6 +475,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 MainActor.assumeIsolated { self?.capture.applySpeechGapSettings() }
             }
         rebuildMenu()
+        if !dictationHotkeyMonitor.start(onPress: { [weak self] in self?.dictationController.press() },
+                                         onRelease: { [weak self] in self?.dictationController.release() }) {
+            NSLog("sAiity dictation: Control monitor unavailable; grant Accessibility access to enable press-to-talk")
+        }
 
         // Lets the Settings window stop the session and drop loaded models
         // before it deletes their files.
@@ -586,6 +602,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Close the transcript cleanly on quit, otherwise the last lines are on
     /// disk but meta.json still says the session never ended.
     func applicationWillTerminate(_ note: Notification) {
+        dictationHotkeyMonitor.stop()
+        dictationController.cancel()
+        dictationToast.dismiss()
         guard recordingSince != nil else { return }
         let sem = DispatchSemaphore(value: 0)
         Task.detached {
@@ -593,6 +612,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             sem.signal()
         }
         _ = sem.wait(timeout: .now() + 2)
+    }
+
+    private func updateDictationToast(_ phase: DictationPhase) {
+        switch phase {
+        case .idle:
+            dictationToast.dismiss()
+        case .dictating:
+            dictationToast.show(text: String(localized: "Dictating…"), animated: true)
+        case .transcribing, .inserting:
+            dictationToast.show(text: String(localized: "Transcribing…"), animated: true)
+        case .result(let text), .failure(let text):
+            dictationToast.show(text: text, animated: false)
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(2))
+                if case .result = self.dictationController.phase {
+                    self.dictationToast.dismiss()
+                } else if case .failure = self.dictationController.phase {
+                    self.dictationToast.dismiss()
+                }
+            }
+        }
+        guard phase != .idle else { return }
+        positionDictationToast()
+    }
+
+    private func positionDictationToast() {
+        guard let screen = NSScreen.main else { return }
+        let frame = screen.visibleFrame
+        let size = dictationToast.frame.size
+        dictationToast.setFrameOrigin(NSPoint(x: frame.midX - size.width / 2,
+                                               y: frame.minY + 80))
     }
 
     // MARK: - Menu
@@ -632,6 +682,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         toggleItem.image = Self.menuSymbol("captions.bubble")
         menu.addItem(toggleItem)
+
+        let dictationItem = NSMenuItem(title: String(localized: "Hold Control to Dictate"),
+                                       action: nil, keyEquivalent: "")
+        dictationItem.image = Self.menuSymbol("mic")
+        dictationItem.isEnabled = false
+        menu.addItem(dictationItem)
 
         let translate = translationMenuItem()
         translate.image = Self.menuSymbol("globe")

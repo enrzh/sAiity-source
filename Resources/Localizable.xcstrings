@@ -6203,6 +6203,69 @@
         }
       }
     },
+    "Hold Control to Dictate": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Control zum Diktieren gedrückt halten" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Mantén pulsada la tecla Control para dictar" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Maintenez la touche Contrôle pour dicter" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "Controlキーを押して音声入力" } }
+      }
+    },
+    "Captions are already running.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Untertitel laufen bereits." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Los subtítulos ya están activos." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Les sous-titres sont déjà actifs." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "字幕はすでに実行中です。" } }
+      }
+    },
+    "Dictating…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Diktat …" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Dictando…" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Dictée…" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "音声入力中…" } }
+      }
+    },
+    "Transcribing…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Transkription …" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Transcribiendo…" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Transcription…" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "文字起こし中…" } }
+      }
+    },
+    "Inserted": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Eingefügt" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Insertado" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Inséré" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "挿入しました" } }
+      }
+    },
+    "Copied to Clipboard": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "In die Zwischenablage kopiert" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Copiado al portapapeles" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Copié dans le presse-papiers" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "クリップボードにコピーしました" } }
+      }
+    },
+    "No speech detected": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Keine Sprache erkannt" } },
+        "es": { "stringUnit": { "state": "translated", "value": "No se ha detectado voz" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Aucune voix détectée" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "音声が検出されませんでした" } }
+      }
+    },
     "No model chosen — %@ is the one to start with": {
       "extractionState": "manual",
       "localizations": {
