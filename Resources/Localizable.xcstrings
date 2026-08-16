@@ -6174,6 +6174,35 @@
         }
       }
     },
+    "Could not prepare the microphone for dictation.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Das Mikrofon konnte für das Diktat nicht vorbereitet werden."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo preparar el micrófono para el dictado."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de préparer le microphone pour la dictée."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ディクテーション用のマイクを準備できませんでした。"
+          }
+        }
+      }
+    },
     "No model chosen — %@ is the one to start with": {
       "extractionState": "manual",
       "localizations": {
