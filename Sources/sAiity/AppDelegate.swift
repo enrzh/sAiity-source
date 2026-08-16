@@ -475,9 +475,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 MainActor.assumeIsolated { self?.capture.applySpeechGapSettings() }
             }
         rebuildMenu()
-        if !dictationHotkeyMonitor.start(onPress: { [weak self] in self?.dictationController.press() },
-                                         onRelease: { [weak self] in self?.dictationController.release() }) {
+        if SettingsWindowController.state.dictationEnabled,
+           !dictationHotkeyMonitor.start(onPress: { [weak self] in self?.dictationController.press() },
+                                          onRelease: { [weak self] in self?.dictationController.release() }) {
             NSLog("sAiity dictation: Control monitor unavailable; grant Accessibility access to enable press-to-talk")
+        }
+        NotificationCenter.default.addObserver(forName: .saiityDictationSettingChanged,
+                                               object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if SettingsWindowController.state.dictationEnabled {
+                    _ = self.dictationHotkeyMonitor.start(
+                        onPress: { [weak self] in self?.dictationController.press() },
+                        onRelease: { [weak self] in self?.dictationController.release() })
+                } else {
+                    self.dictationHotkeyMonitor.stop()
+                    self.dictationController.cancel()
+                }
+            }
         }
 
         // Lets the Settings window stop the session and drop loaded models

@@ -157,6 +157,79 @@ struct ModelsView: View {
 
 // MARK: - Appearance
 
+struct DictationView: View {
+    @Bindable var state: AppState
+
+    private var accessibilityGranted: Bool { AXIsProcessTrusted() }
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Press-to-talk dictation", isOn: $state.dictationEnabled)
+                Text("Hold Control while speaking. Release it to transcribe on this Mac and paste the result into the app that currently has focus.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } header: {
+                Text("Dictation")
+            }
+
+            Section {
+                LabeledContent("Gesture") {
+                    Text("Hold Control")
+                        .foregroundStyle(.secondary)
+                }
+                LabeledContent("Microphone") {
+                    Text("Opened only while dictating")
+                        .foregroundStyle(.secondary)
+                }
+                LabeledContent("Processing") {
+                    Text("On this Mac")
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Privacy")
+            } footer: {
+                Text("Dictation is separate from live captions. It never starts the caption service and is not saved as a meeting transcript.")
+                    .font(.caption)
+            }
+
+            Section {
+                if accessibilityGranted {
+                    Label("Accessibility access is enabled", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Label("Accessibility access is required to detect Control globally and paste into the focused app.",
+                          systemImage: "exclamationmark.triangle")
+                        .font(.caption).foregroundStyle(.orange)
+                    Button("Open Accessibility Settings") {
+                        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+                        NSWorkspace.shared.open(url)
+                    }
+                    .controlSize(.small)
+                }
+            } header: {
+                Text("Permissions")
+            }
+
+            Section {
+                HStack(spacing: 12) {
+                    Image(systemName: "rectangle.and.pencil.and.ellipsis")
+                        .font(.title2).foregroundStyle(.tint)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("A small toast confirms each step")
+                            .font(.body.weight(.medium))
+                        Text("Dictating, transcribing, and the final insertion result appear briefly above the bottom edge of the screen.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                Text("Feedback")
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .formStyle(.grouped)
+    }
+}
+
 /// Everything about producing a caption, on one page: which engine, what
 /// language, how it looks, and how to toggle it. Previously this was spread
 /// across four tabs, which made a simple app feel like a control panel.

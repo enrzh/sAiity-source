@@ -17,6 +17,7 @@ extension Notification.Name {
     static let saiityShowAbout = Notification.Name("sAiityShowAbout")
     /// "Include my microphone" changed; a running capture must act on it now.
     static let saiityMicSettingChanged = Notification.Name("sAiityMicSettingChanged")
+    static let saiityDictationSettingChanged = Notification.Name("sAiityDictationSettingChanged")
 }
 
 /// Shared so non-UI types can report disk usage honestly.
@@ -210,6 +211,17 @@ final class AppState {
             // microphone immediately — leaving the input open after the user
             // said stop is the one thing this app cannot be seen doing.
             NotificationCenter.default.post(name: .saiityMicSettingChanged, object: nil)
+        }
+    }
+
+    /// Press-to-talk is separate from live captions. It is enabled by default,
+    /// but can be disabled without changing any caption or microphone-mixing
+    /// preference.
+    var dictationEnabled = UserDefaults.standard.object(forKey: "dictationEnabled") as? Bool ?? true {
+        didSet {
+            guard dictationEnabled != oldValue else { return }
+            UserDefaults.standard.set(dictationEnabled, forKey: "dictationEnabled")
+            NotificationCenter.default.post(name: .saiityDictationSettingChanged, object: nil)
         }
     }
     struct RunningApp: Sendable {
@@ -606,6 +618,8 @@ enum SettingsWindowController {
         let pages: [(String, String, AnyView)] = [
             (String(localized: "Captions"), "captions.bubble",
              AnyView(CaptionsView(state: state))),
+            (String(localized: "Dictation"), "mic",
+             AnyView(DictationView(state: state))),
             (String(localized: "Models"), "shippingbox",
              AnyView(ModelsView(state: state))),
             (String(localized: "Transcripts"), "text.document",
