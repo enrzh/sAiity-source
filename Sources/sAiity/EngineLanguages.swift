@@ -20,6 +20,7 @@ extension TranslationEngine {
     var languages: any TranslationLanguageProvider.Type {
         switch self {
         case .madlad: return MADLADLanguageProvider.self
+        case .hyMT2: return HyMT2LanguageProvider.self
         case .qwen: return LLMLanguageProvider.self
         }
     }
@@ -86,5 +87,77 @@ enum LLMLanguageProvider: TranslationLanguageProvider {
             return name
         }
         return nil
+    }
+}
+
+// MARK: - Hy-MT2
+
+/// The language variants named by Tencent's Hy-MT2 model card.
+///
+/// Hy-MT2 wants English language names in its user turn, not BCP-47 codes. The
+/// map is intentionally finite: falling back to MADLAD's much larger language
+/// catalogue would make the picker promise translations this model was not
+/// trained or tested for.
+enum HyMT2LanguageProvider: TranslationLanguageProvider {
+    static let names: [String: String] = [
+        "zh": "Chinese",
+        "en": "English",
+        "fr": "French",
+        "pt": "Portuguese",
+        "es": "Spanish",
+        "ja": "Japanese",
+        "tr": "Turkish",
+        "ru": "Russian",
+        "ar": "Arabic",
+        "ko": "Korean",
+        "th": "Thai",
+        "it": "Italian",
+        "de": "German",
+        "vi": "Vietnamese",
+        "ms": "Malay",
+        "id": "Indonesian",
+        "tl": "Filipino",
+        "hi": "Hindi",
+        "zh-Hant": "Traditional Chinese",
+        "pl": "Polish",
+        "cs": "Czech",
+        "nl": "Dutch",
+        "km": "Khmer",
+        "my": "Burmese",
+        "fa": "Persian",
+        "gu": "Gujarati",
+        "ur": "Urdu",
+        "te": "Telugu",
+        "mr": "Marathi",
+        "he": "Hebrew",
+        "bn": "Bengali",
+        "ta": "Tamil",
+        "bo": "Tibetan",
+        "kk": "Kazakh",
+        "mn": "Mongolian",
+        "ug": "Uyghur",
+        "yue": "Cantonese",
+    ]
+
+    static func supportedCanonicalCodes() async -> Set<String> {
+        Set(names.keys)
+    }
+
+    static func nativeCode(for canonical: String) -> String? {
+        let normalized = canonical.replacingOccurrences(of: "_", with: "-")
+        if let exact = names[normalized] { return exact }
+
+        let parts = normalized.split(separator: "-").map(String.init)
+        guard let base = parts.first else { return nil }
+
+        // Traditional Chinese is the only script-specific entry. Regional
+        // Chinese identifiers should retain that distinction in the prompt.
+        if base == "zh", parts.dropFirst().contains(where: { $0.caseInsensitiveCompare("Hant") == .orderedSame }) {
+            return names["zh-Hant"]
+        }
+        if base == "zh", parts.dropFirst().contains(where: { ["TW", "HK", "MO"].contains($0.uppercased()) }) {
+            return names["zh-Hant"]
+        }
+        return names[base]
     }
 }

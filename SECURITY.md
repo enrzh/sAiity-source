@@ -8,10 +8,14 @@ precise about.
 
 - **System audio**, via ScreenCaptureKit. macOS gates this behind Screen
   Recording permission — there is no audio-only permission to ask for, which is
-  why the app requests something that sounds broader than what it does. There
-  are no `AVCaptureDevice` or `AVAudioEngine` call sites in the source: the
-  microphone is never opened, and `Info.plist` deliberately declares no camera
-  or microphone usage strings.
+  why the app requests something that sounds broader than what it does.
+- **The microphone**, only through explicit user actions. The optional
+  **Include my microphone** caption setting requests microphone access and
+  mixes the user's side of a call into recognition. Press-to-talk dictation
+  opens a separate `AVAudioEngine` session only while the configured key is
+  held. Both paths stop and release the microphone when their session ends;
+  dictation and caption mixing cannot own it at the same time. `Info.plist`
+  declares the microphone usage description for these opt-in paths.
 - **huggingface.co**, once per model, to download weights. Nothing else is
   fetched at runtime except the update feed, if you switch update checks on.
 - **The local filesystem**, under
@@ -34,7 +38,7 @@ that nothing leaves the device should not phone home before being asked.
 If you find something, please report it privately first rather than opening a
 public issue: **[aiity.de](https://aiity.de)**.
 
-Useful in a report: macOS version, whether the build was your own or notarised,
+Useful in a report: macOS version, whether the build was your own or signed/notarised,
 and the smallest reproduction you can manage. Crash reports from
 `~/Library/Logs/DiagnosticReports/` are welcome and contain no caption text.
 
@@ -59,6 +63,9 @@ This has not been audited. One adversarial review has been run over the app as a
 whole and its findings fixed, and the security-relevant reasoning is written down
 in the source, but that is a different and much weaker claim than an audit.
 
-There is currently no Developer ID certificate on the project, so builds are not
-notarised and Gatekeeper will object. Do not run a "sAiity" binary you did not
-build yourself from this source.
+The repository contains no Developer ID certificate or notarization credentials.
+The build script signs with an identity available in your local keychain when one
+exists; signing is not the same as notarization. Treat an artifact as notarized
+only after that exact file has passed notarization and has a valid staple. Do not
+run a "sAiity" binary you did not build yourself from this source or obtain from
+the signed release channel.

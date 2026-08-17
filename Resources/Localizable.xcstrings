@@ -5618,31 +5618,31 @@
         }
       }
     },
-    "MIT licensed. On-device live subtitles.": {
+    "On-device live subtitles.": {
       "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "MIT-lizenziert. Live-Untertitel direkt auf dem Gerät."
+            "value": "Live-Untertitel direkt auf dem Gerät."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Con licencia MIT. Subtítulos en vivo en el dispositivo."
+            "value": "Subtítulos en vivo en el dispositivo."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Sous licence MIT. Sous-titres en direct sur l'appareil."
+            "value": "Sous-titres en direct sur l’appareil."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "MITライセンス。オンデバイスのライブ字幕。"
+            "value": "オンデバイスのライブ字幕。"
           }
         }
       }
@@ -6204,9 +6204,12 @@
       }
     },
     "Accessibility access is enabled": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Bedienungshilfen aktiviert" } }, "es": { "stringUnit": { "state": "translated", "value": "Acceso a Accesibilidad activado" } }, "fr": { "stringUnit": { "state": "translated", "value": "Accès à l’accessibilité activé" } }, "ja": { "stringUnit": { "state": "translated", "value": "アクセシビリティアクセスが有効です" } } } },
-    "Accessibility access is required to detect Control globally and paste into the focused app.": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Bedienungshilfen werden benötigt, um Control systemweit zu erkennen und in die aktive App einzufügen." } }, "es": { "stringUnit": { "state": "translated", "value": "Se necesita Accesibilidad para detectar Control globalmente y pegar en la app activa." } }, "fr": { "stringUnit": { "state": "translated", "value": "L’accès à l’accessibilité est requis pour détecter Contrôle et coller dans l’app active." } }, "ja": { "stringUnit": { "state": "translated", "value": "Controlキーをシステム全体で検出し、アクティブなアプリに貼り付けるにはアクセシビリティアクセスが必要です。" } } } },
+    "Accessibility": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Bedienungshilfen" } }, "es": { "stringUnit": { "state": "translated", "value": "Accesibilidad" } }, "fr": { "stringUnit": { "state": "translated", "value": "Accessibilité" } }, "ja": { "stringUnit": { "state": "translated", "value": "アクセシビリティ" } } } },
+    "After granting access, quit and reopen sAiity.": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Beende sAiity nach dem Erteilen des Zugriffs und öffne die App erneut." } }, "es": { "stringUnit": { "state": "translated", "value": "Después de conceder el acceso, cierra sAiity y vuelve a abrirlo." } }, "fr": { "stringUnit": { "state": "translated", "value": "Après avoir accordé l’accès, quittez puis rouvrez sAiity." } }, "ja": { "stringUnit": { "state": "translated", "value": "アクセスを許可した後、sAiityを終了して再度開いてください。" } } } },
+    "Allow…": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Erlauben …" } }, "es": { "stringUnit": { "state": "translated", "value": "Permitir…" } }, "fr": { "stringUnit": { "state": "translated", "value": "Autoriser…" } }, "ja": { "stringUnit": { "state": "translated", "value": "許可…" } } } },
+    "Allowed": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Erlaubt" } }, "es": { "stringUnit": { "state": "translated", "value": "Permitido" } }, "fr": { "stringUnit": { "state": "translated", "value": "Autorisé" } }, "ja": { "stringUnit": { "state": "translated", "value": "許可済み" } } } },
     "Dictation is separate from live captions. It never starts the caption service and is not saved as a meeting transcript.": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Das Diktat ist von den Live-Untertiteln getrennt. Es startet den Untertiteldienst nicht und wird nicht als Gesprächstranskript gespeichert." } }, "es": { "stringUnit": { "state": "translated", "value": "El dictado es independiente de los subtítulos en directo. No inicia el servicio de subtítulos ni se guarda como transcripción de una reunión." } }, "fr": { "stringUnit": { "state": "translated", "value": "La dictée est séparée des sous-titres en direct. Elle ne démarre pas le service de sous-titres et n’est pas enregistrée comme transcription de réunion." } }, "ja": { "stringUnit": { "state": "translated", "value": "音声入力はライブ字幕とは別の機能です。字幕サービスを開始せず、会議の文字起こしとして保存されません。" } } } },
-    "Dictating, transcribing, and the final insertion result appear briefly above the bottom edge of the screen.": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Diktat, Transkription und das Ergebnis des Einfügens erscheinen kurz über dem unteren Bildschirmrand." } }, "es": { "stringUnit": { "state": "translated", "value": "El dictado, la transcripción y el resultado de la inserción aparecen brevemente sobre el borde inferior de la pantalla." } }, "fr": { "stringUnit": { "state": "translated", "value": "La dictée, la transcription et le résultat de l’insertion apparaissent brièvement au-dessus du bord inférieur de l’écran." } }, "ja": { "stringUnit": { "state": "translated", "value": "音声入力、文字起こし、挿入結果は画面下端の上に短時間表示されます。" } } } },
+    "Dictating, transcribing, and the clipboard result appear briefly above the bottom edge of the screen.": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Diktat, Transkription und das Ergebnis in der Zwischenablage erscheinen kurz über dem unteren Bildschirmrand." } }, "es": { "stringUnit": { "state": "translated", "value": "El dictado, la transcripción y el resultado del portapapeles aparecen brevemente sobre el borde inferior de la pantalla." } }, "fr": { "stringUnit": { "state": "translated", "value": "La dictée, la transcription et le résultat dans le presse-papiers apparaissent brièvement au-dessus du bord inférieur de l’écran." } }, "ja": { "stringUnit": { "state": "translated", "value": "音声入力、文字起こし、クリップボードの結果は画面下端の上に短時間表示されます。" } } } },
     "Dictation": {
       "extractionState": "manual",
       "localizations": {
@@ -6216,6 +6219,7 @@
         "ja": { "stringUnit": { "state": "translated", "value": "音声入力" } }
       }
     },
+    "Dictation shortcut": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Diktat-Tastenkürzel" } }, "es": { "stringUnit": { "state": "translated", "value": "Atajo de dictado" } }, "fr": { "stringUnit": { "state": "translated", "value": "Raccourci de dictée" } }, "ja": { "stringUnit": { "state": "translated", "value": "音声入力ショートカット" } } } },
     "Feedback": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Feedback" } }, "es": { "stringUnit": { "state": "translated", "value": "Información" } }, "fr": { "stringUnit": { "state": "translated", "value": "Retour" } }, "ja": { "stringUnit": { "state": "translated", "value": "フィードバック" } } } },
     "Gesture": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Geste" } }, "es": { "stringUnit": { "state": "translated", "value": "Gesto" } }, "fr": { "stringUnit": { "state": "translated", "value": "Geste" } }, "ja": { "stringUnit": { "state": "translated", "value": "ジェスチャー" } } } },
     "Hold Control": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Control gedrückt halten" } }, "es": { "stringUnit": { "state": "translated", "value": "Mantener pulsada Control" } }, "fr": { "stringUnit": { "state": "translated", "value": "Maintenir Contrôle" } }, "ja": { "stringUnit": { "state": "translated", "value": "Controlキーを押す" } } } },
@@ -6228,14 +6232,19 @@
         "ja": { "stringUnit": { "state": "translated", "value": "Controlキーを押して音声入力" } }
       }
     },
-    "Hold Control while speaking. Release it to transcribe on this Mac and paste the result into the app that currently has focus.": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Halte Control beim Sprechen gedrückt. Lass die Taste los, um auf diesem Mac zu transkribieren und das Ergebnis in die aktive App einzufügen." } }, "es": { "stringUnit": { "state": "translated", "value": "Mantén pulsada Control mientras hablas. Suéltala para transcribir en este Mac y pegar el resultado en la app activa." } }, "fr": { "stringUnit": { "state": "translated", "value": "Maintenez Contrôle pendant que vous parlez. Relâchez-la pour transcrire sur ce Mac et coller le résultat dans l’app active." } }, "ja": { "stringUnit": { "state": "translated", "value": "話している間Controlキーを押し続けます。離すとこのMacで文字起こしし、アクティブなアプリに結果を貼り付けます。" } } } },
+    "Hold %@ to Dictate": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "%@ zum Diktieren gedrückt halten" } }, "es": { "stringUnit": { "state": "translated", "value": "Mantén pulsado %@ para dictar" } }, "fr": { "stringUnit": { "state": "translated", "value": "Maintenez %@ pour dicter" } }, "ja": { "stringUnit": { "state": "translated", "value": "%@を押して音声入力" } } } },
+    "Hold your shortcut while speaking. Release it to transcribe on this Mac and copy the result to the clipboard.": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Halte dein Tastenkürzel beim Sprechen gedrückt. Lass es los, um auf diesem Mac zu transkribieren und das Ergebnis in die Zwischenablage zu kopieren." } }, "es": { "stringUnit": { "state": "translated", "value": "Mantén pulsado tu atajo mientras hablas. Suéltalo para transcribir en este Mac y copiar el resultado al portapapeles." } }, "fr": { "stringUnit": { "state": "translated", "value": "Maintenez votre raccourci pendant que vous parlez. Relâchez-le pour transcrire sur ce Mac et copier le résultat dans le presse-papiers." } }, "ja": { "stringUnit": { "state": "translated", "value": "話している間ショートカットを押し続けます。離すとこのMacで文字起こしし、結果をクリップボードにコピーします。" } } } },
     "Microphone": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Mikrofon" } }, "es": { "stringUnit": { "state": "translated", "value": "Micrófono" } }, "fr": { "stringUnit": { "state": "translated", "value": "Microphone" } }, "ja": { "stringUnit": { "state": "translated", "value": "マイク" } } } },
+    "Input Monitoring": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Eingabeüberwachung" } }, "es": { "stringUnit": { "state": "translated", "value": "Monitorización de entrada" } }, "fr": { "stringUnit": { "state": "translated", "value": "Surveillance de l’entrée" } }, "ja": { "stringUnit": { "state": "translated", "value": "入力監視" } } } },
     "On this Mac": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Auf diesem Mac" } }, "es": { "stringUnit": { "state": "translated", "value": "En este Mac" } }, "fr": { "stringUnit": { "state": "translated", "value": "Sur ce Mac" } }, "ja": { "stringUnit": { "state": "translated", "value": "このMac上" } } } },
     "Opened only while dictating": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Nur während des Diktats geöffnet" } }, "es": { "stringUnit": { "state": "translated", "value": "Se abre solo durante el dictado" } }, "fr": { "stringUnit": { "state": "translated", "value": "Ouvert uniquement pendant la dictée" } }, "ja": { "stringUnit": { "state": "translated", "value": "音声入力中のみ使用" } } } },
     "Open Accessibility Settings": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Bedienungshilfen öffnen" } }, "es": { "stringUnit": { "state": "translated", "value": "Abrir ajustes de Accesibilidad" } }, "fr": { "stringUnit": { "state": "translated", "value": "Ouvrir les réglages d’accessibilité" } }, "ja": { "stringUnit": { "state": "translated", "value": "アクセシビリティ設定を開く" } } } },
     "Permissions": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Berechtigungen" } }, "es": { "stringUnit": { "state": "translated", "value": "Permisos" } }, "fr": { "stringUnit": { "state": "translated", "value": "Autorisations" } }, "ja": { "stringUnit": { "state": "translated", "value": "権限" } } } },
     "Press-to-talk dictation": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Diktat per Tastendruck" } }, "es": { "stringUnit": { "state": "translated", "value": "Dictado pulsar para hablar" } }, "fr": { "stringUnit": { "state": "translated", "value": "Dictée push-to-talk" } }, "ja": { "stringUnit": { "state": "translated", "value": "プッシュトゥトーク音声入力" } } } },
+    "Press the full chord, then release…": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Vollständiges Tastenkürzel drücken und loslassen …" } }, "es": { "stringUnit": { "state": "translated", "value": "Pulsa el atajo completo y suéltalo…" } }, "fr": { "stringUnit": { "state": "translated", "value": "Appuyez sur le raccourci complet, puis relâchez…" } }, "ja": { "stringUnit": { "state": "translated", "value": "ショートカット全体を押してから離してください…" } } } },
+    "Press to record a new dictation shortcut. Press Escape to cancel.": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Drücken, um ein neues Diktat-Tastenkürzel aufzunehmen. Escape bricht ab." } }, "es": { "stringUnit": { "state": "translated", "value": "Pulsa para grabar un nuevo atajo de dictado. Pulsa Escape para cancelar." } }, "fr": { "stringUnit": { "state": "translated", "value": "Appuyez pour enregistrer un nouveau raccourci de dictée. Appuyez sur Échap pour annuler." } }, "ja": { "stringUnit": { "state": "translated", "value": "押して新しい音声入力ショートカットを記録します。Escapeキーでキャンセルします。" } } } },
     "Processing": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Verarbeitung" } }, "es": { "stringUnit": { "state": "translated", "value": "Procesamiento" } }, "fr": { "stringUnit": { "state": "translated", "value": "Traitement" } }, "ja": { "stringUnit": { "state": "translated", "value": "処理" } } } },
+    "Required to detect your dictation shortcut in other apps.": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Erforderlich, um dein Diktat-Tastenkürzel in anderen Apps zu erkennen." } }, "es": { "stringUnit": { "state": "translated", "value": "Necesario para detectar el atajo de dictado en otras apps." } }, "fr": { "stringUnit": { "state": "translated", "value": "Requis pour détecter votre raccourci de dictée dans les autres apps." } }, "ja": { "stringUnit": { "state": "translated", "value": "ほかのアプリで音声入力ショートカットを検出するために必要です。" } } } },
     "A small toast confirms each step": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Eine kleine Einblendung bestätigt jeden Schritt" } }, "es": { "stringUnit": { "state": "translated", "value": "Un aviso breve confirma cada paso" } }, "fr": { "stringUnit": { "state": "translated", "value": "Une petite alerte confirme chaque étape" } }, "ja": { "stringUnit": { "state": "translated", "value": "小さな通知で各ステップを確認できます" } } } },
     "Captions are already running.": {
       "extractionState": "manual",
@@ -6244,6 +6253,24 @@
         "es": { "stringUnit": { "state": "translated", "value": "Los subtítulos ya están activos." } },
         "fr": { "stringUnit": { "state": "translated", "value": "Les sous-titres sont déjà actifs." } },
         "ja": { "stringUnit": { "state": "translated", "value": "字幕はすでに実行中です。" } }
+      }
+    },
+    "Ready to Dictate · Hold %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Bereit zum Diktieren · %@ gedrückt halten" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Listo para dictar · Mantén pulsado %@" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Prêt à dicter · Maintenez %@" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "音声入力の準備完了 · %@を押してください" } }
+      }
+    },
+    "Allow Input Monitoring for Dictation": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Eingabeüberwachung für Diktat erlauben" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Permite la monitorización de entrada para dictar" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Autorisez la surveillance de l’entrée pour dicter" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "音声入力のために入力監視を許可" } }
       }
     },
     "Dictating…": {
@@ -6264,15 +6291,6 @@
         "ja": { "stringUnit": { "state": "translated", "value": "文字起こし中…" } }
       }
     },
-    "Inserted": {
-      "extractionState": "manual",
-      "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Eingefügt" } },
-        "es": { "stringUnit": { "state": "translated", "value": "Insertado" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Inséré" } },
-        "ja": { "stringUnit": { "state": "translated", "value": "挿入しました" } }
-      }
-    },
     "Copied to Clipboard": {
       "extractionState": "manual",
       "localizations": {
@@ -6280,6 +6298,42 @@
         "es": { "stringUnit": { "state": "translated", "value": "Copiado al portapapeles" } },
         "fr": { "stringUnit": { "state": "translated", "value": "Copié dans le presse-papiers" } },
         "ja": { "stringUnit": { "state": "translated", "value": "クリップボードにコピーしました" } }
+      }
+    },
+    "Inserted and copied": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Eingefügt und kopiert" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Insertado y copiado" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Inséré et copié" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "挿入してコピーしました" } }
+      }
+    },
+    "Hold your shortcut while speaking. Release it to transcribe on this Mac, then paste into the focused text field or copy the result to the clipboard.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Halte dein Kürzel beim Sprechen gedrückt. Lass es los, um auf diesem Mac zu transkribieren und das Ergebnis in das fokussierte Textfeld einzufügen oder in die Zwischenablage zu kopieren." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Mantén pulsado el atajo mientras hablas. Suéltalo para transcribir en este Mac y pegar el resultado en el campo de texto activo o copiarlo al portapapeles." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Maintenez le raccourci enfoncé pendant que vous parlez. Relâchez-le pour transcrire sur ce Mac, puis insérer le résultat dans le champ de texte actif ou le copier dans le presse-papiers." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "話している間ショートカットを押し続けます。離すとこのMacで文字起こしを行い、フォーカス中のテキストフィールドに挿入するか、結果をクリップボードにコピーします。" } }
+      }
+    },
+    "Required to paste dictation into the focused text field.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Erforderlich, um das Diktat in das fokussierte Textfeld einzufügen." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Necesario para pegar el dictado en el campo de texto activo." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Requis pour insérer la dictée dans le champ de texte actif." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "フォーカス中のテキストフィールドに音声入力を挿入するために必要です。" } }
+      }
+    },
+    "A short overlay shows dictating, transcribing, and the output above the bottom edge of the screen.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Eine kurze Einblendung zeigt Diktat, Transkription und das Ergebnis über dem unteren Bildschirmrand." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Una breve superposición muestra el dictado, la transcripción y el resultado sobre el borde inferior de la pantalla." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Une courte incrustation affiche la dictée, la transcription et le résultat au-dessus du bord inférieur de l’écran." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "短いオーバーレイで、音声入力、文字起こし、結果を画面下端の上に表示します。" } }
       }
     },
     "No speech detected": {
@@ -12613,6 +12667,68 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "A translation-specialized 1.8B GGUF for the 37 language codes listed by Tencent's model card. Opt-in Q4_K_M download; MADLAD remains the broad-coverage default.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ein auf Übersetzungen spezialisiertes 1,8B-GGUF-Modell für die 37 Sprachcodes aus Tencent's Model Card. Der Q4_K_M-Download ist optional; MADLAD bleibt die Standardauswahl mit breiter Abdeckung."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un GGUF 1,8B especializado en traducción para los 37 códigos de idioma de la ficha del modelo de Tencent. Descarga Q4_K_M opcional; MADLAD sigue siendo la opción predeterminada de amplia cobertura."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un GGUF 1,8B spécialisé dans la traduction pour les 37 codes de langue listés dans la fiche du modèle de Tencent. Téléchargement Q4_K_M facultatif ; MADLAD reste le choix par défaut à large couverture."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tencentのモデルカードに記載された37言語コードに対応する、翻訳特化型の1.8B GGUFモデルです。Q4_K_Mは任意でダウンロードでき、MADLADが幅広い言語をカバーするデフォルトです。"
+          }
+        }
+      }
+    },
+    "Apache-2.0 (Tencent Hy-MT2)": {
+      "extractionState": "manual",
+      "shouldTranslate": false
+    },
+    "No translator chosen yet. %@ is the one to start with: the broad-coverage default and a measured fast path. Download it under Models.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Noch kein Übersetzer gewählt. %@ ist der Einstieg: die Standardauswahl mit breiter Abdeckung und ein gemessener schneller Pfad. Lade ihn unter Modelle."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aún no has elegido un traductor. %@ es el indicado para empezar: la opción predeterminada de amplia cobertura y una ruta rápida medida. Descárgalo en Modelos."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucun traducteur choisi pour l'instant. %@ est le bon point de départ : le choix par défaut à large couverture et une option rapide mesurée. Téléchargez-le sous Modèles."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "翻訳エンジンがまだ選択されていません。%@は幅広い言語をカバーするデフォルトで、実測でも高速な選択肢です。「モデル」からダウンロードしてください。"
           }
         }
       }

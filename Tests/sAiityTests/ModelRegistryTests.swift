@@ -33,7 +33,7 @@ struct ModelRegistryTests {
 
         // MADLAD is the reason this test exists: it was downloadable, 1.86 GB,
         // and had no row anywhere in the app.
-        for expected in ["asr.nemotron", "asr.nemotron.fast", "asr.parakeetEou", "mt.madlad"] {
+        for expected in ["asr.nemotron", "asr.nemotron.fast", "asr.parakeetEou", "mt.madlad", "mt.hymt2.1.8b.q4"] {
             #expect(ids.contains(expected), "missing asset \(expected)")
         }
         // Whisper was cut: its translate mode stopped emitting finals ~25 s into
@@ -218,10 +218,12 @@ struct DownloadCoordinatorTests {
     func idsAgreeWithDescriptors() {
         #expect(AssetID.parakeetEou == "asr.parakeetEou")
         #expect(AssetID.madlad == "mt.madlad")
+        #expect(AssetID.hyMT2 == "mt.hymt2.1.8b.q4")
         #expect(AssetID.llm(file: "x.gguf") == "mt.llm.x.gguf")
         let ids = Set(ModelRegistry.snapshot().map(\.asset.id))
         #expect(ids.contains(AssetID.parakeetEou))
         #expect(ids.contains(AssetID.madlad))
+        #expect(ids.contains(AssetID.hyMT2))
     }
 }
 

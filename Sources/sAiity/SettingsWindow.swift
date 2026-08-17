@@ -18,6 +18,7 @@ extension Notification.Name {
     /// "Include my microphone" changed; a running capture must act on it now.
     static let saiityMicSettingChanged = Notification.Name("sAiityMicSettingChanged")
     static let saiityDictationSettingChanged = Notification.Name("sAiityDictationSettingChanged")
+    static let saiityDictationShortcutRecordingChanged = Notification.Name("sAiityDictationShortcutRecordingChanged")
 }
 
 /// Shared so non-UI types can report disk usage honestly.
@@ -221,6 +222,13 @@ final class AppState {
         didSet {
             guard dictationEnabled != oldValue else { return }
             UserDefaults.standard.set(dictationEnabled, forKey: "dictationEnabled")
+            NotificationCenter.default.post(name: .saiityDictationSettingChanged, object: nil)
+        }
+    }
+    var dictationChord = DictationChord.current {
+        didSet {
+            guard dictationChord != oldValue else { return }
+            DictationChord.current = dictationChord
             NotificationCenter.default.post(name: .saiityDictationSettingChanged, object: nil)
         }
     }
@@ -575,6 +583,46 @@ extension NSWindow {
     }
 }
 
+/// The macOS 26 toolbar is rendered as Liquid Glass over the desktop. That is
+/// a poor background for a preferences window whose content is intentionally
+/// opaque and dark: inactive labels disappear on a light desktop. AppKit does
+/// not expose a toolbar-background color, so this view supplies the one solid
+/// surface behind the native toolbar items while still following light/dark
+/// appearance changes.
+final class SettingsWindowToolbarBackdrop: NSView {
+    override var isOpaque: Bool { true }
+
+    // This view only supplies pixels. Let AppKit's native titlebar receive
+    // clicks and drags instead of swallowing window movement.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        autoresizingMask = [.width, .height]
+        updateBackgroundColor()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        wantsLayer = true
+        autoresizingMask = [.width, .height]
+        updateBackgroundColor()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateBackgroundColor()
+    }
+
+    private func updateBackgroundColor() {
+        let appearance = window?.effectiveAppearance ?? effectiveAppearance
+        appearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        }
+    }
+}
+
 /// Puts the selected pane's name in the title bar, the way every Apple
 /// preferences window does.
 ///
@@ -595,6 +643,32 @@ enum SettingsWindowController {
     private static var window: NSWindow?
     /// Shared, so the menu bar can raise a specific sheet in this window.
     static let state = AppState()
+
+    private static func installToolbarBackdrop(in window: NSWindow) {
+        guard let root = window.contentView?.superview else { return }
+
+        func firstDescendant(of view: NSView, matching name: String) -> NSView? {
+            for child in view.subviews {
+                if String(describing: type(of: child)) == name { return child }
+                if let match = firstDescendant(of: child, matching: name) { return match }
+            }
+            return nil
+        }
+
+        // This is feature detection for AppKit's titlebar host, not a
+        // dependency on its private implementation type: when the host is
+        // absent on an older/newer OS, the native toolbar remains untouched.
+        guard let titlebar = firstDescendant(of: root, matching: "NSTitlebarView"),
+              !titlebar.subviews.contains(where: { $0 is SettingsWindowToolbarBackdrop }) else {
+            return
+        }
+        let backdrop = SettingsWindowToolbarBackdrop(frame: titlebar.bounds)
+        if let first = titlebar.subviews.first {
+            titlebar.addSubview(backdrop, positioned: .below, relativeTo: first)
+        } else {
+            titlebar.addSubview(backdrop)
+        }
+    }
 
     static func show() {
         if let w = window {
@@ -644,6 +718,16 @@ enum SettingsWindowController {
             tabs.addTabViewItem(item)
         }
         w.contentViewController = tabs
+        // `NSTabViewController` installs its toolbar when it becomes the
+        // window's content controller. A clear window background otherwise
+        // leaves the toolbar sampling the desktop, so a light desktop can
+        // erase the inactive labels. Preference chrome gives the toolbar its
+        // own readable surface, and the labels are part of the navigation —
+        // they must not disappear through a user display-mode change.
+        w.toolbarStyle = .preference
+        w.titlebarAppearsTransparent = false
+        w.toolbar?.displayMode = .iconAndLabel
+        w.toolbar?.allowsDisplayModeCustomization = false
         // AFTER the assignment, and not optional: setting a tab controller as
         // contentViewController resizes the window to that controller's own
         // fitting size — measured at 500×500 here, which clipped ~200 pt off
@@ -653,12 +737,14 @@ enum SettingsWindowController {
         w.contentMinSize = NSSize(width: 720, height: 480)
         w.title = tabs.tabViewItems.first?.label ?? "sAiity"
         w.makeVibrant()
+        installToolbarBackdrop(in: w)
         w.center()
         window = w
         // Deliberate: this is the one window the user explicitly asked for, so
         // unlike the caption bubble it may take focus.
         NSApp.activate(ignoringOtherApps: true)
         w.makeKeyAndOrderFront(nil)
+        installToolbarBackdrop(in: w)
         Task { await state.refresh() }
     }
 }

@@ -141,5 +141,6 @@ enum AssetID {
     }
     static let parakeetEou = "asr.parakeetEou"
     static let madlad = "mt.madlad"
+    static let hyMT2 = "mt.hymt2.1.8b.q4"
     static func llm(file: String) -> String { "mt.llm.\(file)" }
 }

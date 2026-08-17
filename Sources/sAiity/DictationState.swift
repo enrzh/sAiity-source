@@ -3,11 +3,24 @@ import Foundation
 /// The externally visible lifecycle of a short press-to-talk session.
 enum DictationPhase: Equatable, Sendable {
     case idle
+    case waitingForInputMonitoring
+    case ready
     case dictating
     case transcribing
     case inserting
     case result(String)
     case failure(String)
+}
+
+extension DictationPhase {
+    var automaticallyDismissesToast: Bool {
+        switch self {
+        case .result, .failure:
+            true
+        default:
+            false
+        }
+    }
 }
 
 /// Small, value-type state machine for Control press/release transitions.

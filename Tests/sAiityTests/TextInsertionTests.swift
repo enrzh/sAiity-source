@@ -6,53 +6,73 @@ import Testing
 @MainActor
 @Suite struct TextInsertionTests {
     final class FakePasteboard: DictationPasteboard {
-        var items: [DictationPasteboardItem]
+        var value: String?
 
-        init(items: [DictationPasteboardItem]) {
-            self.items = items
-        }
+        init(value: String? = nil) { self.value = value }
 
         func setString(_ value: String) -> Bool {
-            items = [DictationPasteboardItem(representations: ["public.utf8-plain-text": Data(value.utf8)])]
+            self.value = value
             return true
         }
-
-        func restore(_ snapshot: [DictationPasteboardItem]) {
-            items = snapshot
-        }
     }
 
-    @Test("insertion restores every original pasteboard representation")
-    func preservesPasteboard() {
-        let original = [DictationPasteboardItem(representations: [
-            "public.utf8-plain-text": Data("old".utf8),
-            "public.rtf": Data([1, 2, 3])
-        ])]
-        let board = FakePasteboard(items: original)
-        var pasted = false
-        let inserter = TextInserter(pasteboard: board,
-                                     accessibilityTrusted: { true },
-                                     sendPaste: { pasted = true; return true },
-                                     waitForPaste: {})
+    @Test("a focused editable field receives dictation and the clipboard keeps a copy")
+    func insertsIntoFocusedEditableFieldAndKeepsCopy() {
+        let board = FakePasteboard(value: "previous clipboard")
+        var pasteSent = false
+        let inserter = TextInserter(
+            pasteboard: board,
+            accessibilityTrusted: { true },
+            focusedRole: { "AXTextArea" },
+            sendPaste: {
+                pasteSent = true
+                return true
+            })
 
-        let result = inserter.insert("new text")
+        let result = inserter.insert(" dictated result ")
 
-        #expect(result.outcome == .inserted)
-        #expect(pasted)
-        #expect(board.items == original)
+        #expect(result.outcome == .insertedAndCopied)
+        #expect(pasteSent)
+        #expect(board.value == "dictated result")
     }
 
-    @Test("without accessibility, dictated text remains copied")
-    func fallsBackToCopy() {
-        let board = FakePasteboard(items: [])
-        let inserter = TextInserter(pasteboard: board,
-                                    accessibilityTrusted: { false },
-                                    sendPaste: { false },
-                                    waitForPaste: {})
+    @Test("without a focused editable field, dictated text is copied without a paste")
+    func noFocusedEditableFieldFallsBackToCopy() {
+        let board = FakePasteboard()
+        var pasteSent = false
+        let inserter = TextInserter(
+            pasteboard: board,
+            accessibilityTrusted: { true },
+            focusedRole: { nil },
+            sendPaste: {
+                pasteSent = true
+                return true
+            })
 
         let result = inserter.insert("keep this")
 
         #expect(result.outcome == .copied)
-        #expect(String(data: board.items[0].representations["public.utf8-plain-text"]!, encoding: .utf8) == "keep this")
+        #expect(!pasteSent)
+        #expect(board.value == "keep this")
+    }
+
+    @Test("without accessibility permission, dictated text is copied without a paste")
+    func withoutAccessibilityFallsBackToCopy() {
+        let board = FakePasteboard()
+        var pasteSent = false
+        let inserter = TextInserter(
+            pasteboard: board,
+            accessibilityTrusted: { false },
+            focusedRole: { "AXTextField" },
+            sendPaste: {
+                pasteSent = true
+                return true
+            })
+
+        let result = inserter.insert("keep this")
+
+        #expect(result.outcome == .copied)
+        #expect(!pasteSent)
+        #expect(board.value == "keep this")
     }
 }

@@ -72,6 +72,27 @@ final class DictationController {
         self.onPhaseChanged = onPhaseChanged
     }
 
+    /// Marks the global shortcut as available without opening the microphone.
+    func markReady() {
+        guard !state.isActive else { return }
+        phase = .ready
+    }
+
+    /// Returns to the persistent idle feedback after a transient result or
+    /// error. A new press, cancellation, or permission state wins if it landed
+    /// while the feedback was visible.
+    func markReadyAfterFeedback() {
+        guard !state.isActive, phase.automaticallyDismissesToast else { return }
+        phase = .ready
+    }
+
+    /// Keeps the missing global-key permission visible instead of making the
+    /// shortcut look dead while the monitor retries in the background.
+    func markWaitingForInputMonitoring() {
+        guard !state.isActive else { return }
+        phase = .waitingForInputMonitoring
+    }
+
     func press() {
         guard !state.isActive else { return }
         guard !captionsActive() else {
@@ -158,6 +179,7 @@ final class DictationController {
             if phase == .transcribing { phase = .idle }
             return
         }
+        await backend.flushPending()
         await backend.stop()
         guard session == generation else { return }
         self.backend = nil
@@ -170,8 +192,8 @@ final class DictationController {
         phase = .inserting
         let result = inserter.insert(text)
         switch result.outcome {
-        case .inserted:
-            phase = .result(String(localized: "Inserted"))
+        case .insertedAndCopied:
+            phase = .result(String(localized: "Inserted and copied"))
         case .copied:
             phase = .result(String(localized: "Copied to Clipboard"))
         }

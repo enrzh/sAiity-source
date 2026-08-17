@@ -1,16 +1,11 @@
 import AppKit
+import ApplicationServices
 import Carbon.HIToolbox
 import CoreGraphics
 import Foundation
 
-struct DictationPasteboardItem: Equatable {
-    let representations: [String: Data]
-}
-
 protocol DictationPasteboard: AnyObject {
-    var items: [DictationPasteboardItem] { get }
     func setString(_ value: String) -> Bool
-    func restore(_ snapshot: [DictationPasteboardItem])
 }
 
 final class SystemDictationPasteboard: DictationPasteboard {
@@ -20,82 +15,79 @@ final class SystemDictationPasteboard: DictationPasteboard {
         self.pasteboard = pasteboard
     }
 
-    var items: [DictationPasteboardItem] {
-        pasteboard.pasteboardItems?.map { item in
-            let representations: [String: Data] = Dictionary(uniqueKeysWithValues: item.types.compactMap { type in
-                guard let data = item.data(forType: type) else { return nil }
-                return (type.rawValue, data)
-            })
-            return DictationPasteboardItem(representations: representations)
-        } ?? []
-    }
-
     func setString(_ value: String) -> Bool {
         pasteboard.clearContents()
         return pasteboard.setString(value, forType: .string)
-    }
-
-    func restore(_ snapshot: [DictationPasteboardItem]) {
-        pasteboard.clearContents()
-        let items = snapshot.map { snapshotItem -> NSPasteboardItem in
-            let item = NSPasteboardItem()
-            for (rawType, data) in snapshotItem.representations {
-                item.setData(data, forType: NSPasteboard.PasteboardType(rawValue: rawType))
-            }
-            return item
-        }
-        _ = pasteboard.writeObjects(items)
     }
 }
 
 struct TextInsertionResult: Equatable {
     enum Outcome: Equatable {
-        case inserted
+        case insertedAndCopied
         case copied
     }
 
     let outcome: Outcome
 }
 
-/// Inserts text into the focused app without destroying the user's clipboard.
+/// Puts dictated text on the clipboard and, when the current frontmost app has
+/// an editable focused element, pastes it at that element's insertion point.
 @MainActor
 final class TextInserter {
+    private static let editableRoles: Set<String> = [
+        kAXTextFieldRole as String,
+        kAXTextAreaRole as String,
+        kAXComboBoxRole as String,
+        "AXSearchField",
+    ]
+
     private let pasteboard: any DictationPasteboard
-    private let accessibilityTrusted: () -> Bool
-    private let sendPaste: () -> Bool
-    private let waitForPaste: () -> Void
+    private let accessibilityTrusted: @MainActor () -> Bool
+    private let focusedRole: @MainActor () -> String?
+    private let sendPaste: @MainActor () -> Bool
 
     init(pasteboard: any DictationPasteboard = SystemDictationPasteboard(),
-         accessibilityTrusted: @escaping () -> Bool = AXIsProcessTrusted,
-         sendPaste: @escaping () -> Bool = TextInserter.postPaste,
-         waitForPaste: @escaping () -> Void = TextInserter.waitForPasteConsumption) {
+         accessibilityTrusted: @escaping @MainActor () -> Bool = AXIsProcessTrusted,
+         focusedRole: @escaping @MainActor () -> String? = TextInserter.currentFocusedRole,
+         sendPaste: @escaping @MainActor () -> Bool = TextInserter.postPaste) {
         self.pasteboard = pasteboard
         self.accessibilityTrusted = accessibilityTrusted
+        self.focusedRole = focusedRole
         self.sendPaste = sendPaste
-        self.waitForPaste = waitForPaste
     }
 
     func insert(_ text: String) -> TextInsertionResult {
         let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleaned.isEmpty else { return TextInsertionResult(outcome: .copied) }
-        let original = pasteboard.items
+        _ = pasteboard.setString(cleaned)
 
-        guard pasteboard.setString(cleaned), accessibilityTrusted(), sendPaste() else {
-            _ = pasteboard.setString(cleaned)
+        guard !cleaned.isEmpty,
+              accessibilityTrusted(),
+              let role = focusedRole(),
+              Self.editableRoles.contains(role),
+              sendPaste() else {
             return TextInsertionResult(outcome: .copied)
         }
-
-        waitForPaste()
-        pasteboard.restore(original)
-        return TextInsertionResult(outcome: .inserted)
+        return TextInsertionResult(outcome: .insertedAndCopied)
     }
 
-    func copy(_ text: String) -> TextInsertionResult {
-        _ = pasteboard.setString(text.trimmingCharacters(in: .whitespacesAndNewlines))
-        return TextInsertionResult(outcome: .copied)
+    private static func currentFocusedRole() -> String? {
+        let system = AXUIElementCreateSystemWide()
+        var focusedValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(system,
+                                            kAXFocusedUIElementAttribute as CFString,
+                                            &focusedValue) == .success,
+              let focusedValue else { return nil }
+
+        guard CFGetTypeID(focusedValue) == AXUIElementGetTypeID() else { return nil }
+        let focused = focusedValue as! AXUIElement
+        var roleValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(focused,
+                                            kAXRoleAttribute as CFString,
+                                            &roleValue) == .success else { return nil }
+        return roleValue as? String
     }
 
-    nonisolated private static func postPaste() -> Bool {
+    private static func postPaste() -> Bool {
         guard let source = CGEventSource(stateID: .combinedSessionState),
               let down = CGEvent(keyboardEventSource: source,
                                   virtualKey: CGKeyCode(kVK_ANSI_V),
@@ -103,14 +95,11 @@ final class TextInserter {
               let up = CGEvent(keyboardEventSource: source,
                                virtualKey: CGKeyCode(kVK_ANSI_V),
                                keyDown: false) else { return false }
+
         down.flags = .maskCommand
         up.flags = .maskCommand
         down.post(tap: .cghidEventTap)
         up.post(tap: .cghidEventTap)
         return true
-    }
-
-    nonisolated private static func waitForPasteConsumption() {
-        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
     }
 }

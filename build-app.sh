@@ -110,7 +110,7 @@ fi
 CREDITS="$APP/Contents/Resources/Credits.txt"
 {
     echo "sAiity"
-    echo "Copyright (c) $(date +%Y). MIT licensed — see LICENSE in the source repository."
+    echo "The sAiity application source is public for inspection. No license is granted to copy, modify, or redistribute it."
     echo
     echo "This application includes software from the following projects."
     echo "================================================================"

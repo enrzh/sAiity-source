@@ -45,12 +45,14 @@ import Testing
             self.onChunk = onChunk
         }
         func feed(_ buffer: AVAudioPCMBuffer) {}
+        func flushPending() async {
+            log.values.append("backend.flushPending")
+            onChunk?(TranscriptChunk(text: "hello from dictation", isFinal: true))
+        }
         func stop() async {
             stops += 1
             log.values.append("backend.stop")
-            onChunk?(TranscriptChunk(text: "hello from dictation", isFinal: true))
         }
-        func flushPending() async {}
         func detectedLanguage() async -> String? { nil }
     }
 
@@ -59,7 +61,7 @@ import Testing
 
         func insert(_ text: String) -> TextInsertionResult {
             inserted.append(text)
-            return TextInsertionResult(outcome: .inserted)
+            return TextInsertionResult(outcome: .copied)
         }
     }
 
@@ -80,9 +82,9 @@ import Testing
         controller.release()
         await controller.waitForWorkForTests()
 
-        #expect(log.values == ["capture.stop", "backend.stop"])
+        #expect(log.values == ["capture.stop", "backend.flushPending", "backend.stop"])
         #expect(inserter.inserted == ["hello from dictation"])
-        #expect(controller.phase == .result("Inserted"))
+        #expect(controller.phase == .result("Copied to Clipboard"))
     }
 
     @Test("dictation is rejected while captions are active")
@@ -97,6 +99,58 @@ import Testing
 
         #expect(controller.phase == .failure("Captions are already running."))
         #expect(!controller.isActive)
+    }
+
+    @Test("ready state is visible without opening the microphone")
+    func readyState() {
+        let phases = EventLog()
+        let controller = DictationController(
+            makeBackend: { Issue.record("backend should not be created"); return FakeBackend(log: phases) },
+            capture: FakeCapture(log: phases),
+            inserter: FakeInserter(),
+            captionsActive: { false },
+            onPhaseChanged: { phases.values.append(String(describing: $0)) })
+
+        controller.markReady()
+
+        #expect(controller.phase == .ready)
+        #expect(!controller.isActive)
+        #expect(phases.values == ["ready"])
+    }
+
+    @Test("input monitoring wait is visible without opening the microphone")
+    func inputMonitoringWaitState() {
+        let phases = EventLog()
+        let controller = DictationController(
+            makeBackend: { Issue.record("backend should not be created"); return FakeBackend(log: phases) },
+            capture: FakeCapture(log: phases),
+            inserter: FakeInserter(),
+            captionsActive: { false },
+            onPhaseChanged: { phases.values.append(String(describing: $0)) })
+
+        controller.markWaitingForInputMonitoring()
+
+        #expect(controller.phase == .waitingForInputMonitoring)
+        #expect(!controller.isActive)
+        #expect(phases.values == ["waitingForInputMonitoring"])
+    }
+
+    @Test("completed feedback returns to the ready state for the next dictation")
+    func feedbackReturnsToReady() async {
+        let controller = DictationController(
+            makeBackend: { FakeBackend(log: EventLog()) },
+            capture: FakeCapture(log: EventLog()),
+            inserter: FakeInserter(),
+            captionsActive: { false })
+
+        controller.press()
+        await controller.waitForWorkForTests()
+        controller.release()
+        await controller.waitForWorkForTests()
+
+        #expect(controller.phase == .result("Copied to Clipboard"))
+        controller.markReadyAfterFeedback()
+        #expect(controller.phase == .ready)
     }
 
     @Test("cancellation stops an active microphone session")

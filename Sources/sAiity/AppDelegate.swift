@@ -26,8 +26,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let dictationToast = DictationToastWindow(contentRect: .zero,
                                                        styleMask: [.borderless],
                                                        backing: .buffered,
-                                                       defer: true)
+                                                       defer: false)
     private let dictationCapture = DictationMicrophoneCapture()
+    private var dictationHotkeyRetryTask: Task<Void, Never>?
     private lazy var dictationController = DictationController(
         makeBackend: AppDelegate.makeActiveBackend,
         capture: dictationCapture,
@@ -414,7 +415,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "sAiity",
             .credits: credits,
-            .init(rawValue: "Copyright"): String(localized: "MIT licensed. On-device live subtitles."),
+            .init(rawValue: "Copyright"): String(localized: "On-device live subtitles."),
         ])
         // The standard About panel has no close callback, so give up the Dock
         // presence when the app next loses focus. One-shot: the token has to be
@@ -475,23 +476,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 MainActor.assumeIsolated { self?.capture.applySpeechGapSettings() }
             }
         rebuildMenu()
-        if SettingsWindowController.state.dictationEnabled,
-           !dictationHotkeyMonitor.start(onPress: { [weak self] in self?.dictationController.press() },
-                                          onRelease: { [weak self] in self?.dictationController.release() }) {
-            NSLog("sAiity dictation: Control monitor unavailable; grant Accessibility access to enable press-to-talk")
+        if SettingsWindowController.state.dictationEnabled {
+            Self.scheduleAfterLaunch { [weak self] in
+                self?.ensureDictationHotkey()
+            }
         }
         NotificationCenter.default.addObserver(forName: .saiityDictationSettingChanged,
                                                object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
+                self.dictationHotkeyMonitor.updateChord(SettingsWindowController.state.dictationChord)
                 if SettingsWindowController.state.dictationEnabled {
-                    _ = self.dictationHotkeyMonitor.start(
-                        onPress: { [weak self] in self?.dictationController.press() },
-                        onRelease: { [weak self] in self?.dictationController.release() })
+                    self.ensureDictationHotkey()
                 } else {
+                    self.dictationHotkeyRetryTask?.cancel()
+                    self.dictationHotkeyRetryTask = nil
                     self.dictationHotkeyMonitor.stop()
                     self.dictationController.cancel()
+                    self.dictationToast.dismiss()
                 }
+                self.rebuildMenu()
+            }
+        }
+        NotificationCenter.default.addObserver(forName: .saiityDictationShortcutRecordingChanged,
+                                               object: nil, queue: .main) { [weak self] note in
+            MainActor.assumeIsolated {
+                self?.dictationHotkeyMonitor.setSuspended(note.object as? Bool ?? false)
             }
         }
 
@@ -607,6 +617,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func startDictationHotkey() -> Bool {
+        guard dictationHotkeyMonitor.start(
+            onPress: { [weak self] in
+                Task { @MainActor in self?.dictationController.press() }
+            },
+            onRelease: { [weak self] in
+                Task { @MainActor in self?.dictationController.release() }
+            }) else { return false }
+        dictationController.markReady()
+        return true
+    }
+
+    /// AppKit can accept a panel order request during application launch while
+    /// still dropping it before the window server has settled. Start the global
+    /// monitor after a short post-launch grace period so its initial ready state
+    /// can render in the same way as a later dictation toast.
+    static func scheduleAfterLaunch(_ action: @escaping @MainActor () -> Void) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            action()
+        }
+    }
+
+    /// Input Monitoring can become available after launch (for example after
+    /// the user accepts the privacy prompt). Keep trying while dictation is on
+    /// so the shortcut does not silently depend on reopening sAiity.
+    private func ensureDictationHotkey() {
+        guard SettingsWindowController.state.dictationEnabled else { return }
+        if startDictationHotkey() {
+            dictationHotkeyRetryTask?.cancel()
+            dictationHotkeyRetryTask = nil
+            return
+        }
+        dictationController.markWaitingForInputMonitoring()
+        guard dictationHotkeyRetryTask == nil else { return }
+        dictationHotkeyRetryTask = Task { @MainActor [weak self] in
+            while let self, !Task.isCancelled, SettingsWindowController.state.dictationEnabled {
+                try? await Task.sleep(for: .seconds(2))
+                guard !Task.isCancelled else { return }
+                if self.startDictationHotkey() {
+                    self.dictationHotkeyRetryTask = nil
+                    return
+                }
+            }
+        }
+    }
+
     /// Launching an already-running menu-bar app (double-clicking it in Finder,
     /// or `open -a`) otherwise does nothing at all, which reads as broken.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -618,6 +676,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// disk but meta.json still says the session never ended.
     func applicationWillTerminate(_ note: Notification) {
         dictationHotkeyMonitor.stop()
+        dictationHotkeyRetryTask?.cancel()
         dictationController.cancel()
         dictationToast.dismiss()
         guard recordingSince != nil else { return }
@@ -633,6 +692,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch phase {
         case .idle:
             dictationToast.dismiss()
+        case .waitingForInputMonitoring:
+            dictationToast.show(text: String(localized: "Allow Input Monitoring for Dictation"), animated: false)
+        case .ready:
+            let chord = SettingsWindowController.state.dictationChord.displayString
+            dictationToast.show(text: String(localized: "Ready to Dictate · Hold \(chord)"),
+                                animated: false,
+                                autoDismissAfter: .seconds(4.5))
         case .dictating:
             dictationToast.show(text: String(localized: "Dictating…"), animated: true)
         case .transcribing, .inserting:
@@ -641,10 +707,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             dictationToast.show(text: text, animated: false)
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(2))
-                if case .result = self.dictationController.phase {
-                    self.dictationToast.dismiss()
-                } else if case .failure = self.dictationController.phase {
-                    self.dictationToast.dismiss()
+                if self.dictationController.phase.automaticallyDismissesToast {
+                    self.dictationController.markReadyAfterFeedback()
                 }
             }
         }
@@ -653,7 +717,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func positionDictationToast() {
-        guard let screen = NSScreen.main else { return }
+        let mouse = NSEvent.mouseLocation
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(mouse) })
+                ?? NSScreen.main
+                ?? NSScreen.screens.first else { return }
         let frame = screen.visibleFrame
         let size = dictationToast.frame.size
         dictationToast.setFrameOrigin(NSPoint(x: frame.midX - size.width / 2,
@@ -698,7 +765,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         toggleItem.image = Self.menuSymbol("captions.bubble")
         menu.addItem(toggleItem)
 
-        let dictationItem = NSMenuItem(title: String(localized: "Hold Control to Dictate"),
+        let chord = SettingsWindowController.state.dictationChord.displayString
+        let dictationItem = NSMenuItem(title: String(localized: "Hold \(chord) to Dictate"),
                                        action: nil, keyEquivalent: "")
         dictationItem.image = Self.menuSymbol("mic")
         dictationItem.isEnabled = false

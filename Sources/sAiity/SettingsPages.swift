@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import Carbon.HIToolbox
 import CoreGraphics
 import SwiftUI
@@ -159,14 +160,14 @@ struct ModelsView: View {
 
 struct DictationView: View {
     @Bindable var state: AppState
-
-    private var accessibilityGranted: Bool { AXIsProcessTrusted() }
+    @State private var inputMonitoringGranted = CGPreflightListenEventAccess()
+    @State private var accessibilityGranted = AXIsProcessTrusted()
 
     var body: some View {
         Form {
             Section {
                 Toggle("Press-to-talk dictation", isOn: $state.dictationEnabled)
-                Text("Hold Control while speaking. Release it to transcribe on this Mac and paste the result into the app that currently has focus.")
+                Text("Hold your shortcut while speaking. Release it to transcribe on this Mac, then paste into the focused text field or copy the result to the clipboard.")
                     .font(.caption).foregroundStyle(.secondary)
             } header: {
                 Text("Dictation")
@@ -174,8 +175,7 @@ struct DictationView: View {
 
             Section {
                 LabeledContent("Gesture") {
-                    Text("Hold Control")
-                        .foregroundStyle(.secondary)
+                    DictationShortcutRecorder(state: state)
                 }
                 LabeledContent("Microphone") {
                     Text("Opened only while dictating")
@@ -193,18 +193,21 @@ struct DictationView: View {
             }
 
             Section {
-                if accessibilityGranted {
-                    Label("Accessibility access is enabled", systemImage: "checkmark.circle.fill")
+                permissionRow(title: "Input Monitoring",
+                              granted: inputMonitoringGranted,
+                              explanation: "Required to detect your dictation shortcut in other apps.") {
+                    _ = CGRequestListenEventAccess()
+                    openPrivacySettings("Privacy_ListenEvent")
+                }
+                if !inputMonitoringGranted {
+                    Text("After granting access, quit and reopen sAiity.")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
-                } else {
-                    Label("Accessibility access is required to detect Control globally and paste into the focused app.",
-                          systemImage: "exclamationmark.triangle")
-                        .font(.caption).foregroundStyle(.orange)
-                    Button("Open Accessibility Settings") {
-                        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
-                        NSWorkspace.shared.open(url)
-                    }
-                    .controlSize(.small)
+                }
+                permissionRow(title: "Accessibility",
+                              granted: accessibilityGranted,
+                              explanation: "Required to paste dictation into the focused text field.") {
+                    openPrivacySettings("Privacy_Accessibility")
                 }
             } header: {
                 Text("Permissions")
@@ -217,7 +220,7 @@ struct DictationView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("A small toast confirms each step")
                             .font(.body.weight(.medium))
-                        Text("Dictating, transcribing, and the final insertion result appear briefly above the bottom edge of the screen.")
+                        Text("A short overlay shows dictating, transcribing, and the output above the bottom edge of the screen.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -227,6 +230,164 @@ struct DictationView: View {
         }
         .scrollContentBackground(.hidden)
         .formStyle(.grouped)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshPermissions()
+        }
+    }
+
+    @ViewBuilder
+    private func permissionRow(title: LocalizedStringKey,
+                               granted: Bool,
+                               explanation: LocalizedStringKey,
+                               request: @escaping () -> Void) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Label(title, systemImage: granted ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                .foregroundStyle(granted ? AnyShapeStyle(.secondary) : AnyShapeStyle(.orange))
+            Spacer()
+            if granted {
+                Text("Allowed")
+                    .foregroundStyle(.secondary)
+            } else {
+                Button("Allow…", action: request)
+                    .controlSize(.small)
+            }
+        }
+        if !granted {
+            Text(explanation)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func refreshPermissions() {
+        inputMonitoringGranted = CGPreflightListenEventAccess()
+        accessibilityGranted = AXIsProcessTrusted()
+    }
+
+    private func openPrivacySettings(_ pane: String) {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") else { return }
+        NSWorkspace.shared.open(url)
+    }
+}
+
+private struct DictationShortcutRecorder: NSViewRepresentable {
+    @Bindable var state: AppState
+
+    func makeNSView(context: Context) -> RecorderView {
+        let view = RecorderView()
+        view.chord = state.dictationChord
+        view.onChange = { state.dictationChord = $0 }
+        return view
+    }
+
+    func updateNSView(_ view: RecorderView, context: Context) {
+        view.chord = state.dictationChord
+        view.refresh()
+    }
+
+    final class RecorderView: NSView {
+        var chord = DictationChord.current
+        var onChange: ((DictationChord) -> Void)?
+        private var recording = false
+        private var capture = DictationChordCaptureState()
+        private let label = NSTextField(labelWithString: "")
+
+        override init(frame: NSRect) {
+            super.init(frame: frame)
+            label.alignment = .center
+            label.font = .monospacedSystemFont(ofSize: 12, weight: .medium)
+            label.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(label)
+            NSLayoutConstraint.activate([
+                label.centerXAnchor.constraint(equalTo: centerXAnchor),
+                label.centerYAnchor.constraint(equalTo: centerYAnchor),
+                widthAnchor.constraint(greaterThanOrEqualToConstant: 170),
+                heightAnchor.constraint(equalToConstant: 24),
+            ])
+            wantsLayer = true
+            layer?.cornerRadius = 6
+            refresh()
+        }
+
+        required init?(coder: NSCoder) { fatalError() }
+        override var acceptsFirstResponder: Bool { true }
+
+        func refresh() {
+            label.stringValue = recording ? String(localized: "Press the full chord, then release…") : chord.displayString
+            layer?.backgroundColor = (recording
+                ? NSColor.controlAccentColor.withAlphaComponent(0.25)
+                : NSColor.quaternaryLabelColor).cgColor
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            beginRecording()
+        }
+
+        private func beginRecording() {
+            guard !recording else { return }
+            recording = true
+            capture.reset()
+            NotificationCenter.default.post(name: .saiityDictationShortcutRecordingChanged,
+                                            object: true)
+            window?.makeFirstResponder(self)
+            refresh()
+        }
+
+        private func endRecording() {
+            guard recording else { return }
+            recording = false
+            capture.reset()
+            NotificationCenter.default.post(name: .saiityDictationShortcutRecordingChanged,
+                                            object: false)
+            refresh()
+        }
+
+        override func isAccessibilityElement() -> Bool { true }
+        override func accessibilityRole() -> NSAccessibility.Role? { .button }
+        override func accessibilityLabel() -> String? { String(localized: "Dictation shortcut") }
+        override func accessibilityValue() -> Any? {
+            recording ? String(localized: "Press the full chord, then release…") : chord.displayString
+        }
+        override func accessibilityHelp() -> String? {
+            String(localized: "Press to record a new dictation shortcut. Press Escape to cancel.")
+        }
+        override func accessibilityPerformPress() -> Bool {
+            beginRecording()
+            return true
+        }
+
+        override func flagsChanged(with event: NSEvent) {
+            guard recording else { super.flagsChanged(with: event); return }
+            let key = UInt16(event.keyCode)
+            let isDown = DictationChord.modifierIsDown(key, flags: event.modifierFlags)
+            commitIfReady(capture.handle(.flagsChanged(key, isDown: isDown)))
+        }
+
+        override func keyDown(with event: NSEvent) {
+            guard recording else { super.keyDown(with: event); return }
+            if event.keyCode == UInt16(kVK_Escape) {
+                endRecording()
+                return
+            }
+            _ = capture.handle(.keyDown(UInt16(event.keyCode)))
+        }
+
+        override func keyUp(with event: NSEvent) {
+            guard recording else { super.keyUp(with: event); return }
+            commitIfReady(capture.handle(.keyUp(UInt16(event.keyCode))))
+        }
+
+        private func commitIfReady(_ chord: DictationChord?) {
+            guard let chord else { refresh(); return }
+            self.chord = chord
+            onChange?(chord)
+            endRecording()
+        }
+
+        override func resignFirstResponder() -> Bool {
+            endRecording()
+            return true
+        }
     }
 }
 
@@ -373,7 +534,7 @@ struct CaptionsView: View {
                     if let te = state.translationEngine {
                         Text(te.summary).font(.caption).foregroundStyle(.secondary)
                     } else {
-                        Label("No translator chosen yet. \(TranslationEngine.recommended.displayName) is the one to start with: fastest of the two, and it only ever translates. Download it under Models.",
+                        Label("No translator chosen yet. \(TranslationEngine.recommended.displayName) is the one to start with: the broad-coverage default and a measured fast path. Download it under Models.",
                               systemImage: "sparkles")
                             .font(.caption).foregroundStyle(.secondary)
                     }
@@ -839,6 +1000,7 @@ struct TranscriptsView: View {
                         "Nothing saved yet",
                         systemImage: "text.document",
                         description: Text("Turn on “Save transcripts of sessions” and every captioned session appears here."))
+                        .frame(maxWidth: .infinity)
                 } else {
                     TextField("Search all transcripts", text: $query)
                         .textFieldStyle(.roundedBorder)

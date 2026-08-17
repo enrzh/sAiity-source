@@ -41,9 +41,10 @@ enum TranslationTiming: String, CaseIterable, Sendable {
 /// Which translator to use.
 ///
 /// The ordering here is the honest recommendation order, and the summaries say
-/// why — including for the two that are slower than they sound.
+/// why — including for the opt-in specialist and the slower generic LLM path.
 enum TranslationEngine: String, CaseIterable, Sendable, Codable {
     case madlad
+    case hyMT2
     case qwen
 
     /// The chosen translator, or nothing. Same reasoning as `ASREngine.selected`:
@@ -51,8 +52,8 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
     /// never downloaded it and had translation switched off.
     @Defaults(optionalRawKey: "translationEngine") static var selected: TranslationEngine?
 
-    /// Suggested when nothing is chosen: the fastest of the two, the best
-    /// quality, and the only one whose licence lets it ship.
+    /// Suggested when nothing is chosen: the measured fast path and the broad
+    /// coverage default. Specialist and generic alternatives stay opt-in.
     static let recommended: TranslationEngine = .madlad
 
     /// The translator to build once one is needed. Guarded by `selected` at the
@@ -62,6 +63,7 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
     var displayName: String {
         switch self {
         case .madlad: return String(localized: "MADLAD")
+        case .hyMT2: return HyMT2Translator.displayName
         case .qwen: return String(localized: "Local LLM")
         }
     }
@@ -70,6 +72,8 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
         switch self {
         case .madlad:
             return String(localized: "MADLAD-400-3B, a dedicated translation model on MLX. Best quality of the local options and Apache-2.0, so it can ship. 1.86 GB, and about 0.2 seconds per sentence once loaded, measured — the fastest of the downloadable engines, and it only ever translates, so it cannot wander off answering the speaker.")
+        case .hyMT2:
+            return String(localized: "A translation-specialized 1.8B GGUF for the 37 language codes listed by Tencent's model card. Opt-in Q4_K_M download; MADLAD remains the broad-coverage default.")
         case .qwen:
             return String(localized: "A small local LLM doing the translation — about 1.2 seconds per sentence on the recommended Qwen 2B, measured. Most flexible of the options: choose from Qwen and Gemma builds, or add your own GGUF by URL or from disk. Stay at 2B-class or above; sub-billion models keep answering or echoing the caption instead of translating it.")
         }
@@ -83,6 +87,7 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
     var licence: String {
         switch self {
         case .madlad: return String(localized: "Apache-2.0 (Google MADLAD-400)")
+        case .hyMT2: return String(localized: "Apache-2.0 (Tencent Hy-MT2)")
         case .qwen: return String(localized: "Per model — shown on each row under Models")
         }
     }
@@ -90,6 +95,7 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
     func makeTranslator() -> Translating? {
         switch self {
         case .madlad: return MADLADTranslator()
+        case .hyMT2: return HyMT2Translator()
         case .qwen: return LocalLLMTranslator()
         }
     }
@@ -100,6 +106,7 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
     var activeAssetID: String? {
         switch self {
         case .madlad: return AssetID.madlad
+        case .hyMT2: return AssetID.hyMT2
         case .qwen: return LocalModel.selected.map { AssetID.llm(file: $0.file) }
         }
     }
@@ -125,6 +132,21 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
                 removal: .remove(MADLADTranslator.modelsDirectory),
                 use: .whenTranslator(.madlad),
                 install: { sink in try await MADLADTranslator.downloadWeights(progress: sink) })]
+
+        case .hyMT2:
+            return [ModelAsset(
+                id: AssetID.hyMT2,
+                family: .translation,
+                title: "Hy-MT2-1.8B Q4_K_M",
+                detail: summary,
+                recommended: false,
+                licence: "Apache-2.0 (Tencent Hy-MT2)",
+                advertisedBytes: HyMT2Translator.modelBytes,
+                storage: .file(HyMT2Translator.localURL,
+                               expectedBytes: HyMT2Translator.modelBytes),
+                removal: .remove(HyMT2Translator.localURL),
+                use: .whenTranslator(.hyMT2),
+                install: { sink in try await HyMT2Translator.download(progress: sink) })]
 
         case .qwen:
             return LocalModel.all.map { m in

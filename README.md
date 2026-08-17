@@ -1,222 +1,97 @@
 # sAiity
 
-**Subtitles for whatever your Mac is playing.** Captured from system audio,
-recognised and translated entirely on this machine — no account, no API key, and
-no audio ever leaving the device. It reaches the network twice: once to download
-the models from huggingface.co, and thereafter only to ask aiity.de whether
-there is a newer version — which is off unless you turn it on, and which sends
-no audio, no transcripts and no identifiers.
+Live subtitles for whatever your Mac is playing.
 
-<p align="center">
-  <img src="docs/screenshots/01-bubble.png" width="92%" alt="A German caption with its English translation beneath it">
-</p>
+sAiity captures system audio, recognises speech, and translates it on the Mac.
+It can save bilingual transcripts locally and provide press-to-talk dictation
+to the app that currently has focus.
 
-<p align="center">
-  <img src="docs/screenshots/02-subtitles.png" width="32%" alt="Captions settings">
-  <img src="docs/screenshots/03-models.png" width="32%" alt="Models, with sizes and licences">
-  <img src="docs/screenshots/04-library.png" width="32%" alt="Library">
-</p>
+**No account. No API key. No audio leaves the Mac.**
 
-### [Download sAiity](https://github.com/enrzh/sAiity/releases/latest)
+- Native SwiftUI/AppKit app for macOS 26 on Apple Silicon
+- Streaming captions from system audio
+- Optional translation below the original caption
+- Local transcripts with SRT, WebVTT, Markdown, and text export
+- Press-to-talk dictation with a configurable key
+- A dictated result is inserted into the focused text field when possible and
+  always remains on the clipboard
+- German, English, French, Spanish, and Japanese interface localizations
+- No Windows release target
 
-Open the disk image and drag sAiity to Applications. It is signed, notarised and
-stapled, so it opens without a Gatekeeper detour — including on a Mac with no
-network. Updates arrive in the app after that, or from the menu under
-**Check for Updates…**
+## Translation
 
-Requires **macOS 26** on Apple Silicon. On first launch it asks for Screen
-Recording permission: that is how macOS gates system audio, there is no
-audio-only permission to ask for. The microphone stays closed unless you
-explicitly turn on **Include my microphone** (off by default) — system audio
-on a call carries only the other side, so that setting is what makes a
-meeting transcript contain your own half. Its permission prompt only ever
-appears after you flip it.
+MADLAD-400-3B is the recommended translation engine. It covers a broad range of
+languages and runs on-device.
 
-> 104 unit tests. The notes in this file try to be honest about what is verified
-> and what isn't, including the parts that aren't.
+Hy-MT2-1.8B is an opt-in translation-specialized engine. It is useful for the
+language set declared by its model card, but it is not the broad-coverage
+default. Local Qwen and Gemma GGUF models remain available for users who want
+to supply a different local model.
 
----
+Models are downloaded on first use and stored locally. The app does not ship
+model weights.
 
-## Press-to-talk dictation
+## Dictation
 
-Hold **Control** while speaking to dictate into the app that currently has the
-keyboard focus. Release it to transcribe locally, clean the text, and paste it
-there. The original clipboard is restored after a successful paste; when
-Accessibility permission is unavailable, the dictated text remains copied so it
-is not lost. Dictation uses a separate microphone-only session and does not
-start while live captions are running.
+Hold the configured press-to-talk key while speaking. Release it to transcribe
+locally, clean the result, and insert it into the focused app. When there is no
+focused editable field, the result is copied without attempting a paste.
 
-## What is actually interesting here
-
-**The bubble does not move.** Its width is a *setting*, not a measurement. That
-sounds like a detail and is the whole trick: sizing a caption panel to its text
-means it resizes and re-centres every time a word arrives, and again when the
-translation lands a second later — two layout jumps per line, forever. Nothing
-about the text enters the geometry. See
-[`BubbleGeometry.swift`](Sources/sAiity/BubbleGeometry.swift), which is pure
-arithmetic and unit-tested precisely because "it drifted left" is several steps
-removed from the four lines of clamping that caused it.
-
-**Captions commit on a pause in speech, not on a timer.** A finished sentence is
-translated when the speaker stops. The alternative — flushing when a time or
-length budget runs out — cuts sentences in half and hands the translator a
-fragment, which is how you get confident nonsense. Quiet is measured against
-the material's own noise floor, not an absolute level: a fixed −45 dBFS
-threshold never fired under a continuous music bed — measured, the same speech
-fired with silent pauses and never over a −34 dBFS bed — which meant scored
-material only ever translated when the video was paused. The hold, 750 ms by
-default, is the line between a breath and a full stop: at 450 ms it fired on
-the pause a speaker leaves at a comma, and a sentence with commas in it was
-split at every one. Both are under Captions → Sentences, and the pause commit
-can be switched off for material where the pause means nothing.
-
-**Chinese, Japanese and Korean actually work.** Sentence detection originally
-required `[.!?]` followed by a space, and the rolling commit looked for the last
-space in the buffer. Neither exists in a script that does not separate words, so
-CJK audio was recognised perfectly and then never committed, never translated,
-and never written to the transcript — until silence. Both paths now understand
-`。！？` and clause breaks.
-
-**One `process()` call is in flight, ever.** FluidAudio's streaming managers are
-actors, and Swift actors are re-entrant across `await`. Two overlapping calls let
-the second run the buffer compaction while the first is suspended; the first then
-resumes with a stale offset and removes more elements than the array holds. That
-is a real crash, twice, from two different causes — see the type documentation on
-[`StreamingASRBackend.swift`](Sources/sAiity/StreamingASRBackend.swift), which
-records what is now enforced and what still relies on the caller.
-
-**It gives memory back.** MLX pools freed GPU buffers rather than returning
-them, with a default ceiling near your physical RAM, so a translator that had
-been released still occupied ~1.9 GB — and a second model would load on top of
-it. Bounding that pool takes a session from 1.5 GB down to 196 MB the moment you
-press Stop. [`MemoryPolicy.swift`](Sources/sAiity/MemoryPolicy.swift) explains
-the whole failure, including the two measurement traps that made it hard to see.
-
-## What it does
-
-- **Captions system audio.** ScreenCaptureKit taps what the Mac is playing —
-  optionally scoped to a single app, so notification pings and a second video
-  stay out of a meeting's captions. Screen Recording permission is how macOS
-  gates system audio; there is no audio-only permission. Your microphone is
-  only opened if you switch on **Include my microphone** (off by default),
-  which mixes your side of a call into recognition.
-- **Recognises on-device**, with two streaming engines:
-  - **Nemotron 3.5 multilingual** (recommended, 634 MB) — one model, 121
-    language tags, identifying the spoken language from the audio itself. Two
-    latency tiers, Balanced (2240 ms) and Fast (1120 ms), each its own download.
-  - **Parakeet EOU** (437 MB) — English only, quicker to the first word, and it
-    detects end-of-utterance itself.
-- **Translates on-device**, optionally, as a second line:
-  - **MADLAD-400-3B** (1.86 GB) — a dedicated translation model covering ~450
-    languages, including broad Asian and African coverage.
-  - **A local LLM** — curated Qwen and Gemma GGUF builds, or your own added by
-    URL or picked from disk. Ollama's blobs are GGUF files and work directly.
-- **Records transcripts** (off by default) with turn breaks where the audio
-  actually paused, readable and searchable inside the app, exportable as SRT,
-  WebVTT, Markdown or plain text — bilingual when translation ran — also from
-  the command line.
-- **Stays out of the way**: global hot keys for start/stop, hide/show, copy,
-  and a "what did I miss" recap of the last few sentences; a `saiity://`
-  scheme for Shortcuts, Raycast and scripts; downloads that resume where they
-  stopped; a diagnostics file one click away when something misbehaves.
-- **Speaks English, German, French, Spanish and Japanese**, announces captions
-  to VoiceOver on request, and honours Reduce Transparency and Increase
-  Contrast.
-
-## What it is not
-
-Worth saying plainly before you clone it:
-
-- **It runs on macOS 26 and Apple Silicon only.** That is a narrow audience,
-  deliberately: the streaming recognisers are CoreML and MLX builds for Apple
-  GPUs, and there is no Intel path.
-- **Sentence boundaries follow pauses.** Clauses are assembled before they are
-  shown or translated, but a speaker who pauses hard mid-sentence still gets a
-  break there, and the recogniser's own chunk boundary decides which clause a
-  word lands in. Better than it was, not exact.
-- **Only German has been read by a human on screen.** Every user-facing
-  surface is covered in all four localizations — menus, settings, setup, the
-  caption bubble's VoiceOver labels, the download and failure lines — and a
-  test enforces that no string escapes the catalog. German was verified by
-  rendering every screen. French, Spanish and Japanese follow Apple's own
-  terminology and preserve every format placeholder, but they have not had a
-  native speaker's pass, and no layout has been checked in them.
-- **It is not audited**, and captions are not a transcript of record. On-device
-  recognition of unclear speech is still recognition of unclear speech.
-
-## Building
-
-```bash
-./build-app.sh            # build + sign build/sAiity.app (test hooks enabled)
-./build-app.sh --install  # …and install to /Applications
-./build-app.sh --notarize # Developer ID build: no test hooks, notarised, stapled
-```
-
-A bare `swift build` binary **cannot hold Screen Recording permission** — TCC
-keys off a bundle identity and code signature — which is why there is an
-assembled `.app` rather than a plain executable. The script bundles the vendored
-`llama.framework` and the MLX metallib, and assembles `Credits.txt` from the 41
-dependency licences at build time. Versions are stamped from `git describe`.
-
-Tests need the release configuration; a plain `swift test` fails on this
-toolchain's debug C targets:
-
-```bash
-swift test -c release -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS
-```
-
-## Command line
-
-```bash
-sAiity --version
-sAiity --list
-sAiity --export srt|md|txt [sessionId]
-```
-
-## Layout
-
-| | |
-|---|---|
-| `Sources/sAiity/ModelRegistry.swift` | every downloadable model: paths, completeness, deletion |
-| `StreamingASRBackend.swift` | the shared streaming driver — pump serialisation, the cumulative→delta committer, pause and rolling commits, subtitle timing |
-| `Translators.swift`, `EngineLanguages.swift` | translation engines and per-engine language-code normalisation (MADLAD wants `zh`, never `zh-Hans`; an LLM wants an English language *name*) |
-| `OverlayWindow.swift`, `BubbleGeometry.swift` | the caption bubble; geometry is pure and unit-tested |
-| `MemoryPolicy.swift` | what may stay in RAM, and when it has to be given back |
-| `Onboarding*.swift` | first run: permission with live status, model choice with sizes stated before download |
+Dictation is a separate microphone-only session. It does not write to saved
+caption transcripts and it does not require sAiity to be the frontmost app.
+Captions and dictation do not own the microphone at the same time.
 
 ## Privacy
 
-Recognition, translation and transcripts are processed and stored locally.
-Transcripts are off by default and live under
-`~/Library/Application Support/de.aiity.saiity/Sessions`. Model weights are
-downloaded once into `…/Models`; every row in Settings → Models names its
-licence and its source, and Remove All frees the lot.
+System audio is captured through ScreenCaptureKit. Screen Recording permission
+is the macOS permission that gates this access.
 
-See [SECURITY.md](SECURITY.md) for what counts as a finding and how to report
-one.
+The optional microphone mixer for captions is off by default. Dictation opens
+the microphone only while the press-to-talk key is held. Recognition, translation,
+and saved transcripts stay on the device.
 
-## Contributing
+Models are downloaded from huggingface.co. Update checks are opt-in and send no
+audio, transcript, or account identifier.
 
-Issues and pull requests welcome — [CONTRIBUTING.md](CONTRIBUTING.md) covers what
-to run first. Two things about this codebase are easy to trip over, and both
-were learned expensively:
+## Source policy
 
-1. **The bubble's width is a setting, not a measurement.** Any change that
-   derives it from the text reintroduces the jitter the whole design exists to
-   avoid. `BubbleGeometryTests` will fail, and that is deliberate.
-2. **New settings keys must be read somewhere.** A stored-but-never-read
-   appearance value looks exactly like a working feature and does nothing; five
-   of the ten original `CaptionStyle` fields were in that state.
-   `CaptionStyleTests` enumerates every property and stops compiling when one is
-   added without being covered.
+This repository is public for inspection. No license is granted to copy, modify, or redistribute the source.
 
-## Licence
+The release page is the supported way to obtain the application. Security
+reports can be sent through [aiity.de](https://aiity.de).
 
-[MIT](LICENSE) — © 2026 Xianjie Zhan.
+## Build
 
-Third-party notices are assembled into the app bundle at build time and shown in
-the About window.
+The app is assembled as a signed bundle because macOS permissions are bound to
+the application identity, not to a bare SwiftPM executable.
 
-## Contact
+    ./build-app.sh
+    ./build-app.sh --install
+    ./build-app.sh --notarize
 
-[aiity.de](https://aiity.de)
+The release test command is:
+
+    swift test -c release -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS
+
+A plain debug test run is not the supported verification path on this
+toolchain.
+
+## Layout
+
+| Path | Responsibility |
+| --- | --- |
+| Sources/sAiity/StreamingASRBackend.swift | Streaming recognition, partial text, pauses, and sentence commits |
+| Sources/sAiity/Translators.swift | MADLAD and local-LLM translation lifecycle |
+| Sources/sAiity/HyMT2Translator.swift | Hy-MT2 model template, language set, and generation |
+| Sources/sAiity/DictationController.swift | Press-to-talk dictation lifecycle |
+| Sources/sAiity/DictationToastWindow.swift | Dictation status surface above other apps |
+| Sources/sAiity/TranscriptStore.swift | Local transcript storage and retention |
+| Sources/sAiity/OverlayWindow.swift | Caption bubble geometry and presentation |
+| Resources/Localizable.xcstrings | User-facing localization catalog |
+
+## Release
+
+Download the current build from
+[GitHub Releases](https://github.com/enrzh/sAiity/releases).
+
+sAiity is part of the [aiity](https://aiity.de) family.

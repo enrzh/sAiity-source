@@ -2,7 +2,6 @@ import AudioCommon
 import Foundation
 import MADLADTranslation
 import LLM
-import NaturalLanguage
 
 /// MADLAD-400-3B-MT — a T5 encoder-decoder run on MLX via
 /// `soniqo/speech-swift`, the only Swift package that compiles a dedicated
@@ -413,7 +412,7 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
         """
         guard let raw = await generate(system: systemPrompt, user: user) else { return nil }
 
-        switch Self.sanitize(raw, input: text, target: target) {
+        switch TranslationOutputValidator.sanitize(raw, input: text, target: target) {
         case .ok(let out):
             return out
         case .rejected(let why, let retryable):
@@ -442,86 +441,12 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
             // only started recovering anything once it could pick a different
             // continuation.
             guard let raw2 = await generate(system: harder, user: user, temp: 0.7),
-                  case .ok(let out) = Self.sanitize(raw2, input: text, target: target) else {
+                  case .ok(let out) = TranslationOutputValidator.sanitize(raw2, input: text, target: target) else {
                 NSLog("sAiity qwen: retry did not recover")
                 return nil
             }
             return out
         }
-    }
-
-    /// The languages `NLLanguageRecognizer` can identify, by primary subtag.
-    /// Outside this set its answer is a guess, so the output-language check has
-    /// to stand down rather than reject good text.
-    static let recognizableLanguages: Set<String> = [
-        "am", "ar", "hy", "bn", "bg", "my", "ca", "cs", "zh", "hr", "da", "nl",
-        "en", "fi", "fr", "ka", "de", "el", "gu", "he", "hi", "hu", "is", "id",
-        "it", "ja", "kn", "km", "ko", "lo", "lv", "lt", "ml", "mr", "mn", "nb",
-        "or", "fa", "pl", "pt", "pa", "ro", "ru", "sr", "si", "sk", "sl", "es",
-        "sv", "ta", "te", "th", "bo", "tr", "uk", "ur", "vi",
-    ]
-
-    /// `retryable` marks the failures a second pass can plausibly fix — the
-    /// model answering in the wrong language. Empty or runaway output is not
-    /// worth another half-second.
-    enum Verdict {
-        case ok(String)
-        case rejected(why: String, retryable: Bool)
-    }
-
-    /// Belt and braces on top of the prompt. Ghost-pepper keeps an equivalent
-    /// strip even with a correct template, and so do we: rejecting keeps the
-    /// original caption, and a missing translation beats an invented one.
-    static func sanitize(_ raw: String, input: String, target: String) -> Verdict {
-        func reject(_ why: String, retryable: Bool = false) -> Verdict {
-            .rejected(why: why, retryable: retryable)
-        }
-        var t = raw
-
-        t = t.replacingOccurrences(of: "<think>[\\s\\S]*?</think>", with: "",
-                                   options: .regularExpression)
-        t = t.replacingOccurrences(of: "<think>[\\s\\S]*", with: "",
-                                   options: .regularExpression)
-        t = t.replacingOccurrences(of: "</?USER-INPUT>", with: "", options: .regularExpression)
-        t = t.replacingOccurrences(of: "</?text>", with: "", options: .regularExpression)
-        t = t.replacingOccurrences(
-            of: "^\\s*(Translation|Übersetzung|Output)\\s*[:：]\\s*",
-            with: "", options: [.regularExpression, .caseInsensitive])
-        t = t.replacingOccurrences(of: "\\s*\\n+\\s*", with: " ", options: .regularExpression)
-        t = t.trimmingCharacters(in: .whitespacesAndNewlines)
-        if t.count > 2, (t.hasPrefix("\"") && t.hasSuffix("\"")) || (t.hasPrefix("„") && t.hasSuffix("“")) {
-            t = String(t.dropFirst().dropLast()).trimmingCharacters(in: .whitespaces)
-        }
-
-        guard !t.isEmpty, t != "..." else {   // "..." is LLM.swift's empty sentinel
-            return reject("empty")
-        }
-        let ratio = Double(t.count) / Double(max(input.count, 1))
-        guard ratio > 0.15, ratio < 4.0 else {
-            return reject(String(format: "length ratio %.2f", ratio))
-        }
-        // Copying the input back is this model's characteristic failure on a
-        // long sentence. The language check below misses it whenever the
-        // recognizer is unsure, so catch the echo directly.
-        if t.compare(input, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame {
-            return reject("echoed input", retryable: true)
-        }
-        let want = target.split(separator: "-").first.map(String.init) ?? target
-        // Only meaningful for languages the recognizer actually models. Ask it
-        // about Yoruba or Amharic and it answers confidently with something
-        // else, which would reject perfectly good translations for most of the
-        // long tail MADLAD and Qwen can reach.
-        if t.count >= 12, Self.recognizableLanguages.contains(want) {
-            let r = NLLanguageRecognizer()
-            r.processString(t)
-            if let lang = r.dominantLanguage?.rawValue {
-                let got = lang.split(separator: "-").first.map(String.init) ?? lang
-                guard got == want else {
-                    return reject("got \(got), want \(want)", retryable: true)
-                }
-            }
-        }
-        return .ok(t)
     }
 
     /// llama.cpp frees the model and its KV cache in `LLMCore.deinit`, so this
