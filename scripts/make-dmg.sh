@@ -75,7 +75,9 @@ tell application "Finder"
         update without registering applications
         delay 2
         update without registering applications
-        close
+        -- Leave the window open until hdiutil detach. Closing it here makes
+        -- Finder rewrite the .DS_Store from cached defaults and drop the
+        -- background alias on current macOS.
     end tell
 end tell
 APPLESCRIPT

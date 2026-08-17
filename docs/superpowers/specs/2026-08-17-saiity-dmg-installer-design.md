@@ -24,7 +24,7 @@ The installer remains a normal Finder window. There is no helper app, custom ins
 
 `scripts/make-dmg-background.swift` remains the single source of truth for the generated background. It will draw the canvas, wordmark, instruction, and arrow using AppKit/Core Graphics.
 
-`scripts/make-dmg.sh` will keep the existing staging, signing, notarization, stapling, and mounted verification flow. Its Finder AppleScript will use the same canvas dimensions and positions as the renderer, explicitly apply the background picture, and persist the window's icon view settings before closing. If Finder automation is unavailable, the image must still remain installable and the script must retain its existing best-effort fallback behavior.
+`scripts/make-dmg.sh` will keep the existing staging, signing, notarization, stapling, and mounted verification flow. Its Finder AppleScript will use the same canvas dimensions and positions as the renderer and explicitly apply the background picture. The Finder window remains open until `hdiutil detach` flushes the view state; closing it first makes current macOS versions rewrite the `.DS_Store` from cached defaults and drop the background alias. If Finder automation is unavailable, the image must still remain installable and the script must retain its existing best-effort fallback behavior.
 
 ## Verification
 

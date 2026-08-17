@@ -84,7 +84,7 @@ Keep the background picture assignment after `set theViewOptions` and before the
 
 - [ ] **Step 2: Let Finder persist the view before detach**
 
-Keep `update without registering applications`, increase the existing delay to `2`, and add a second `update without registering applications` immediately before `close`. This gives Finder time to write `.DS_Store` so the background and positions survive conversion.
+Keep `update without registering applications`, increase the existing delay to `2`, and add a second `update without registering applications`. Leave the Finder window open until `hdiutil detach`: on current macOS, explicitly closing it first rewrites `.DS_Store` from cached defaults and drops the background alias. Ejecting the mounted read-write image closes the window while preserving the background and positions.
 
 - [ ] **Step 3: Run shell syntax and renderer checks**
 
@@ -184,4 +184,3 @@ Expected: only the two installer scripts and the two installer design/plan docum
 - [ ] **Step 3: Do not publish a release from this task**
 
 Leave `v2.0.0` and its public assets unchanged. Cut a new release separately only after the user approves the mounted preview.
-
