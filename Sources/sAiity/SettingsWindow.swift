@@ -232,6 +232,15 @@ final class AppState {
             NotificationCenter.default.post(name: .saiityDictationSettingChanged, object: nil)
         }
     }
+    /// Translate the final dictation with the same local engine and target used
+    /// by captions. Off by default because it adds a model step and latency.
+    var translateDictation = UserDefaults.standard.bool(forKey: "translateDictation") {
+        didSet {
+            guard translateDictation != oldValue else { return }
+            UserDefaults.standard.set(translateDictation, forKey: "translateDictation")
+            NotificationCenter.default.post(name: .saiityDictationSettingChanged, object: nil)
+        }
+    }
     struct RunningApp: Sendable {
         let bundleID: String
         let name: String

@@ -5,6 +5,29 @@ import Testing
 
 @MainActor
 @Suite struct SettingsWindowTests {
+    @Test("dictation translation is opt-in and persisted")
+    func dictationTranslationIsOptIn() {
+        let defaults = UserDefaults.standard
+        let previous = defaults.object(forKey: "translateDictation")
+        defer {
+            if let previous {
+                defaults.set(previous, forKey: "translateDictation")
+            } else {
+                defaults.removeObject(forKey: "translateDictation")
+            }
+        }
+
+        defaults.removeObject(forKey: "translateDictation")
+        let state = AppState()
+        #expect(state.translateDictation == false)
+
+        state.translateDictation = true
+        #expect(defaults.bool(forKey: "translateDictation"))
+
+        state.translateDictation = false
+        #expect(defaults.bool(forKey: "translateDictation") == false)
+    }
+
     @Test("settings uses preference toolbar chrome with visible labels")
     func toolbarUsesPreferenceChrome() {
         SettingsWindowController.show()

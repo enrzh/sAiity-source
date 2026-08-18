@@ -169,6 +169,14 @@ struct DictationView: View {
                 Toggle("Press-to-talk dictation", isOn: $state.dictationEnabled)
                 Text("Hold your shortcut while speaking. Release it to transcribe on this Mac, then paste into the focused text field or copy the result to the clipboard.")
                     .font(.caption).foregroundStyle(.secondary)
+                LabeledToggle("Translate dictated text",
+                              "Uses the same target language and local translation model as captions.",
+                              isOn: $state.translateDictation)
+                if state.translateDictation && state.translateTo == nil {
+                    Text("Choose a translation target under Captions first.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             } header: {
                 Text("Dictation")
             }

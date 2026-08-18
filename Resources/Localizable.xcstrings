@@ -6219,6 +6219,33 @@
         "ja": { "stringUnit": { "state": "translated", "value": "音声入力" } }
       }
     },
+    "Translate dictated text": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Diktierten Text übersetzen" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Traducir el texto dictado" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Traduire le texte dicté" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ディクテーションしたテキストを翻訳" } }
+      }
+    },
+    "Uses the same target language and local translation model as captions.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Verwendet dieselbe Zielsprache und dasselbe lokale Übersetzungsmodell wie die Untertitel." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Usa el mismo idioma de destino y el mismo modelo de traducción local que los subtítulos." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Utilise la même langue cible et le même modèle de traduction local que les sous-titres." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "字幕と同じ翻訳先の言語とローカル翻訳モデルを使用します。" } }
+      }
+    },
+    "Choose a translation target under Captions first.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Wähle zuerst unter „Untertitel“ eine Übersetzungszielsprache." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Elige primero un idioma de destino en Subtítulos." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Choisissez d’abord une langue cible dans Sous-titres." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "まず「字幕」で翻訳先の言語を選択してください。" } }
+      }
+    },
     "Dictation shortcut": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Diktat-Tastenkürzel" } }, "es": { "stringUnit": { "state": "translated", "value": "Atajo de dictado" } }, "fr": { "stringUnit": { "state": "translated", "value": "Raccourci de dictée" } }, "ja": { "stringUnit": { "state": "translated", "value": "音声入力ショートカット" } } } },
     "Feedback": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Feedback" } }, "es": { "stringUnit": { "state": "translated", "value": "Información" } }, "fr": { "stringUnit": { "state": "translated", "value": "Retour" } }, "ja": { "stringUnit": { "state": "translated", "value": "フィードバック" } } } },
     "Gesture": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Geste" } }, "es": { "stringUnit": { "state": "translated", "value": "Gesto" } }, "fr": { "stringUnit": { "state": "translated", "value": "Geste" } }, "ja": { "stringUnit": { "state": "translated", "value": "ジェスチャー" } } } },
@@ -6307,6 +6334,42 @@
         "es": { "stringUnit": { "state": "translated", "value": "Insertado y copiado" } },
         "fr": { "stringUnit": { "state": "translated", "value": "Inséré et copié" } },
         "ja": { "stringUnit": { "state": "translated", "value": "挿入してコピーしました" } }
+      }
+    },
+    "Translated and inserted": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Übersetzt und eingefügt" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Traducido e insertado" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Traduit et inséré" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "翻訳して挿入しました" } }
+      }
+    },
+    "Translated and copied": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Übersetzt und kopiert" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Traducido y copiado" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Traduit et copié" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "翻訳してコピーしました" } }
+      }
+    },
+    "Translation unavailable — original inserted and copied": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Übersetzung nicht verfügbar — Original eingefügt und kopiert" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Traducción no disponible: original insertado y copiado" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Traduction indisponible : original inséré et copié" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "翻訳を利用できません — 原文を挿入してコピーしました" } }
+      }
+    },
+    "Translation unavailable — original copied to Clipboard": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Übersetzung nicht verfügbar — Original in die Zwischenablage kopiert" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Traducción no disponible: original copiado al portapapeles" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Traduction indisponible : original copié dans le presse-papiers" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "翻訳を利用できません — 原文をクリップボードにコピーしました" } }
       }
     },
     "Hold your shortcut while speaking. Release it to transcribe on this Mac, then paste into the focused text field or copy the result to the clipboard.": {

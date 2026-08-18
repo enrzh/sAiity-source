@@ -34,6 +34,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         capture: dictationCapture,
         inserter: TextInserter(),
         captionsActive: { [weak self] in self?.state.isActive ?? false },
+        translationConfiguration: { [weak self] in
+            self?.dictationTranslationConfiguration() ?? .disabled
+        },
+        translate: { [weak self] text, source, target in
+            guard let self else { return nil }
+            return await self.translateDictatedText(text, source: source, target: target)
+        },
         onPhaseChanged: { [weak self] phase in self?.updateDictationToast(phase) })
     private let dictationHotkeyMonitor = DictationHotkeyMonitor()
     private let capture = SystemAudioCapture()
@@ -162,12 +169,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// never called, so MADLAD and Qwen never downloaded their weights and
     /// `translate()` quietly returned nil forever.
     @MainActor
-    private func prepareTranslatorIfNeeded() async {
-        guard let target = translateTo, !translatorReady else { return }
+    @discardableResult
+    private func prepareTranslatorIfNeeded(allowWithoutCaptions: Bool = false,
+                                           sourceLanguage: String? = nil) async -> Bool {
+        guard let target = translateTo else { return false }
+        guard !translatorReady else { return true }
         guard TranslationEngine.selected != nil, let engine = activeTranslator else {
             // A target without a translator: honest, and recoverable in one step.
             setStatus("No translator chosen — pick one in Settings → Captions")
-            return
+            return false
         }
         // Loading is deferred until a session is actually running, deliberately.
         // Choosing a target used to load the model there and then — 1.9 GB for
@@ -175,11 +185,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // app was open, with captions stopped and nothing to translate. That was
         // the largest block of memory this app held for no reason at all.
         // start() calls this again once the session is up.
-        guard state.isActive else {
+        guard allowWithoutCaptions || state.isActive else {
             setStatus("Translation: \(AppLanguage(code: target).displayName) — loads on start")
-            return
+            return false
         }
-        let src = detectedLanguage ?? locale.identifier(.bcp47)
+        let src = sourceLanguage ?? detectedLanguage ?? locale.identifier(.bcp47)
         NSLog("sAiity translator: selected=\(TranslationEngine.effective.rawValue) object=\(engine.name) src=\(src) dst=\(target)")
         // Frozen BEFORE the await, like `target` above and for the same
         // reason: the user can switch translator — or Qwen model — while
@@ -196,6 +206,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             translatorReady = true
             if let assetID { LoadHealth.clear(assetID) }
             setStatus("Translating with \(TranslationEngine.effective.displayName)")
+            return true
         } catch {
             translatorReady = false
             // Bytes on disk that refuse to load are damage worth remembering —
@@ -212,7 +223,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             setStatus("Translation unavailable: \(error.localizedDescription)")
             NSLog("sAiity translator prepare failed: \(error.localizedDescription)")
+            return false
         }
+    }
+
+    private func dictationTranslationConfiguration() -> DictationTranslationConfiguration {
+        let settings = SettingsWindowController.state
+        return DictationTranslationConfiguration(enabled: settings.translateDictation,
+                                                  target: settings.translateTo)
+    }
+
+    private func translateDictatedText(_ text: String,
+                                       source: String,
+                                       target: String) async -> String? {
+        // A settings change replaces the translator asynchronously. Do not
+        // translate against the old model while that replacement is in flight.
+        await translatorSwap?.value
+        guard translateTo == target else { return nil }
+        if activeTranslator == nil {
+            activeTranslator = TranslationEngine.effective.makeTranslator()
+        }
+        guard await prepareTranslatorIfNeeded(allowWithoutCaptions: true,
+                                              sourceLanguage: source),
+              let engine = activeTranslator else { return nil }
+        return await engine.translate(text, from: source, to: target)
     }
 
     /// Where the capture session is in its lifecycle.
@@ -703,6 +737,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             dictationToast.show(text: String(localized: "Dictating…"), animated: true)
         case .transcribing, .inserting:
             dictationToast.show(text: String(localized: "Transcribing…"), animated: true)
+        case .translating:
+            dictationToast.show(text: String(localized: "Translating…"), animated: true)
         case .result(let text), .failure(let text):
             dictationToast.show(text: text, animated: false)
             Task { @MainActor in

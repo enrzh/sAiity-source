@@ -37,11 +37,15 @@ private final class DictationFinalTextCollector: @unchecked Sendable {
 @MainActor
 final class DictationController {
     typealias BackendFactory = () -> TranscriptionBackend
+    typealias TranslationConfigurationProvider = () -> DictationTranslationConfiguration
+    typealias TranslationHandler = (String, String, String) async -> String?
 
     private let makeBackend: BackendFactory
     private let capture: any DictationAudioCapture
     private let inserter: any DictationTextInsertion
     private let captionsActive: () -> Bool
+    private let translationConfiguration: TranslationConfigurationProvider
+    private let translate: TranslationHandler
     private let onPhaseChanged: (DictationPhase) -> Void
     private let collector = DictationFinalTextCollector()
 
@@ -64,11 +68,15 @@ final class DictationController {
          capture: any DictationAudioCapture,
          inserter: any DictationTextInsertion,
          captionsActive: @escaping () -> Bool,
+         translationConfiguration: @escaping TranslationConfigurationProvider = { .disabled },
+         translate: @escaping TranslationHandler = { _, _, _ in nil },
          onPhaseChanged: @escaping (DictationPhase) -> Void = { _ in }) {
         self.makeBackend = makeBackend
         self.capture = capture
         self.inserter = inserter
         self.captionsActive = captionsActive
+        self.translationConfiguration = translationConfiguration
+        self.translate = translate
         self.onPhaseChanged = onPhaseChanged
     }
 
@@ -179,6 +187,8 @@ final class DictationController {
             if phase == .transcribing { phase = .idle }
             return
         }
+        let sourceLanguage = await backend.detectedLanguage()
+            ?? Locale.current.identifier(.bcp47)
         await backend.flushPending()
         await backend.stop()
         guard session == generation else { return }
@@ -189,13 +199,45 @@ final class DictationController {
             phase = .result(String(localized: "No speech detected"))
             return
         }
+        let configuration = translationConfiguration()
+        var output = text
+        var translated = false
+        var translationFailed = false
+        if configuration.enabled,
+           let target = configuration.target?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !target.isEmpty {
+            phase = .translating
+            if let value = await translate(text, sourceLanguage, target) {
+                let cleaned = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !cleaned.isEmpty {
+                    output = cleaned
+                    translated = true
+                } else {
+                    translationFailed = true
+                }
+            } else {
+                translationFailed = true
+            }
+        }
         phase = .inserting
-        let result = inserter.insert(text)
+        let result = inserter.insert(output)
         switch result.outcome {
         case .insertedAndCopied:
-            phase = .result(String(localized: "Inserted and copied"))
+            if translated {
+                phase = .result(String(localized: "Translated and inserted"))
+            } else if translationFailed {
+                phase = .result(String(localized: "Translation unavailable — original inserted and copied"))
+            } else {
+                phase = .result(String(localized: "Inserted and copied"))
+            }
         case .copied:
-            phase = .result(String(localized: "Copied to Clipboard"))
+            if translated {
+                phase = .result(String(localized: "Translated and copied"))
+            } else if translationFailed {
+                phase = .result(String(localized: "Translation unavailable — original copied to Clipboard"))
+            } else {
+                phase = .result(String(localized: "Copied to Clipboard"))
+            }
         }
     }
 

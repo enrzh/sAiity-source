@@ -7,6 +7,7 @@ enum DictationPhase: Equatable, Sendable {
     case ready
     case dictating
     case transcribing
+    case translating
     case inserting
     case result(String)
     case failure(String)
@@ -21,6 +22,17 @@ extension DictationPhase {
             false
         }
     }
+}
+
+/// The opt-in translation stage for one press-to-talk session.
+///
+/// The target is captured when the session finishes so changing caption
+/// settings while the user is speaking cannot silently change the output.
+struct DictationTranslationConfiguration: Equatable, Sendable {
+    let enabled: Bool
+    let target: String?
+
+    static let disabled = Self(enabled: false, target: nil)
 }
 
 /// Small, value-type state machine for Control press/release transitions.
