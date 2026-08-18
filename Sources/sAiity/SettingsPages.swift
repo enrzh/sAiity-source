@@ -170,10 +170,23 @@ struct DictationView: View {
                 Text("Hold your shortcut while speaking. Release it to transcribe on this Mac, then paste into the focused text field or copy the result to the clipboard.")
                     .font(.caption).foregroundStyle(.secondary)
                 LabeledToggle("Translate dictated text",
-                              "Uses the same target language and local translation model as captions.",
+                              "Uses the shared local translation model with dictation's own target.",
                               isOn: $state.translateDictation)
-                if state.translateDictation && state.translateTo == nil {
-                    Text("Choose a translation target under Captions first.")
+                LabeledContent("Language") {
+                    Button {
+                        state.showDictationTranslationPicker = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(state.dictationTranslateTo.map { AppLanguage(code: $0).displayName }
+                                 ?? String(localized: "Off"))
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                    .disabled(!state.translateDictation)
+                }
+                if state.translateDictation && state.dictationTranslateTo == nil {
+                    Text("Choose a dictation translation target before speaking.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -611,7 +624,16 @@ struct CaptionsView: View {
             await state.refreshTargetSupport()
         }
         .sheet(isPresented: $state.showLocalModels) { LocalModelsView(state: state) }
-        .sheet(isPresented: $state.showTranslationPicker) { TranslationTargetPicker(state: state) }
+        .sheet(isPresented: $state.showTranslationPicker) {
+            TranslationTargetPicker(state: state,
+                                    target: $state.translateTo,
+                                    title: "Translate captions to")
+        }
+        .sheet(isPresented: $state.showDictationTranslationPicker) {
+            TranslationTargetPicker(state: state,
+                                    target: $state.dictationTranslateTo,
+                                    title: "Translate dictation to")
+        }
     }
 
     @ViewBuilder

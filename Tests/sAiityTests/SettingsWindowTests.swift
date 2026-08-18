@@ -61,6 +61,18 @@ import Testing
         #expect(defaults.bool(forKey: "dictationTranslateToMigrated"))
     }
 
+    @Test("dictation language picker has its own presentation state")
+    func dictationPickerIsIndependent() {
+        let state = AppState()
+        #expect(state.showTranslationPicker == false)
+        #expect(state.showDictationTranslationPicker == false)
+
+        state.showDictationTranslationPicker = true
+
+        #expect(state.showDictationTranslationPicker)
+        #expect(state.showTranslationPicker == false)
+    }
+
     @Test("settings uses preference toolbar chrome with visible labels")
     func toolbarUsesPreferenceChrome() {
         SettingsWindowController.show()

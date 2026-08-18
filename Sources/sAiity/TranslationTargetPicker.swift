@@ -15,6 +15,8 @@ import SwiftUI
 /// greying them out would say the same thing more quietly.
 struct TranslationTargetPicker: View {
     @Bindable var state: AppState
+    @Binding var target: String?
+    let title: LocalizedStringKey
     @Environment(\.dismiss) private var dismiss
 
     @State private var query = ""
@@ -34,15 +36,23 @@ struct TranslationTargetPicker: View {
     /// would leave the user with no way to understand why.
     private var engine: TranslationEngine { state.translationEngine ?? .recommended }
 
+    init(state: AppState,
+         target: Binding<String?>,
+         title: LocalizedStringKey = "Translate captions to") {
+        self.state = state
+        self._target = target
+        self.title = title
+    }
+
     var body: some View {
-        SheetShell(title: "Translate captions to",
+        SheetShell(title: title,
                    subtitle: state.translationEngine == nil
                        ? "\(engine.displayName) — recommended, not chosen yet"
                        : "Using \(engine.displayName)",
                    width: 500, height: 560,
                    headerAccessory: {
             Button("Off") {
-                state.translateTo = nil
+                target = nil
                 dismiss()
             }
             .controlSize(.small)
@@ -98,7 +108,7 @@ struct TranslationTargetPicker: View {
         // invisible to the keyboard and to VoiceOver, so the menu bar's "All
         // languages…" opened a sheet a keyboard user could not operate at all.
         Button {
-            state.translateTo = lang.code
+            target = lang.code
             dismiss()
         } label: {
             HStack {
@@ -111,14 +121,14 @@ struct TranslationTargetPicker: View {
                     }
                 }
                 Spacer()
-                if state.translateTo == lang.code {
+                if target == lang.code {
                     Image(systemName: "checkmark").foregroundStyle(.tint)
                 }
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityAddTraits(state.translateTo == lang.code ? .isSelected : [])
+        .accessibilityAddTraits(target == lang.code ? .isSelected : [])
         .padding(.vertical, 1)
     }
 
@@ -126,7 +136,8 @@ struct TranslationTargetPicker: View {
         HStack {
             Text(lang.displayName).foregroundStyle(.secondary)
             Spacer()
-            AlternativeEngines(state: state, language: lang, dismiss: { dismiss() })
+            AlternativeEngines(state: state, target: $target, language: lang,
+                               dismiss: { dismiss() })
         }
         .padding(.vertical, 1)
     }
@@ -176,6 +187,7 @@ struct TargetUnsupportedNotice: View {
 /// async query to Apple's framework.
 private struct AlternativeEngines: View {
     @Bindable var state: AppState
+    @Binding var target: String?
     let language: AppLanguage
     let dismiss: () -> Void
 
@@ -188,7 +200,7 @@ private struct AlternativeEngines: View {
                     // Set both at once: switching the engine and then hunting
                     // for the language again is the failure this replaces.
                     state.translationEngine = e
-                    state.translateTo = language.code
+                    target = language.code
                     dismiss()
                 }
                 .controlSize(.small)

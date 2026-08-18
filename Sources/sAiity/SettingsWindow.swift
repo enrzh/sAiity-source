@@ -441,6 +441,9 @@ final class AppState {
     /// The searchable target-language sheet. Also raised from the menu bar's
     /// "All languages…" item, which is why it lives on shared state.
     var showTranslationPicker = false
+    /// Separate sheet state so a menu request for dictation can never open the
+    /// captions picker with the wrong binding.
+    var showDictationTranslationPicker = false
 
     /// Whether the selected engine can reach the selected target. Recomputed on
     /// every change to either, because a stored target outlives an engine swap.
