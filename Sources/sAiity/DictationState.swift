@@ -1,5 +1,33 @@
 import Foundation
 
+/// Owns the one-time migration and storage contract for dictation's language
+/// target. The migration marker matters even when the inherited target is Off:
+/// a later captions change must not silently opt dictation into translation.
+enum DictationTargetPreference {
+    static let targetKey = "dictationTranslateTo"
+    static let migratedKey = "dictationTranslateToMigrated"
+
+    static func load(from defaults: UserDefaults = .standard) -> String? {
+        if !defaults.bool(forKey: migratedKey) {
+            if let inherited = defaults.string(forKey: "translateTo") {
+                defaults.set(inherited, forKey: targetKey)
+            } else {
+                defaults.removeObject(forKey: targetKey)
+            }
+            defaults.set(true, forKey: migratedKey)
+        }
+        return defaults.string(forKey: targetKey)
+    }
+
+    static func save(_ value: String?, to defaults: UserDefaults = .standard) {
+        if let value {
+            defaults.set(value, forKey: targetKey)
+        } else {
+            defaults.removeObject(forKey: targetKey)
+        }
+    }
+}
+
 /// The externally visible lifecycle of a short press-to-talk session.
 enum DictationPhase: Equatable, Sendable {
     case idle

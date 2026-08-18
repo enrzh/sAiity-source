@@ -98,19 +98,28 @@ final class AppState {
     /// Languages to offer when translating an already-recorded transcript:
     /// the current target first, then recently used ones, then what this Mac
     /// is set up for. Same sources the menu bar draws on, so the two agree.
-    var recentTargetsForMenu: [String] {
+    private func recentTargets(current: String?, defaultsKey: String) -> [String] {
         var out: [String] = []
         func add(_ c: String?) {
             guard let c, !c.isEmpty, !out.contains(c) else { return }
             out.append(c)
         }
-        add(translateTo)
-        (UserDefaults.standard.stringArray(forKey: "recentTranslateTargets") ?? []).forEach(add)
+        add(current)
+        (UserDefaults.standard.stringArray(forKey: defaultsKey) ?? []).forEach(add)
         Locale.preferredLanguages.prefix(4).forEach {
             add(Locale(identifier: $0).language.languageCode?.identifier)
         }
         ["en", "de"].forEach(add)
         return Array(out.prefix(8))
+    }
+
+    var recentTargetsForMenu: [String] {
+        recentTargets(current: translateTo, defaultsKey: "recentTranslateTargets")
+    }
+
+    var recentDictationTargetsForMenu: [String] {
+        recentTargets(current: dictationTranslateTo,
+                      defaultsKey: "recentDictationTranslateTargets")
     }
 
     /// Every downloadable asset with its live disk state, from one registry.
@@ -232,12 +241,21 @@ final class AppState {
             NotificationCenter.default.post(name: .saiityDictationSettingChanged, object: nil)
         }
     }
-    /// Translate the final dictation with the same local engine and target used
-    /// by captions. Off by default because it adds a model step and latency.
+    /// Translate the final dictation with the shared local engine and its own
+    /// target. Off by default because it adds a model step and latency.
     var translateDictation = UserDefaults.standard.bool(forKey: "translateDictation") {
         didSet {
             guard translateDictation != oldValue else { return }
             UserDefaults.standard.set(translateDictation, forKey: "translateDictation")
+            NotificationCenter.default.post(name: .saiityDictationSettingChanged, object: nil)
+        }
+    }
+    /// Independent from captions after the one-time migration on first launch.
+    /// A nil value is a real persisted Off state, not a signal to follow captions.
+    var dictationTranslateTo: String? = DictationTargetPreference.load() {
+        didSet {
+            guard dictationTranslateTo != oldValue else { return }
+            DictationTargetPreference.save(dictationTranslateTo)
             NotificationCenter.default.post(name: .saiityDictationSettingChanged, object: nil)
         }
     }

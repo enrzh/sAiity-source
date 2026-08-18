@@ -28,6 +28,39 @@ import Testing
         #expect(defaults.bool(forKey: "translateDictation") == false)
     }
 
+    @Test("first dictation target initialization inherits captions once, including Off")
+    func dictationTargetMigratesOnce() {
+        let defaults = UserDefaults.standard
+        let keys = ["translateTo", "dictationTranslateTo", "dictationTranslateToMigrated"]
+        let snapshot = keys.map { ($0, defaults.object(forKey: $0)) }
+        defer {
+            snapshot.forEach { key, value in
+                if let value { defaults.set(value, forKey: key) }
+                else { defaults.removeObject(forKey: key) }
+            }
+        }
+
+        defaults.set("de", forKey: "translateTo")
+        defaults.removeObject(forKey: "dictationTranslateTo")
+        defaults.removeObject(forKey: "dictationTranslateToMigrated")
+        let inherited = AppState()
+        #expect(inherited.dictationTranslateTo == "de")
+        #expect(defaults.bool(forKey: "dictationTranslateToMigrated"))
+
+        inherited.dictationTranslateTo = "fr"
+        inherited.translateTo = "ja"
+        let independent = AppState()
+        #expect(independent.dictationTranslateTo == "fr")
+        #expect(independent.translateTo == "ja")
+
+        defaults.removeObject(forKey: "dictationTranslateTo")
+        defaults.removeObject(forKey: "dictationTranslateToMigrated")
+        defaults.removeObject(forKey: "translateTo")
+        let off = AppState()
+        #expect(off.dictationTranslateTo == nil)
+        #expect(defaults.bool(forKey: "dictationTranslateToMigrated"))
+    }
+
     @Test("settings uses preference toolbar chrome with visible labels")
     func toolbarUsesPreferenceChrome() {
         SettingsWindowController.show()
