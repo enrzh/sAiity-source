@@ -230,7 +230,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func dictationTranslationConfiguration() -> DictationTranslationConfiguration {
         let settings = SettingsWindowController.state
         return DictationTranslationConfiguration(enabled: settings.translateDictation,
-                                                  target: settings.translateTo)
+                                                  target: settings.dictationTranslateTo)
     }
 
     private func translateDictatedText(_ text: String,
@@ -239,7 +239,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // A settings change replaces the translator asynchronously. Do not
         // translate against the old model while that replacement is in flight.
         await translatorSwap?.value
-        guard translateTo == target else { return nil }
+        guard SettingsWindowController.state.translateDictation,
+              SettingsWindowController.state.dictationTranslateTo == target else {
+            return nil
+        }
         if activeTranslator == nil {
             activeTranslator = TranslationEngine.effective.makeTranslator()
         }
@@ -416,6 +419,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Recently chosen targets, so the menu stays short without being a fixed
     /// list that ignores what this person actually uses.
     @Defaults("recentTranslateTargets") private var recentTargets: [String] = []
+    @Defaults("recentDictationTranslateTargets") private var recentDictationTargets: [String] = []
 
     private func rememberTarget(_ code: String) {
         var r = recentTargets.filter { $0 != code }
@@ -423,9 +427,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         recentTargets = Array(r.prefix(6))
     }
 
+    private func rememberDictationTarget(_ code: String) {
+        var r = recentDictationTargets.filter { $0 != code }
+        r.insert(code, at: 0)
+        recentDictationTargets = Array(r.prefix(6))
+    }
+
     @objc private func showLanguagePicker() {
         SettingsWindowController.show()
         SettingsWindowController.state.showTranslationPicker = true
+    }
+
+    @objc private func showDictationLanguagePicker() {
+        SettingsWindowController.show()
+        SettingsWindowController.state.showDictationTranslationPicker = true
     }
 
     /// An LSUIElement app has no App menu, so this is the ONLY route to the
@@ -525,8 +540,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 } else {
                     self.dictationHotkeyRetryTask?.cancel()
                     self.dictationHotkeyRetryTask = nil
-                    self.dictationHotkeyMonitor.stop()
+                    // Cancel before the monitor and toast go away, so no
+                    // prepared backend survives a user-visible disable action.
                     self.dictationController.cancel()
+                    self.dictationHotkeyMonitor.stop()
                     self.dictationToast.dismiss()
                 }
                 self.rebuildMenu()
@@ -659,7 +676,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onRelease: { [weak self] in
                 Task { @MainActor in self?.dictationController.release() }
             }) else { return false }
-        dictationController.markReady()
+        dictationController.prepare()
         return true
     }
 
@@ -728,11 +745,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             dictationToast.dismiss()
         case .waitingForInputMonitoring:
             dictationToast.show(text: String(localized: "Allow Input Monitoring for Dictation"), animated: false)
+        case .preparing:
+            dictationToast.show(text: String(localized: "Preparing Dictation…"), animated: true)
         case .ready:
             let chord = SettingsWindowController.state.dictationChord.displayString
             dictationToast.show(text: String(localized: "Ready to Dictate · Hold \(chord)"),
                                 animated: false,
                                 autoDismissAfter: .seconds(4.5))
+        case .starting:
+            dictationToast.show(text: String(localized: "Starting Dictation…"), animated: true)
         case .dictating:
             dictationToast.show(text: String(localized: "Dictating…"), animated: true)
         case .transcribing, .inserting:
@@ -808,9 +829,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dictationItem.isEnabled = false
         menu.addItem(dictationItem)
 
-        let translate = translationMenuItem()
-        translate.image = Self.menuSymbol("globe")
-        menu.addItem(translate)
+        let captionsTranslation = translationMenuItem(
+            scope: .captions,
+            title: "Captions: Translate to",
+            currentTarget: translateTo,
+            recentTargets: recentTargets)
+        captionsTranslation.image = Self.menuSymbol("globe")
+        menu.addItem(captionsTranslation)
+
+        let dictationTranslation = translationMenuItem(
+            scope: .dictation,
+            title: "Dictation: Translate to",
+            currentTarget: SettingsWindowController.state.dictationTranslateTo,
+            recentTargets: recentDictationTargets)
+        dictationTranslation.image = Self.menuSymbol("globe")
+        menu.addItem(dictationTranslation)
 
         // Everything about transcripts has left this menu: the saved-session
         // submenu, the Save-transcript toggle, and both Copy commands. They
@@ -846,38 +879,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
 
-    private func translationMenuItem() -> NSMenuItem {
-        let item = NSMenuItem(title: String(localized: "Translate to"), action: nil, keyEquivalent: "")
+    private func translationMenuItem(scope: TranslationMenuScope,
+                                     title: String.LocalizationValue,
+                                     currentTarget: String?,
+                                     recentTargets: [String]) -> NSMenuItem {
+        let item = NSMenuItem(title: String(localized: title), action: nil, keyEquivalent: "")
         let menu = NSMenu()
-        let off = NSMenuItem(title: String(localized: "Off"), action: #selector(pickTranslation(_:)), keyEquivalent: "")
-        off.representedObject = ""
-        off.state = translateTo == nil ? .on : .off
-        menu.addItem(off)
-        menu.addItem(.separator())
-
-        // A short, relevant menu plus a route to all ~450, rather than a
-        // hardcoded twelve. The old list also disagreed with the one in
-        // Settings, so the languages on offer depended on where you looked.
-        var shown: [String] = []
-        func add(_ code: String) {
-            guard !shown.contains(code) else { return }
-            shown.append(code)
-            let mi = NSMenuItem(title: AppLanguage(code: code).displayName,
+        let preferred = Locale.preferredLanguages.prefix(4).map {
+            Locale(identifier: $0).language.languageCode?.identifier ?? $0
+        }
+        let entries = TranslationMenuModel.entries(
+            scope: scope,
+            currentTarget: currentTarget,
+            recentTargets: recentTargets,
+            preferredLanguages: Array(preferred),
+            fallbackLanguages: ["en", "de"])
+        for entry in entries {
+            let title = entry.selection.code.map { AppLanguage(code: $0).displayName }
+                ?? String(localized: "Off")
+            let mi = NSMenuItem(title: title,
                                 action: #selector(pickTranslation(_:)), keyEquivalent: "")
-            mi.representedObject = code
-            mi.state = (code == translateTo) ? .on : .off
+            mi.representedObject = entry.selection
+            mi.state = entry.isSelected ? .on : .off
             menu.addItem(mi)
         }
-        if let current = translateTo { add(current) }
-        recentTargets.forEach(add)
-        // What this Mac is actually set up for beats any list we could guess.
-        for tag in Locale.preferredLanguages.prefix(4) {
-            add(Locale(identifier: tag).language.languageCode?.identifier ?? tag)
-        }
-        for code in ["en", "de"] where shown.count < 8 { add(code) }
 
         menu.addItem(.separator())
-        let all = NSMenuItem(title: String(localized: "All languages…"), action: #selector(showLanguagePicker),
+        let allSelector: Selector = scope == .captions
+            ? #selector(showLanguagePicker)
+            : #selector(showDictationLanguagePicker)
+        let all = NSMenuItem(title: String(localized: "All languages…"), action: allSelector,
                              keyEquivalent: "")
         menu.addItem(all)
 
@@ -1058,6 +1089,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // that moment loading into.
         let wasRunning = state == .running
         Task { @MainActor in
+            await dictationController.invalidatePreparedBackend()
             if wasRunning { await backend.stop() }
             backend = new.makeBackend()
             setStatus("Engine: \(new.displayName)")
@@ -1076,12 +1108,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// handler is the single place that rebuilds the translator, so the menu and
     /// the Settings window cannot drift apart or do the work twice.
     @objc private func pickTranslation(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? String else { return }
-        let target = id.isEmpty ? nil : id
-        guard target != translateTo else { return }
-        if let target { rememberTarget(target) }
-        NotificationCenter.default.post(name: .saiityTranslateTargetChanged, object: nil,
-                                        userInfo: ["target": target as Any])
+        guard let selection = sender.representedObject as? TranslationMenuSelection else { return }
+        switch selection.scope {
+        case .captions:
+            guard selection.code != translateTo else { return }
+            if let target = selection.code { rememberTarget(target) }
+            NotificationCenter.default.post(name: .saiityTranslateTargetChanged, object: nil,
+                                            userInfo: ["target": selection.code as Any])
+        case .dictation:
+            let state = SettingsWindowController.state
+            guard selection.code != state.dictationTranslateTo else { return }
+            if let target = selection.code { rememberDictationTarget(target) }
+            state.dictationTranslateTo = selection.code
+        }
     }
 
 
@@ -1614,6 +1653,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Stop and drop every loaded model, so their files can be removed for real.
     @MainActor
     private func releaseModels() async {
+        await dictationController.invalidatePreparedBackend()
         await stopAsync()
         // Rebuild rather than reuse: a backend that has been stopped is not
         // guaranteed to restart cleanly, and this path is rare.

@@ -33,7 +33,7 @@ private final class DictationFinalTextCollector: @unchecked Sendable {
     }
 }
 
-/// Owns one short microphone -> ASR -> insertion session.
+/// Owns the reusable ASR backend and one short microphone -> insertion session.
 @MainActor
 final class DictationController {
     typealias BackendFactory = () -> TranscriptionBackend
@@ -51,7 +51,11 @@ final class DictationController {
 
     private var state = DictationSessionState()
     private var generation = 0
+    private var preparationGeneration = 0
     private var backend: TranscriptionBackend?
+    private var preparedBackend: TranscriptionBackend?
+    private var preparedFormat: AVAudioFormat?
+    private var preparationTask: Task<Void, Never>?
     private var startupTask: Task<Void, Never>?
     private var releaseTask: Task<Void, Never>?
     private var cleanupTask: Task<Void, Never>?
@@ -80,13 +84,23 @@ final class DictationController {
         self.onPhaseChanged = onPhaseChanged
     }
 
-    /// Marks the global shortcut as available without opening the microphone.
+    /// Starts ASR preparation without opening the microphone. Calling this more
+    /// than once joins the same single-flight task and never creates a second
+    /// backend.
+    func prepare() {
+        guard !state.isActive, preparedBackend == nil, preparationTask == nil else { return }
+        phase = .preparing
+        beginPreparation()
+    }
+
+    /// Marks the global shortcut as available for tests and compatibility with
+    /// callers that already completed preparation outside this controller.
     func markReady() {
         guard !state.isActive else { return }
         phase = .ready
     }
 
-    /// Returns to the persistent idle feedback after a transient result or
+    /// Returns to the persistent ready feedback after a transient result or
     /// error. A new press, cancellation, or permission state wins if it landed
     /// while the feedback was visible.
     func markReadyAfterFeedback() {
@@ -112,7 +126,10 @@ final class DictationController {
         generation += 1
         let session = generation
         collector.reset()
-        phase = .dictating
+        phase = .starting
+        if preparedBackend == nil, preparationTask == nil {
+            beginPreparation()
+        }
         startupTask = Task { @MainActor [weak self] in
             await self?.start(session: session)
         }
@@ -129,54 +146,141 @@ final class DictationController {
         }
     }
 
+    /// Cancels both a live microphone session and a background/prepared ASR
+    /// backend. The async companion below is used when model files are about to
+    /// be deleted and must not return until the backend has really stopped.
     func cancel() {
-        guard state.isActive else { return }
+        guard state.isActive || preparationTask != nil || preparedBackend != nil else {
+            phase = .idle
+            return
+        }
+
         generation += 1
+        preparationGeneration += 1
         state.cancel()
         startupTask?.cancel()
         releaseTask?.cancel()
+        preparationTask?.cancel()
         capture.stop()
+
+        let preparation = preparationTask
+        let startup = startupTask
+        let release = releaseTask
+        let active = backend
+        let prepared = preparedBackend
+        preparationTask = nil
+        backend = nil
+        preparedBackend = nil
+        preparedFormat = nil
         phase = .idle
 
-        let startup = startupTask
-        cleanupTask = Task { @MainActor [weak self] in
+        cleanupTask = Task { @MainActor in
+            await preparation?.value
             await startup?.value
-            guard let self else { return }
-            self.backend = nil
+            await release?.value
+            if let active {
+                await active.stop()
+            } else {
+                await prepared?.stop()
+            }
+        }
+    }
+
+    /// Synchronous callers can initiate cancellation; model deletion awaits
+    /// this method so no old backend can keep a model file open.
+    func invalidatePreparedBackend() async {
+        cancel()
+        await cleanupTask?.value
+    }
+
+    private func beginPreparation() {
+        guard preparationTask == nil, preparedBackend == nil else { return }
+        let token = preparationGeneration
+        preparationTask = Task { @MainActor [weak self] in
+            await self?.runPreparation(token: token)
+        }
+    }
+
+    private func runPreparation(token: Int) async {
+        let candidate = makeBackend()
+        do {
+            try await candidate.prepare(locale: Locale.current) { _ in }
+            try Task.checkCancellation()
+            guard token == preparationGeneration else {
+                await candidate.stop()
+                return
+            }
+            guard let format = await candidate.inputFormat else {
+                throw BackendError.notPrepared
+            }
+            try Task.checkCancellation()
+            guard token == preparationGeneration else {
+                await candidate.stop()
+                return
+            }
+            preparedBackend = candidate
+            preparedFormat = format
+            preparationTask = nil
+            if !state.isActive, phase == .preparing {
+                phase = .ready
+            }
+        } catch is CancellationError {
+            await candidate.stop()
+            guard token == preparationGeneration else { return }
+            preparationTask = nil
+            if !state.isActive, phase == .preparing {
+                phase = .idle
+            }
+        } catch {
+            await candidate.stop()
+            guard token == preparationGeneration else { return }
+            preparationTask = nil
+            preparedBackend = nil
+            preparedFormat = nil
+            state.cancel()
+            phase = .failure(error.localizedDescription)
         }
     }
 
     private func start(session: Int) async {
-        let backend = makeBackend()
-        self.backend = backend
-        do {
-            try await backend.prepare(locale: Locale.current) { _ in }
-            try Task.checkCancellation()
-            // A quick tap can release while the model is preparing. The session
-            // is still valid until finish() has stopped the backend; cancelling
-            // is represented by a generation change, not by state.isActive.
-            guard session == generation, state.isActive || phase == .transcribing else {
-                await backend.stop()
-                return
+        guard session == generation else { return }
+        await preparationTask?.value
+        guard session == generation else { return }
+        guard state.isActive else {
+            if phase == .starting || phase == .transcribing {
+                phase = .idle
             }
+            return
+        }
+        guard let preparedBackend, let preparedFormat else {
+            if phase == .starting || phase == .transcribing {
+                state.cancel()
+                phase = .idle
+            }
+            return
+        }
 
+        backend = preparedBackend
+        do {
             let collector = collector
-            try await backend.start { chunk in
+            try await preparedBackend.start { chunk in
                 guard chunk.isFinal else { return }
                 collector.append(chunk.text)
             }
             try Task.checkCancellation()
-            guard let format = await backend.inputFormat else {
-                throw BackendError.notPrepared
+            guard session == generation else { return }
+            try capture.start(targetFormat: preparedFormat) { [weak preparedBackend] buffer in
+                preparedBackend?.feed(buffer)
             }
-            try Task.checkCancellation()
-            try capture.start(targetFormat: format) { [weak backend] buffer in
-                backend?.feed(buffer)
+            guard session == generation else {
+                capture.stop()
+                return
             }
+            phase = state.isActive ? .dictating : .transcribing
         } catch is CancellationError {
-            await teardown(backend, session: session, reportFailure: false)
+            await failStart(preparedBackend, session: session, message: nil)
         } catch {
-            await teardown(backend, session: session, reportFailure: true, message: error.localizedDescription)
+            await failStart(preparedBackend, session: session, message: error.localizedDescription)
         }
     }
 
@@ -241,16 +345,19 @@ final class DictationController {
         }
     }
 
-    private func teardown(_ backend: TranscriptionBackend,
-                          session: Int,
-                          reportFailure: Bool,
-                          message: String = "") async {
+    private func failStart(_ backend: TranscriptionBackend,
+                           session: Int,
+                           message: String?) async {
         capture.stop()
         await backend.stop()
         guard session == generation else { return }
         self.backend = nil
+        if let cached = preparedBackend, cached === backend {
+            self.preparedBackend = nil
+            self.preparedFormat = nil
+        }
         state.cancel()
-        if reportFailure {
+        if let message {
             phase = .failure(message)
         } else {
             phase = .idle
@@ -259,6 +366,7 @@ final class DictationController {
 
     #if SAIITY_TEST_HOOKS
     func waitForWorkForTests() async {
+        await preparationTask?.value
         await startupTask?.value
         await releaseTask?.value
         await cleanupTask?.value

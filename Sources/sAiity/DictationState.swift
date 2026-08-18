@@ -28,11 +28,58 @@ enum DictationTargetPreference {
     }
 }
 
+enum TranslationMenuScope: Equatable, Sendable {
+    case captions
+    case dictation
+}
+
+struct TranslationMenuSelection: Equatable, Sendable {
+    let scope: TranslationMenuScope
+    let code: String?
+}
+
+struct TranslationMenuEntry: Equatable, Sendable {
+    let selection: TranslationMenuSelection
+    let isSelected: Bool
+}
+
+enum TranslationMenuModel {
+    /// Builds one short, deterministic menu for either translation surface.
+    /// The caller supplies the scope-specific current and recent values; no
+    /// captions preference can leak into the dictation menu.
+    static func entries(scope: TranslationMenuScope,
+                        currentTarget: String?,
+                        recentTargets: [String],
+                        preferredLanguages: [String],
+                        fallbackLanguages: [String]) -> [TranslationMenuEntry] {
+        var codes: [String?] = [nil]
+        var seen = Set<String>()
+
+        func add(_ code: String?) {
+            guard let code, !code.isEmpty, seen.insert(code).inserted else { return }
+            codes.append(code)
+        }
+
+        add(currentTarget)
+        recentTargets.forEach(add)
+        preferredLanguages.forEach(add)
+        fallbackLanguages.forEach(add)
+
+        return codes.map {
+            TranslationMenuEntry(
+                selection: TranslationMenuSelection(scope: scope, code: $0),
+                isSelected: $0 == currentTarget)
+        }
+    }
+}
+
 /// The externally visible lifecycle of a short press-to-talk session.
 enum DictationPhase: Equatable, Sendable {
     case idle
     case waitingForInputMonitoring
+    case preparing
     case ready
+    case starting
     case dictating
     case transcribing
     case translating

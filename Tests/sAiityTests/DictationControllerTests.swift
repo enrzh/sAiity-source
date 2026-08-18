@@ -33,6 +33,9 @@ import Testing
         private let format = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1)!
         var starts = 0
         var stops = 0
+        var prepares = 0
+        var blockPreparation = false
+        var preparationContinuation: CheckedContinuation<Void, Never>?
         var onChunk: (@Sendable (TranscriptChunk) -> Void)?
         var detectedLanguageResult: String? = "en"
 
@@ -40,7 +43,19 @@ import Testing
 
         let name = "Test backend"
         var inputFormat: AVAudioFormat? { get async { format } }
-        func prepare(locale: Locale, progress: @escaping @Sendable (String) -> Void) async throws {}
+        func prepare(locale: Locale, progress: @escaping @Sendable (String) -> Void) async throws {
+            prepares += 1
+            if blockPreparation {
+                await withCheckedContinuation { continuation in
+                    preparationContinuation = continuation
+                }
+            }
+        }
+
+        func finishPreparation() {
+            preparationContinuation?.resume()
+            preparationContinuation = nil
+        }
         func start(onChunk: @escaping @Sendable (TranscriptChunk) -> Void) async throws {
             starts += 1
             self.onChunk = onChunk
@@ -257,5 +272,125 @@ import Testing
 
         #expect(capture.stopped)
         #expect(!controller.isActive)
+    }
+
+    @Test("preparation emits preparing then ready without opening the microphone")
+    func preparationProducesTruthfulReadyState() async {
+        let backend = FakeBackend(log: EventLog())
+        let capture = FakeCapture(log: EventLog())
+        var phases: [DictationPhase] = []
+        let controller = DictationController(
+            makeBackend: { backend },
+            capture: capture,
+            inserter: FakeInserter(),
+            captionsActive: { false },
+            onPhaseChanged: { phases.append($0) })
+
+        controller.prepare()
+        await controller.waitForWorkForTests()
+
+        #expect(backend.prepares == 1)
+        #expect(!capture.started)
+        #expect(phases == [.preparing, .ready])
+    }
+
+    @Test("two presses reuse one prepared backend")
+    func preparedBackendIsReused() async {
+        let backend = FakeBackend(log: EventLog())
+        let controller = DictationController(
+            makeBackend: { backend },
+            capture: FakeCapture(log: EventLog()),
+            inserter: FakeInserter(),
+            captionsActive: { false })
+
+        controller.prepare()
+        await controller.waitForWorkForTests()
+        controller.press()
+        await controller.waitForWorkForTests()
+        controller.release()
+        await controller.waitForWorkForTests()
+        controller.press()
+        await controller.waitForWorkForTests()
+        controller.release()
+        await controller.waitForWorkForTests()
+
+        #expect(backend.prepares == 1)
+        #expect(backend.starts == 2)
+        #expect(backend.stops == 2)
+    }
+
+    @Test("a press before readiness waits and starts only after preparation")
+    func earlyPressWaitsForPreparation() async {
+        let backend = FakeBackend(log: EventLog())
+        backend.blockPreparation = true
+        let capture = FakeCapture(log: EventLog())
+        let controller = DictationController(
+            makeBackend: { backend },
+            capture: capture,
+            inserter: FakeInserter(),
+            captionsActive: { false })
+
+        controller.prepare()
+        for _ in 0..<100 where backend.prepares == 0 {
+            await Task.yield()
+        }
+        controller.press()
+        #expect(controller.phase == .starting)
+        #expect(!capture.started)
+
+        backend.finishPreparation()
+        await controller.waitForWorkForTests()
+
+        #expect(capture.started)
+        #expect(controller.phase == .dictating)
+    }
+
+    @Test("release before readiness never opens the microphone")
+    func releaseBeforeReadinessDoesNotStartCapture() async {
+        let backend = FakeBackend(log: EventLog())
+        backend.blockPreparation = true
+        let capture = FakeCapture(log: EventLog())
+        let inserter = FakeInserter()
+        let controller = DictationController(
+            makeBackend: { backend },
+            capture: capture,
+            inserter: inserter,
+            captionsActive: { false })
+
+        controller.press()
+        for _ in 0..<100 where backend.prepares == 0 {
+            await Task.yield()
+        }
+        controller.release()
+        backend.finishPreparation()
+        await controller.waitForWorkForTests()
+
+        #expect(!capture.started)
+        #expect(inserter.inserted.isEmpty)
+        #expect(!controller.isActive)
+    }
+
+    @Test("invalidating preparation releases the cached backend")
+    func invalidationAllowsFreshPreparation() async {
+        var backends: [FakeBackend] = []
+        let controller = DictationController(
+            makeBackend: {
+                let backend = FakeBackend(log: EventLog())
+                backends.append(backend)
+                return backend
+            },
+            capture: FakeCapture(log: EventLog()),
+            inserter: FakeInserter(),
+            captionsActive: { false })
+
+        controller.prepare()
+        await controller.waitForWorkForTests()
+        await controller.invalidatePreparedBackend()
+        controller.prepare()
+        await controller.waitForWorkForTests()
+
+        #expect(backends.count == 2)
+        #expect(backends[0].stops == 1)
+        #expect(backends[1].prepares == 1)
     }
 }

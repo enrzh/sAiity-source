@@ -12767,6 +12767,69 @@
       "extractionState": "manual",
       "shouldTranslate": false
     },
+    "Captions: Translate to": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Untertitel: Übersetzen in" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Subtítulos: traducir a" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Sous-titres : traduire vers" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "字幕: 翻訳先" } }
+      }
+    },
+    "Dictation: Translate to": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Diktat: Übersetzen in" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Dictado: traducir a" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Dictée : traduire vers" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "音声入力: 翻訳先" } }
+      }
+    },
+    "Translate dictation to": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Diktat übersetzen in" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Traducir el dictado a" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Traduire la dictée vers" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "音声入力の翻訳先" } }
+      }
+    },
+    "Uses the shared local translation model with dictation's own target.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Verwendet das gemeinsame lokale Übersetzungsmodell mit dem eigenen Diktat-Ziel." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Usa el modelo local de traducción compartido con el destino propio del dictado." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Utilise le modèle local de traduction partagé avec la propre langue cible de la dictée." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ディクテーション専用の翻訳先で、共有ローカル翻訳モデルを使用します。" } }
+      }
+    },
+    "Choose a dictation translation target before speaking.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Wähle vor dem Sprechen eine Übersetzungszielsprache für das Diktat." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Elige un idioma de destino para el dictado antes de hablar." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Choisissez une langue cible pour la dictée avant de parler." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "話す前に音声入力の翻訳先を選択してください。" } }
+      }
+    },
+    "Preparing Dictation…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Diktat wird vorbereitet …" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Preparando el dictado…" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Préparation de la dictée…" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "音声入力を準備中…" } }
+      }
+    },
+    "Starting Dictation…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Diktat wird gestartet …" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Iniciando el dictado…" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Démarrage de la dictée…" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "音声入力を開始中…" } }
+      }
+    },
     "No translator chosen yet. %@ is the one to start with: the broad-coverage default and a measured fast path. Download it under Models.": {
       "extractionState": "manual",
       "localizations": {
