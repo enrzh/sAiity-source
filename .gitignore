@@ -1,5 +1,6 @@
 # SwiftPM build products. .build alone is several gigabytes of compiled
 # dependencies and checkouts — never commit it.
+.worktrees/
 .build/
 .swiftpm/
 *.o
