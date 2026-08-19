@@ -141,6 +141,10 @@ final class NemotronEngine: FluidStreamingEngine, @unchecked Sendable {
         await manager.setPartialCallback(callback)
     }
 
+    func reset() async {
+        await manager.reset()
+    }
+
     func process(_ samples: [Float]) async throws {
         _ = try await manager.process(samples: samples)
     }

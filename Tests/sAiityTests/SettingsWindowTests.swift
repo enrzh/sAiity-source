@@ -73,6 +73,77 @@ import Testing
         #expect(state.showTranslationPicker == false)
     }
 
+    @Test("dictation preparation uses its own target when captions are off")
+    func dictationPreparationTargetIsIndependent() {
+        #expect(AppDelegate.translationTargetForPreparation(
+            captionsTarget: nil,
+            requestedTarget: "de") == "de")
+        #expect(AppDelegate.translationTargetForPreparation(
+            captionsTarget: "fr",
+            requestedTarget: "de") == "de")
+        #expect(AppDelegate.translationTargetForPreparation(
+            captionsTarget: "fr",
+            requestedTarget: nil) == "fr")
+    }
+
+    @Test("dictation picker request selects the Dictation pane")
+    func dictationPickerRequestSelectsDictationPane() {
+        SettingsWindowController.showDictationTranslationPicker()
+        defer {
+            NSApp.windows
+                .first(where: { $0.contentViewController is NSTabViewController })?
+                .close()
+            SettingsWindowController.state.showDictationTranslationPicker = false
+        }
+
+        guard let window = NSApp.windows.first(where: {
+            $0.contentViewController is NSTabViewController
+        }), let tabs = window.contentViewController as? NSTabViewController else {
+            Issue.record("settings window was not created")
+            return
+        }
+
+        #expect(SettingsWindowController.state.showDictationTranslationPicker)
+        #expect(tabs.selectedTabViewItemIndex == 1)
+    }
+
+    @Test("recognition deletion releases dictation's fallback backend")
+    func recognitionDeletionReleasesDictationBackendWithoutSelectedEngine() async {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("saiity-delete-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory,
+                                                  withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let asset = ModelAsset(
+            id: "test-recognition",
+            family: .recognition,
+            title: "Test recognition",
+            detail: "",
+            recommended: false,
+            licence: nil,
+            advertisedBytes: nil,
+            storage: .directory(directory, markers: []),
+            removal: .remove(directory),
+            use: .never,
+            install: nil)
+        let state = AppState()
+        var released = 0
+        let previousRelease = CaptionSession.shared.releaseModels
+        let previousRunning = CaptionSession.shared.isRunning
+        CaptionSession.shared.releaseModels = { released += 1 }
+        CaptionSession.shared.setRunning(false)
+        defer {
+            CaptionSession.shared.releaseModels = previousRelease
+            CaptionSession.shared.setRunning(previousRunning)
+        }
+
+        await state.delete(asset)
+
+        #expect(released == 1)
+        #expect(!FileManager.default.fileExists(atPath: directory.path))
+    }
+
     @Test("settings uses preference toolbar chrome with visible labels")
     func toolbarUsesPreferenceChrome() {
         SettingsWindowController.show()

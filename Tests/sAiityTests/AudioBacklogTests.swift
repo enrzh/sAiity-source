@@ -27,6 +27,7 @@ import Testing
             lock.withLock { _batches.append(samples.count) }
         }
         func finishSession() async -> String? { nil }
+        func reset() async {}
         func teardown() async {}
     }
 

@@ -88,6 +88,10 @@ final class ParakeetEouEngine: FluidStreamingEngine, @unchecked Sendable {
         await manager.setEouCallback { text in callback(text) }
     }
 
+    func reset() async {
+        await manager.reset()
+    }
+
     func process(_ samples: [Float]) async throws {
         guard let format = AVAudioFormat(commonFormat: .pcmFormatFloat32,
                                          sampleRate: sampleRate, channels: 1, interleaved: false),

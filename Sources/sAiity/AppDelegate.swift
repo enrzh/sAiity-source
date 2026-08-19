@@ -164,15 +164,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// translation on for someone who never asked for it.
     private var translationSuspendedByMemory = false
 
+    /// A dictation request supplies its own target; caption preparation falls
+    /// back to the captions preference when no scoped target is provided.
+    static func translationTargetForPreparation(captionsTarget: String?,
+                                                requestedTarget: String?) -> String? {
+        requestedTarget ?? captionsTarget
+    }
+
     /// Load (and if necessary download) the selected translator. This was the
     /// missing link: the translator object was constructed but `prepare()` was
     /// never called, so MADLAD and Qwen never downloaded their weights and
     /// `translate()` quietly returned nil forever.
     @MainActor
     @discardableResult
-    private func prepareTranslatorIfNeeded(allowWithoutCaptions: Bool = false,
+    private func prepareTranslatorIfNeeded(requestedTarget: String? = nil,
+                                           allowWithoutCaptions: Bool = false,
                                            sourceLanguage: String? = nil) async -> Bool {
-        guard let target = translateTo else { return false }
+        guard let target = Self.translationTargetForPreparation(captionsTarget: translateTo,
+                                                                requestedTarget: requestedTarget) else {
+            return false
+        }
         guard !translatorReady else { return true }
         guard TranslationEngine.selected != nil, let engine = activeTranslator else {
             // A target without a translator: honest, and recoverable in one step.
@@ -246,7 +257,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if activeTranslator == nil {
             activeTranslator = TranslationEngine.effective.makeTranslator()
         }
-        guard await prepareTranslatorIfNeeded(allowWithoutCaptions: true,
+        guard await prepareTranslatorIfNeeded(requestedTarget: target,
+                                              allowWithoutCaptions: true,
                                               sourceLanguage: source),
               let engine = activeTranslator else { return nil }
         return await engine.translate(text, from: source, to: target)
@@ -439,8 +451,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showDictationLanguagePicker() {
-        SettingsWindowController.show()
-        SettingsWindowController.state.showDictationTranslationPicker = true
+        SettingsWindowController.showDictationTranslationPicker()
     }
 
     /// An LSUIElement app has no App menu, so this is the ONLY route to the
@@ -1090,7 +1101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let wasRunning = state == .running
         Task { @MainActor in
             await dictationController.invalidatePreparedBackend()
-            if wasRunning { await backend.stop() }
+            if wasRunning { await backend.release() }
             backend = new.makeBackend()
             setStatus("Engine: \(new.displayName)")
             if wasRunning { restartRecognition() }
@@ -1655,8 +1666,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func releaseModels() async {
         await dictationController.invalidatePreparedBackend()
         await stopAsync()
-        // Rebuild rather than reuse: a backend that has been stopped is not
-        // guaranteed to restart cleanly, and this path is rare.
+        await backend.release()
         backend = AppDelegate.makeActiveBackend()
         activeTranslator = TranslationEngine.effective.makeTranslator()
         translatorReady = false

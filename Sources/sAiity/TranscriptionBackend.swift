@@ -89,8 +89,14 @@ protocol TranscriptionBackend: AnyObject, Sendable {
     /// queue and return; the engine is driven from elsewhere.
     func feed(_ buffer: AVAudioPCMBuffer)
 
-    /// Flush and tear down.
+    /// End the current streaming session and reset it for reuse. Loaded model
+    /// resources stay resident so a short-lived dictation session can start
+    /// again without loading hundreds of megabytes a second time.
     func stop() async
+
+    /// Release all model resources. Call this before deleting model files or
+    /// discarding a backend permanently.
+    func release() async
 
     /// Commit whatever is still volatile, without stopping. Called when the
     /// audio goes silent: an utterance boundary that is far more reliable than
@@ -108,6 +114,7 @@ protocol TranscriptionBackend: AnyObject, Sendable {
 extension TranscriptionBackend {
     func flushPending() async {}
     func detectedLanguage() async -> String? { nil }
+    func release() async { await stop() }
 }
 
 enum BackendError: LocalizedError {

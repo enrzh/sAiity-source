@@ -9,6 +9,7 @@ import Foundation
 protocol FluidStreamingEngine: AnyObject, Sendable {
     var sampleRate: Double { get }
     func load(progress: @escaping @Sendable (String) -> Void) async throws
+    func reset() async
     /// The engine's running transcript. Cumulative for the whole session on
     /// both engines, not a delta.
     func setPartial(_ callback: @escaping @Sendable (String) -> Void) async
@@ -59,6 +60,7 @@ final class StreamingASRBackend: TranscriptionBackend, @unchecked Sendable {
 
     private var format: AVAudioFormat?
     private var emit: (@Sendable (TranscriptChunk) -> Void)?
+    private var sessionStarted = false
 
     /// The partial callback is CUMULATIVE for the session — the whole
     /// transcript, every time, not a delta. Left alone that means nothing is
@@ -207,6 +209,9 @@ final class StreamingASRBackend: TranscriptionBackend, @unchecked Sendable {
         // exactly the overlap this type exists to prevent, and it is how the
         // buffer-offset trap documented above was reached in the field.
         await stopPump()
+        // Reset the streaming state while retaining the loaded weights. This
+        // covers both the first start and a start after an interrupted session.
+        await engine.reset()
         emit = onChunk
         commitLock.withLock { committed = ""; lastSeen = ""; lastCommitAt = Date() }
         sessionStart = Date()
@@ -273,6 +278,7 @@ final class StreamingASRBackend: TranscriptionBackend, @unchecked Sendable {
             }
         }
         }
+        sessionStarted = true
     }
 
     /// Cheap and non-blocking: copy the samples out and return. The pump owns
@@ -325,28 +331,35 @@ final class StreamingASRBackend: TranscriptionBackend, @unchecked Sendable {
         // its buffer offset exactly the way concurrent feeds did — verified, it
         // crashed here with the same "Can't remove more items than it has" trap.
         await stopPump()
-        // Not `keepingCapacity`: this backend may be about to be discarded, and
-        // holding the session's high-water allocation — potentially many
-        // megabytes of audio — for an object nobody will use again is the kind
-        // of retention that adds up to running the machine out of memory.
+        // Not `keepingCapacity`: a stopped session should not retain its
+        // high-water audio allocation while the loaded model remains cached.
         pendingLock.withLock {
             pending = []
             overflowing = false
         }
 
-        // finish() returns the WHOLE session transcript; emit only what has not
-        // already been committed, or the last line is duplicated.
-        if let full = await engine.finishSession() {
-            let rest = commitLock.withLock { () -> String in
-                let r = full.hasPrefix(committed) ? String(full.dropFirst(committed.count)) : full
-                committed = full
-                return r
+        if sessionStarted {
+            // finish() returns the WHOLE session transcript; emit only what has
+            // not already been committed, or the last line is duplicated.
+            if let full = await engine.finishSession() {
+                let rest = commitLock.withLock { () -> String in
+                    let r = full.hasPrefix(committed) ? String(full.dropFirst(committed.count)) : full
+                    committed = full
+                    return r
+                }
+                let t = rest.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !t.isEmpty { emit?(stampedFinal(t)) }
             }
-            let t = rest.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !t.isEmpty { emit?(stampedFinal(t)) }
         }
-        await engine.teardown()
+        await engine.reset()
+        sessionStarted = false
         emit = nil
+    }
+
+    func release() async {
+        await stop()
+        await engine.teardown()
+        format = nil
     }
 
     func detectedLanguage() async -> String? { await engine.detectedLanguage() }

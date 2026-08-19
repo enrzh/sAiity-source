@@ -174,14 +174,16 @@ final class DictationController {
         preparedFormat = nil
         phase = .idle
 
+        let previousCleanup = cleanupTask
         cleanupTask = Task { @MainActor in
+            await previousCleanup?.value
             await preparation?.value
             await startup?.value
             await release?.value
             if let active {
-                await active.stop()
+                await active.release()
             } else {
-                await prepared?.stop()
+                await prepared?.release()
             }
         }
     }
@@ -196,7 +198,10 @@ final class DictationController {
     private func beginPreparation() {
         guard preparationTask == nil, preparedBackend == nil else { return }
         let token = preparationGeneration
-        preparationTask = Task { @MainActor [weak self] in
+        let previousCleanup = cleanupTask
+        preparationTask = Task { @MainActor [weak self, previousCleanup] in
+            await previousCleanup?.value
+            guard !Task.isCancelled else { return }
             await self?.runPreparation(token: token)
         }
     }
@@ -207,7 +212,7 @@ final class DictationController {
             try await candidate.prepare(locale: Locale.current) { _ in }
             try Task.checkCancellation()
             guard token == preparationGeneration else {
-                await candidate.stop()
+                await candidate.release()
                 return
             }
             guard let format = await candidate.inputFormat else {
@@ -215,7 +220,7 @@ final class DictationController {
             }
             try Task.checkCancellation()
             guard token == preparationGeneration else {
-                await candidate.stop()
+                await candidate.release()
                 return
             }
             preparedBackend = candidate
@@ -225,14 +230,14 @@ final class DictationController {
                 phase = .ready
             }
         } catch is CancellationError {
-            await candidate.stop()
+            await candidate.release()
             guard token == preparationGeneration else { return }
             preparationTask = nil
             if !state.isActive, phase == .preparing {
                 phase = .idle
             }
         } catch {
-            await candidate.stop()
+            await candidate.release()
             guard token == preparationGeneration else { return }
             preparationTask = nil
             preparedBackend = nil
@@ -323,6 +328,7 @@ final class DictationController {
                 translationFailed = true
             }
         }
+        guard session == generation else { return }
         phase = .inserting
         let result = inserter.insert(output)
         switch result.outcome {
@@ -349,7 +355,7 @@ final class DictationController {
                            session: Int,
                            message: String?) async {
         capture.stop()
-        await backend.stop()
+        await backend.release()
         guard session == generation else { return }
         self.backend = nil
         if let cached = preparedBackend, cached === backend {

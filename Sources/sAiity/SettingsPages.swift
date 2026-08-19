@@ -254,6 +254,11 @@ struct DictationView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshPermissions()
         }
+        .sheet(isPresented: $state.showDictationTranslationPicker) {
+            TranslationTargetPicker(state: state,
+                                    target: $state.dictationTranslateTo,
+                                    title: "Translate dictation to")
+        }
     }
 
     @ViewBuilder
@@ -628,11 +633,6 @@ struct CaptionsView: View {
             TranslationTargetPicker(state: state,
                                     target: $state.translateTo,
                                     title: "Translate captions to")
-        }
-        .sheet(isPresented: $state.showDictationTranslationPicker) {
-            TranslationTargetPicker(state: state,
-                                    target: $state.dictationTranslateTo,
-                                    title: "Translate dictation to")
         }
     }
 

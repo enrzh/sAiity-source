@@ -381,11 +381,16 @@ final class AppState {
     func delete(_ asset: ModelAsset) async {
         guard case .remove = asset.removal else { return }
         modelError = nil
-        if asset.use.isSelected {
-            if CaptionSession.shared.isRunning {
-                modelError = String(localized: "\(asset.title) is running the live captions. Stop captions first.")
-                return
-            }
+        if CaptionSession.shared.isRunning, asset.use.isSelected {
+            modelError = String(localized: "\(asset.title) is running the live captions. Stop captions first.")
+            return
+        }
+        // Recognition can be prewarmed for dictation even when no captions
+        // engine has been selected: ASREngine.effective uses the recommended
+        // fallback in that state. Release all loaded recognition resources
+        // before deletion so the fallback cannot keep the file mapped.
+        if !CaptionSession.shared.isRunning,
+           asset.family == .recognition || asset.use.isSelected {
             await CaptionSession.shared.releaseEverything()
         }
         if !ModelRegistry.remove(asset) {
@@ -776,6 +781,19 @@ enum SettingsWindowController {
         w.makeKeyAndOrderFront(nil)
         installToolbarBackdrop(in: w)
         Task { await state.refresh() }
+    }
+
+    /// Open the dictation target picker in the pane that owns it. Menu-bar
+    /// commands can arrive while another settings pane is selected, so
+    /// presenting the shared sheet state alone is not enough.
+    static func showDictationTranslationPicker() {
+        show()
+        guard let tabs = window?.contentViewController as? NSTabViewController,
+              let index = tabs.tabViewItems.firstIndex(where: {
+                  $0.label == String(localized: "Dictation")
+              }) else { return }
+        tabs.selectedTabViewItemIndex = index
+        state.showDictationTranslationPicker = true
     }
 }
 

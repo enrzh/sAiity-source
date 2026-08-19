@@ -36,6 +36,8 @@ import Testing
         var prepares = 0
         var blockPreparation = false
         var preparationContinuation: CheckedContinuation<Void, Never>?
+        var blockStop = false
+        var stopContinuation: CheckedContinuation<Void, Never>?
         var onChunk: (@Sendable (TranscriptChunk) -> Void)?
         var detectedLanguageResult: String? = "en"
 
@@ -68,6 +70,16 @@ import Testing
         func stop() async {
             stops += 1
             log.values.append("backend.stop")
+            if blockStop {
+                await withCheckedContinuation { continuation in
+                    stopContinuation = continuation
+                }
+            }
+        }
+        func finishStop() {
+            blockStop = false
+            stopContinuation?.resume()
+            stopContinuation = nil
         }
         func detectedLanguage() async -> String? { detectedLanguageResult }
     }
@@ -138,6 +150,48 @@ import Testing
         #expect(phases.contains("translating"))
         #expect(phases.contains("inserting"))
         #expect(controller.phase == .result("Translated and copied"))
+    }
+
+    @Test("cancellation during translation cannot insert stale output")
+    func cancellationDuringTranslationDiscardsOutput() async {
+        final class TranslationGate: @unchecked Sendable {
+            var started = false
+            var continuation: CheckedContinuation<String?, Never>?
+
+            func resolve(_ value: String?) {
+                continuation?.resume(returning: value)
+                continuation = nil
+            }
+        }
+
+        let gate = TranslationGate()
+        let inserter = FakeInserter()
+        let controller = DictationController(
+            makeBackend: { FakeBackend(log: EventLog()) },
+            capture: FakeCapture(log: EventLog()),
+            inserter: inserter,
+            captionsActive: { false },
+            translationConfiguration: {
+                DictationTranslationConfiguration(enabled: true, target: "de")
+            },
+            translate: { _, _, _ in
+                gate.started = true
+                return await withCheckedContinuation { continuation in
+                    gate.continuation = continuation
+                }
+            })
+
+        controller.press()
+        await controller.waitForWorkForTests()
+        controller.release()
+        for _ in 0..<100 where !gate.started { await Task.yield() }
+
+        controller.cancel()
+        gate.resolve("stale translation")
+        await controller.waitForWorkForTests()
+
+        #expect(inserter.inserted.isEmpty)
+        #expect(!controller.isActive)
     }
 
     @Test("translation failure preserves the original dictated text")
@@ -317,6 +371,37 @@ import Testing
         #expect(backend.prepares == 1)
         #expect(backend.starts == 2)
         #expect(backend.stops == 2)
+    }
+
+    @Test("preparation waits for cancellation cleanup")
+    func preparationWaitsForCancellationCleanup() async {
+        var backends: [FakeBackend] = []
+        let controller = DictationController(
+            makeBackend: {
+                let backend = FakeBackend(log: EventLog())
+                backends.append(backend)
+                return backend
+            },
+            capture: FakeCapture(log: EventLog()),
+            inserter: FakeInserter(),
+            captionsActive: { false })
+
+        controller.prepare()
+        await controller.waitForWorkForTests()
+        let first = backends[0]
+        first.blockStop = true
+        controller.cancel()
+        for _ in 0..<100 where first.stops == 0 { await Task.yield() }
+
+        controller.prepare()
+        for _ in 0..<20 { await Task.yield() }
+        #expect(backends.count == 1)
+
+        first.finishStop()
+        await controller.waitForWorkForTests()
+
+        #expect(backends.count == 2)
+        #expect(backends[1].prepares == 1)
     }
 
     @Test("a press before readiness waits and starts only after preparation")
