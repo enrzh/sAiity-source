@@ -40,6 +40,8 @@ import Testing
         var stopContinuation: CheckedContinuation<Void, Never>?
         var onChunk: (@Sendable (TranscriptChunk) -> Void)?
         var detectedLanguageResult: String? = "en"
+        var authoritativeResult: String?
+        var finishDictationCalls = 0
 
         init(log: EventLog) { self.log = log }
 
@@ -81,6 +83,16 @@ import Testing
             stopContinuation?.resume()
             stopContinuation = nil
         }
+        func finishDictation() async -> String? {
+            finishDictationCalls += 1
+            if let authoritativeResult {
+                log.values.append("backend.finishDictation")
+                return authoritativeResult
+            }
+            await flushPending()
+            await stop()
+            return nil
+        }
         func detectedLanguage() async -> String? { detectedLanguageResult }
     }
 
@@ -113,6 +125,30 @@ import Testing
         #expect(log.values == ["capture.stop", "backend.flushPending", "backend.stop"])
         #expect(inserter.inserted == ["hello from dictation"])
         #expect(controller.phase == .result("Copied to Clipboard"))
+    }
+
+    @Test("dictation inserts the authoritative completion instead of an early rolling final")
+    func authoritativeCompletionReplacesEarlyHypothesis() async {
+        let log = EventLog()
+        let backend = FakeBackend(log: log)
+        backend.authoritativeResult = "Schedule a meeting with Sarah."
+        let inserter = FakeInserter()
+        let controller = DictationController(
+            makeBackend: { backend },
+            capture: FakeCapture(log: log),
+            inserter: inserter,
+            captionsActive: { false })
+
+        controller.press()
+        await controller.waitForWorkForTests()
+        backend.onChunk?(TranscriptChunk(
+            text: "Schedule a meeting with Sara", isFinal: true))
+        controller.release()
+        await controller.waitForWorkForTests()
+
+        #expect(backend.finishDictationCalls == 1)
+        #expect(log.values == ["capture.stop", "backend.finishDictation"])
+        #expect(inserter.inserted == ["Schedule a meeting with Sarah."])
     }
 
     @Test("enabled dictation translates before inserting and copying")

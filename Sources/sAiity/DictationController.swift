@@ -298,12 +298,12 @@ final class DictationController {
         }
         let sourceLanguage = await backend.detectedLanguage()
             ?? Locale.current.identifier(.bcp47)
-        await backend.flushPending()
-        await backend.stop()
+        let authoritative = await backend.finishDictation()
         guard session == generation else { return }
         self.backend = nil
 
-        let text = collector.text
+        let authoritativeText = authoritative?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = authoritativeText.flatMap { $0.isEmpty ? nil : $0 } ?? collector.text
         guard !text.isEmpty else {
             phase = .result(String(localized: "No speech detected"))
             return

@@ -104,6 +104,11 @@ protocol TranscriptionBackend: AnyObject, Sendable {
     /// multilingual Nemotron often simply does not do.
     func flushPending() async
 
+    /// Finish a short dictation session and return the engine's authoritative
+    /// completed utterance when the backend can provide one. Unlike `stop()`,
+    /// this must not emit the returned text through the live caption callback.
+    func finishDictation() async -> String?
+
     /// The language identified from the AUDIO, where the engine can do that.
     /// Better than inferring it from the transcript's spelling for the case that
     /// defeats the text detector: a language whose model emits almost no text.
@@ -113,6 +118,11 @@ protocol TranscriptionBackend: AnyObject, Sendable {
 
 extension TranscriptionBackend {
     func flushPending() async {}
+    func finishDictation() async -> String? {
+        await flushPending()
+        await stop()
+        return nil
+    }
     func detectedLanguage() async -> String? { nil }
     func release() async { await stop() }
 }
