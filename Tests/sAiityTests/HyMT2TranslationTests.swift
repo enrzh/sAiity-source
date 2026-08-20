@@ -13,6 +13,12 @@ struct HyMT2TranslationTests {
         #expect(TranslationEngine.hyMT2 != TranslationEngine.recommended)
     }
 
+    @Test("Hy-MT2 uses conservative first-pass and retry sampling")
+    func samplingTemperaturesStayQualityFirst() {
+        #expect(HyMT2Translator.generationTemperature == Float(0.1))
+        #expect(HyMT2Translator.retryTemperature == Float(0.15))
+    }
+
     @Test("Hy-MT2 exposes the concrete language-card set")
     func supportedLanguagesMatchTheModelCard() async {
         let expected = Set([

@@ -13,6 +13,8 @@ final class HyMT2Translator: Translating, @unchecked Sendable {
     static let modelBytes: Int64 = 1_133_080_448
     static let modelFile = "Hy-MT2-1.8B-Q4_K_M.gguf"
     static let downloadURL = URL(string: "https://huggingface.co/tencent/Hy-MT2-1.8B-GGUF/resolve/main/Hy-MT2-1.8B-Q4_K_M.gguf?download=true")!
+    static let generationTemperature: Float = 0.1
+    static let retryTemperature: Float = 0.15
 
     static var modelsDirectory: URL {
         ModelRegistry.root.appendingPathComponent("hymt2", isDirectory: true)
@@ -93,7 +95,7 @@ final class HyMT2Translator: Translating, @unchecked Sendable {
                 template: Self.template,
                 topK: 20,
                 topP: 0.6,
-                temp: 0.7,
+                temp: Self.generationTemperature,
                 repeatPenalty: 1.05,
                 maxTokenCount: 2048) else {
                 return nil
@@ -114,10 +116,10 @@ final class HyMT2Translator: Translating, @unchecked Sendable {
     private let flightLock = NSLock()
     private var inFlight = false
 
-    private func generate(_ input: String, temperature: Float = 0.7) async -> String? {
+    private func generate(_ input: String, temperature: Float? = nil) async -> String? {
         guard let llm else { return nil }
         llm.history = []
-        llm.temp = temperature
+        llm.temp = temperature ?? Self.generationTemperature
         await llm.respond(to: input, thinking: .none)
         return llm.output
     }
@@ -146,7 +148,7 @@ final class HyMT2Translator: Translating, @unchecked Sendable {
             guard retryable else { return nil }
 
             let retry = Self.retryPrompt(targetName: targetName, source: text)
-            guard let rawRetry = await generate(retry, temperature: 0.9),
+            guard let rawRetry = await generate(retry, temperature: Self.retryTemperature),
                   case .ok(let output) = TranslationOutputValidator.sanitize(
                     rawRetry, input: text, target: target) else {
                 return nil
