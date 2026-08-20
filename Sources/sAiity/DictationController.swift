@@ -40,7 +40,7 @@ final class DictationController {
     typealias TranslationConfigurationProvider = () -> DictationTranslationConfiguration
     typealias TranslationHandler = (String, String, String) async -> String?
 
-    private let makeBackend: BackendFactory
+    private let backendProvider: any ASRBackendProvider
     private let capture: any DictationAudioCapture
     private let inserter: any DictationTextInsertion
     private let captionsActive: () -> Bool
@@ -53,8 +53,6 @@ final class DictationController {
     private var generation = 0
     private var preparationGeneration = 0
     private var backend: TranscriptionBackend?
-    private var preparedBackend: TranscriptionBackend?
-    private var preparedFormat: AVAudioFormat?
     private var preparationTask: Task<Void, Never>?
     private var startupTask: Task<Void, Never>?
     private var releaseTask: Task<Void, Never>?
@@ -68,6 +66,18 @@ final class DictationController {
 
     var isActive: Bool { state.isActive }
 
+    /// True while dictation still owns work that can touch the translator. The
+    /// key is released before transcription and translation finish, so
+    /// `isActive` alone is not enough for model-lifecycle decisions.
+    var isBusy: Bool {
+        switch phase {
+        case .preparing, .starting, .dictating, .transcribing, .translating, .inserting:
+            return true
+        case .idle, .waitingForInputMonitoring, .ready, .result, .failure:
+            return false
+        }
+    }
+
     init(makeBackend: @escaping BackendFactory,
          capture: any DictationAudioCapture,
          inserter: any DictationTextInsertion,
@@ -75,7 +85,23 @@ final class DictationController {
          translationConfiguration: @escaping TranslationConfigurationProvider = { .disabled },
          translate: @escaping TranslationHandler = { _, _, _ in nil },
          onPhaseChanged: @escaping (DictationPhase) -> Void = { _ in }) {
-        self.makeBackend = makeBackend
+        self.backendProvider = SingleBackendProvider(makeBackend: makeBackend)
+        self.capture = capture
+        self.inserter = inserter
+        self.captionsActive = captionsActive
+        self.translationConfiguration = translationConfiguration
+        self.translate = translate
+        self.onPhaseChanged = onPhaseChanged
+    }
+
+    init(backendProvider: any ASRBackendProvider,
+         capture: any DictationAudioCapture,
+         inserter: any DictationTextInsertion,
+         captionsActive: @escaping () -> Bool,
+         translationConfiguration: @escaping TranslationConfigurationProvider = { .disabled },
+         translate: @escaping TranslationHandler = { _, _, _ in nil },
+         onPhaseChanged: @escaping (DictationPhase) -> Void = { _ in }) {
+        self.backendProvider = backendProvider
         self.capture = capture
         self.inserter = inserter
         self.captionsActive = captionsActive
@@ -88,7 +114,7 @@ final class DictationController {
     /// than once joins the same single-flight task and never creates a second
     /// backend.
     func prepare() {
-        guard !state.isActive, preparedBackend == nil, preparationTask == nil else { return }
+        guard !state.isActive, preparationTask == nil, phase != .ready else { return }
         phase = .preparing
         beginPreparation()
     }
@@ -126,8 +152,9 @@ final class DictationController {
         generation += 1
         let session = generation
         collector.reset()
+        let wasReady = phase == .ready
         phase = .starting
-        if preparedBackend == nil, preparationTask == nil {
+        if !wasReady, preparationTask == nil {
             beginPreparation()
         }
         startupTask = Task { @MainActor [weak self] in
@@ -150,7 +177,7 @@ final class DictationController {
     /// backend. The async companion below is used when model files are about to
     /// be deleted and must not return until the backend has really stopped.
     func cancel() {
-        guard state.isActive || preparationTask != nil || preparedBackend != nil else {
+        guard state.isActive || preparationTask != nil || phase == .ready || isBusy else {
             phase = .idle
             return
         }
@@ -167,11 +194,8 @@ final class DictationController {
         let startup = startupTask
         let release = releaseTask
         let active = backend
-        let prepared = preparedBackend
         preparationTask = nil
         backend = nil
-        preparedBackend = nil
-        preparedFormat = nil
         phase = .idle
 
         let previousCleanup = cleanupTask
@@ -181,9 +205,9 @@ final class DictationController {
             await startup?.value
             await release?.value
             if let active {
-                await active.release()
+                await backendProvider.release(active, discard: true)
             } else {
-                await prepared?.release()
+                await backendProvider.invalidate()
             }
         }
     }
@@ -196,7 +220,7 @@ final class DictationController {
     }
 
     private func beginPreparation() {
-        guard preparationTask == nil, preparedBackend == nil else { return }
+        guard preparationTask == nil else { return }
         let token = preparationGeneration
         let previousCleanup = cleanupTask
         preparationTask = Task { @MainActor [weak self, previousCleanup] in
@@ -207,41 +231,29 @@ final class DictationController {
     }
 
     private func runPreparation(token: Int) async {
-        let candidate = makeBackend()
         do {
-            try await candidate.prepare(locale: Locale.current) { _ in }
+            try await backendProvider.prepare(locale: Locale.current) { _ in }
             try Task.checkCancellation()
             guard token == preparationGeneration else {
-                await candidate.release()
                 return
-            }
-            guard let format = await candidate.inputFormat else {
-                throw BackendError.notPrepared
             }
             try Task.checkCancellation()
             guard token == preparationGeneration else {
-                await candidate.release()
                 return
             }
-            preparedBackend = candidate
-            preparedFormat = format
             preparationTask = nil
             if !state.isActive, phase == .preparing {
                 phase = .ready
             }
         } catch is CancellationError {
-            await candidate.release()
             guard token == preparationGeneration else { return }
             preparationTask = nil
             if !state.isActive, phase == .preparing {
                 phase = .idle
             }
         } catch {
-            await candidate.release()
             guard token == preparationGeneration else { return }
             preparationTask = nil
-            preparedBackend = nil
-            preparedFormat = nil
             state.cancel()
             phase = .failure(error.localizedDescription)
         }
@@ -257,25 +269,27 @@ final class DictationController {
             }
             return
         }
-        guard let preparedBackend, let preparedFormat else {
-            if phase == .starting || phase == .transcribing {
-                state.cancel()
-                phase = .idle
-            }
-            return
-        }
-
-        backend = preparedBackend
+        let progress: @Sendable (String) -> Void = { _ in }
         do {
+            let acquired = try await backendProvider.acquire(locale: Locale.current,
+                                                              progress: progress)
+            guard session == generation else {
+                await backendProvider.release(acquired, discard: true)
+                return
+            }
+            backend = acquired
+            guard let format = await acquired.inputFormat else {
+                throw BackendError.notPrepared
+            }
             let collector = collector
-            try await preparedBackend.start { chunk in
+            try await acquired.start { chunk in
                 guard chunk.isFinal else { return }
                 collector.append(chunk.text)
             }
             try Task.checkCancellation()
             guard session == generation else { return }
-            try capture.start(targetFormat: preparedFormat) { [weak preparedBackend] buffer in
-                preparedBackend?.feed(buffer)
+            try capture.start(targetFormat: format) { [weak acquired] buffer in
+                acquired?.feed(buffer)
             }
             guard session == generation else {
                 capture.stop()
@@ -283,9 +297,14 @@ final class DictationController {
             }
             phase = state.isActive ? .dictating : .transcribing
         } catch is CancellationError {
-            await failStart(preparedBackend, session: session, message: nil)
+            if let backend { await failStart(backend, session: session, message: nil) }
         } catch {
-            await failStart(preparedBackend, session: session, message: error.localizedDescription)
+            if let backend {
+                await failStart(backend, session: session, message: error.localizedDescription)
+            } else if session == generation {
+                state.cancel()
+                phase = .failure(error.localizedDescription)
+            }
         }
     }
 
@@ -299,8 +318,9 @@ final class DictationController {
         let sourceLanguage = await backend.detectedLanguage()
             ?? Locale.current.identifier(.bcp47)
         let authoritative = await backend.finishDictation()
-        guard session == generation else { return }
+        await backendProvider.release(backend, discard: false)
         self.backend = nil
+        guard session == generation else { return }
 
         let authoritativeText = authoritative?.trimmingCharacters(in: .whitespacesAndNewlines)
         let text = authoritativeText.flatMap { $0.isEmpty ? nil : $0 } ?? collector.text
@@ -355,13 +375,9 @@ final class DictationController {
                            session: Int,
                            message: String?) async {
         capture.stop()
-        await backend.release()
+        await backendProvider.release(backend, discard: true)
         guard session == generation else { return }
         self.backend = nil
-        if let cached = preparedBackend, cached === backend {
-            self.preparedBackend = nil
-            self.preparedFormat = nil
-        }
         state.cancel()
         if let message {
             phase = .failure(message)

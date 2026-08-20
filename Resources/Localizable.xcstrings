@@ -1582,6 +1582,15 @@
         }
       }
     },
+    "Speech recognition is already in use.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Spracherkennung wird bereits verwendet." } },
+        "es": { "stringUnit": { "state": "translated", "value": "El reconocimiento de voz ya está en uso." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "La reconnaissance vocale est déjà utilisée." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "音声認識はすでに使用中です。" } }
+      }
+    },
     "Background": {
       "localizations": {
         "de": {
