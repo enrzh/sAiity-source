@@ -186,6 +186,16 @@ final class StreamingASRBackend: TranscriptionBackend, @unchecked Sendable {
         await p.value
     }
 
+    private func stopPumpAndClearPending() async {
+        await stopPump()
+        // Not `keepingCapacity`: a stopped session should not retain its
+        // high-water audio allocation while the loaded model remains cached.
+        pendingLock.withLock {
+            pending = []
+            overflowing = false
+        }
+    }
+
     init(name: String, engine: any FluidStreamingEngine) {
         self.name = name
         self.engine = engine
@@ -325,18 +335,23 @@ final class StreamingASRBackend: TranscriptionBackend, @unchecked Sendable {
         if !t.isEmpty { emit?(stampedFinal(t)) }
     }
 
+    /// Finish a short dictation utterance without sending the authoritative
+    /// completion through the caption callback.
+    func finishDictation() async -> String? {
+        await stopPumpAndClearPending()
+        let full = sessionStarted ? await engine.finishSession() : nil
+        await engine.reset()
+        sessionStarted = false
+        emit = nil
+        return full
+    }
+
     func stop() async {
         // Waits for the pump to actually leave the engine. Calling finish()
         // while a process() is still suspended re-enters the actor and corrupts
         // its buffer offset exactly the way concurrent feeds did — verified, it
         // crashed here with the same "Can't remove more items than it has" trap.
-        await stopPump()
-        // Not `keepingCapacity`: a stopped session should not retain its
-        // high-water audio allocation while the loaded model remains cached.
-        pendingLock.withLock {
-            pending = []
-            overflowing = false
-        }
+        await stopPumpAndClearPending()
 
         if sessionStarted {
             // finish() returns the WHOLE session transcript; emit only what has
