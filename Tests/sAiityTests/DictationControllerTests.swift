@@ -151,6 +151,28 @@ import Testing
         #expect(inserter.inserted == ["Schedule a meeting with Sarah."])
     }
 
+    @Test("an empty authoritative completion falls back to rolling finals")
+    func emptyAuthoritativeCompletionUsesFallback() async {
+        let log = EventLog()
+        let backend = FakeBackend(log: log)
+        backend.authoritativeResult = "   "
+        let inserter = FakeInserter()
+        let controller = DictationController(
+            makeBackend: { backend },
+            capture: FakeCapture(log: log),
+            inserter: inserter,
+            captionsActive: { false })
+
+        controller.press()
+        await controller.waitForWorkForTests()
+        backend.onChunk?(TranscriptChunk(text: "Rolling final", isFinal: true))
+        controller.release()
+        await controller.waitForWorkForTests()
+
+        #expect(backend.finishDictationCalls == 1)
+        #expect(inserter.inserted == ["Rolling final"])
+    }
+
     @Test("enabled dictation translates before inserting and copying")
     func translatesBeforeInsertion() async {
         let log = EventLog()
