@@ -19,11 +19,20 @@ import Testing
     @Test("a focused editable field receives dictation and the clipboard keeps a copy")
     func insertsIntoFocusedEditableFieldAndKeepsCopy() {
         let board = FakePasteboard(value: "previous clipboard")
+        var spaceSent = false
         var pasteSent = false
         let inserter = TextInserter(
             pasteboard: board,
             accessibilityTrusted: { true },
-            focusedRole: { "AXTextArea" },
+            focusedElement: {
+                TextInsertionTarget(role: "AXTextArea",
+                                    value: "existing message",
+                                    isEditable: true)
+            },
+            sendSpace: {
+                spaceSent = true
+                return true
+            },
             sendPaste: {
                 pasteSent = true
                 return true
@@ -32,8 +41,82 @@ import Testing
         let result = inserter.insert(" dictated result ")
 
         #expect(result.outcome == .insertedAndCopied)
+        #expect(spaceSent)
         #expect(pasteSent)
         #expect(board.value == "dictated result")
+    }
+
+    @Test("an editable focused element with an unexpected role still receives dictation")
+    func editableFocusedElementIsNotRejectedByRoleAllowlist() {
+        let board = FakePasteboard()
+        var spaceSent = false
+        var pasteSent = false
+        let inserter = TextInserter(
+            pasteboard: board,
+            accessibilityTrusted: { true },
+            focusedElement: {
+                TextInsertionTarget(role: "AXGroup",
+                                    value: "existing message",
+                                    isEditable: true)
+            },
+            sendSpace: {
+                spaceSent = true
+                return true
+            },
+            sendPaste: {
+                pasteSent = true
+                return true
+            })
+
+        let result = inserter.insert("next line")
+
+        #expect(result.outcome == .insertedAndCopied)
+        #expect(spaceSent)
+        #expect(pasteSent)
+        #expect(board.value == "next line")
+    }
+
+    @Test("an empty editable field receives dictation without a leading space")
+    func emptyEditableFieldDoesNotReceiveLeadingSpace() {
+        let board = FakePasteboard()
+        let inserter = TextInserter(
+            pasteboard: board,
+            accessibilityTrusted: { true },
+            focusedElement: {
+                TextInsertionTarget(role: "AXTextArea",
+                                    value: nil,
+                                    isEditable: true)
+            },
+            sendPaste: { true })
+
+        let result = inserter.insert("first line")
+
+        #expect(result.outcome == .insertedAndCopied)
+        #expect(board.value == "first line")
+    }
+
+    @Test("empty dictation does not become a separator on the clipboard")
+    func emptyDictationStaysEmpty() {
+        let board = FakePasteboard(value: "previous clipboard")
+        var pasteSent = false
+        let inserter = TextInserter(
+            pasteboard: board,
+            accessibilityTrusted: { true },
+            focusedElement: {
+                TextInsertionTarget(role: "AXTextArea",
+                                    value: "existing message",
+                                    isEditable: true)
+            },
+            sendPaste: {
+                pasteSent = true
+                return true
+            })
+
+        let result = inserter.insert(" \n")
+
+        #expect(result.outcome == .copied)
+        #expect(!pasteSent)
+        #expect(board.value == "")
     }
 
     @Test("without a focused editable field, dictated text is copied without a paste")
@@ -43,7 +126,7 @@ import Testing
         let inserter = TextInserter(
             pasteboard: board,
             accessibilityTrusted: { true },
-            focusedRole: { nil },
+            focusedElement: { nil },
             sendPaste: {
                 pasteSent = true
                 return true
@@ -63,7 +146,9 @@ import Testing
         let inserter = TextInserter(
             pasteboard: board,
             accessibilityTrusted: { false },
-            focusedRole: { "AXTextField" },
+            focusedElement: {
+                TextInsertionTarget(role: "AXTextField", value: "existing", isEditable: true)
+            },
             sendPaste: {
                 pasteSent = true
                 return true
