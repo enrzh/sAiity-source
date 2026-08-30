@@ -7,6 +7,48 @@ import WhisperKit
 @MainActor
 struct WhisperDictationBackendTests {
 
+    private func source() throws -> String {
+        try String(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/sAiity/WhisperDictationBackend.swift"), encoding: .utf8)
+    }
+
+    @Test("Whisper lifecycle uses the exact concrete API boundary")
+    func concreteLifecycleContract() throws {
+        let text = try source()
+        #expect(text.contains("WhisperKit.download(variant: choice.identifier"))
+        #expect(text.contains("downloadBase: partialRoot"))
+        #expect(text.contains("useBackgroundSession: false"))
+        #expect(text.contains("from: \"argmaxinc/whisperkit-coreml\""))
+        #expect(text.contains("progressCallback: progress"))
+        #expect(text.contains("setupModels(model: choice.identifier"))
+        #expect(text.contains("loadModels(prewarmMode: true)"))
+        #expect(text.contains("callback: nil"))
+        #expect(text.contains("MelSpectrogram.mlmodelc"))
+        #expect(text.contains("AudioEncoder.mlmodelc"))
+        #expect(text.contains("TextDecoder.mlmodelc"))
+    }
+
+    @Test("Readiness is marker-last and recovery is concrete")
+    func readinessAndRecoveryContract() throws {
+        let text = try source()
+        #expect(text.contains(".partial"))
+        #expect(text.contains("write(to: marker"))
+        #expect(text.contains("removeItem(at:"))
+        #expect(text.contains("Task<URL, Error>"))
+        #expect(text.contains("Task.checkCancellation()"))
+    }
+
+    @Test("Settings preparation is the only model construction boundary")
+    func explicitSettingsBoundary() throws {
+        let text = try source()
+        #expect(text.contains("static func prepareModel"))
+        #expect(text.contains("static func transcribe(samples:"))
+        #expect(text.contains("try await WhisperKit(model: choice.identifier"))
+    }
+
     @Test("Package manifest pins the exact WhisperKit dependency")
     func manifestPinsWhisperKit() throws {
         let package = try String(contentsOf: URL(fileURLWithPath: #filePath)

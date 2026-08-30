@@ -68,4 +68,80 @@ struct WhisperDictationBackend {
         _ = try decodingOptions(for: locale)
         try transcription()
     }
+
+    @MainActor private static var preparations: [String: Task<URL, Error>] = [:]
+
+    @MainActor
+    static func modelFolder(for choice: ModelChoice, under root: URL = ModelRegistry.root) -> URL {
+        root.appendingPathComponent(choice.folderName, isDirectory: true)
+    }
+
+    @MainActor
+    static func isReady(_ choice: ModelChoice, under root: URL = ModelRegistry.root) -> Bool {
+        let folder = modelFolder(for: choice, under: root)
+        let required = ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"]
+        return required.allSatisfy { FileManager.default.fileExists(atPath: folder.appendingPathComponent($0).path) }
+            && FileManager.default.fileExists(atPath: folder.appendingPathComponent(choice.readinessMarkerName).path)
+    }
+
+    @MainActor
+    static func prepareModel(_ choice: ModelChoice, under root: URL = ModelRegistry.root,
+                             progress: @escaping @Sendable (Progress) -> Void = { _ in }) async throws {
+        if isReady(choice, under: root) { return }
+        let key = modelFolder(for: choice, under: root).path
+        if let existing = preparations[key] {
+            _ = try await existing.value
+            return
+        }
+        let task = Task<URL, Error> {
+            try Task.checkCancellation()
+            let fm = FileManager.default
+            try fm.createDirectory(at: root, withIntermediateDirectories: true)
+            let final = modelFolder(for: choice, under: root)
+            let partialRoot = root.appendingPathComponent("\(choice.folderName).partial", isDirectory: true)
+            try? fm.removeItem(at: final)
+            try fm.createDirectory(at: partialRoot, withIntermediateDirectories: true)
+            let downloaded = try await WhisperKit.download(variant: choice.identifier,
+                downloadBase: partialRoot, useBackgroundSession: false,
+                from: "argmaxinc/whisperkit-coreml", token: nil,
+                endpoint: Constants.defaultRemoteEndpoint, progressCallback: progress)
+            try Task.checkCancellation()
+            try? fm.removeItem(at: final)
+            try fm.moveItem(at: downloaded, to: final)
+            let whisper = try await WhisperKit(model: choice.identifier, modelRepo: nil,
+                modelFolder: final.path, prewarm: false, load: false, download: false)
+            try await whisper.setupModels(model: choice.identifier, modelRepo: nil,
+                modelFolder: final.path, download: false)
+            try await whisper.loadModels(prewarmMode: true)
+            let marker = final.appendingPathComponent(choice.readinessMarkerName)
+            try Data().write(to: marker, options: .atomic)
+            try? fm.removeItem(at: partialRoot)
+            return final
+        }
+        preparations[key] = task
+        defer { preparations[key] = nil }
+        do { _ = try await task.value }
+        catch {
+            try? FileManager.default.removeItem(at: root.appendingPathComponent("\(choice.folderName).partial"))
+            throw error
+        }
+    }
+
+    @MainActor
+    static func removeModel(_ choice: ModelChoice, under root: URL = ModelRegistry.root) throws {
+        try FileManager.default.removeItem(at: modelFolder(for: choice, under: root))
+    }
+
+    static func transcribe(samples: [[Float]], locale: Locale,
+                           model choice: ModelChoice = model) async throws -> String {
+        let options = try decodingOptions(for: locale)
+        let folder = ModelRegistry.root.appendingPathComponent(choice.folderName, isDirectory: true)
+        let whisper = try await WhisperKit(model: choice.identifier, modelRepo: nil,
+            modelFolder: folder.path, prewarm: false, load: false, download: false)
+        try await whisper.setupModels(model: choice.identifier, modelRepo: nil,
+            modelFolder: folder.path, download: false)
+        try await whisper.loadModels(prewarmMode: true)
+        let results = await whisper.transcribe(audioArrays: samples, decodeOptions: options, callback: nil)
+        return results.compactMap { $0?.first?.text }.joined(separator: " ")
+    }
 }
