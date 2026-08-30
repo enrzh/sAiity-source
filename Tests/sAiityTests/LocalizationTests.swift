@@ -17,6 +17,20 @@ import Testing
 /// localized position that nobody added to the catalog.
 struct LocalizationTests {
 
+    @Test("Task6 settings keys have all shipped translations")
+    func task6SettingsKeysAreComplete() throws {
+        let required = ["Dictation cleanup", "Clean up dictated text", "Whisper dictation", "Whisper model", "Base", "Small", "Download", "Retry", "Remove", "Not ready", "Ready", "Preparing dictation", "Transcribing", "Cleaning up", "Dictation limit reached", "Permission required", "Open System Settings", "Reset Position", "Recovery", "Dictation failed", "Translated and inserted", "Inserted and copied", "Translation unavailable — cleaned text inserted and copied"]
+        let strings = try Self.catalog()
+        for key in required {
+            guard let entry = strings[key], let localizations = entry["localizations"] as? [String: Any] else {
+                Issue.record("missing catalog key: \(key)"); continue
+            }
+            for language in Self.shippedLanguages {
+                #expect((localizations[language] as? [String: Any]) != nil, "missing \(language): \(key)")
+            }
+        }
+    }
+
     // MARK: - Fixtures
 
     private static var repoRoot: URL {

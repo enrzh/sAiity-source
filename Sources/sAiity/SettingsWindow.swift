@@ -234,6 +234,21 @@ final class AppState {
             NotificationCenter.default.post(name: .saiityDictationSettingChanged, object: nil)
         }
     }
+    var dictationRecognizer: ASREngine? = UserDefaults.standard.string(forKey: "dictationRecognizer").flatMap(ASREngine.init(rawValue:)) {
+        didSet {
+            guard dictationRecognizer != oldValue else { return }
+            if let value = dictationRecognizer { UserDefaults.standard.set(value.rawValue, forKey: "dictationRecognizer") }
+            else { UserDefaults.standard.removeObject(forKey: "dictationRecognizer") }
+            NotificationCenter.default.post(name: .saiityDictationSettingChanged, object: nil)
+        }
+    }
+    var dictationCleanupEnabled = UserDefaults.standard.bool(forKey: "dictationCleanupEnabled") {
+        didSet {
+            guard dictationCleanupEnabled != oldValue else { return }
+            UserDefaults.standard.set(dictationCleanupEnabled, forKey: "dictationCleanupEnabled")
+            NotificationCenter.default.post(name: .saiityDictationSettingChanged, object: nil)
+        }
+    }
     var dictationChord = DictationChord.current {
         didSet {
             guard dictationChord != oldValue else { return }
@@ -794,6 +809,12 @@ enum SettingsWindowController {
               }) else { return }
         tabs.selectedTabViewItemIndex = index
         state.showDictationTranslationPicker = true
+    }
+
+    static func selectModelsPane() {
+        show()
+        guard let tabs = window?.contentViewController as? NSTabViewController else { return }
+        tabs.selectedTabViewItemIndex = tabs.tabViewItems.firstIndex { $0.label == String(localized: "Models") } ?? 0
     }
 }
 

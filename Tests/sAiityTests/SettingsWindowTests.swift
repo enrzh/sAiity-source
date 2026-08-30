@@ -5,6 +5,31 @@ import Testing
 
 @MainActor
 @Suite struct SettingsWindowTests {
+    @Test("dictation cleanup is off by default and persists independently")
+    func dictationCleanupIsIndependent() {
+        let defaults = UserDefaults.standard
+        let keys = ["dictationCleanupEnabled", "dictationRecognizer"]
+        let snapshot = keys.map { ($0, defaults.object(forKey: $0)) }
+        defer { snapshot.forEach { key, value in value.map { defaults.set($0, forKey: key) } ?? defaults.removeObject(forKey: key) } }
+        defaults.removeObject(forKey: "dictationCleanupEnabled")
+        defaults.removeObject(forKey: "dictationRecognizer")
+        let state = AppState()
+        #expect(state.dictationCleanupEnabled == false)
+        state.dictationCleanupEnabled = true
+        #expect(defaults.bool(forKey: "dictationCleanupEnabled"))
+        state.engine = .nemotron
+        state.dictationRecognizer = .parakeet
+        #expect(ASREngine.selected == .nemotron)
+        #expect(state.dictationRecognizer == .parakeet)
+    }
+
+    @Test("dictation locale covers every catalog language")
+    func dictationLocaleCoversLanguageCatalog() {
+        #expect(Set(WhisperDictationBackend.supportedLanguageCodes) == Set(LanguageCatalog.all.map(\.code)))
+        #expect(WhisperDictationBackend.ModelChoice.allCases == [.base, .small])
+        #expect(WhisperDictationBackend.isReady(.base, under: URL(fileURLWithPath: "/definitely-missing")) == false)
+    }
+
     @Test("dictation translation is opt-in and persisted")
     func dictationTranslationIsOptIn() {
         let defaults = UserDefaults.standard

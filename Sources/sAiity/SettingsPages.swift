@@ -194,6 +194,44 @@ struct DictationView: View {
                 Text("Dictation")
             }
 
+            Section("Whisper dictation") {
+                Picker("Whisper model", selection: Binding(get: { WhisperDictationBackend.model }, set: { WhisperDictationBackend.model = $0 })) {
+                    ForEach(WhisperDictationBackend.ModelChoice.allCases, id: \.self) { choice in
+                        Text(choice.description.capitalized).tag(choice)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Picker("Recognition", selection: $state.dictationRecognizer) {
+                    Text("None").tag(ASREngine?.none)
+                    ForEach(ASREngine.allCases, id: \.self) { Text($0.displayName).tag(Optional($0)) }
+                }
+                .pickerStyle(.segmented)
+                Picker("Language", selection: Binding(get: { WhisperDictationBackend.locale }, set: { WhisperDictationBackend.locale = $0 })) {
+                    Text("Auto").tag("auto")
+                    ForEach(LanguageCatalog.all, id: \.code) { language in
+                        Text(language.displayName).tag(language.code)
+                    }
+                }
+                HStack {
+                    let choice = WhisperDictationBackend.model
+                    let ready = WhisperDictationBackend.isReady(choice)
+                    Label(ready ? "Ready" : "Not ready", systemImage: ready ? "checkmark.circle" : "arrow.down.circle")
+                    Spacer()
+                    Button("Download") { Task { try? await (NSApp.delegate as? AppDelegate)?.prepareSelectedWhisperModelForUse() } }
+                    Button("Retry") { Task { try? await (NSApp.delegate as? AppDelegate)?.prepareSelectedWhisperModelForUse() } }
+                    Button("Remove") { Task { try? await WhisperDictationBackend().removeModel(choice) } }
+                }
+                Button("Models") { SettingsWindowController.selectModelsPane() }
+            }
+
+            Section("Dictation cleanup") {
+                Toggle("Clean up dictated text", isOn: $state.dictationCleanupEnabled)
+                    .disabled(state.llmModel?.isDownloaded != true)
+                if state.llmModel?.isDownloaded != true {
+                    Button("Not ready") { SettingsWindowController.selectModelsPane() }
+                }
+            }
+
             Section {
                 LabeledContent("Gesture") {
                     DictationShortcutRecorder(state: state)
