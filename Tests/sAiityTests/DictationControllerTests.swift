@@ -14,6 +14,9 @@ import Testing
         let log: EventLog
         var started = false
         var stopped = false
+        var stopCalls = 0
+        var takeCalls = 0
+        var limitHandler: (@Sendable () -> Void)?
 
         init(log: EventLog) { self.log = log }
 
@@ -23,15 +26,18 @@ import Testing
         }
 
         func stop() {
+            stopCalls += 1
             stopped = true
             log.values.append("capture.stop")
         }
 
         var samples: [Float] = []
         func takeCollectedSamples() -> [Float] {
+            takeCalls += 1
             defer { samples.removeAll() }
             return samples
         }
+        func setLimitHandler(_ handler: (@Sendable () -> Void)?) { limitHandler = handler }
     }
 
     final class FakeBackend: TranscriptionBackend, @unchecked Sendable {
@@ -160,6 +166,98 @@ import Testing
 
         #expect(log.values == ["capture.stop", "whisper.transcribe"])
         #expect(inserter.inserted == ["whisper final"])
+        #expect(capture.takeCalls == 1)
+    }
+
+    @Test("Whisper limit finishes once and drains samples")
+    func whisperLimitFinishesOnce() async {
+        let capture = FakeCapture(log: EventLog())
+        capture.samples = [4, 5]
+        var transcriptions = 0
+        let controller = DictationController(
+            makeBackend: { FakeBackend(log: EventLog()) }, capture: capture,
+            inserter: FakeInserter(), captionsActive: { false },
+            dictationUsesWhisper: { true },
+            transcribeWhisper: { samples, _ in
+                transcriptions += 1
+                #expect(samples == [[4, 5]])
+                return "limited"
+            })
+        controller.markReady(); controller.press(); await controller.waitForWorkForTests()
+        for _ in 0..<100 where capture.limitHandler == nil { await Task.yield() }
+        capture.limitHandler?(); capture.limitHandler?()
+        for _ in 0..<100 { await Task.yield() }
+        await controller.waitForWorkForTests()
+        #expect(transcriptions == 1)
+        #expect(capture.stopCalls == 1)
+        #expect(capture.takeCalls == 1)
+    }
+
+    @Test("Whisper cancellation drains exactly once")
+    func whisperCancellationDrainsOnce() async {
+        let capture = FakeCapture(log: EventLog()); capture.samples = [1]
+        let controller = DictationController(
+            makeBackend: { FakeBackend(log: EventLog()) }, capture: capture,
+            inserter: FakeInserter(), captionsActive: { false },
+            dictationUsesWhisper: { true })
+        controller.markReady(); controller.press(); await controller.waitForWorkForTests()
+        controller.cancel(); await controller.waitForWorkForTests()
+        #expect(capture.stopCalls == 1); #expect(capture.takeCalls == 1); #expect(capture.samples.isEmpty)
+    }
+
+    @Test("Whisper format failure never starts the microphone and drains samples")
+    func whisperFormatFailure() async {
+        let capture = FakeCapture(log: EventLog()); capture.samples = [9]
+        let controller = DictationController(
+            makeBackend: { FakeBackend(log: EventLog()) }, capture: capture,
+            inserter: FakeInserter(), captionsActive: { false },
+            dictationUsesWhisper: { true }, audioFormatFactory: { nil })
+        controller.markReady(); controller.press(); await controller.waitForWorkForTests()
+        #expect(!capture.started); #expect(capture.takeCalls == 1); #expect(capture.samples.isEmpty)
+        #expect(controller.phase != .dictating)
+    }
+
+    @Test("Whisper cancellation during transcription does not drain samples twice")
+    func whisperCancellationDuringTranscriptionDrainsOnce() async {
+        let capture = FakeCapture(log: EventLog()); capture.samples = [7]
+        var transcriptionContinuation: CheckedContinuation<String?, Never>?
+        let controller = DictationController(
+            makeBackend: { FakeBackend(log: EventLog()) }, capture: capture,
+            inserter: FakeInserter(), captionsActive: { false },
+            dictationUsesWhisper: { true },
+            transcribeWhisper: { _, _ in
+                await withCheckedContinuation { continuation in
+                    transcriptionContinuation = continuation
+                }
+                return nil
+            })
+        controller.markReady(); controller.press(); await controller.waitForWorkForTests()
+        controller.release()
+        while transcriptionContinuation == nil {
+            await Task.yield()
+        }
+        controller.cancel()
+        transcriptionContinuation?.resume(returning: nil)
+        await controller.waitForWorkForTests()
+        #expect(capture.stopCalls == 1)
+        #expect(capture.takeCalls == 1)
+        #expect(capture.samples.isEmpty)
+    }
+
+    @Test("Whisper transcription failure leaves capture samples drained")
+    func whisperTranscriptionFailureDrainsSamples() async {
+        let capture = FakeCapture(log: EventLog()); capture.samples = [8]
+        let controller = DictationController(
+            makeBackend: { FakeBackend(log: EventLog()) }, capture: capture,
+            inserter: FakeInserter(), captionsActive: { false },
+            dictationUsesWhisper: { true },
+            transcribeWhisper: { _, _ in throw BackendError.notPrepared })
+        controller.markReady(); controller.press(); await controller.waitForWorkForTests()
+        controller.release(); await controller.waitForWorkForTests()
+        #expect(capture.stopCalls == 1)
+        #expect(capture.takeCalls == 1)
+        #expect(capture.samples.isEmpty)
+        #expect(controller.phase != .dictating)
     }
 
     @Test("dictation inserts the authoritative completion instead of an early rolling final")
