@@ -859,27 +859,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch phase {
         case .idle:
             dictationToast.dismiss()
-        case .waitingForInputMonitoring:
-            dictationToast.show(text: String(localized: "Allow Input Monitoring for Dictation"), animated: false)
-        case .preparing:
-            dictationToast.show(text: String(localized: "Preparing Dictation…"), animated: true)
+        case .waitingForInputMonitoring, .preparing:
+            dictationToast.show(phase: phase)
         case .ready:
             let chord = SettingsWindowController.state.dictationChord.displayString
             dictationToast.show(text: String(localized: "Ready to Dictate · Hold \(chord)"),
                                 animated: false,
                                 autoDismissAfter: .seconds(4.5))
-        case .starting:
-            dictationToast.show(text: String(localized: "Starting Dictation…"), animated: true)
-        case .dictating:
-            dictationToast.show(text: String(localized: "Dictating…"), animated: true)
-        case .transcribing, .cleaning, .inserting:
-            dictationToast.show(text: String(localized: "Transcribing…"), animated: true)
-        case .translating:
-            dictationToast.show(text: String(localized: "Translating…"), animated: true)
-        case .limit:
-            dictationToast.show(text: String(localized: "Dictation limit reached"), animated: false)
-        case .recovery(let text), .result(let text), .failure(let text):
-            dictationToast.show(text: text, animated: false)
+        case .starting, .dictating, .transcribing, .cleaning, .translating, .inserting, .limit:
+            dictationToast.show(phase: phase)
+        case .recovery, .result, .failure:
+            dictationToast.show(phase: phase)
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(2))
                 if self.dictationController.phase.automaticallyDismissesToast {
@@ -888,7 +878,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         guard phase != .idle else { return }
-        positionDictationToast()
     }
 
     private func positionDictationToast() {

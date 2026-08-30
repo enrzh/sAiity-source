@@ -1,11 +1,17 @@
 import AppKit
 
+extension NSAccessibility.Role {
+    static let status = Self(rawValue: "AXStatus")
+}
+
 @MainActor
 final class DictationToastWindow: NSPanel {
     private let label = NSTextField(labelWithString: "")
     private let spinner = NSProgressIndicator()
     private var autoDismissTask: Task<Void, Never>?
     private var presentationGeneration = 0
+    private var hasPlacedToast = false
+    var onResetPosition: (() -> Void)?
 #if SAIITY_TEST_HOOKS
     private(set) var orderFrontCallsForTests = 0
 #endif
@@ -23,6 +29,9 @@ final class DictationToastWindow: NSPanel {
         ignoresMouseEvents = true
         hidesOnDeactivate = false
         isMovable = false
+        setAccessibilityRole(.status)
+        setAccessibilityLabel("Dictation")
+        setAccessibilityEnabled(true)
 
         let effect = NSGlassEffectView()
         effect.style = .regular
@@ -53,11 +62,61 @@ final class DictationToastWindow: NSPanel {
         ])
         effect.contentView = host
         contentView = effect
+        applyAccessibilitySurface()
+    }
+
+    private func applyAccessibilitySurface() {
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency {
+            isOpaque = true
+            backgroundColor = NSColor.windowBackgroundColor
+        } else {
+            isOpaque = false
+            backgroundColor = .clear
+        }
+        if NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast {
+            hasShadow = true
+            effectBorderColor = NSColor.labelColor
+        }
+    }
+
+    private var effectBorderColor: NSColor? {
+        get { contentView?.layer?.borderColor.flatMap(NSColor.init(cgColor:)) }
+        set {
+            contentView?.wantsLayer = true
+            contentView?.layer?.borderWidth = newValue == nil ? 0 : 1
+            contentView?.layer?.borderColor = newValue?.cgColor
+        }
+    }
+
+    func show(phase: DictationPhase) {
+        let p = phase.toastPresentation
+        if !hasPlacedToast && frame.width <= 1 {
+            let screen = FrameStore.bestScreen(for: frame) ?? NSScreen.main
+            if FrameStore.load() == nil, let screen {
+                let v = screen.visibleFrame
+                setFrameOrigin(NSPoint(x: v.midX - frame.width / 2, y: v.minY + 80))
+            }
+            hasPlacedToast = true
+        }
+        let frame = self.frame
+        show(text: p.value, animated: phase == .preparing || phase == .starting || phase == .dictating || phase == .transcribing || phase == .cleaning || phase == .translating || phase == .inserting)
+        setFrame(frame, display: false)
+        setAccessibilityValue(p.value)
+        NSAccessibility.post(element: self, notification: .announcementRequested)
+    }
+
+    func performResetPosition() -> Bool {
+        guard let onResetPosition else { return false }
+        onResetPosition()
+        return true
     }
 
     func show(text: String, animated: Bool, autoDismissAfter: Duration? = nil) {
         cancelAutoDismiss()
         label.stringValue = text
+        setAccessibilityValue(text)
+        setAccessibilityEnabled(true)
+        applyAccessibilitySurface()
         spinner.isHidden = !animated
         animated ? spinner.startAnimation(nil) : spinner.stopAnimation(nil)
         alphaValue = 1
@@ -95,6 +154,10 @@ final class DictationToastWindow: NSPanel {
                   self.presentationGeneration == generation,
                   self.isVisible else { return }
 
+            if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                self.dismiss()
+                return
+            }
             NSAnimationContext.runAnimationGroup { [weak self] context in
                 guard let self else { return }
                 context.duration = 0.85

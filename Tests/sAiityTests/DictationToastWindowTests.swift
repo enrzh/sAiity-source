@@ -5,6 +5,56 @@ import Testing
 
 @MainActor
 @Suite struct DictationToastWindowTests {
+    @Test("dictation phases map to stable accessible status values")
+    func phasePresentationIsStable() {
+        #expect(DictationPhase.waitingForInputMonitoring.toastPresentation.label == "Dictation")
+        #expect(DictationPhase.preparing.toastPresentation.value == "Preparing")
+        #expect(DictationPhase.dictating.toastPresentation.value == "Recording")
+        #expect(DictationPhase.transcribing.toastPresentation.value == "Transcribing")
+        #expect(DictationPhase.cleaning.toastPresentation.value == "Cleaning")
+        #expect(DictationPhase.translating.toastPresentation.value == "Translating")
+        #expect(DictationPhase.inserting.toastPresentation.value == "Inserting")
+        #expect(DictationPhase.result("Done").toastPresentation.value == "Done")
+        #expect(DictationPhase.limit.toastPresentation.value == "Limit reached")
+        #expect(DictationPhase.failure("No model").toastPresentation.value == "No model")
+        #expect(DictationPhase.recovery("Retry").toastPresentation.value == "Retry")
+    }
+
+    @Test("phase updates do not reposition the toast")
+    func phaseUpdatesPreserveFrame() {
+        let window = makeWindow()
+        window.setFrameOrigin(NSPoint(x: 321, y: 222))
+        let frame = window.frame
+        window.show(phase: .transcribing)
+        #expect(window.frame == frame)
+        window.dismiss()
+    }
+
+    @Test("toast exposes a stable status accessibility surface")
+    func accessibilitySurface() {
+        let window = makeWindow()
+        window.show(phase: .cleaning)
+        #expect(window.accessibilityRole() == .status)
+        #expect(window.accessibilityLabel() == "Dictation")
+        #expect((window.accessibilityValue() as? String) == "Cleaning")
+        #expect(window.isAccessibilityEnabled())
+        window.dismiss()
+    }
+
+    @Test("reset position action is exposed by the toast")
+    func resetPositionAction() {
+        let window = makeWindow()
+        var called = false
+        window.onResetPosition = { called = true }
+        #expect(window.performResetPosition())
+        #expect(called)
+    }
+
+    private func makeWindow() -> DictationToastWindow {
+        DictationToastWindow(contentRect: .zero, styleMask: [.borderless],
+                             backing: .buffered, defer: false)
+    }
+
     @Test("initial dictation setup waits for the window server to settle")
     func initialSetupRunsAfterLaunchTurn() async {
         var events: [String] = []

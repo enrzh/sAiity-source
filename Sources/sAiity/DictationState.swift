@@ -91,6 +91,31 @@ enum DictationPhase: Equatable, Sendable {
     case failure(String)
 }
 
+struct DictationToastPresentation: Equatable, Sendable {
+    let label: String
+    let value: String
+}
+
+extension DictationPhase {
+    var toastPresentation: DictationToastPresentation {
+        switch self {
+        case .idle: return .init(label: "Dictation", value: "Idle")
+        case .waitingForInputMonitoring: return .init(label: "Dictation", value: "Permission required")
+        case .preparing: return .init(label: "Dictation", value: "Preparing")
+        case .ready: return .init(label: "Dictation", value: "Ready")
+        case .starting: return .init(label: "Dictation", value: "Starting")
+        case .dictating: return .init(label: "Dictation", value: "Recording")
+        case .transcribing: return .init(label: "Dictation", value: "Transcribing")
+        case .cleaning: return .init(label: "Dictation", value: "Cleaning")
+        case .translating: return .init(label: "Dictation", value: "Translating")
+        case .inserting: return .init(label: "Dictation", value: "Inserting")
+        case .limit: return .init(label: "Dictation", value: "Limit reached")
+        case .recovery(let text), .result(let text), .failure(let text):
+            return .init(label: "Dictation", value: text)
+        }
+    }
+}
+
 struct DictationCleanupConfiguration: Equatable, Sendable {
     let enabled: Bool
     static let disabled = Self(enabled: false)

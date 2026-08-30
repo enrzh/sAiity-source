@@ -36,6 +36,11 @@ enum FrameStore {
         UserDefaults.standard.removeObject(forKey: widthKey)
     }
 
+    static func reset() {
+        UserDefaults.standard.removeObject(forKey: key)
+        clearUserWidth()
+    }
+
     /// Pull a saved frame back onto a screen that still exists. Shrink before
     /// moving, so a frame saved on a big display cannot end up wider than the
     /// laptop panel you just undocked to.
@@ -971,8 +976,7 @@ final class OverlayWindow: NSPanel {
     func resetPosition() {
         hasCustomFrame = false
         userWidth = nil
-        UserDefaults.standard.removeObject(forKey: "captionFrame")
-        FrameStore.clearUserWidth()
+        FrameStore.reset()
         // Recompute rather than keeping the width the bubble happens to have.
         // Reset has just discarded the user's chosen width, so the width is a
         // setting again — carrying the old one forward is how a dragged-wide
