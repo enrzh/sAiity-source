@@ -94,4 +94,10 @@ struct LanguageTests {
             #expect(!engines.isEmpty, "\(lang.code) is listed but no engine can translate it")
         }
     }
+
+    @Test("The dictation catalog matches the translation catalog")
+    func dictationCatalogMatchesMADLAD() {
+        #expect(Set(LanguageCatalog.all.map(\.code)) ==
+                Set(MADLADLanguages.canonicalCodes).union(LanguageCatalog.popular))
+    }
 }

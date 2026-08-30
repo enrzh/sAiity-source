@@ -29,6 +29,7 @@ let package = Package(
         // the fact — a bad bug would live forever on every Mac that has it.
         .package(url: "https://github.com/sparkle-project/Sparkle",
                  from: "2.9.5"),
+        .package(url: "https://github.com/argmaxinc/WhisperKit.git", exact: "1.0.0"),
     ],
     targets: [
         .executableTarget(
@@ -42,6 +43,7 @@ let package = Package(
                 .product(name: "LLM", package: "LLM.swift"),
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "Sparkle", package: "Sparkle"),
+                .product(name: "WhisperKit", package: "WhisperKit"),
             ],
             path: "Sources/sAiity",
             swiftSettings: [.swiftLanguageMode(.v5)]
