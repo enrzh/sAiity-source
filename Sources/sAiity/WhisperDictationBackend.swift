@@ -38,7 +38,9 @@ struct WhisperDictationBackend {
             do {
                 try await self.prepareModelUnlocked(c, root, progress)
                 let folder = Self.folder(c, root)
+                try Task.checkCancellation()
                 try await self.prepare(c.identifier, folder)
+                try Task.checkCancellation()
                 try Data().write(to: folder.appendingPathComponent(c.readinessMarkerName), options: .atomic)
             } catch is CancellationError {
                 try? FileManager.default.removeItem(at: root.appendingPathComponent("\(c.folderName).partial"))
@@ -79,10 +81,18 @@ struct WhisperDictationBackend {
 }
 private actor FIFOAsyncMutex {
     private var locked = false
-    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var waiters: [UUID: CheckedContinuation<Void, Error>] = [:]
+    private var order: [UUID] = []
 
+    // Same-key nested run is intentionally unsupported; no production path needs reentrancy.
     func run<T: Sendable>(_ operation: @Sendable () async throws -> T) async throws -> T {
-        await acquire()
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await acquire(id: id)
+        } onCancel: {
+            Task { await self.cancel(id: id) }
+        }
+        try Task.checkCancellation()
         do {
             let result = try await operation()
             release()
@@ -93,23 +103,37 @@ private actor FIFOAsyncMutex {
         }
     }
 
-    private func acquire() async {
+    private func acquire(id: UUID) async throws {
+        try Task.checkCancellation()
         if !locked {
             locked = true
             return
         }
-        await withCheckedContinuation { continuation in
-            waiters.append(continuation)
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            if Task.isCancelled {
+                continuation.resume(throwing: CancellationError())
+                return
+            }
+            waiters[id] = continuation
+            order.append(id)
         }
     }
 
+    private func cancel(id: UUID) {
+        guard let waiter = waiters.removeValue(forKey: id) else { return }
+        order.removeAll { $0 == id }
+        waiter.resume(throwing: CancellationError())
+    }
+
     private func release() {
-        if let next = waiters.first {
-            waiters.removeFirst()
-            next.resume()
-        } else {
-            locked = false
+        while let id = order.first {
+            order.removeFirst()
+            if let next = waiters.removeValue(forKey: id) {
+                next.resume()
+                return
+            }
         }
+        locked = false
     }
 }
 

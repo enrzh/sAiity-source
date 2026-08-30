@@ -167,6 +167,57 @@ struct WhisperDictationBackendTests {
         #expect(FileManager.default.fileExists(atPath: marker.path))
     }
 
+    @Test("queued cancellation skips the operation and preserves FIFO order")
+    func queuedCancellationSkipsOperationAndPreservesFIFO() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let gate = Gate()
+        let calls = Counter()
+        let backend = WhisperDictationBackend(root: root, transcribe: { _, _, _, _ in
+            await calls.increment()
+            let call = await calls.value
+            if call == 1 { await gate.wait() }
+            return "call-\(call)"
+        })
+        let first = Task { try await backend.transcribe(samples: [], locale: Locale(identifier: "en-US")) }
+        await calls.waitUntilValue(1)
+        let second = Task { try await backend.transcribe(samples: [], locale: Locale(identifier: "en-US")) }
+        let third = Task { try await backend.transcribe(samples: [], locale: Locale(identifier: "en-US")) }
+        second.cancel()
+        await gate.open()
+        #expect(try await first.value == "call-1")
+        do {
+            _ = try await second.value
+            #expect(Bool(false))
+        } catch { #expect(error is CancellationError) }
+        #expect(try await third.value == "call-2")
+        #expect(await calls.value == 2)
+    }
+
+    @Test("cancellation during explicit setup keeps final files and does not write marker")
+    func cancellationDuringExplicitSetupPreservesFinalFiles() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let folder = WhisperDictationBackend.modelFolder(for: .base, under: root)
+        try makeModel(at: root)
+        let marker = folder.appendingPathComponent(".saiity-ready")
+        let gate = Gate()
+        let backend = WhisperDictationBackend(root: root, download: { _, _, _ in
+            throw TestError.unexpectedDownload
+        }, prepare: { _, _ in await gate.wait() })
+        let task = Task { try await backend.prepareModelForUse(.base) }
+        await Task.yield()
+        task.cancel()
+        await gate.open()
+        do {
+            _ = try await task.value
+            #expect(Bool(false))
+        } catch { #expect(error is CancellationError) }
+        #expect(FileManager.default.fileExists(atPath: folder.path))
+        #expect(FileManager.default.fileExists(atPath: folder.appendingPathComponent("MelSpectrogram.mlmodelc").path))
+        #expect(!FileManager.default.fileExists(atPath: marker.path))
+    }
+
     @Test("mixed operations serialize without type casts and preserve typed results", .timeLimit(.minutes(1)))
     func mixedOperationsSerializePerRootAndIdentifier() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -217,11 +268,22 @@ struct WhisperDictationBackendTests {
         #expect(await counter.value == 2)
     }
 
-    private enum TestError: Error, Equatable { case failed }
+    private enum TestError: Error, Equatable { case failed, unexpectedDownload }
 
     private actor Counter {
         var value = 0
         func increment() { value += 1 }
+        func waitUntilValue(_ expected: Int) async {
+            while value < expected { await Task.yield() }
+        }
+    }
+
+    private actor Gate {
+        private var isOpen = false
+        func wait() async {
+            while !isOpen { await Task.yield() }
+        }
+        func open() { isOpen = true }
     }
 
     private actor EventLog {
