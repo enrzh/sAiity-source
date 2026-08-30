@@ -6,11 +6,14 @@ extension NSAccessibility.Role {
 
 @MainActor
 final class DictationToastWindow: NSPanel {
+    static var postAccessibility: (Any, NSAccessibility.Notification) -> Void = NSAccessibility.post(element:notification:)
     private let label = NSTextField(labelWithString: "")
     private let spinner = NSProgressIndicator()
+    private let resetButton = NSButton()
     private var autoDismissTask: Task<Void, Never>?
     private var presentationGeneration = 0
     private var hasPlacedToast = false
+    private var suppressFrameSave = false
     var onResetPosition: (() -> Void)?
 #if SAIITY_TEST_HOOKS
     private(set) var orderFrontCallsForTests = 0
@@ -26,9 +29,9 @@ final class DictationToastWindow: NSPanel {
         isOpaque = false
         backgroundColor = .clear
         hasShadow = true
-        ignoresMouseEvents = true
+        ignoresMouseEvents = false
         hidesOnDeactivate = false
-        isMovable = false
+        isMovable = true
         setAccessibilityRole(.status)
         setAccessibilityLabel("Dictation")
         setAccessibilityEnabled(true)
@@ -44,8 +47,15 @@ final class DictationToastWindow: NSPanel {
 
         spinner.style = .spinning
         spinner.controlSize = .small
+        resetButton.image = NSImage(systemSymbolName: "arrow.counterclockwise", accessibilityDescription: "Reset Position")
+        resetButton.isBordered = false
+        resetButton.toolTip = "Reset Position"
+        resetButton.setAccessibilityRole(.button)
+        resetButton.setAccessibilityLabel("Reset Position")
+        resetButton.target = self
+        resetButton.action = #selector(resetPositionFromButton)
 
-        let stack = NSStackView(views: [spinner, label])
+        let stack = NSStackView(views: [spinner, label, resetButton])
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 8
@@ -63,6 +73,14 @@ final class DictationToastWindow: NSPanel {
         effect.contentView = host
         contentView = effect
         applyAccessibilitySurface()
+        if let saved = FrameStore.loadDictation(), let screen = FrameStore.bestScreen(for: saved) {
+            setFrame(FrameStore.clamp(saved, into: screen.visibleFrame), display: false)
+            hasPlacedToast = true
+        }
+        NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification,
+                                               object: self, queue: .main) { [weak self] _ in
+            if self?.suppressFrameSave == false { self?.saveDraggedFrame() }
+        }
     }
 
     private func applyAccessibilitySurface() {
@@ -76,6 +94,8 @@ final class DictationToastWindow: NSPanel {
         if NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast {
             hasShadow = true
             effectBorderColor = NSColor.labelColor
+        } else {
+            effectBorderColor = nil
         }
     }
 
@@ -89,20 +109,25 @@ final class DictationToastWindow: NSPanel {
     }
 
     func show(phase: DictationPhase) {
+        show(phase: phase, autoDismissAfter: nil)
+    }
+
+    func show(phase: DictationPhase, autoDismissAfter: Duration?) {
         let p = phase.toastPresentation
-        if !hasPlacedToast && frame.width <= 1 {
-            let screen = FrameStore.bestScreen(for: frame) ?? NSScreen.main
-            if FrameStore.load() == nil, let screen {
-                let v = screen.visibleFrame
-                setFrameOrigin(NSPoint(x: v.midX - frame.width / 2, y: v.minY + 80))
-            }
-            hasPlacedToast = true
-        }
+        let needsPlacement = !hasPlacedToast
         let frame = self.frame
-        show(text: p.value, animated: phase == .preparing || phase == .starting || phase == .dictating || phase == .transcribing || phase == .cleaning || phase == .translating || phase == .inserting)
-        setFrame(frame, display: false)
+        show(text: p.value, animated: phase == .preparing || phase == .starting || phase == .dictating || phase == .transcribing || phase == .cleaning || phase == .translating || phase == .inserting, autoDismissAfter: autoDismissAfter)
+        if needsPlacement && FrameStore.loadDictation() == nil,
+           let screen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? NSScreen.main {
+            let v = screen.visibleFrame
+            setFrameOrigin(NSPoint(x: v.midX - self.frame.width / 2, y: v.minY + 80))
+        }
+        hasPlacedToast = true
+        if !needsPlacement || FrameStore.loadDictation() != nil {
+            setFrame(frame, display: false)
+        }
         setAccessibilityValue(p.value)
-        NSAccessibility.post(element: self, notification: .announcementRequested)
+        Self.postAccessibility(self, .announcementRequested)
     }
 
     func performResetPosition() -> Bool {
@@ -110,6 +135,22 @@ final class DictationToastWindow: NSPanel {
         onResetPosition()
         return true
     }
+
+    func saveDraggedFrame() { FrameStore.saveDictation(frame) }
+
+    func resetPosition() {
+        FrameStore.resetDictation()
+        let screen = FrameStore.bestScreen(for: frame) ?? NSScreen.main
+        guard let screen else { return }
+        let v = screen.visibleFrame
+        let f = NSRect(x: v.midX - frame.width / 2, y: v.minY + 80,
+                       width: max(frame.width, 150), height: max(frame.height, 36))
+        suppressFrameSave = true
+        setFrame(FrameStore.clamp(f, into: v), display: false)
+        suppressFrameSave = false
+    }
+
+    @objc private func resetPositionFromButton() { resetPosition() }
 
     func show(text: String, animated: Bool, autoDismissAfter: Duration? = nil) {
         cancelAutoDismiss()

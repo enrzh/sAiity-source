@@ -41,6 +41,15 @@ enum FrameStore {
         clearUserWidth()
     }
 
+    private static let dictationKey = "dictationToastFrame"
+    static func saveDictation(_ f: NSRect) { UserDefaults.standard.set(NSStringFromRect(f), forKey: dictationKey) }
+    static func loadDictation() -> NSRect? {
+        guard let s = UserDefaults.standard.string(forKey: dictationKey) else { return nil }
+        let r = NSRectFromString(s)
+        return r.width > 1 && r.height > 1 ? r : nil
+    }
+    static func resetDictation() { UserDefaults.standard.removeObject(forKey: dictationKey) }
+
     /// Pull a saved frame back onto a screen that still exists. Shrink before
     /// moving, so a frame saved on a big display cannot end up wider than the
     /// laptop panel you just undocked to.

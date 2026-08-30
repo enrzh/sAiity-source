@@ -631,6 +631,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlay.onCopy = { [weak self] in self?.copyCurrentLine() }
         overlay.onOpenWindow = { SettingsWindowController.show() }
         overlay.onClear = { [weak self] in self?.clearCaption() }
+        dictationToast.onResetPosition = { [weak self] in
+            self?.dictationToast.resetPosition()
+        }
         NotificationCenter.default.addObserver(
             self, selector: #selector(saveTranscriptChangedExternally(_:)),
             name: .saiitySaveTranscriptChanged, object: nil)
@@ -862,10 +865,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .waitingForInputMonitoring, .preparing:
             dictationToast.show(phase: phase)
         case .ready:
-            let chord = SettingsWindowController.state.dictationChord.displayString
-            dictationToast.show(text: String(localized: "Ready to Dictate · Hold \(chord)"),
-                                animated: false,
-                                autoDismissAfter: .seconds(4.5))
+            dictationToast.show(phase: phase, autoDismissAfter: .seconds(4.5))
         case .starting, .dictating, .transcribing, .cleaning, .translating, .inserting, .limit:
             dictationToast.show(phase: phase)
         case .recovery, .result, .failure:

@@ -5,6 +5,38 @@ import Testing
 
 @MainActor
 @Suite struct DictationToastWindowTests {
+    @Test("dictation toast persists its own frame key")
+    func dictationFramePersistenceIsIndependent() {
+        FrameStore.resetDictation()
+        let frame = NSRect(x: 111, y: 222, width: 240, height: 36)
+        FrameStore.saveDictation(frame)
+        #expect(FrameStore.loadDictation() == frame)
+        #expect(UserDefaults.standard.string(forKey: "captionFrame") == nil)
+        FrameStore.resetDictation()
+    }
+
+    @Test("toast drag saves its frame and reset clears the production action")
+    func dragSaveAndReset() {
+        let window = makeWindow()
+        window.setFrame(NSRect(x: 200, y: 220, width: 240, height: 36), display: false)
+        window.saveDraggedFrame()
+        #expect(FrameStore.loadDictation() == window.frame)
+        window.resetPosition()
+        #expect(FrameStore.loadDictation() == nil)
+        window.dismiss()
+    }
+
+    @Test("announcements use the injected element and notification")
+    func announcementSeam() {
+        var received: (Any, NSAccessibility.Notification)?
+        DictationToastWindow.postAccessibility = { received = ($0, $1) }
+        defer { DictationToastWindow.postAccessibility = NSAccessibility.post(element:notification:) }
+        let window = makeWindow()
+        window.show(phase: .cleaning)
+        #expect(received?.0 as AnyObject? === window)
+        #expect(received?.1 == .announcementRequested)
+        window.dismiss()
+    }
     @Test("dictation phases map to stable accessible status values")
     func phasePresentationIsStable() {
         #expect(DictationPhase.waitingForInputMonitoring.toastPresentation.label == "Dictation")
