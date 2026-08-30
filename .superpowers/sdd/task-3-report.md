@@ -1,9 +1,11 @@
 # Task 3 Report
 
-- base: `ccd003d`
-- files: `DictationState.swift`, `DictationController.swift`, `DictationCleanupValidator.swift`, `DictationMicrophoneCaptureTests.swift`, `DictationControllerTests.swift`, `ModelLifecycleTests.swift`, `LocalModels.swift`, `Translators.swift`, `AppDelegate.swift`
-- RED exact failures: missing `DictationAudioSampleLimit`; old empty-authoritative test expected rolling text; initial compile also exposed non-exhaustive new phases and optional text handling.
-- GREEN: authoritative `finishDictation()` is called once; rolling collector/fallback removed; cleanup is default-off and runs before translation; translation receives cleaned text and failure retains it; cleanup validation rejects empty/role-marked/oversized output; Qwen/Gemma compatibility requires downloaded GGUF; new phases are exhaustive; Hy-MT2 retry temperature is `0.15`.
-- focused tests: `swift test -c release -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS --jobs 2 --filter 'DictationControllerTests|DictationMicrophoneCaptureTests|ModelLifecycleTests'` -> 30 tests passed.
-- diff-check: passed.
-- concerns: capture-side converted-sample accounting and cap-triggered controller terminal wiring still require follow-up; this commit intentionally does not touch Task 4/5/6 wiring.
+- implementation commits: `f153501`, `52141a5`
+- verification commit base: `52141a5a3385329a9a562fcc668e3514b0ea8bc2`
+- focused command: `swift test -c release -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS --jobs 2 --filter 'DictationControllerTests|DictationMicrophoneCaptureTests|ModelLifecycleTests'`
+- runner: entered XCTest test runner (`Testing Library Version: 2074`, target `arm64e-apple-macos14.0`)
+- result: PASS; `Test run with 30 tests in 3 suites passed after 0.605 seconds.`
+- suites: `DictationMicrophoneCaptureTests`, `ModelLifecycleTests`, `DictationControllerTests`
+- first failure: none
+- build/test warnings: SwiftPM conflicting `swift-syntax` identity warning and existing Swift concurrency `Sendable` warnings; command exit code `0`
+- diff-check: `git diff --check` passed
