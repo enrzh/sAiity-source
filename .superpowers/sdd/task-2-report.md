@@ -2,9 +2,8 @@
 
 ## Base / Head / Commit
 
-- Base: `8331cb0`
-- Head before fix: `8331cb0`
-- Commit: `HEAD` (`fix: enforce Whisper lifecycle boundaries`)
+- Review range: `233fb84..newHEAD`
+- Implementation commits: `8331cb0`, `4d42fce`, and `newHEAD` (`fix: complete Whisper model lifecycle`)
 
 ## Files
 
@@ -19,7 +18,7 @@ Command:
 swift test -c release -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS --filter 'WhisperDictationBackendTests|LanguageTests'
 ```
 
-Result: failed as expected at compile time because the concrete hook initializer was absent. After the test was executable, it failed on the old lifecycle implementation, proving the boundary behavior rather than a source-string check.
+Result: failed as expected at compile time because the root-injected concrete prepare closure initializer was absent. The failure identified the missing behavior API, not a source-string check.
 
 ## Fix GREEN
 
@@ -29,7 +28,7 @@ Command:
 swift test -c release -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS --filter 'WhisperDictationBackendTests|LanguageTests'
 ```
 
-Result: exit 0. `Test run with 18 tests in 2 suites passed after 0.026 seconds.` Tests cover normal download without setup/load, explicit setup/load then marker-last, concrete locale rejection before transcription, required files, and marker-based readiness.
+Result: exit 0. The Whisper-focused run executed 16 tests in 1 suite. Coverage includes normal download without setup/load, one explicit prepare closure with setup/load/release before marker, cancellation cleanup, failure cleanup and retry, custom-root consistency, remove cleanup, same-root single-flight, different-root independence, transcription hook invocation, and unsupported-locale rejection before the hook.
 
 ## Concerns
 
