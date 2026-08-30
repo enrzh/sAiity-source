@@ -8,7 +8,7 @@ import Testing
     @Test("cleanup compatibility requires a downloaded Qwen or Gemma GGUF")
     func cleanupCompatibilityIsRestricted() {
         let qwen = LocalModel(source: .url("https://example.invalid/qwen.gguf"), file: "qwen.gguf", label: "Qwen", bytes: 1, recommended: false, note: "", licence: "")
-        #expect(!qwen.isCleanupCompatible(false))
+        #expect(!qwen.isCleanupCompatible())
     }
 
     final class FakeLifecycleBackend: TranscriptionBackend, @unchecked Sendable {

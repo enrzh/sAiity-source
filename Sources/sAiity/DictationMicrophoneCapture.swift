@@ -105,15 +105,24 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
             return buffer
         }
         guard error == nil, output.frameLength > 0 else { return }
-        let remaining = DictationAudioSampleLimit.maximumSamples - lock.withLock { sampleCount }
-        guard remaining > 0 else { return }
-        let accepted = min(Int(output.frameLength), remaining)
-        lock.withLock { sampleCount += accepted }
-        output.frameLength = AVAudioFrameCount(accepted)
+        let accounting = acceptConvertedFrame(Int(output.frameLength))
+        guard accounting.acceptedFrameCount > 0 else { return }
+        output.frameLength = AVAudioFrameCount(accounting.acceptedFrameCount)
         onBuffer(output)
-        if accepted == remaining, lock.withLock({ !didEmitLimit }) {
-            lock.withLock { didEmitLimit = true }
-            onLimit?()
+        if accounting.shouldEmitLimit { onLimit?() }
+    }
+
+    /// Accounts one successfully converted buffer atomically. The returned
+    /// values let the audio callback do feed/limit work after releasing lock.
+    func acceptConvertedFrame(_ frameCount: Int) -> (acceptedFrameCount: Int, shouldEmitLimit: Bool) {
+        lock.withLock {
+            let remaining = DictationAudioSampleLimit.maximumSamples - sampleCount
+            guard frameCount > 0, remaining > 0 else { return (0, false) }
+            let accepted = min(frameCount, remaining)
+            sampleCount += accepted
+            let shouldEmit = sampleCount == DictationAudioSampleLimit.maximumSamples && !didEmitLimit
+            if shouldEmit { didEmitLimit = true }
+            return (accepted, shouldEmit)
         }
     }
 }

@@ -267,8 +267,8 @@ struct LocalModel: Identifiable, Sendable, Equatable, Codable {
         return Double(n) >= Double(expected) * 0.98
     }
 
-    func isCleanupCompatible(_ downloaded: Bool = true) -> Bool {
-        downloaded && isDownloaded && file.lowercased().hasSuffix(".gguf") &&
+    func isCleanupCompatible() -> Bool {
+        isDownloaded && file.lowercased().hasSuffix(".gguf") &&
             [file, label].joined(separator: " ").range(of: "qwen|gemma", options: .regularExpression) != nil
     }
 
