@@ -7,6 +7,10 @@ extension NSAccessibility.Role {
 @MainActor
 final class DictationToastWindow: NSPanel {
     static var postAccessibility: (Any, NSAccessibility.Notification) -> Void = NSAccessibility.post(element:notification:)
+    static let systemAccessibilityPreferences: () -> (Bool, Bool, Bool) = {
+        (NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency, NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast)
+    }
+    static var accessibilityPreferences = systemAccessibilityPreferences
     private let label = NSTextField(labelWithString: "")
     private let spinner = NSProgressIndicator()
     private let resetButton = NSButton()
@@ -14,6 +18,8 @@ final class DictationToastWindow: NSPanel {
     private var presentationGeneration = 0
     private var hasPlacedToast = false
     private var suppressFrameSave = false
+    private var dragStart: NSPoint?
+    private var dragOrigin: NSPoint = .zero
     var onResetPosition: (() -> Void)?
 #if SAIITY_TEST_HOOKS
     private(set) var orderFrontCallsForTests = 0
@@ -84,14 +90,15 @@ final class DictationToastWindow: NSPanel {
     }
 
     private func applyAccessibilitySurface() {
-        if NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency {
+        let (_, reduceTransparency, increaseContrast) = Self.accessibilityPreferences()
+        if reduceTransparency {
             isOpaque = true
             backgroundColor = NSColor.windowBackgroundColor
         } else {
             isOpaque = false
             backgroundColor = .clear
         }
-        if NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast {
+        if increaseContrast {
             hasShadow = true
             effectBorderColor = NSColor.labelColor
         } else {
@@ -127,6 +134,7 @@ final class DictationToastWindow: NSPanel {
             setFrame(frame, display: false)
         }
         setAccessibilityValue(p.value)
+        setAccessibilityLabel(p.label)
         Self.postAccessibility(self, .announcementRequested)
     }
 
@@ -137,6 +145,20 @@ final class DictationToastWindow: NSPanel {
     }
 
     func saveDraggedFrame() { FrameStore.saveDictation(frame) }
+
+    func beginDrag(at point: NSPoint) { dragStart = point; dragOrigin = frame.origin }
+    func drag(to point: NSPoint) {
+        guard let dragStart else { return }
+        setFrameOrigin(NSPoint(x: dragOrigin.x + point.x - dragStart.x, y: dragOrigin.y + point.y - dragStart.y))
+    }
+    func endDrag() { dragStart = nil; saveDraggedFrame() }
+    override func mouseDown(with event: NSEvent) {
+        let point = contentView?.convert(event.locationInWindow, from: nil) ?? .zero
+        guard !resetButton.frame.contains(point) else { return }
+        beginDrag(at: point)
+    }
+    override func mouseDragged(with event: NSEvent) { drag(to: contentView?.convert(event.locationInWindow, from: nil) ?? .zero) }
+    override func mouseUp(with event: NSEvent) { endDrag() }
 
     func resetPosition() {
         FrameStore.resetDictation()
@@ -150,7 +172,8 @@ final class DictationToastWindow: NSPanel {
         suppressFrameSave = false
     }
 
-    @objc private func resetPositionFromButton() { resetPosition() }
+    @objc private func resetPositionFromButton() { _ = performResetPosition() }
+    func performResetButtonAction() { resetButton.performClick(nil) }
 
     func show(text: String, animated: Bool, autoDismissAfter: Duration? = nil) {
         cancelAutoDismiss()
@@ -195,7 +218,7 @@ final class DictationToastWindow: NSPanel {
                   self.presentationGeneration == generation,
                   self.isVisible else { return }
 
-            if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            if Self.accessibilityPreferences().0 {
                 self.dismiss()
                 return
             }

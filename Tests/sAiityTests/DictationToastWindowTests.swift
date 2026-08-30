@@ -5,6 +5,60 @@ import Testing
 
 @MainActor
 @Suite struct DictationToastWindowTests {
+    @Test("real drag updates and persists the borderless panel frame")
+    func realDragPersistsFrame() {
+        let window = makeWindow()
+        window.setFrame(NSRect(x: 200, y: 220, width: 240, height: 36), display: false)
+        window.beginDrag(at: NSPoint(x: 210, y: 230))
+        window.drag(to: NSPoint(x: 260, y: 280))
+        window.endDrag()
+        #expect(window.frame.origin == NSPoint(x: 250, y: 270))
+        #expect(FrameStore.loadDictation() == window.frame)
+        window.dismiss()
+    }
+
+    @Test("reset button invokes the production callback")
+    func resetButtonUsesCallback() {
+        let window = makeWindow()
+        var called = false
+        window.onResetPosition = { called = true }
+        window.performResetButtonAction()
+        #expect(called)
+    }
+
+    @Test("toast remains nonactivating and has a stable accessibility label")
+    func nonactivatingAccessibility() {
+        let window = makeWindow()
+        #expect(window.styleMask.contains(.nonactivatingPanel))
+        #expect(!window.canBecomeKey)
+        #expect(!window.canBecomeMain)
+        window.show(phase: .cleaning)
+        #expect(window.accessibilityRole() == .status)
+        #expect(window.accessibilityLabel() == "Dictation")
+        window.dismiss()
+    }
+
+    @Test("saved toast frames restore and clamp through the window seam")
+    func restoresSavedFrame() {
+        FrameStore.resetDictation()
+        FrameStore.saveDictation(NSRect(x: 5000, y: 5000, width: 240, height: 36))
+        let window = makeWindow()
+        #expect(window.frame.width == 240)
+        #expect(window.frame.maxX <= (NSScreen.main?.visibleFrame.maxX ?? .greatestFiniteMagnitude))
+        FrameStore.resetDictation()
+        window.dismiss()
+    }
+
+    @Test("accessibility preferences are injectable and update surfaces")
+    func accessibilityPreferences() {
+        DictationToastWindow.accessibilityPreferences = { (true, true, true) }
+        defer { DictationToastWindow.accessibilityPreferences = DictationToastWindow.systemAccessibilityPreferences }
+        let window = makeWindow()
+        window.show(phase: .cleaning)
+        #expect(window.isOpaque)
+        #expect(window.contentView?.layer?.borderWidth == 1)
+        window.dismiss()
+    }
     @Test("dictation toast persists its own frame key")
     func dictationFramePersistenceIsIndependent() {
         FrameStore.resetDictation()
