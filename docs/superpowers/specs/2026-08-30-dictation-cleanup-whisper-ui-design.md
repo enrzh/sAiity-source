@@ -1,256 +1,214 @@
-# Local Dictation Cleanup, Whisper Models, and Native UI Design
+# Local Dictation Cleanup, Whisper Batch Inference, and Native UI Design
 
 ## Status and Baseline
 
-This is an implementation-ready design specification for macOS only. The
-baseline is `main` at `c227ca0`, with a clean working tree and two documentation
-commits ahead of `origin/main`. No tests are claimed to have passed by this
-document. The implementation plan must turn the contracts below into RED and
-GREEN tests before changing production code.
+This is an implementation-ready macOS-only specification. The historical
+implementation baseline is `main` at `c227ca0`; the current specification
+revision is carried by the commits after it, including `229ab995`. This
+document makes no test or release claim. Implementation starts with focused
+RED tests, followed by the smallest GREEN changes in existing types.
 
-The design follows general macOS principles: clear state, predictable focus and
-keyboard behavior, native controls, sufficient contrast, reduced motion, and
-VoiceOver-readable labels. The repository has no available `apple-design`
-references or HIG directory, so this document does not invent line-by-line HIG
-citations.
+## Goal and Scope
 
-## Goal
+After push-to-talk release, sAiity performs an opt-in, local cleanup of the
+authoritative dictation transcript, optionally translates that result, and
+performs one final clipboard and/or text insertion operation. Release-time
+batch Whisper inference is selectable for dictation. Live captions retain
+their streaming Nemotron/Parakeet path.
 
-After push-to-talk release, sAiity may perform a strictly local, opt-in cleanup
-of the authoritative dictation transcript, optionally translate that result,
-and then copy or insert exactly one final string. Dictation may use a selectable
-Whisper model for release-time batch inference while live captions continue to
-use their existing streaming Nemotron/Parakeet path. The settings and toast
-surfaces must make readiness, progress, failures, and accessibility behavior
-understandable without redesigning the whole application.
+The scope covers macOS dictation cleanup, its prompts and fallback, batch
+Whisper readiness and the 20-second recording limit, independent caption and
+dictation settings, `DictationToastWindow` placement/accessibility, permission
+recovery, and focused tests. It excludes iOS, Windows, Linux, external APIs,
+uploads, live-caption changes, release/signing/distribution, app-wide
+navigation redesign, merged overlay windows, and new abstraction layers.
 
-## Scope
+## Existing Boundaries
 
-In scope:
-
-- macOS push-to-talk dictation cleanup, its prompt contract, fallback, and
-  ordering;
-- post-release batch Whisper selection, download/readiness/loading state, and
-  the 20-second recording limit;
-- independent captions versus dictation model settings;
-- `DictationToastWindow` presentation and frame persistence;
-- the focused native toolbar/background and dictation permission recovery UI;
-- focused unit and integration tests listed in the test matrix.
-
-Out of scope:
-
-- iOS, Windows, or Linux;
-- always-on microphone capture, external transcription APIs, or transcript
-  uploads;
-- changing live caption recognition, caption translation, or caption rolling
-  commit behavior;
-- copying Tauri/Rust managers, `cpal`, or the Dictus architecture;
-- a new app-wide visual rewrite, a merged overlay window, or speculative
-  abstraction layers;
-- release, signing, distribution, or performance claims.
-
-## Existing Boundaries and YAGNI Rules
-
-Reuse the existing `ASRBackendPool`, `IdleEviction`, `ModelRegistry`,
+Reuse `ASRBackendPool`, `IdleEviction`, `ModelRegistry`,
 `DictationController`, `AVAudioEngine` capture, `DictationToastWindow`,
-`OverlayWindow`, and `FrameStore` patterns. Keep behavior in existing types and
-functions. Do not add a Manager, Service, Factory, Strategy, Protocol, Adapter,
-Coordinator, Provider, or Registry unless an existing boundary demonstrably
-requires it; the default implementation is a small change to current types.
+`OverlayWindow`, and `FrameStore`. Do not add a Manager, Service, Factory,
+Strategy, Protocol, Adapter, Coordinator, Provider, or Registry. Keep the
+behavior in the existing controller, pool, state, settings, and window types.
 
-The Dictus `d49d270` implementation is reference material only. Borrow these
-behavioral ideas: preparation separate from recording, serialized shortcut
-lifecycle with a generation guard, draining on stop, releasing failed model
-instances, and separate cleanup system/user prompts. Do not copy its Tauri or
-Rust managers, `cpal`, external APIs, or always-on microphone behavior.
+`DictationController.finishDictation()` already exists as the completion
+boundary in the current implementation. The implementation must preserve that
+boundary and its single authoritative-finalization call; it must not introduce
+a second completion API.
 
-## Dictation Pipeline
+## Dictation Pipeline and Cleanup Contract
 
-The only accepted ordering is:
+The only accepted order is:
 
 ```text
-authoritative transcript
-  -> optional local cleanup
-  -> optional dictation translation
-  -> clipboard and/or text insertion
+authoritative transcript -> optional cleanup -> optional dictation translation
+-> one clipboard and/or text insertion operation
 ```
 
-The authoritative transcript is obtained after recording stops and all pending
-audio has drained. Partial callbacks and rolling caption finals are never sent
-to cleanup, translation, clipboard, or insertion. Cleanup is default off and
-strictly local. When cleanup is enabled, it uses the existing local GGUF
-generation runtime and the existing runtime lifecycle; it does not introduce a
-second generation subsystem.
+Recording release stops capture, drains pending audio, and obtains the
+authoritative batch result. Streaming partials, rolling caption finals, and
+intermediate hypotheses never enter cleanup, translation, clipboard, or
+insertion. Nemotron/Parakeet dictation and captions continue to share the
+existing `ASRBackendPool`; Whisper is a dictation-only batch holder after
+release and never replaces captions. If captions are active, dictation is
+rejected by the existing exclusive-use rule and does not run in parallel.
 
-Cleanup has separate system and user prompts. The system prompt must constrain
-the operation to correcting punctuation, casing, fillers, false starts, and
-repetition while preserving meaning, names, numbers, ordering, and uncertainty.
-It must explicitly prohibit summary, translation, expansion, explanation,
-invention, and adding information. The user prompt contains only the
-authoritative transcript. The output is accepted only when non-empty and
-otherwise treated as failure. On nil, error, cancellation, or empty cleanup
-output, use the original authoritative transcript. Cleanup errors must never
-prevent insertion of usable original speech.
+Cleanup defaults off and uses the existing local GGUF generation runtime.
+The system prompt requires only punctuation, casing, filler, false-start, and
+repetition correction. It preserves meaning, names, numbers, ordering, and
+uncertainty, and explicitly forbids summary, translation, expansion,
+explanation, invention, and added information. The user prompt contains only
+the authoritative transcript; system and user prompt boundaries remain
+separate. Output is trimmed, then validated: it must be non-empty, contain no
+Markdown fence marker or fenced block, and contain no prose surrounding the
+cleaned transcript. Invalid fenced output is a cleanup failure.
 
-Translation, when enabled, receives the selected whole dictation result after
-cleanup. Translation is independent of cleanup and is never used to repair a
-cleanup failure. A stale or cancelled generation must discard all later
-translation and insertion work. Successful completion performs one clipboard
-write and/or one insertion operation, never one operation per intermediate
-stage.
+For cleanup error, timeout, nil output, trimmed-empty output, or invalid
+fenced/prose output, select the original authoritative transcript and continue
+to translation and insertion. Cleanup failure never discards usable speech.
+Translation receives the selected whole result after cleanup. Translation
+failure likewise selects the original dictation result. A user cancel or new
+generation discards every pending and completed downstream output and performs
+no clipboard write or insertion.
 
-## Whisper Model Contract
+## Whisper Selection and Asset Ownership
 
-Whisper is used only for push-to-talk dictation batch inference after release.
-It is never the caption engine and never processes live partials. Captions
-continue to use the currently selected streaming Nemotron or Parakeet model.
-Changing a dictation Whisper selection cannot change caption selection, model
-readiness, running state, or translation settings, and changing caption
-selection cannot change dictation readiness.
+The first release selects exactly these two official Whisper model IDs:
 
-The first release has exactly these two selectable model IDs:
+1. `openai_whisper-base.en` (Whisper `base.en`), English-only, lower latency.
+2. `openai_whisper-small.en` (Whisper `small.en`), English-only, higher
+   accuracy and latency.
 
-1. `whisper.base.en.gguf`: OpenAI Whisper `base.en`, GGUF, English-only,
-   balanced latency and accuracy.
-2. `whisper.small.en.gguf`: OpenAI Whisper `small.en`, GGUF, English-only,
-   higher accuracy and latency.
+The current `Package.swift` and `Package.resolved` contain no WhisperKit
+dependency. Adding a dependency is a separate implementation change outside
+this documentation commit. The executable implementation must use an approved
+WhisperKit version and its documented model IDs/download API before coding
+against it; the two IDs above are the complete first-release selection.
 
-The catalogue must store the exact source URL, license text, expected byte
-size when published, and SHA-256 checksum for each asset. An implementation
-may expose a model as downloadable only after those values and the complete
-GGUF asset have been verified in the release asset manifest. A missing URL,
-checksum, license, or complete asset is a blocking model-catalogue failure,
-not a silent fallback or a future decision. The implementation must not add a
-third model in this scope.
+WhisperKit owns model download, staging, integrity verification, local cache,
+partial-transfer recovery, and removal. The spec does not invent source URLs,
+SHA values, byte sizes, license fields, or a `ModelAsset` manifest. Whisper
+models are not registered with `ModelRegistry`. Readiness comes from the real
+WhisperKit local-model state for the selected ID, never from a fabricated
+registry entry or a file-presence guess. `ModelRegistryTests` therefore retain
+their no-Whisper assertions and continue to cover only registry-owned assets.
 
-Each Whisper model has independently visible states: `Not downloaded`,
-`Downloading` with determinate or indeterminate progress, `Downloaded`/
-`Ready`, `Loading`, `Ready for next dictation`, `Failed` with recovery action,
-and `Partially downloaded` with retry or remove action. A selected but not
-ready model provides an actionable Download/Retry control and cannot start
-recording as if it were ready. Loading occurs after release or explicit
-preparation and is represented in the toast/settings state. Failed instances
-are released and do not remain in the pool. Reuse `ASRBackendPool` and
-`IdleEviction` so loaded resources can be reused and evicted by existing
-lifecycle rules.
+Settings exposes exactly the two IDs with independent states: Not downloaded,
+Downloading (determinate or indeterminate), Downloaded/Ready, Loading, Ready
+for next dictation, Failed with Retry, and Partially downloaded with Retry or
+Remove. Download, Retry, and Remove are actionable. A selected model that is
+not ready cannot start recording as ready. WhisperKit owns its batch holder
+and cache lifecycle; the existing `ASRBackendPool` remains the shared
+streaming Nemotron/Parakeet pool. Failed holders are released. Whisper batch
+inference is dictation-only and does not alter caption selection, caption
+readiness, caption running state, or translation settings.
 
-Dictation recording is capped at 20 seconds. At the cap, capture stops through
-the normal serialized release/drain path, the user sees a concise limit state,
-and the available authoritative transcript still follows the normal fallback
-and single-insertion rules. The cap is not applied to captions.
+## Lifecycle, Audio Cap, and Races
 
-## Lifecycle and Concurrency
+Preparation and microphone recording remain separate. The existing controller
+serializes shortcut press, release, cancel, permission changes, and new
+sessions on its current main-actor boundary. Release marks `transcribing`,
+drains pending audio, and finalizes exactly once through the existing
+`finishDictation()` boundary.
 
-Preparation and microphone recording remain separate. Shortcut press starts at
-most one preparation/start task; release stops capture promptly, marks the
-session as transcribing, drains pending audio, and awaits the authoritative
-batch result exactly once. A monotonically increasing generation token guards
-preparation, startup, release, cleanup, translation, and insertion. Press,
-release, cancel, permission changes, and a new session are serialized on the
-existing controller actor/main-actor boundary.
+The 20-second cap is based on successful conversion to 16 kHz mono: exactly
+320000 accepted mono samples reaches the cap. Capture then stops through the
+normal release/drain path and enters `transcribing`; the cap does not affect
+captions. Samples that fail conversion do not advance the count.
 
-Cancellation increments the generation, stops capture, awaits relevant tasks,
-and releases or invalidates the failed/stale backend. A late completion may
-update no phase, clipboard, or insertion. Phase changes are emitted only when
-the phase actually changes; updating text or progress in the same toast does
-not reset its phase or restart its display timer.
+Cap, release, cancel, and late task completion use one terminal-transition
+function guarded by the session generation. The first accepted terminal event
+wins. A cap event enters transcription; cancellation wins only if its terminal
+transition is accepted first. A cancel or new generation invalidates all later
+cleanup, translation, clipboard, insertion, and phase updates and releases or
+invalidates stale holders.
 
-## Dictation Toast and Placement
+## Toast, Placement, and Accessibility
 
-Keep `DictationToastWindow` as a separate window. Do not merge it with the
-caption overlay. Its visual language should match the subtitle bubble through
-readable type, restrained opacity, border and shadow treatment, spacing, and
-state hierarchy, while remaining a native macOS toast rather than a generic
-floating card. Use a single readable native toolbar/background in the related
-settings surface and correct excessive transparency.
+`DictationToastWindow` remains separate from the caption overlay. Preserve the
+existing subtitle-bubble visual language with readable type, restrained
+opacity, border, shadow, and spacing. Do not add gradients or fading
+backgrounds. Toast phases are permission required, preparing/loading, ready,
+recording, transcribing, cleaning, translating, inserting, success, 20-second
+limit, and failure with its recovery action.
 
-The toast supports the lifecycle states needed by users: permission required,
-preparing/loading, ready, recording, transcribing, cleaning, translating,
-inserting, success, 20-second limit, and failure with a recovery action where
-one exists. Model download/readiness controls are actionable from settings;
-the toast reports their current state without becoming a model-management
-window.
+Phase changes do not relocate the window, reset a dragged frame, or restart a
+phase timer. Progress/text updates do none of those actions. Persist the toast
+frame as an `NSRect` string under a key distinct from the caption frame key.
+Placement selection is: saved frame with center containment first, then the
+display with greatest visible-frame overlap, then a valid fallback. Clamp the
+whole frame inside the selected `visibleFrame`; negative screen coordinates
+are valid. On first display placement with no saved frame, use the pointer's
+screen, then the main-window screen, then `NSScreen.main`, then the first
+screen. On `didChangeScreenParameters`, re-run the saved-frame containment,
+overlap, fallback, and whole-frame clamp rules. Never reset placement merely
+because a phase changed.
 
-Dragging is a native whole-window drag. Toast frame persistence is independent
-from caption frame persistence and uses its own stored key. A phase update must
-not reset a user-dragged frame. Initial placement uses the active interaction
-screen; after a successful drag, the saved screen and frame have priority.
-When a display is removed or its resolution changes, placement must choose the
-first valid fallback in this order: keep the frame if it does not overlap the
-new visible area incorrectly, center on the selected fallback display, then
-clamp within the visible frame. Negative screen coordinates are valid. No
-saved frame may leave the toast unreachable.
+The toast exposes AX role, stable status label, current value, and live
+announcement for each phase/action. Mouse dragging remains available and
+Settings exposes a `Reset Position` action. Reduce Motion dismisses directly
+without fade and removes nonessential animation. Reduce Transparency uses an
+opaque readable surface. Increase Contrast strengthens border and text
+contrast. Permission/model failures expose their Retry, Download, Remove, or
+settings-recovery action to VoiceOver.
 
-Honor Reduce Motion and Reduce Transparency, Increase Contrast, and VoiceOver.
-Reduced motion removes nonessential animation and uses immediate phase changes;
-reduced transparency uses an opaque readable surface; increased contrast
-strengthens boundaries and text contrast. Every state and action has a stable
-VoiceOver label/value, and permission/model failures expose their recovery
-action in the accessibility tree.
+## Permissions, Settings, and Toast Copy
 
-## Permissions and Settings UI
+Permission state is explicit: unknown/requesting, granted, denied, and
+restricted/unavailable. Denied or unavailable states show the supported macOS
+settings recovery action plus Retry/Recheck; recovery never silently restarts
+recording or changes caption permission.
 
-The dictation permission state is explicit: unknown/requesting, granted,
-denied, and restricted/unavailable. Denied and unavailable states explain the
-next supported recovery action, including opening the relevant macOS setting
-when appropriate, and provide a retry/recheck action. Permission recovery must
-not silently restart recording or alter caption permission state.
+Modify only the existing settings screens. Controls and states are exact:
 
-The settings changes are scoped to the existing screens: one native readable
-toolbar/background, a dictation cleanup toggle defaulting off, independent
-dictation Whisper selection/readiness controls, independent caption model
-readiness controls, and the permission recovery row. Do not replace the whole
-settings navigation or introduce a new settings architecture.
+- Dictation cleanup: Toggle, default off.
+- Dictation recognizer: Picker for the existing streaming Nemotron/Parakeet
+  choice; it remains distinct from Whisper batch selection.
+- Whisper model: Picker with `openai_whisper-base.en` and
+  `openai_whisper-small.en`, each showing the real
+  WhisperKit readiness state and Download/Retry/Remove action.
+- Captions: row that navigates to actionable caption readiness controls; it is
+  not a duplicate or fake readiness indicator in Dictation settings.
+- Permission recovery: explicit state, settings action, and Retry/Recheck.
+
+Use these concise toast phase copies: `Allow Dictation Permission`,
+`Preparing Dictation`, `Ready to Dictate`, `Recording`,
+`Transcribing`, `Cleaning`, `Translating`, `Inserting`,
+`Copied to Clipboard`, `20-Second Limit Reached`, and
+`Dictation Failed: Retry`.
 
 ## Test Matrix
 
-Tests are planned in TDD order: write each RED test first, then implement the
-smallest change to make it GREEN. This document records no passing result.
+Add only coverage absent from current generation-guard,
+`finishDictation()`, authoritative-final, and partial-download tests.
 
 | Area | Required assertions |
 | --- | --- |
-| Authoritative revision | An early rolling final is not inserted when release returns a revised authoritative transcript; the authoritative revision wins. |
-| Cleanup fallback/order | Cleanup receives only the authoritative result; disabled cleanup is bypassed; nil, error, empty, or cancelled cleanup returns original text; translation follows cleanup and insertion occurs once. |
-| Cleanup prompt safety | System and user prompts are separate and require punctuation/casing/filler/false-start/repetition correction while prohibiting summary, translation, expansion, and invention. |
-| Captions independence | Caption Nemotron/Parakeet selection and streaming callbacks remain independent from dictation Whisper selection, readiness, and batch loading. |
-| Whisper assets/readiness | Both fixed model IDs have complete manifest metadata; partial/download/loading/ready/failed states expose the specified actions and failed instances are released. |
-| 20-second limit | Capture stops at 20 seconds, follows drain/release ordering, reports the limit, and does not change caption duration behavior. |
-| Shortcut races | Repeated press/release/cancel and permission changes are serialized; generation guards prevent stale phase, cleanup, translation, clipboard, or insertion effects. |
-| Audio drain | Stop waits for the audio queue/pump to drain and calls authoritative finalization once; cleanup never sees a partial. |
-| Single insertion | A successful dictation produces one final clipboard/insertion operation, including cleanup and translation paths. |
-| Toast placement | Independent frame persistence survives phases; initial active interaction screen, saved screen priority after drag, negative coordinates, removed displays, resolution changes, overlap, centering, and clamping are covered. |
-| Toast phase | Progress/text updates do not reset phase, frame, or the phase display lifecycle. |
-| Accessibility settings | Reduce Motion, Reduce Transparency, Increase Contrast, and VoiceOver labels/actions produce readable, stable states. |
-
-## Implementation Plan Shape
-
-One implementation plan can be formed from these bounded work units:
-
-1. Extend the existing dictation completion boundary and controller lifecycle
-   with authoritative release, drain, generation guards, 20-second cap, and
-   focused RED/GREEN tests.
-2. Add local cleanup invocation using the existing GGUF runtime, separate
-   prompts, strict output validation, fallback, ordering, and tests.
-3. Add the two fixed Whisper assets to `ModelRegistry`, readiness/download/
-   loading/failure presentation, independent settings state, and model tests.
-4. Refine the existing toast/settings surfaces for native background, states,
-   permission recovery, independent frame persistence, placement recovery, and
-   accessibility tests.
-5. Run focused tests and `git diff --check`; report test evidence separately
-   from release or distribution evidence.
+| Cleanup contract | Separate system/user prompts; trim and reject empty, fenced, and surrounding-prose output; error/timeout/nil/invalid output uses original and continues. |
+| Cleanup ordering | Cleanup receives only authoritative text; translation follows selected result; one insertion/clipboard operation occurs. |
+| Cancel/new generation | Cancel and new generation discard all output and prevent insertion; late cleanup/translation cannot update phase. |
+| Streaming independence | Captions remain streaming Nemotron/Parakeet; their pool and settings remain independent of Whisper batch state. |
+| Whisper ownership | Exactly `openai_whisper-base.en` and `openai_whisper-small.en`; readiness/actions come from WhisperKit state; `ModelRegistryTests` continue to exclude Whisper. |
+| Audio cap | Only successful 16 kHz mono samples count; sample 320000 stops capture and enters transcription; conversion failures do not count; captions are unaffected. |
+| Terminal race | First accepted cap/release/cancel transition wins; cancel wins only if accepted first; drain and finalization happen once. |
+| Toast placement | Independent key, saved-frame center containment, maximum overlap fallback, pointer/main-window/main/first-screen order, negative coordinates, display change, whole-frame clamp, and phase stability. |
+| Accessibility | AX role/status/value/live announcement, Reset Position, Reduce Motion direct dismiss, opaque Reduce Transparency, and Increase Contrast boundaries/text. |
+| Settings | Exact toggle/pickers/actions/states, actionable Captions navigation, permission recovery, and exact phase copy. |
 
 ## Acceptance Criteria
 
-- macOS only, local-only cleanup, cleanup off by default, and no partial
-  processing.
-- Authoritative transcript, optional cleanup, optional dictation translation,
-  and one final clipboard/insertion operation occur in that order.
-- Cleanup failures and empty output preserve usable original speech.
-- Exactly `whisper.base.en.gguf` and `whisper.small.en.gguf` are selectable,
-  with verified complete assets and no unresolved model choice.
-- Captions remain streaming Nemotron/Parakeet and settings remain independent.
-- Recording stops at 20 seconds and all shortcut/audio races are generation-safe.
-- Toast remains separate, draggable, persistently placed, phase-stable, and
-  accessible across display and macOS accessibility changes.
-- The change is limited to the existing boundaries and does not add
-  speculative managers or rewrite the application UI.
+The implementation is macOS-only and local-only, cleanup is off by default,
+and partials are never processed. `openai_whisper-base.en` and
+`openai_whisper-small.en` are the only
+Whisper choices, with WhisperKit owning download/cache integrity and no
+Whisper `ModelAsset`. Captions remain streaming Nemotron/Parakeet through the
+shared pool, while dictation rejects overlap. Authoritative text, optional
+cleanup, optional translation, and one final insertion follow the stated
+fallback and generation rules. The 320000-sample cap, serialized terminal
+transition, independent persistent accessible toast, exact settings controls,
+and focused test matrix are explicit. No global navigation, new window
+system, gradient/fading background, speculative abstraction, or release claim
+is introduced.
+
+Before commit, inspect the full document for unresolved wording and run
+`git diff --check`. This spec change records no test result.
