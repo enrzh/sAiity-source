@@ -36,6 +36,7 @@ final class DictationController {
 
     private var state = DictationSessionState()
     private var generation = 0
+    private var terminal: DictationTerminal = .cancelled
     private var preparationGeneration = 0
     private var backend: TranscriptionBackend?
     private var preparationTask: Task<Void, Never>?
@@ -144,6 +145,7 @@ final class DictationController {
 
         generation += 1
         let session = generation
+        terminal = .open
         let wasReady = phase == .ready
         phase = .starting
         if !wasReady, preparationTask == nil {
@@ -155,7 +157,7 @@ final class DictationController {
     }
 
     func release() {
-        guard state.release() else { return }
+        guard state.release(), terminal.accept(.released) else { return }
         let session = generation
         phase = .transcribing
         releaseTask = Task { @MainActor [weak self] in
@@ -175,6 +177,7 @@ final class DictationController {
         }
 
         generation += 1
+        _ = terminal.accept(.cancelled)
         preparationGeneration += 1
         state.cancel()
         startupTask?.cancel()
@@ -202,6 +205,13 @@ final class DictationController {
                 await backendProvider.invalidate()
             }
         }
+    }
+
+    private func limit(session: Int) {
+        guard session == generation, terminal.accept(.limited) else { return }
+        state.cancel()
+        phase = .transcribing
+        releaseTask = Task { @MainActor [weak self] in await self?.finish(session: session) }
     }
 
     /// Synchronous callers can initiate cancellation; model deletion awaits
@@ -276,6 +286,11 @@ final class DictationController {
             try await acquired.start { _ in }
             try Task.checkCancellation()
             guard session == generation else { return }
+            if let microphone = capture as? DictationMicrophoneCapture {
+                microphone.onLimit = { [weak self] in
+                    Task { @MainActor in self?.limit(session: session) }
+                }
+            }
             try capture.start(targetFormat: format) { [weak acquired] buffer in
                 acquired?.feed(buffer)
             }

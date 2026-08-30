@@ -30,6 +30,9 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
     private let lock = NSLock()
     private var lifecycle = DictationCaptureLifecycle()
     private var converter: AVAudioConverter?
+    private var sampleCount = 0
+    private var didEmitLimit = false
+    var onLimit: (@Sendable () -> Void)?
 
     var isRunning: Bool {
         lock.withLock { lifecycle.isRunning }
@@ -55,6 +58,7 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
             ])
         }
         self.converter = converter
+        lock.withLock { sampleCount = 0; didEmitLimit = false }
 
         input.installTap(onBus: 0, bufferSize: 1024, format: sourceFormat) { [weak self] buffer, _ in
             self?.convert(buffer, to: targetFormat, onBuffer: onBuffer)
@@ -101,6 +105,15 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
             return buffer
         }
         guard error == nil, output.frameLength > 0 else { return }
+        let remaining = DictationAudioSampleLimit.maximumSamples - lock.withLock { sampleCount }
+        guard remaining > 0 else { return }
+        let accepted = min(Int(output.frameLength), remaining)
+        lock.withLock { sampleCount += accepted }
+        output.frameLength = AVAudioFrameCount(accepted)
         onBuffer(output)
+        if accepted == remaining, lock.withLock({ !didEmitLimit }) {
+            lock.withLock { didEmitLimit = true }
+            onLimit?()
+        }
     }
 }

@@ -44,6 +44,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return nil }
             return await self.translateDictatedText(text, source: source, target: target)
         },
+        cleanupConfiguration: {
+            DictationCleanupConfiguration(enabled: UserDefaults.standard.bool(forKey: "dictationCleanupEnabled"))
+        },
+        cleanup: { [weak self] text in
+            guard let self,
+                  LocalModel.selected?.isCleanupCompatible() == true,
+                  let translator = self.activeTranslator as? LocalLLMTranslator else { return nil }
+            return await translator.cleanup(text)
+        },
         onPhaseChanged: { [weak self] phase in
             self?.updateDictationToast(phase)
             self?.scheduleTranslatorEvictionIfIdle()

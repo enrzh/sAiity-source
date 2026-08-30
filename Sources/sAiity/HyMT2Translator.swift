@@ -14,7 +14,7 @@ final class HyMT2Translator: Translating, @unchecked Sendable {
     static let modelFile = "Hy-MT2-1.8B-Q4_K_M.gguf"
     static let downloadURL = URL(string: "https://huggingface.co/tencent/Hy-MT2-1.8B-GGUF/resolve/main/Hy-MT2-1.8B-Q4_K_M.gguf?download=true")!
     static let generationTemperature: Float = 0.1
-    static let retryTemperature: Float = 0.15
+    static let retryTemperature: Float = 0.7
 
     static var modelsDirectory: URL {
         ModelRegistry.root.appendingPathComponent("hymt2", isDirectory: true)

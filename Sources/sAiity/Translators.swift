@@ -196,8 +196,8 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
 
     func cleanup(_ text: String) async -> String? {
         guard llm != nil else { return nil }
-        let user = "Clean up this dictated transcript. Preserve meaning; fix punctuation and capitalization only. Output only the cleaned transcript.\n\n<TRANSCRIPT>\n\(text)\n</TRANSCRIPT>"
-        guard let raw = await generate(system: "You clean dictated transcripts. Never add facts or commentary.", user: user) else { return nil }
+        let user = "Clean up this dictated transcript: fix punctuation, casing, fillers, false starts, and obvious repetition. Output only the cleaned transcript. Never summarize, translate, expand, invent, explain, or change facts, numbers, or names.\n\n<TRANSCRIPT>\n\(text)\n</TRANSCRIPT>"
+        guard let raw = await generate(system: "You clean dictated transcripts. Preserve meaning, facts, numbers, names, order, and uncertainty. Never summarize, translate, expand, explain, invent, or add information. Output only cleaned transcript text.", user: user) else { return nil }
         return DictationCleanupValidator.validate(raw)
     }
 
