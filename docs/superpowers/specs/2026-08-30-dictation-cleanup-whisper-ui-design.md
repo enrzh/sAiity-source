@@ -36,7 +36,7 @@ The `.en` identifiers are not used. The local checkout confirms `ModelVariant.ba
 
 Every language in `LanguageCatalog.all` is selectable for Whisper. That set is the union of `MADLADLanguages.canonicalCodes` and `LanguageCatalog.popular`, using the existing canonical BCP-47 strings, including `en`, `de`, `fr`, `es`, `it`, `pt`, `nl`, `pl`, `ru`, `uk`, `tr`, `ar`, `he`, `hi`, `bn`, `ur`, `fa`, `zh-Hans`, `zh-Hant`, `ja`, `ko`, `th`, `vi`, `id`, `sw`, `am`, `ha`, `yo`, `ig`, `zu`, and `so`, plus the complete MADLAD code set.
 
-For a multilingual model, the language hint is the current dictation locale: canonicalize its BCP-47 identifier, take the base ISO-639-1 code accepted by WhisperKit, and pass it in `DecodingOptions.language`. A supported script or region is retained only for sAiity persistence; WhisperKit receives the base language code. If the current locale has no supported base code, pass `language: nil` and `detectLanguage: true`. `auto` is therefore represented only by nil plus detection, and is allowed only for these multilingual model choices. An explicit unsupported hint is rejected before transcription and never silently substituted.
+For a multilingual model, an explicit locale selection is canonicalized as a BCP-47 identifier, reduced to the base ISO-639-1 code accepted by WhisperKit, and passed in `DecodingOptions.language`. A supported script or region is retained only for sAiity persistence; WhisperKit receives the base language code. Only an explicit `Auto` selection passes `language: nil` with `detectLanguage: true`, and that mode is allowed only for these multilingual model choices. Any explicit locale whose base code is unsupported fails clearly before transcription; it never falls back to automatic detection or another language.
 
 ## Swift package and real API
 
@@ -76,7 +76,7 @@ Settings adds a default-off cleanup toggle, the existing streaming recognizer ch
 
 Add focused tests for:
 
-- exact multilingual identifiers, full `LanguageCatalog.all` locale coverage, current-locale base language hints, explicit unsupported hints, and nil auto-detection;
+- exact multilingual identifiers, full `LanguageCatalog.all` locale coverage, explicit locale base-language hints, explicit `Auto` as nil plus language detection, and clear pre-transcription failure for every explicit unsupported locale;
 - the exact package URL/version/product declaration and the concrete wrapper's `setupModels`, `download`, `loadModels(prewarmMode:)`, `transcribe`, and result-text API calls;
 - download interruption, partial-directory cleanup, retry, marker-based readiness, remove, and concurrent same-identifier single-flight;
 - cleanup runtime exclusion from `HyMT2Translator`, MADLAD, and `TranslationEngine.effective`, plus Not-ready behavior and Models navigation;
@@ -86,6 +86,6 @@ Add focused tests for:
 
 ## Acceptance and checks
 
-The implementation is local-only, cleanup is off by default, partials are never processed, and only the two multilingual identifiers are selectable. WhisperKit is used through the verified 1.0.0 APIs above; sAiity owns only its folder marker, existence/readiness check, temporary-directory cleanup, and `FileManager` removal. Cleanup uses only the existing Qwen/Gemma-compatible GGUF path. All fallbacks, locale rules, single-flight behavior, terminal race rules, and focused tests above are explicit.
+The implementation is local-only, cleanup is off by default, partials are never processed, and only the two multilingual identifiers are selectable. WhisperKit is used through the verified 1.0.0 APIs above; sAiity owns only its folder marker, existence/readiness check, temporary-directory cleanup, and `FileManager` removal. Cleanup uses only the existing Qwen/Gemma-compatible GGUF path. Only explicit `Auto` enables nil language plus detection; every explicit unsupported locale fails before transcription without substitution. All fallbacks, locale rules, single-flight behavior, terminal race rules, and focused tests above are explicit.
 
-Before committing this documentation change, inspect the full file for unresolved planning language; run `git diff --check`; confirm `git status` shows only this spec changed; and commit with message `docs: finalize dictation model contracts`.
+Before committing this documentation change, inspect the full file for unresolved planning language; run `git diff --check`; confirm `git status` shows only this spec changed; and commit with message `docs: clarify Whisper locale detection`.
