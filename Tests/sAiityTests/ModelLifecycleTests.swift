@@ -11,6 +11,24 @@ import Testing
         #expect(!qwen.isCleanupCompatible())
     }
 
+    @Test("downloaded custom GGUF compatibility matches labels case-insensitively")
+    func downloadedCustomGGUFCompatibilityUsesLabel() throws {
+        let directory = LocalModel.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let prefix = "model-lifecycle-\(UUID().uuidString)"
+        let files = ["\(prefix)-alpha.gguf", "\(prefix)-beta.gguf", "\(prefix)-other.gguf"]
+        defer { for file in files { try? FileManager.default.removeItem(at: directory.appendingPathComponent(file)) } }
+        for file in files { try Data([0]).write(to: directory.appendingPathComponent(file)) }
+
+        let gemma = LocalModel(source: .url("https://example.invalid/gemma.gguf"), file: files[0], label: "Gemma", bytes: 1, recommended: false, note: "", licence: "")
+        let qwen = LocalModel(source: .url("https://example.invalid/qwen.gguf"), file: files[1], label: "QWEN", bytes: 1, recommended: false, note: "", licence: "")
+        let other = LocalModel(source: .url("https://example.invalid/other.gguf"), file: files[2], label: "Mistral", bytes: 1, recommended: false, note: "", licence: "")
+
+        #expect(gemma.isCleanupCompatible())
+        #expect(qwen.isCleanupCompatible())
+        #expect(!other.isCleanupCompatible())
+    }
+
     final class FakeLifecycleBackend: TranscriptionBackend, @unchecked Sendable {
         let name = "Lifecycle test backend"
         let format = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1)!

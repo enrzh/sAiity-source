@@ -269,7 +269,7 @@ struct LocalModel: Identifiable, Sendable, Equatable, Codable {
 
     func isCleanupCompatible() -> Bool {
         isDownloaded && file.lowercased().hasSuffix(".gguf") &&
-            [file, label].joined(separator: " ").range(of: "qwen|gemma", options: .regularExpression) != nil
+            [file, label].joined(separator: " ").lowercased().range(of: "qwen|gemma", options: .regularExpression) != nil
     }
 
     /// Where a download comes from. Nil for an imported file — it is already
