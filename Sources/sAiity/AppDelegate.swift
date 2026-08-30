@@ -57,10 +57,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         transcribeWhisper: { samples, locale in
             try await WhisperDictationBackend().transcribe(samples: samples, locale: locale)
         },
-        prepareWhisper: { [weak self] in
-            guard let self else { return }
-            try await self.prepareSelectedWhisperModelForUse(progress: { _ in })
-        },
         whisperIsReady: { WhisperDictationBackend.isReady(WhisperDictationBackend.model) },
         onPhaseChanged: { [weak self] phase in
             self?.updateDictationToast(phase)

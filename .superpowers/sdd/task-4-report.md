@@ -40,6 +40,15 @@ swift test -c release -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS --jo
 - Focused verification after audit fixes: 67 tests in 5 suites passed with `--jobs 2`.
 - Commit: `fix: isolate Whisper preparation and sample ownership`.
 
+## Final Re-review Evidence
+
+- RED: selected-Whisper ordinary preparation and unready shortcut tests failed before isolation; the late-callback ownership regression was also added before the lock-boundary implementation.
+- GREEN: ordinary preparation no longer invokes Whisper preparation, unready Whisper shortcut input fails clearly, and controller injection of `prepareWhisper` was removed.
+- GREEN: sample ownership checks running state and performs limit accounting plus sample append under one lock; delayed old-session handlers remain generation guarded.
+- Focused verification: 67 tests in 5 suites passed with `--jobs 2`; `git diff --check` passed.
+- Commit: `test: prove Whisper preparation isolation`.
+- Concern: the production AppDelegate method delegates to `WhisperDictationBackend.prepareModelForUse`, whose existing tests exercise the real backend lifecycle and marker cleanup but avoid loading a real WhisperKit model in unit tests; physical/runtime acceptance remains outside this focused run.
+
 `git diff --check` passed before commit.
 
 ## Scope

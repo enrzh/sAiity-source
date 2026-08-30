@@ -31,7 +31,6 @@ final class DictationController {
     typealias TranslationHandler = (String, String, String) async -> String?
     typealias CleanupHandler = (String) async -> String?
     typealias WhisperTranscriptionHandler = ([[Float]], Locale) async throws -> String?
-    typealias WhisperPreparationHandler = () async throws -> Void
     typealias AudioFormatFactory = () -> AVAudioFormat?
     typealias WhisperReadinessProvider = () -> Bool
 
@@ -46,7 +45,6 @@ final class DictationController {
     private let cleanup: CleanupHandler
     private let dictationUsesWhisper: () -> Bool
     private let transcribeWhisper: WhisperTranscriptionHandler
-    private let prepareWhisper: WhisperPreparationHandler
     private let audioFormatFactory: AudioFormatFactory
     private let whisperIsReady: WhisperReadinessProvider
 
@@ -62,7 +60,6 @@ final class DictationController {
     private var sessionUsesWhisper = false
     private var sessionLocale = Locale.current
     private var captureDrained = true
-    private var preparationUsesWhisper = false
     private(set) var phase: DictationPhase = .idle {
         didSet {
             guard phase != oldValue else { return }
@@ -94,7 +91,6 @@ final class DictationController {
          cleanup: @escaping CleanupHandler = { _ in nil },
          dictationUsesWhisper: @escaping () -> Bool = { false },
          transcribeWhisper: @escaping WhisperTranscriptionHandler = { _, _ in nil },
-         prepareWhisper: @escaping WhisperPreparationHandler = {},
          audioFormatFactory: @escaping AudioFormatFactory = { AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1) },
          whisperIsReady: @escaping WhisperReadinessProvider = { true },
          onPhaseChanged: @escaping (DictationPhase) -> Void = { _ in }) {
@@ -108,7 +104,6 @@ final class DictationController {
         self.cleanup = cleanup
         self.dictationUsesWhisper = dictationUsesWhisper
         self.transcribeWhisper = transcribeWhisper
-        self.prepareWhisper = prepareWhisper
         self.audioFormatFactory = audioFormatFactory
         self.whisperIsReady = whisperIsReady
         self.onPhaseChanged = onPhaseChanged
@@ -124,7 +119,6 @@ final class DictationController {
          cleanup: @escaping CleanupHandler = { _ in nil },
          dictationUsesWhisper: @escaping () -> Bool = { false },
          transcribeWhisper: @escaping WhisperTranscriptionHandler = { _, _ in nil },
-         prepareWhisper: @escaping WhisperPreparationHandler = {},
          audioFormatFactory: @escaping AudioFormatFactory = { AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1) },
          whisperIsReady: @escaping WhisperReadinessProvider = { true },
          onPhaseChanged: @escaping (DictationPhase) -> Void = { _ in }) {
@@ -138,7 +132,6 @@ final class DictationController {
         self.cleanup = cleanup
         self.dictationUsesWhisper = dictationUsesWhisper
         self.transcribeWhisper = transcribeWhisper
-        self.prepareWhisper = prepareWhisper
         self.audioFormatFactory = audioFormatFactory
         self.whisperIsReady = whisperIsReady
         self.onPhaseChanged = onPhaseChanged
@@ -272,7 +265,6 @@ final class DictationController {
     private func beginPreparation() {
         guard preparationTask == nil else { return }
         let token = preparationGeneration
-        preparationUsesWhisper = dictationUsesWhisper()
         let previousCleanup = cleanupTask
         preparationTask = Task { @MainActor [weak self, previousCleanup] in
             await previousCleanup?.value

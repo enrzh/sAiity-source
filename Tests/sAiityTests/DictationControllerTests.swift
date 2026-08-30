@@ -219,28 +219,22 @@ import Testing
 
     @Test("ordinary preparation never prepares selected Whisper")
     func ordinaryPreparationDoesNotPrepareWhisper() async {
-        var whisperPreparations = 0
         let capture = FakeCapture(log: EventLog())
         let controller = DictationController(
             makeBackend: { FakeBackend(log: EventLog()) }, capture: capture,
             inserter: FakeInserter(), captionsActive: { false },
-            dictationUsesWhisper: { true },
-            prepareWhisper: { whisperPreparations += 1 }, whisperIsReady: { false })
+            dictationUsesWhisper: { true }, whisperIsReady: { false })
         controller.prepare(); await controller.waitForWorkForTests()
-        #expect(whisperPreparations == 0)
         #expect(!capture.started)
     }
 
     @Test("Whisper press before explicit readiness fails without preparing")
     func whisperPressBeforeReadinessDoesNotAutoPrepare() async {
-        var whisperPreparations = 0
         let controller = DictationController(
             makeBackend: { FakeBackend(log: EventLog()) }, capture: FakeCapture(log: EventLog()),
             inserter: FakeInserter(), captionsActive: { false },
-            dictationUsesWhisper: { true },
-            prepareWhisper: { whisperPreparations += 1 }, whisperIsReady: { false })
+            dictationUsesWhisper: { true }, whisperIsReady: { false })
         controller.press(); await controller.waitForWorkForTests()
-        #expect(whisperPreparations == 0)
         #expect(controller.phase == .failure("Whisper dictation is not ready. Prepare it in Settings."))
     }
 
