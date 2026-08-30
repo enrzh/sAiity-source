@@ -145,7 +145,58 @@ struct WhisperDictationBackendTests {
         #expect(!FileManager.default.fileExists(atPath: partial.path))
     }
 
-    @Test("same model preparation is single-flight while different roots proceed independently")
+    @Test("cancellation preserves an existing final model and marker")
+    func cancelledPreparationPreservesReadyModel() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let folder = WhisperDictationBackend.modelFolder(for: .base, under: root)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let marker = folder.appendingPathComponent(".saiity-ready")
+        try Data().write(to: marker)
+        let backend = WhisperDictationBackend(root: root, download: { _, _, _ in
+            throw CancellationError()
+        })
+
+        do {
+            try await backend.prepareModelForUse(.base)
+            #expect(Bool(false))
+        } catch {
+            #expect(error is CancellationError)
+        }
+        #expect(FileManager.default.fileExists(atPath: folder.path))
+        #expect(FileManager.default.fileExists(atPath: marker.path))
+    }
+
+    @Test("mixed operations serialize without type casts and preserve typed results", .timeLimit(.minutes(1)))
+    func mixedOperationsSerializePerRootAndIdentifier() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let events = EventLog()
+        let backend = WhisperDictationBackend(
+            root: root,
+            download: { _, destination, _ in
+                await events.append("prepare-start")
+                try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+                try await Task.sleep(for: .milliseconds(20))
+                await events.append("prepare-end")
+                return destination
+            },
+            transcribe: { _, _, _, _ in
+                await events.append("transcribe")
+                return "spoken"
+            })
+
+        async let prepare: Void = backend.prepareModel(.base)
+        async let transcribe: String = backend.transcribe(samples: [], locale: Locale(identifier: "en-US"))
+        let result = try await (prepare, transcribe)
+
+        #expect(result.1 == "spoken")
+        try await backend.removeModel(.base)
+        let recorded = await events.value
+        #expect(recorded == ["prepare-start", "prepare-end", "transcribe"] || recorded == ["transcribe", "prepare-start", "prepare-end"])
+    }
+
+    @Test("same model preparation is single-flight while different roots proceed independently", .timeLimit(.minutes(1)))
     func preparationSingleFlightAndRootIsolation() async throws {
         let first = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let second = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -171,6 +222,14 @@ struct WhisperDictationBackendTests {
     private actor Counter {
         var value = 0
         func increment() { value += 1 }
+    }
+
+    private actor EventLog {
+        private(set) var value: [String] = []
+
+        func append(_ event: String) {
+            value.append(event)
+        }
     }
 
     @Test("Package manifest pins the exact WhisperKit dependency")
