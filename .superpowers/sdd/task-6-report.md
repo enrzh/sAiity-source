@@ -15,11 +15,12 @@ Implemented the scoped dictation settings and localization contract, including t
 - Added RED tests for settings persistence, locale/model scope, readiness, and localization coverage.
 - Review fix: replaced the inert recognizer preference with `DictationRecognizer.selected`, wired to a separate dictation streaming pool and Whisper `isSelected` state.
 - Review fix: preparation errors propagate to the settings UI; removal invalidates `DictationController` before deleting Whisper files.
+- Final review fix: preparation accepts an explicit captured `ModelChoice`, so a later model picker change cannot redirect the in-flight action.
 
 ## Verification
 
 - RED: the review-fix run caught and corrected one stale readiness assertion.
-- GREEN: `swift test -c release --jobs 2 -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS --filter 'SettingsWindowTests|LocalizationTests|ModelLifecycleTests|DictationControllerTests|StreamingASRBackendTests'` passed: 58 tests in 5 suites.
+- GREEN: `swift test -c release --jobs 2 -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS --filter 'SettingsWindowTests|LocalizationTests|ModelLifecycleTests|DictationControllerTests|StreamingASRBackendTests'` passed: 59 tests in 5 suites.
 - GREEN smoke: the same flags with `--filter 'SettingsWindowTests|LocalizationTests'` passed: 14 tests in 2 suites.
 - GREEN: `swift build -c release --jobs 2` passed.
 - Catalog JSON validation passed; all 23 keys are present in all four shipped locales.

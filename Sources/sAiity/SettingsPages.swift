@@ -214,7 +214,7 @@ struct DictationView: View {
                 }
                 .pickerStyle(.segmented)
                 Picker("Language", selection: Binding(get: { WhisperDictationBackend.locale }, set: { WhisperDictationBackend.locale = $0 })) {
-                    Text("Off").tag("auto")
+                    Text(verbatim: "Automatic").tag("auto")
                     ForEach(LanguageCatalog.all, id: \.code) { language in
                         Text(language.displayName).tag(language.code)
                     }
@@ -343,7 +343,7 @@ struct DictationView: View {
 
     private func prepareWhisper(_ choice: WhisperDictationBackend.ModelChoice) {
         Task {
-            do { try await (NSApp.delegate as? AppDelegate)?.prepareSelectedWhisperModelForUse() }
+            do { try await (NSApp.delegate as? AppDelegate)?.prepareSelectedWhisperModelForUse(choice) }
             catch { await MainActor.run { state.modelError = error.localizedDescription; state.refreshModels() } }
             await MainActor.run { state.refreshModels() }
         }

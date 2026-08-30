@@ -86,8 +86,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 #endif
 
     /// Production action for the deferred Task6 settings control.
-    func prepareSelectedWhisperModelForUse(progress: @escaping @Sendable (Progress) -> Void = { _ in }) async throws {
-        let choice = WhisperDictationBackend.model
+    func prepareSelectedWhisperModelForUse(_ choice: WhisperDictationBackend.ModelChoice,
+                                           progress: @escaping @Sendable (Progress) -> Void = { _ in }) async throws {
         #if SAIITY_TEST_HOOKS
         if let hook = whisperPreparationForTests {
             try await hook(choice, progress)
@@ -96,6 +96,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
         let backend = WhisperDictationBackend()
         try await backend.prepareModelForUse(choice, progress: progress)
+    }
+
+    func prepareSelectedWhisperModelForUse(progress: @escaping @Sendable (Progress) -> Void = { _ in }) async throws {
+        try await prepareSelectedWhisperModelForUse(WhisperDictationBackend.model, progress: progress)
     }
 
     func removeSelectedWhisperModel() async throws {

@@ -248,6 +248,21 @@ import Testing
         #expect(before.2 == after.2)
     }
 
+    @Test("explicit Whisper preparation freezes the clicked choice")
+    func explicitWhisperChoiceIsNotReread() async throws {
+        let app = AppDelegate()
+        var received: WhisperDictationBackend.ModelChoice?
+        app.whisperPreparationForTests = { choice, _ in received = choice }
+        defer { app.whisperPreparationForTests = nil }
+        try await app.prepareSelectedWhisperModelForUse(.base)
+        WhisperDictationBackend.model = .small
+        #expect(received == .base)
+        received = nil
+        try await app.prepareSelectedWhisperModelForUse(.small)
+        WhisperDictationBackend.model = .base
+        #expect(received == .small)
+    }
+
     @Test("AppDelegate Whisper preparation failure propagates without readiness")
     func appDelegateWhisperPreparationFailureBoundary() async {
         let app = AppDelegate()
