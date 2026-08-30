@@ -52,7 +52,7 @@ and this exact executable target dependency:
 .product(name: "WhisperKit", package: "WhisperKit")
 ```
 
-`Package.resolved` already verifies version `1.0.0`, revision `25c62997041c134b03ca82731ce2f6fd2cae1eb9`, at that URL. Do not raise the version without a source/API check. The local package manifest exposes the `WhisperKit` library product and target used above; its tools version is 5.9 and its supported macOS minimum is 13, compatible with sAiity's macOS 26 platform declaration.
+`Package.resolved` already verifies version `1.0.0`, revision `25c62997041c134b03ca82731ce2f6fd2cae1eb9`, at that URL. Do not raise the version without a source/API check. The local package manifest exposes the `WhisperKit` library product and target used above; its tools version is 5.10 and its supported macOS minimum is 13, compatible with sAiity's macOS 26 platform declaration.
 
 The holder is one concrete `WhisperDictationBackend` type directly at the existing `DictationController` dependency boundary. It imports `WhisperKit`, owns one configured `WhisperKit` instance, and is not a protocol or manager. It is created only for dictation after recording release; the existing streaming backend pool remains unchanged.
 
