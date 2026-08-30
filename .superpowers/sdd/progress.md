@@ -3,3 +3,4 @@ Task 2: complete (commits 233fb84..ccd003d, review approved after lifecycle and 
 Task 3: complete (commits ccd003d..ed326af, review approved after runtime and test fixes)
 Task 4: complete (commits ed326af..63b1037, review approved after preparation, ownership, and midpoint-state fixes)
 Task 5: complete (commits cce9c9f..44a9fcb, review approved after drag, persistence, display, reset, and accessibility fixes)
+Task 6: complete (commits 87f4f59..1197698, review approved after runtime wiring and direct action tests)
