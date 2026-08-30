@@ -195,19 +195,26 @@ struct DictationView: View {
             }
 
             Section("Whisper dictation") {
+                Picker("Whisper model", selection: $state.dictationRecognizer) {
+                    Text("Dictation").tag(DictationRecognizer.streaming)
+                    Text("Whisper dictation").tag(DictationRecognizer.whisper)
+                }
+                .pickerStyle(.segmented)
                 Picker("Whisper model", selection: Binding(get: { WhisperDictationBackend.model }, set: { WhisperDictationBackend.model = $0 })) {
                     ForEach(WhisperDictationBackend.ModelChoice.allCases, id: \.self) { choice in
                         Text(choice.description.capitalized).tag(choice)
                     }
                 }
                 .pickerStyle(.segmented)
-                Picker("Recognition", selection: $state.dictationRecognizer) {
-                    Text("None").tag(ASREngine?.none)
-                    ForEach(ASREngine.allCases, id: \.self) { Text($0.displayName).tag(Optional($0)) }
+                Picker("Recognition", selection: Binding(get: { ASREngine(rawValue: UserDefaults.standard.string(forKey: "dictationStreamingEngine") ?? "nemotron") ?? .nemotron }, set: {
+                    UserDefaults.standard.set($0.rawValue, forKey: "dictationStreamingEngine")
+                    SettingsWindowController.refreshDictationRuntime()
+                })) {
+                    ForEach(ASREngine.allCases, id: \.self) { Text($0.displayName).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 Picker("Language", selection: Binding(get: { WhisperDictationBackend.locale }, set: { WhisperDictationBackend.locale = $0 })) {
-                    Text("Auto").tag("auto")
+                    Text("Off").tag("auto")
                     ForEach(LanguageCatalog.all, id: \.code) { language in
                         Text(language.displayName).tag(language.code)
                     }
@@ -217,9 +224,15 @@ struct DictationView: View {
                     let ready = WhisperDictationBackend.isReady(choice)
                     Label(ready ? "Ready" : "Not ready", systemImage: ready ? "checkmark.circle" : "arrow.down.circle")
                     Spacer()
-                    Button("Download") { Task { try? await (NSApp.delegate as? AppDelegate)?.prepareSelectedWhisperModelForUse() } }
-                    Button("Retry") { Task { try? await (NSApp.delegate as? AppDelegate)?.prepareSelectedWhisperModelForUse() } }
-                    Button("Remove") { Task { try? await WhisperDictationBackend().removeModel(choice) } }
+                    Button("Download") { prepareWhisper(choice) }
+                    Button("Retry") { prepareWhisper(choice) }
+                    Button("Remove") {
+                        Task {
+                            do { try await (NSApp.delegate as? AppDelegate)?.removeSelectedWhisperModel() }
+                            catch { await MainActor.run { state.modelError = error.localizedDescription } }
+                            await MainActor.run { state.refreshModels() }
+                        }
+                    }
                 }
                 Button("Models") { SettingsWindowController.selectModelsPane() }
             }
@@ -326,6 +339,14 @@ struct DictationView: View {
     private func refreshPermissions() {
         inputMonitoringGranted = CGPreflightListenEventAccess()
         accessibilityGranted = AXIsProcessTrusted()
+    }
+
+    private func prepareWhisper(_ choice: WhisperDictationBackend.ModelChoice) {
+        Task {
+            do { try await (NSApp.delegate as? AppDelegate)?.prepareSelectedWhisperModelForUse() }
+            catch { await MainActor.run { state.modelError = error.localizedDescription; state.refreshModels() } }
+            await MainActor.run { state.refreshModels() }
+        }
     }
 
     private func openPrivacySettings(_ pane: String) {

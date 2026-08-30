@@ -35,8 +35,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Captions and push-to-talk share this one prepared backend. The pool owns
     /// the warm model; callers hold only a temporary lease while feeding audio.
     private lazy var asrBackendPool = ASRBackendPool(makeBackend: AppDelegate.makeActiveBackend)
+    private lazy var dictationBackendPool = ASRBackendPool(makeBackend: AppDelegate.makeDictationStreamingBackend)
     private lazy var dictationController = DictationController(
-        backendProvider: asrBackendPool,
+        backendProvider: dictationBackendPool,
         capture: dictationCapture,
         inserter: TextInserter(),
         captionsActive: { [weak self] in self?.state.isActive ?? false },
@@ -56,7 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                   let translator = self.activeTranslator as? LocalLLMTranslator else { return nil }
             return await translator.cleanup(text)
         },
-        dictationUsesWhisper: { WhisperDictationBackend.isSelected },
+        dictationUsesWhisper: { DictationRecognizer.selected == .whisper },
         transcribeWhisper: { samples, locale in
             try await WhisperDictationBackend().transcribe(samples: samples, locale: locale)
         },
@@ -97,6 +98,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         try await backend.prepareModelForUse(choice, progress: progress)
     }
 
+    func removeSelectedWhisperModel() async throws {
+        await dictationController.invalidatePreparedBackend()
+        try await WhisperDictationBackend().removeModel(WhisperDictationBackend.model)
+    }
+
     #if SAIITY_TEST_HOOKS
     var captionEngineForTests: ASREngine { engine }
     var captionPoolPreparedForTests: Bool { asrBackendPool.preparedForTests }
@@ -116,6 +122,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// rebased), and it was slower than Nemotron plus a real translator anyway.
     static func makeActiveBackend() -> TranscriptionBackend {
         ASREngine.effective.makeBackend()
+    }
+
+    static func makeDictationStreamingBackend() -> TranscriptionBackend {
+        let engine = ASREngine(rawValue: UserDefaults.standard.string(forKey: "dictationStreamingEngine") ?? ASREngine.recommended.rawValue) ?? .recommended
+        return engine.makeBackend()
+    }
+
+    func refreshDictationRuntime() {
+        Task { @MainActor in
+            await dictationController.invalidatePreparedBackend()
+            await dictationBackendPool.replace(with: Self.makeDictationStreamingBackend())
+        }
     }
 
     private var activeTranslator: Translating?

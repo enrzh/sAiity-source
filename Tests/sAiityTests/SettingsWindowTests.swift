@@ -18,9 +18,10 @@ import Testing
         state.dictationCleanupEnabled = true
         #expect(defaults.bool(forKey: "dictationCleanupEnabled"))
         state.engine = .nemotron
-        state.dictationRecognizer = .parakeet
+        state.dictationRecognizer = .whisper
         #expect(ASREngine.selected == .nemotron)
-        #expect(state.dictationRecognizer == .parakeet)
+        #expect(state.dictationRecognizer == .whisper)
+        #expect(WhisperDictationBackend.isSelected)
     }
 
     @Test("dictation locale covers every catalog language")
@@ -28,6 +29,22 @@ import Testing
         #expect(Set(WhisperDictationBackend.supportedLanguageCodes) == Set(LanguageCatalog.all.map(\.code)))
         #expect(WhisperDictationBackend.ModelChoice.allCases == [.base, .small])
         #expect(WhisperDictationBackend.isReady(.base, under: URL(fileURLWithPath: "/definitely-missing")) == false)
+    }
+
+    @Test("dictation recognizer choices update runtime selection without changing captions")
+    func dictationRecognizerChoicesAreIndependent() {
+        let defaults = UserDefaults.standard
+        let snapshot = ["dictationRecognizer", "asrEngine", "whisperDictationSelected"].map { ($0, defaults.object(forKey: $0)) }
+        defer { snapshot.forEach { key, value in value.map { defaults.set($0, forKey: key) } ?? defaults.removeObject(forKey: key) } }
+        defaults.set(ASREngine.parakeetEou.rawValue, forKey: "asrEngine")
+        DictationRecognizer.selected = .streaming
+        let state = AppState()
+        state.dictationRecognizer = .whisper
+        WhisperDictationBackend.model = .small
+        #expect(DictationRecognizer.selected == .whisper)
+        #expect(WhisperDictationBackend.isSelected)
+        #expect(WhisperDictationBackend.model == .small)
+        #expect(ASREngine.selected == .parakeetEou)
     }
 
     @Test("dictation translation is opt-in and persisted")

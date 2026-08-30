@@ -156,6 +156,17 @@ enum ASREngine: String, CaseIterable, Sendable {
     }
 }
 
+enum DictationRecognizer: String, CaseIterable, Sendable {
+    case streaming, whisper
+    static var selected: Self {
+        get { Self(rawValue: UserDefaults.standard.string(forKey: "dictationRecognizer") ?? "streaming") ?? .streaming }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: "dictationRecognizer")
+            WhisperDictationBackend.isSelected = newValue == .whisper
+        }
+    }
+}
+
 /// What languages a recognition engine can handle.
 enum LanguageCoverage: Sendable {
     /// Multilingual, with the language identified from the audio itself.

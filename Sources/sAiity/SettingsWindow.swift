@@ -234,11 +234,10 @@ final class AppState {
             NotificationCenter.default.post(name: .saiityDictationSettingChanged, object: nil)
         }
     }
-    var dictationRecognizer: ASREngine? = UserDefaults.standard.string(forKey: "dictationRecognizer").flatMap(ASREngine.init(rawValue:)) {
+    var dictationRecognizer: DictationRecognizer = DictationRecognizer.selected {
         didSet {
             guard dictationRecognizer != oldValue else { return }
-            if let value = dictationRecognizer { UserDefaults.standard.set(value.rawValue, forKey: "dictationRecognizer") }
-            else { UserDefaults.standard.removeObject(forKey: "dictationRecognizer") }
+            DictationRecognizer.selected = dictationRecognizer
             NotificationCenter.default.post(name: .saiityDictationSettingChanged, object: nil)
         }
     }
@@ -815,6 +814,10 @@ enum SettingsWindowController {
         show()
         guard let tabs = window?.contentViewController as? NSTabViewController else { return }
         tabs.selectedTabViewItemIndex = tabs.tabViewItems.firstIndex { $0.label == String(localized: "Models") } ?? 0
+    }
+
+    static func refreshDictationRuntime() {
+        (NSApp.delegate as? AppDelegate)?.refreshDictationRuntime()
     }
 }
 

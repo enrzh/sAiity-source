@@ -1,23 +1,28 @@
 # Task 6 Report
 
-Implemented the scoped dictation settings and localization contract.
+Implemented the scoped dictation settings and localization contract, including the review runtime wiring.
 
 ## Changes
 
 - Added persisted, default-off dictation cleanup state independent from captions.
 - Added an independent dictation streaming recognizer selection.
+- The picker now drives `DictationRecognizer.selected`; Whisper selection mirrors `WhisperDictationBackend.isSelected`, while streaming uses a separate backend pool and engine preference.
 - Added Whisper Base/Small, locale coverage from `LanguageCatalog.all`, readiness, Download/Retry/Remove, and Models recovery navigation.
 - Download and retry use `AppDelegate.prepareSelectedWhisperModelForUse`; captions remain on their existing selection.
+- Whisper removal invalidates the prepared dictation backend before deleting files and refreshes readiness afterward.
+- The test target enables `SAIITY_TEST_HOOKS`, matching the focused test command.
 - Added the exact 23 Task6 catalog keys with complete `de`, `fr`, `es`, and `ja` entries.
 - Added RED tests for settings persistence, locale/model scope, readiness, and localization coverage.
+- Review fix: replaced the inert recognizer preference with `DictationRecognizer.selected`, wired to a separate dictation streaming pool and Whisper `isSelected` state.
+- Review fix: preparation errors propagate to the settings UI; removal invalidates `DictationController` before deleting Whisper files.
 
 ## Verification
 
-- RED: focused release test command did not reach assertions because the existing test target does not compile: `StreamingASRBackend.pendingSampleCountForTests` and `DictationController.waitForWorkForTests` are missing.
+- RED: the review-fix run caught and corrected one stale readiness assertion.
+- GREEN: `swift test -c release --jobs 2 -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS --filter 'SettingsWindowTests|LocalizationTests|ModelLifecycleTests|DictationControllerTests|StreamingASRBackendTests'` passed: 58 tests in 5 suites.
+- GREEN smoke: the same flags with `--filter 'SettingsWindowTests|LocalizationTests'` passed: 14 tests in 2 suites.
 - GREEN: `swift build -c release --jobs 2` passed.
 - Catalog JSON validation passed; all 23 keys are present in all four shipped locales.
 - `git diff --check` passed.
 
-## Concern
-
-The focused settings/localization and model lifecycle tests remain blocked by the pre-existing test compilation errors above. No push or release was performed.
+No push or release was performed.

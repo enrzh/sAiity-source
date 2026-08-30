@@ -183,7 +183,7 @@ final class DictationController {
         captureDrained = false
         if sessionUsesWhisper && !whisperIsReady() {
             state.cancel()
-            phase = .failure(String(localized: "Whisper dictation is not ready. Prepare it in Settings."))
+            phase = .failure(String(localized: "Not ready"))
             return
         }
         terminal = .open

@@ -235,7 +235,7 @@ import Testing
             inserter: FakeInserter(), captionsActive: { false },
             dictationUsesWhisper: { true }, whisperIsReady: { false })
         controller.press(); await controller.waitForWorkForTests()
-        #expect(controller.phase == .failure("Whisper dictation is not ready. Prepare it in Settings."))
+        #expect(controller.phase == .failure("Not ready"))
     }
 
     @Test("a delayed limit handler from an old session cannot finish the new session")
