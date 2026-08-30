@@ -25,6 +25,10 @@ struct WhisperDictationBackendTests {
         #expect(WhisperDictationBackend.ModelChoice.small.identifier == "openai_whisper-small")
         #expect(WhisperDictationBackend.ModelChoice.base.description == "base")
         #expect(WhisperDictationBackend.ModelChoice.small.description == "small")
+        #expect(WhisperDictationBackend.ModelChoice.base.folderName == "whisper-openai_whisper-base")
+        #expect(WhisperDictationBackend.ModelChoice.small.folderName == "whisper-openai_whisper-small")
+        #expect(WhisperDictationBackend.ModelChoice.base.readinessMarkerName == ".saiity-ready")
+        #expect(WhisperDictationBackend.ModelChoice.small.readinessMarkerName == ".saiity-ready")
     }
 
     @Test("Locale hints use a base language and disable detection")
@@ -48,6 +52,26 @@ struct WhisperDictationBackendTests {
     func unsupportedLocale() {
         #expect(throws: WhisperDictationError.unsupportedLocale("xx-YY")) {
             try WhisperDictationBackend.decodingOptions(for: Locale(identifier: "xx-YY"))
+        }
+    }
+
+    @Test("Unsupported locale is rejected before the transcription closure")
+    func unsupportedLocaleDoesNotCallTranscription() {
+        var callCount = 0
+        #expect(throws: WhisperDictationError.unsupportedLocale("xx-YY")) {
+            try WhisperDictationBackend.transcribe(locale: Locale(identifier: "xx-YY")) {
+                callCount += 1
+            }
+        }
+        #expect(callCount == 0)
+    }
+
+    @Test("Supported regional locale uses its base language")
+    func regionalLocaleSupportBoundary() throws {
+        let options = try WhisperDictationBackend.decodingOptions(for: Locale(identifier: "de-DE"))
+        #expect(options.language == "de")
+        #expect(throws: WhisperDictationError.unsupportedLocale("zz-ZZ")) {
+            try WhisperDictationBackend.decodingOptions(for: Locale(identifier: "zz-ZZ"))
         }
     }
 }

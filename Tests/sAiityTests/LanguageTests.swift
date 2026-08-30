@@ -100,4 +100,22 @@ struct LanguageTests {
         #expect(Set(LanguageCatalog.all.map(\.code)) ==
                 Set(MADLADLanguages.canonicalCodes).union(LanguageCatalog.popular))
     }
+
+    @Test("Persisted dictation locales are canonical BCP-47 or auto")
+    func persistedDictationLocaleCanonicalization() {
+        let defaults = UserDefaults.standard
+        let key = "whisperDictationLocale"
+        let old = defaults.object(forKey: key)
+        defer {
+            if let old { defaults.set(old, forKey: key) } else { defaults.removeObject(forKey: key) }
+        }
+
+        defaults.set("de_DE", forKey: key)
+        #expect(WhisperDictationBackend.locale == "de-DE")
+        #expect(defaults.string(forKey: key) == "de-DE")
+
+        defaults.set("zz-ZZ", forKey: key)
+        #expect(WhisperDictationBackend.locale == "auto")
+        #expect(defaults.string(forKey: key) == "auto")
+    }
 }
