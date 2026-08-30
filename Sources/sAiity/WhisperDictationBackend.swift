@@ -45,11 +45,12 @@ struct WhisperDictationBackend {
         let f = folder(c, root)
         return ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"].allSatisfy { name in
             let url = f.appendingPathComponent(name)
-            guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]),
+            guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]),
                   values.isDirectory == true, values.isSymbolicLink != true else { return false }
             guard let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]) else { return false }
             return enumerator.contains { item in
-                guard let values = try? item.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]) else { return false }
+                guard let itemURL = item as? URL,
+                      let values = try? itemURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]) else { return false }
                 return values.isRegularFile == true && values.isSymbolicLink != true && (values.fileSize ?? 0) > 0
             }
         }
