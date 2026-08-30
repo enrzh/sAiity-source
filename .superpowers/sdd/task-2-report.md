@@ -2,16 +2,16 @@
 
 ## Base / Head / Commit
 
-- Base: `233fb84`
-- Head before commit: `233fb84`
-- Commit: `c4bf487` (`feat: add Whisper lifecycle and batch recognition`)
+- Base: `8331cb0`
+- Head before fix: `8331cb0`
+- Commit: `HEAD` (`fix: enforce Whisper lifecycle boundaries`)
 
 ## Files
 
 - `Sources/sAiity/WhisperDictationBackend.swift`
 - `Tests/sAiityTests/WhisperDictationBackendTests.swift`
 
-## RED
+## Fix RED
 
 Command:
 
@@ -19,9 +19,9 @@ Command:
 swift test -c release -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS --filter 'WhisperDictationBackendTests|LanguageTests'
 ```
 
-Result: failed as expected after the new RED tests were added. Existing locale/catalog tests passed; the three new lifecycle boundary tests failed because the concrete download/setup/load, readiness/recovery, and explicit Settings preparation contracts were absent.
+Result: failed as expected at compile time because the concrete hook initializer was absent. After the test was executable, it failed on the old lifecycle implementation, proving the boundary behavior rather than a source-string check.
 
-## GREEN
+## Fix GREEN
 
 Command:
 
@@ -29,10 +29,10 @@ Command:
 swift test -c release -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS --filter 'WhisperDictationBackendTests|LanguageTests'
 ```
 
-Result: exit 0. `Build complete! (82.58 Sek.)`; `Test run with 19 tests in 2 suites passed after 0.032 seconds.`
+Result: exit 0. `Test run with 18 tests in 2 suites passed after 0.026 seconds.` Tests cover normal download without setup/load, explicit setup/load then marker-last, concrete locale rejection before transcription, required files, and marker-based readiness.
 
 ## Concerns
 
 - SwiftPM continues to emit the pre-existing conflicting `swift-syntax` identity warning.
-- Lifecycle tests pin the source-level concrete API boundary; no network model download was attempted.
+- Lifecycle tests use concrete injected closures; no network model download was attempted.
 - No Task 3 integration was made.

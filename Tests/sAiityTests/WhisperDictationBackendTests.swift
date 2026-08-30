@@ -7,46 +7,45 @@ import WhisperKit
 @MainActor
 struct WhisperDictationBackendTests {
 
-    private func source() throws -> String {
-        try String(contentsOf: URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("Sources/sAiity/WhisperDictationBackend.swift"), encoding: .utf8)
+    @Test("normal preparation downloads without constructing or loading Whisper")
+    func normalPreparationOnlyDownloads() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var events: [String] = []
+        let backend = WhisperDictationBackend(
+            download: { _, destination, _ in
+                events.append("download")
+                let folder = destination.appendingPathComponent("downloaded", isDirectory: true)
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                for name in ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"] {
+                    try Data().write(to: folder.appendingPathComponent(name))
+                }
+                return folder
+            },
+            setup: { _, _ in events.append("setup") },
+            load: { _, _ in events.append("load") })
+
+        try await backend.prepareModel(.base, under: root)
+
+        #expect(events == ["download"])
+        #expect(!WhisperDictationBackend.isReady(.base, under: root))
     }
 
-    @Test("Whisper lifecycle uses the exact concrete API boundary")
-    func concreteLifecycleContract() throws {
-        let text = try source()
-        #expect(text.contains("WhisperKit.download(variant: choice.identifier"))
-        #expect(text.contains("downloadBase: partialRoot"))
-        #expect(text.contains("useBackgroundSession: false"))
-        #expect(text.contains("from: \"argmaxinc/whisperkit-coreml\""))
-        #expect(text.contains("progressCallback: progress"))
-        #expect(text.contains("setupModels(model: choice.identifier"))
-        #expect(text.contains("loadModels(prewarmMode: true)"))
-        #expect(text.contains("callback: nil"))
-        #expect(text.contains("MelSpectrogram.mlmodelc"))
-        #expect(text.contains("AudioEncoder.mlmodelc"))
-        #expect(text.contains("TextDecoder.mlmodelc"))
-    }
-
-    @Test("Readiness is marker-last and recovery is concrete")
-    func readinessAndRecoveryContract() throws {
-        let text = try source()
-        #expect(text.contains(".partial"))
-        #expect(text.contains("write(to: marker"))
-        #expect(text.contains("removeItem(at:"))
-        #expect(text.contains("Task<URL, Error>"))
-        #expect(text.contains("Task.checkCancellation()"))
-    }
-
-    @Test("Settings preparation is the only model construction boundary")
-    func explicitSettingsBoundary() throws {
-        let text = try source()
-        #expect(text.contains("static func prepareModel"))
-        #expect(text.contains("static func transcribe(samples:"))
-        #expect(text.contains("try await WhisperKit(model: choice.identifier"))
+    @Test("Settings preparation loads before writing the readiness marker")
+    func explicitPreparationOrder() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var events: [String] = []
+        let backend = WhisperDictationBackend(download: { _, destination, _ in
+            let folder = destination.appendingPathComponent("downloaded", isDirectory: true)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            for name in ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"] { try Data().write(to: folder.appendingPathComponent(name)) }
+            events.append("download"); return folder
+        }, setup: { _, _ in events.append("setup") }, load: { _, _ in events.append("load") })
+        try await backend.prepareModelForUse(.base, under: root)
+        events.append(FileManager.default.fileExists(atPath: WhisperDictationBackend.modelFolder(for: .base, under: root).appendingPathComponent(".saiity-ready").path) ? "marker" : "missing")
+        #expect(events == ["download", "setup", "load", "marker"])
+        #expect(WhisperDictationBackend.isReady(.base, under: root))
     }
 
     @Test("Package manifest pins the exact WhisperKit dependency")
