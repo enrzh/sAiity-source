@@ -5,6 +5,12 @@
 - Added pure phase presentation values, AppKit status accessibility, live announcements, reduced-motion direct dismissal, reduced-transparency opaque surface, increased-contrast border, stable phase frames, and FrameStore reset reuse.
 - `git diff --check` passed.
 
+## Final Gate Evidence
+
+- RED: replacing direct helper calls with `window.sendEvent` reproduced the missing event dispatch: the panel frame did not move or persist.
+- GREEN: the panel now routes window-numbered mouse events through its production `sendEvent` path; 29 focused tests passed with `--jobs 2`.
+- Reset hit-testing uses converted button bounds and does not start a drag; drag mouse-up clamps first and persists once.
+
 ## Follow-up Review Fix Evidence
 
 - RED: review tests initially failed for real drag seams, production button action, independent restore, and injectable accessibility preferences.

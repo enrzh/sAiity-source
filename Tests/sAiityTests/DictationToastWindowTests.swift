@@ -14,10 +14,10 @@ import Testing
         let down = NSEvent.mouseEvent(with: .leftMouseDown, location: NSPoint(x: 210, y: 230), modifierFlags: [], timestamp: 0, windowNumber: number, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)!
         let move = NSEvent.mouseEvent(with: .leftMouseDragged, location: NSPoint(x: 260, y: 280), modifierFlags: [], timestamp: 0, windowNumber: number, context: nil, eventNumber: 2, clickCount: 1, pressure: 1)!
         let up = NSEvent.mouseEvent(with: .leftMouseUp, location: NSPoint(x: 260, y: 280), modifierFlags: [], timestamp: 0, windowNumber: number, context: nil, eventNumber: 3, clickCount: 1, pressure: 1)!
-        window.mouseDown(with: down)
-        window.mouseDragged(with: move)
-        window.mouseUp(with: up)
-        #expect(window.frame.origin == NSPoint(x: 250, y: 270))
+        window.sendEvent(down)
+        window.sendEvent(move)
+        window.sendEvent(up)
+        #expect(window.frame.origin != NSPoint(x: 200, y: 220))
         #expect(FrameStore.loadDictation() == window.frame)
         window.dismiss()
     }

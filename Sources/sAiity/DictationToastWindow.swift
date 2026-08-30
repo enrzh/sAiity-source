@@ -20,6 +20,7 @@ final class DictationToastWindow: NSPanel {
     private var suppressFrameSave = false
     private var dragStart: NSPoint?
     private var dragOrigin: NSPoint = .zero
+    private var dragging = false
     var onResetPosition: (() -> Void)?
 #if SAIITY_TEST_HOOKS
     private(set) var orderFrontCallsForTests = 0
@@ -151,19 +152,31 @@ final class DictationToastWindow: NSPanel {
         guard let dragStart else { return }
         setFrameOrigin(NSPoint(x: dragOrigin.x + point.x - dragStart.x, y: dragOrigin.y + point.y - dragStart.y))
     }
-    func endDrag() { dragStart = nil; saveDraggedFrame() }
-    override func mouseDown(with event: NSEvent) {
-        let point = contentView?.convert(event.locationInWindow, from: nil) ?? .zero
-        let resetFrame = resetButton.convert(resetButton.bounds, to: contentView)
-        guard !resetFrame.contains(point) else { return }
-        beginDrag(at: point)
-    }
-    override func mouseDragged(with event: NSEvent) { drag(to: contentView?.convert(event.locationInWindow, from: nil) ?? .zero) }
-    override func mouseUp(with event: NSEvent) {
-        endDrag()
+    func endDrag() {
+        guard dragStart != nil else { return }
+        dragStart = nil
         let screen = FrameStore.bestScreen(for: frame) ?? NSScreen.main
         if let screen { setFrame(FrameStore.clamp(frame, into: screen.visibleFrame), display: false) }
         saveDraggedFrame()
+        dragging = false
+    }
+    override func mouseDown(with event: NSEvent) {
+        let point = contentView?.convert(event.locationInWindow, from: nil) ?? .zero
+        let resetFrame = resetButton.convert(resetButton.bounds, to: contentView)
+        guard !resetFrame.contains(point) else { resetPositionFromButton(); return }
+        dragging = true
+        beginDrag(at: point)
+    }
+    override func mouseDragged(with event: NSEvent) { drag(to: contentView?.convert(event.locationInWindow, from: nil) ?? .zero) }
+    override func mouseUp(with event: NSEvent) { if dragging { endDrag() } }
+
+    override func sendEvent(_ event: NSEvent) {
+        switch event.type {
+        case .leftMouseDown: mouseDown(with: event)
+        case .leftMouseDragged: mouseDragged(with: event)
+        case .leftMouseUp: mouseUp(with: event)
+        default: super.sendEvent(event)
+        }
     }
 
     override var canBecomeKey: Bool { false }
