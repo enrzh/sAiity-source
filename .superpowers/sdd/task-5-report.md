@@ -11,6 +11,14 @@
 - GREEN: `DictationToastWindowTests` + `BubbleGeometryTests` passed 29 tests with `--jobs 2`.
 - Implemented borderless-panel mouse drag lifecycle with frame updates and mouse-up persistence; reset button invokes the AppDelegate-wired callback path.
 - Added non-zero independent frame restore/clamp coverage, exact phase-frame preservation, AX label assertion, and injected Reduce Motion/Transparency/Contrast behavior.
+
+## Final Interaction Verification
+
+- RED: the final event test required missing production verification for NSEvent drag dispatch and button hit-testing.
+- GREEN: focused suites passed 29 tests with `--jobs 2`; the test constructs real window-numbered mouse events and calls the NSPanel event overrides.
+- Mouse-up clamps to the active visible frame and persists the independent dictation frame; Reset button coordinates use converted bounds and its action remains callback-bound.
+- Verified nonactivating panel behavior and `canBecomeKey/Main == false`; no headless AppKit event limitation occurred.
+- `git diff --check` passed.
 - Existing overlay geometry suite passed 11 tests in the combined focused run.
 - A concurrent-suite frame assertion exposed first-presentation placement overriding a caller frame; placement is now limited to an unset frame.
 

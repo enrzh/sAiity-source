@@ -154,11 +154,20 @@ final class DictationToastWindow: NSPanel {
     func endDrag() { dragStart = nil; saveDraggedFrame() }
     override func mouseDown(with event: NSEvent) {
         let point = contentView?.convert(event.locationInWindow, from: nil) ?? .zero
-        guard !resetButton.frame.contains(point) else { return }
+        let resetFrame = resetButton.convert(resetButton.bounds, to: contentView)
+        guard !resetFrame.contains(point) else { return }
         beginDrag(at: point)
     }
     override func mouseDragged(with event: NSEvent) { drag(to: contentView?.convert(event.locationInWindow, from: nil) ?? .zero) }
-    override func mouseUp(with event: NSEvent) { endDrag() }
+    override func mouseUp(with event: NSEvent) {
+        endDrag()
+        let screen = FrameStore.bestScreen(for: frame) ?? NSScreen.main
+        if let screen { setFrame(FrameStore.clamp(frame, into: screen.visibleFrame), display: false) }
+        saveDraggedFrame()
+    }
+
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
 
     func resetPosition() {
         FrameStore.resetDictation()
