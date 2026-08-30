@@ -11,7 +11,7 @@ struct WhisperDictationBackendTests {
         let folder = WhisperDictationBackend.modelFolder(for: choice, under: root)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         for name in ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"] {
-            try Data().write(to: folder.appendingPathComponent(name))
+            try Data(repeating: 1, count: 1).write(to: folder.appendingPathComponent(name))
         }
     }
 
@@ -26,7 +26,7 @@ struct WhisperDictationBackendTests {
                 let folder = destination.appendingPathComponent("downloaded", isDirectory: true)
                 try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
                 for name in ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"] {
-                    try Data().write(to: folder.appendingPathComponent(name))
+                    try Data(repeating: 1, count: 1).write(to: folder.appendingPathComponent(name))
                 }
                 return folder
             },
@@ -46,7 +46,7 @@ struct WhisperDictationBackendTests {
         let backend = WhisperDictationBackend(download: { _, destination, _ in
             let folder = destination.appendingPathComponent("downloaded", isDirectory: true)
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            for name in ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"] { try Data().write(to: folder.appendingPathComponent(name)) }
+            for name in ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"] { try Data(repeating: 1, count: 1).write(to: folder.appendingPathComponent(name)) }
             events.append("download"); return folder
         }, prepare: { _, _ in events.append("setup"); events.append("load"); events.append("release") })
         try await backend.prepareModelForUse(.base, under: root)
@@ -65,7 +65,7 @@ struct WhisperDictationBackendTests {
             try await Task.sleep(for: .milliseconds(10))
             let folder = destination.appendingPathComponent("downloaded", isDirectory: true)
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            for name in ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"] { try Data().write(to: folder.appendingPathComponent(name)) }
+            for name in ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"] { try Data(repeating: 1, count: 1).write(to: folder.appendingPathComponent(name)) }
             events.append("download"); return folder
         }, prepare: { _, _ in events.append("setup"); events.append("load"); events.append("release") })
         try await backend.prepareModelForUse(.base)
@@ -83,10 +83,10 @@ struct WhisperDictationBackendTests {
             try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
             let folder = destination.appendingPathComponent("downloaded", isDirectory: true)
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            for name in ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"] { try Data().write(to: folder.appendingPathComponent(name)) }
+            for name in ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"] { try Data(repeating: 1, count: 1).write(to: folder.appendingPathComponent(name)) }
             return folder
         }, prepare: { _, folder in
-            try Data().write(to: folder.appendingPathComponent(".saiity-ready"))
+            try Data(repeating: 1, count: 1).write(to: folder.appendingPathComponent(".saiity-ready"))
             if attempts == 1 { throw TestError.failed }
         })
         do { try await backend.prepareModelForUse(.base); #expect(Bool(false)) } catch { #expect((error as? TestError) == .failed) }
@@ -101,7 +101,7 @@ struct WhisperDictationBackendTests {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         try makeModel(at: root)
-        try Data().write(to: root.appendingPathComponent("whisper-openai_whisper-base/.saiity-ready"))
+        try Data(repeating: 1, count: 1).write(to: root.appendingPathComponent("whisper-openai_whisper-base/.saiity-ready"))
         try FileManager.default.createDirectory(at: root.appendingPathComponent("whisper-openai_whisper-base.partial"), withIntermediateDirectories: true)
         let backend = WhisperDictationBackend(root: root)
         try await backend.removeModel(.base)
@@ -152,7 +152,7 @@ struct WhisperDictationBackendTests {
         let folder = WhisperDictationBackend.modelFolder(for: .base, under: root)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let marker = folder.appendingPathComponent(".saiity-ready")
-        try Data().write(to: marker)
+        try Data(repeating: 1, count: 1).write(to: marker)
         let backend = WhisperDictationBackend(root: root, download: { _, _, _ in
             throw CancellationError()
         })
@@ -295,7 +295,7 @@ struct WhisperDictationBackendTests {
             try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
             let folder = destination.appendingPathComponent("downloaded", isDirectory: true)
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            for name in ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"] { try Data().write(to: folder.appendingPathComponent(name)) }
+            for name in ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"] { try Data(repeating: 1, count: 1).write(to: folder.appendingPathComponent(name)) }
             return folder
         })
         async let a: Void = backend.prepareModel(.base, under: first)

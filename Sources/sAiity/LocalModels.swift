@@ -267,8 +267,14 @@ struct LocalModel: Identifiable, Sendable, Equatable, Codable {
         return Double(n) >= Double(expected) * 0.98
     }
 
+    static func isCleanupCompatible(_ model: LocalModel?) -> Bool {
+        guard let model else { return false }
+        return model.isDownloaded && model.file.lowercased().hasSuffix(".gguf") &&
+            [model.file, model.label].joined(separator: " ").lowercased().range(of: "qwen|gemma", options: .regularExpression) != nil
+    }
+
     func isCleanupCompatible() -> Bool {
-        isDownloaded && file.lowercased().hasSuffix(".gguf") &&
+        Self.isCleanupCompatible(self) &&
             [file, label].joined(separator: " ").lowercased().range(of: "qwen|gemma", options: .regularExpression) != nil
     }
 

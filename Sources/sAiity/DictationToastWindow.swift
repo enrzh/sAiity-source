@@ -11,9 +11,11 @@ final class DictationToastWindow: NSPanel {
         (NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency, NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast)
     }
     static var accessibilityPreferences = systemAccessibilityPreferences
+#if SAIITY_TEST_HOOKS
     static var visibleFramesForTests: (() -> [NSRect])?
     static var activeFrameForTests: (() -> NSRect?)?
     static var saveDictationForTests: ((NSRect) -> Void)?
+#endif
     private let label = NSTextField(labelWithString: "")
     private let spinner = NSProgressIndicator()
     private let resetButton = NSButton()
@@ -138,18 +140,22 @@ final class DictationToastWindow: NSPanel {
     }
 
     private var placementVisibleFrame: NSRect? {
+#if SAIITY_TEST_HOOKS
         if let frames = Self.visibleFramesForTests?(), let active = Self.activeFrameForTests?() {
             return frames.first(where: { $0.contains(NSPoint(x: active.midX, y: active.midY)) }) ?? frames.first
         }
+#endif
         let screen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? NSScreen.main
         return screen?.visibleFrame
     }
 
     private func injectedVisibleFrame(for frame: NSRect) -> NSRect? {
+#if SAIITY_TEST_HOOKS
         if let frames = Self.visibleFramesForTests?() {
             let center = NSPoint(x: frame.midX, y: frame.midY)
             return frames.first(where: { $0.contains(center) }) ?? frames.first
         }
+#endif
         return FrameStore.bestScreen(for: frame)?.visibleFrame
     }
 
@@ -160,7 +166,9 @@ final class DictationToastWindow: NSPanel {
     }
 
     func saveDraggedFrame() {
+#if SAIITY_TEST_HOOKS
         Self.saveDictationForTests?(frame)
+#endif
         FrameStore.saveDictation(frame)
     }
 

@@ -53,7 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         },
         cleanup: { [weak self] text in
             guard let self,
-                  LocalModel.selected?.isCleanupCompatible() == true,
+                  LocalModel.isCleanupCompatible(LocalModel.selected),
                   let translator = self.activeTranslator as? LocalLLMTranslator else { return nil }
             return await translator.cleanup(text)
         },

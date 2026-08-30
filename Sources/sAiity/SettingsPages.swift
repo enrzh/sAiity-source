@@ -256,8 +256,8 @@ struct DictationView: View {
 
             Section("Dictation cleanup") {
                 Toggle("Clean up dictated text", isOn: $state.dictationCleanupEnabled)
-                    .disabled(state.llmModel?.isDownloaded != true)
-                if state.llmModel?.isDownloaded != true {
+                    .disabled(!LocalModel.isCleanupCompatible(state.llmModel))
+                if !LocalModel.isCleanupCompatible(state.llmModel) {
                     Button("Not ready") { Self.notReadyAction(selectModels: SettingsWindowController.selectModelsPane) }
                 }
             }
