@@ -16,6 +16,8 @@ Implemented the scoped dictation settings and localization contract, including t
 - Review fix: replaced the inert recognizer preference with `DictationRecognizer.selected`, wired to a separate dictation streaming pool and Whisper `isSelected` state.
 - Review fix: preparation errors propagate to the settings UI; removal invalidates `DictationController` before deleting Whisper files.
 - Final review fix: preparation accepts an explicit captured `ModelChoice`, so a later model picker change cannot redirect the in-flight action.
+- Task6 fresh fixer: extracted the existing Dictation settings actions as internal static functions with closure injection; Buttons call the same functions used by tests. Removal invalidates before deleting the captured choice, and download/retry/remove refresh readiness and surface errors.
+- Reused localized `Engine` for the recognizer picker and added the missing localized `Automatic` key in `de`, `fr`, `es`, and `ja`.
 
 ## Verification
 
@@ -25,5 +27,16 @@ Implemented the scoped dictation settings and localization contract, including t
 - GREEN: `swift build -c release --jobs 2` passed.
 - Catalog JSON validation passed; all 23 keys are present in all four shipped locales.
 - `git diff --check` passed.
+
+## Fresh fixer action contract tests
+
+- `downloadActionUsesCapturedModelAndRefreshesReadiness`: passed
+- `downloadFailureSetsModelErrorAndRefreshesState`: passed
+- `retryClearsFailureThenUsesCapturedModel`: passed
+- `removeInvalidatesBeforeDeletingAndRefreshesReadiness`: passed
+- `permissionRecoveryOpensInputMonitoringSettings`: passed
+- `notReadyActionSelectsExistingModelsPane`: passed
+
+Focused run: `swift test -c release --jobs 2 -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS --filter 'SettingsWindowTests|LocalizationTests|ModelLifecycleTests'` — 35 tests in 3 suites passed.
 
 No push or release was performed.

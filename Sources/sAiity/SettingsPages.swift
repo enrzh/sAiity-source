@@ -163,6 +163,25 @@ struct DictationView: View {
     @State private var inputMonitoringGranted = CGPreflightListenEventAccess()
     @State private var accessibilityGranted = AXIsProcessTrusted()
 
+    internal static func downloadAction(_ choice: WhisperDictationBackend.ModelChoice, prepare: (WhisperDictationBackend.ModelChoice) async throws -> Void, refresh: () -> Void, setError: (Error) -> Void) async {
+        do { try await prepare(choice) } catch { setError(error) }
+        refresh()
+    }
+
+    internal static func retryAction(_ choice: WhisperDictationBackend.ModelChoice, clearError: () -> Void, prepare: (WhisperDictationBackend.ModelChoice) async throws -> Void, refresh: () -> Void, setError: (Error) -> Void) async {
+        clearError()
+        await downloadAction(choice, prepare: prepare, refresh: refresh, setError: setError)
+    }
+
+    internal static func removeAction(_ choice: WhisperDictationBackend.ModelChoice, invalidate: () async -> Void, remove: (WhisperDictationBackend.ModelChoice) async throws -> Void, refresh: () -> Void, setError: (Error) -> Void) async throws {
+        await invalidate()
+        do { try await remove(choice) } catch { setError(error); refresh(); throw error }
+        refresh()
+    }
+
+    internal static func permissionRecoveryAction(_ pane: String, open: (String) -> Void) { open(pane) }
+    internal static func notReadyAction(selectModels: () -> Void) { selectModels() }
+
     var body: some View {
         Form {
             Section {
@@ -195,7 +214,7 @@ struct DictationView: View {
             }
 
             Section("Whisper dictation") {
-                Picker("Whisper model", selection: $state.dictationRecognizer) {
+                Picker("Engine", selection: $state.dictationRecognizer) {
                     Text("Dictation").tag(DictationRecognizer.streaming)
                     Text("Whisper dictation").tag(DictationRecognizer.whisper)
                 }
@@ -214,7 +233,7 @@ struct DictationView: View {
                 }
                 .pickerStyle(.segmented)
                 Picker("Language", selection: Binding(get: { WhisperDictationBackend.locale }, set: { WhisperDictationBackend.locale = $0 })) {
-                    Text(verbatim: "Automatic").tag("auto")
+                    Text(String(localized: "Automatic")).tag("auto")
                     ForEach(LanguageCatalog.all, id: \.code) { language in
                         Text(language.displayName).tag(language.code)
                     }
@@ -225,12 +244,10 @@ struct DictationView: View {
                     Label(ready ? "Ready" : "Not ready", systemImage: ready ? "checkmark.circle" : "arrow.down.circle")
                     Spacer()
                     Button("Download") { prepareWhisper(choice) }
-                    Button("Retry") { prepareWhisper(choice) }
+                    Button("Retry") { retryWhisper(choice) }
                     Button("Remove") {
                         Task {
-                            do { try await (NSApp.delegate as? AppDelegate)?.removeSelectedWhisperModel() }
-                            catch { await MainActor.run { state.modelError = error.localizedDescription } }
-                            await MainActor.run { state.refreshModels() }
+                            try? await removeWhisper(choice)
                         }
                     }
                 }
@@ -241,7 +258,7 @@ struct DictationView: View {
                 Toggle("Clean up dictated text", isOn: $state.dictationCleanupEnabled)
                     .disabled(state.llmModel?.isDownloaded != true)
                 if state.llmModel?.isDownloaded != true {
-                    Button("Not ready") { SettingsWindowController.selectModelsPane() }
+                    Button("Not ready") { Self.notReadyAction(selectModels: SettingsWindowController.selectModelsPane) }
                 }
             }
 
@@ -269,7 +286,7 @@ struct DictationView: View {
                               granted: inputMonitoringGranted,
                               explanation: "Required to detect your dictation shortcut in other apps.") {
                     _ = CGRequestListenEventAccess()
-                    openPrivacySettings("Privacy_ListenEvent")
+                    Self.permissionRecoveryAction("Privacy_ListenEvent", open: openPrivacySettings)
                 }
                 if !inputMonitoringGranted {
                     Text("After granting access, quit and reopen sAiity.")
@@ -279,7 +296,7 @@ struct DictationView: View {
                 permissionRow(title: "Accessibility",
                               granted: accessibilityGranted,
                               explanation: "Required to paste dictation into the focused text field.") {
-                    openPrivacySettings("Privacy_Accessibility")
+                    Self.permissionRecoveryAction("Privacy_Accessibility", open: openPrivacySettings)
                 }
             } header: {
                 Text("Permissions")
@@ -343,10 +360,26 @@ struct DictationView: View {
 
     private func prepareWhisper(_ choice: WhisperDictationBackend.ModelChoice) {
         Task {
-            do { try await (NSApp.delegate as? AppDelegate)?.prepareSelectedWhisperModelForUse(choice) }
-            catch { await MainActor.run { state.modelError = error.localizedDescription; state.refreshModels() } }
-            await MainActor.run { state.refreshModels() }
+            await Self.downloadAction(choice, prepare: { choice in
+                try await (NSApp.delegate as? AppDelegate)?.prepareSelectedWhisperModelForUse(choice)
+            }, refresh: { state.refreshModels() }, setError: { state.modelError = $0.localizedDescription })
         }
+    }
+
+    private func retryWhisper(_ choice: WhisperDictationBackend.ModelChoice) {
+        Task {
+            await Self.retryAction(choice, clearError: { state.modelError = nil }, prepare: { choice in
+                try await (NSApp.delegate as? AppDelegate)?.prepareSelectedWhisperModelForUse(choice)
+            }, refresh: { state.refreshModels() }, setError: { state.modelError = $0.localizedDescription })
+        }
+    }
+
+    private func removeWhisper(_ choice: WhisperDictationBackend.ModelChoice) async throws {
+        try await Self.removeAction(choice, invalidate: {
+            await (NSApp.delegate as? AppDelegate)?.invalidateDictationBackend()
+        }, remove: { choice in
+            try await WhisperDictationBackend().removeModel(choice)
+        }, refresh: { state.refreshModels() }, setError: { state.modelError = $0.localizedDescription })
     }
 
     private func openPrivacySettings(_ pane: String) {

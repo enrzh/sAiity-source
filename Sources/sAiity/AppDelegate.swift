@@ -103,8 +103,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func removeSelectedWhisperModel() async throws {
-        await dictationController.invalidatePreparedBackend()
+        await invalidateDictationBackend()
         try await WhisperDictationBackend().removeModel(WhisperDictationBackend.model)
+    }
+
+    func invalidateDictationBackend() async {
+        await dictationController.invalidatePreparedBackend()
     }
 
     #if SAIITY_TEST_HOOKS

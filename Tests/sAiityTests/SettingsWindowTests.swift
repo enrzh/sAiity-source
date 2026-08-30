@@ -5,6 +5,48 @@ import Testing
 
 @MainActor
 @Suite struct SettingsWindowTests {
+    @Test("download captures model and refreshes readiness")
+    func downloadActionUsesCapturedModelAndRefreshesReadiness() async {
+        var events: [String] = []
+        await DictationView.downloadAction(.base, prepare: { choice in events.append("prepare-\(choice)") }, refresh: { events.append("refresh") }, setError: { error in events.append("error-\(error.localizedDescription)") })
+        #expect(events == ["prepare-base", "refresh"])
+    }
+
+    @Test("download failure stores error and refreshes state")
+    func downloadFailureSetsModelErrorAndRefreshesState() async {
+        var events: [String] = []
+        await DictationView.downloadAction(.small, prepare: { _ in throw NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "failed"]) }, refresh: { events.append("refresh") }, setError: { error in events.append("error-\(error.localizedDescription)") })
+        #expect(events == ["error-failed", "refresh"])
+    }
+
+    @Test("retry clears failure before using captured model")
+    func retryClearsFailureThenUsesCapturedModel() async {
+        var events: [String] = []
+        await DictationView.retryAction(.small, clearError: { events.append("clear") }, prepare: { choice in events.append("prepare-\(choice)") }, refresh: { events.append("refresh") }, setError: { _ in events.append("error") })
+        #expect(events == ["clear", "prepare-small", "refresh"])
+    }
+
+    @Test("remove invalidates before deleting and refreshes readiness")
+    func removeInvalidatesBeforeDeletingAndRefreshesReadiness() async throws {
+        var events: [String] = []
+        try await DictationView.removeAction(.base, invalidate: { events.append("invalidate") }, remove: { choice in events.append("remove-\(choice)") }, refresh: { events.append("refresh") }, setError: { error in events.append("error-\(error.localizedDescription)") })
+        #expect(events == ["invalidate", "remove-base", "refresh"])
+    }
+
+    @Test("permission recovery opens input monitoring settings")
+    func permissionRecoveryOpensInputMonitoringSettings() {
+        var opened: String?
+        DictationView.permissionRecoveryAction("Privacy_ListenEvent") { opened = $0 }
+        #expect(opened == "Privacy_ListenEvent")
+    }
+
+    @Test("not ready action selects existing models pane")
+    func notReadyActionSelectsExistingModelsPane() {
+        var selected = false
+        DictationView.notReadyAction { selected = true }
+        #expect(selected)
+    }
+
     @Test("dictation cleanup is off by default and persists independently")
     func dictationCleanupIsIndependent() {
         let defaults = UserDefaults.standard

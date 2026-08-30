@@ -19,7 +19,7 @@ struct LocalizationTests {
 
     @Test("Task6 settings keys have all shipped translations")
     func task6SettingsKeysAreComplete() throws {
-        let required = ["Dictation cleanup", "Clean up dictated text", "Whisper dictation", "Whisper model", "Base", "Small", "Download", "Retry", "Remove", "Not ready", "Ready", "Preparing dictation", "Transcribing", "Cleaning up", "Dictation limit reached", "Permission required", "Open System Settings", "Reset Position", "Recovery", "Dictation failed", "Translated and inserted", "Inserted and copied", "Translation unavailable — cleaned text inserted and copied"]
+        let required = ["Automatic", "Dictation cleanup", "Clean up dictated text", "Whisper dictation", "Whisper model", "Base", "Small", "Download", "Retry", "Remove", "Not ready", "Ready", "Preparing dictation", "Transcribing", "Cleaning up", "Dictation limit reached", "Permission required", "Open System Settings", "Reset Position", "Recovery", "Dictation failed", "Translated and inserted", "Inserted and copied", "Translation unavailable — cleaned text inserted and copied"]
         let strings = try Self.catalog()
         for key in required {
             guard let entry = strings[key], let localizations = entry["localizations"] as? [String: Any] else {

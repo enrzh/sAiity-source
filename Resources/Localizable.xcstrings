@@ -1,6 +1,15 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Automatic": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Automatisch"}},
+        "es": {"stringUnit": {"state": "translated", "value": "Automático"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Automatique"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "自動"}}
+      }
+    },
     "Dictation cleanup": {
       "extractionState": "manual",
       "localizations": {
