@@ -194,6 +194,13 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
     static var isAvailable: Bool { true }
     static func isDownloaded() -> Bool { LocalModel.selected?.isDownloaded ?? false }
 
+    func cleanup(_ text: String) async -> String? {
+        guard llm != nil else { return nil }
+        let user = "Clean up this dictated transcript. Preserve meaning; fix punctuation and capitalization only. Output only the cleaned transcript.\n\n<TRANSCRIPT>\n\(text)\n</TRANSCRIPT>"
+        guard let raw = await generate(system: "You clean dictated transcripts. Never add facts or commentary.", user: user) else { return nil }
+        return DictationCleanupValidator.validate(raw)
+    }
+
     /// The language name to put in the prompt, always in English.
     ///
     /// This used to come from `Locale.current`, which is the user's UI language
@@ -440,7 +447,7 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
             // same prompt reproduced the same wrong answer verbatim — the retry
             // only started recovering anything once it could pick a different
             // continuation.
-            guard let raw2 = await generate(system: harder, user: user, temp: 0.7),
+            guard let raw2 = await generate(system: harder, user: user, temp: 0.15),
                   case .ok(let out) = TranslationOutputValidator.sanitize(raw2, input: text, target: target) else {
                 NSLog("sAiity qwen: retry did not recover")
                 return nil

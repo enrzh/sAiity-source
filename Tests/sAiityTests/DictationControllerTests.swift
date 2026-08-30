@@ -40,7 +40,7 @@ import Testing
         var stopContinuation: CheckedContinuation<Void, Never>?
         var onChunk: (@Sendable (TranscriptChunk) -> Void)?
         var detectedLanguageResult: String? = "en"
-        var authoritativeResult: String?
+        var authoritativeResult: String? = "hello from dictation"
         var finishDictationCalls = 0
 
         init(log: EventLog) { self.log = log }
@@ -122,7 +122,7 @@ import Testing
         controller.release()
         await controller.waitForWorkForTests()
 
-        #expect(log.values == ["capture.stop", "backend.flushPending", "backend.stop"])
+        #expect(log.values == ["capture.stop", "backend.finishDictation"])
         #expect(inserter.inserted == ["hello from dictation"])
         #expect(controller.phase == .result("Copied to Clipboard"))
     }
@@ -151,7 +151,7 @@ import Testing
         #expect(inserter.inserted == ["Schedule a meeting with Sarah."])
     }
 
-    @Test("an empty authoritative completion falls back to rolling finals")
+    @Test("an empty authoritative completion does not use rolling finals")
     func emptyAuthoritativeCompletionUsesFallback() async {
         let log = EventLog()
         let backend = FakeBackend(log: log)
@@ -170,7 +170,8 @@ import Testing
         await controller.waitForWorkForTests()
 
         #expect(backend.finishDictationCalls == 1)
-        #expect(inserter.inserted == ["Rolling final"])
+        #expect(inserter.inserted.isEmpty)
+        #expect(controller.phase == .result("No speech detected"))
     }
 
     @Test("enabled dictation translates before inserting and copying")
@@ -428,7 +429,7 @@ import Testing
 
         #expect(backend.prepares == 1)
         #expect(backend.starts == 2)
-        #expect(backend.stops == 2)
+        #expect(backend.stops == 0)
     }
 
     @Test("preparation waits for cancellation cleanup")

@@ -836,11 +836,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             dictationToast.show(text: String(localized: "Starting Dictation…"), animated: true)
         case .dictating:
             dictationToast.show(text: String(localized: "Dictating…"), animated: true)
-        case .transcribing, .inserting:
+        case .transcribing, .cleaning, .inserting:
             dictationToast.show(text: String(localized: "Transcribing…"), animated: true)
         case .translating:
             dictationToast.show(text: String(localized: "Translating…"), animated: true)
-        case .result(let text), .failure(let text):
+        case .limit:
+            dictationToast.show(text: String(localized: "Dictation limit reached"), animated: false)
+        case .recovery(let text), .result(let text), .failure(let text):
             dictationToast.show(text: text, animated: false)
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(2))

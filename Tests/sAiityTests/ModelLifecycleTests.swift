@@ -5,6 +5,12 @@ import Testing
 
 @MainActor
 @Suite struct ModelLifecycleTests {
+    @Test("cleanup compatibility requires a downloaded Qwen or Gemma GGUF")
+    func cleanupCompatibilityIsRestricted() {
+        let qwen = LocalModel(source: .url("https://example.invalid/qwen.gguf"), file: "qwen.gguf", label: "Qwen", bytes: 1, recommended: false, note: "", licence: "")
+        #expect(!qwen.isCleanupCompatible(false))
+    }
+
     final class FakeLifecycleBackend: TranscriptionBackend, @unchecked Sendable {
         let name = "Lifecycle test backend"
         let format = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1)!

@@ -16,29 +16,13 @@ protocol DictationTextInsertion: AnyObject {
 
 extension TextInserter: DictationTextInsertion {}
 
-private final class DictationFinalTextCollector: @unchecked Sendable {
-    private let lock = NSLock()
-    private var assembler = DictationTextAssembler()
-
-    func reset() {
-        lock.withLock { assembler.reset() }
-    }
-
-    func append(_ text: String) {
-        lock.withLock { assembler.append(text) }
-    }
-
-    var text: String {
-        lock.withLock { assembler.finalText }
-    }
-}
-
 /// Owns the reusable ASR backend and one short microphone -> insertion session.
 @MainActor
 final class DictationController {
     typealias BackendFactory = () -> TranscriptionBackend
     typealias TranslationConfigurationProvider = () -> DictationTranslationConfiguration
     typealias TranslationHandler = (String, String, String) async -> String?
+    typealias CleanupHandler = (String) async -> String?
 
     private let backendProvider: any ASRBackendProvider
     private let capture: any DictationAudioCapture
@@ -47,7 +31,8 @@ final class DictationController {
     private let translationConfiguration: TranslationConfigurationProvider
     private let translate: TranslationHandler
     private let onPhaseChanged: (DictationPhase) -> Void
-    private let collector = DictationFinalTextCollector()
+    private let cleanupConfiguration: () -> DictationCleanupConfiguration
+    private let cleanup: CleanupHandler
 
     private var state = DictationSessionState()
     private var generation = 0
@@ -71,9 +56,9 @@ final class DictationController {
     /// `isActive` alone is not enough for model-lifecycle decisions.
     var isBusy: Bool {
         switch phase {
-        case .preparing, .starting, .dictating, .transcribing, .translating, .inserting:
+        case .preparing, .starting, .dictating, .transcribing, .cleaning, .translating, .inserting:
             return true
-        case .idle, .waitingForInputMonitoring, .ready, .result, .failure:
+        case .idle, .waitingForInputMonitoring, .ready, .limit, .recovery, .result, .failure:
             return false
         }
     }
@@ -83,7 +68,9 @@ final class DictationController {
          inserter: any DictationTextInsertion,
          captionsActive: @escaping () -> Bool,
          translationConfiguration: @escaping TranslationConfigurationProvider = { .disabled },
-         translate: @escaping TranslationHandler = { _, _, _ in nil },
+        translate: @escaping TranslationHandler = { _, _, _ in nil },
+         cleanupConfiguration: @escaping () -> DictationCleanupConfiguration = { .disabled },
+         cleanup: @escaping CleanupHandler = { _ in nil },
          onPhaseChanged: @escaping (DictationPhase) -> Void = { _ in }) {
         self.backendProvider = SingleBackendProvider(makeBackend: makeBackend)
         self.capture = capture
@@ -91,6 +78,8 @@ final class DictationController {
         self.captionsActive = captionsActive
         self.translationConfiguration = translationConfiguration
         self.translate = translate
+        self.cleanupConfiguration = cleanupConfiguration
+        self.cleanup = cleanup
         self.onPhaseChanged = onPhaseChanged
     }
 
@@ -99,7 +88,9 @@ final class DictationController {
          inserter: any DictationTextInsertion,
          captionsActive: @escaping () -> Bool,
          translationConfiguration: @escaping TranslationConfigurationProvider = { .disabled },
-         translate: @escaping TranslationHandler = { _, _, _ in nil },
+        translate: @escaping TranslationHandler = { _, _, _ in nil },
+         cleanupConfiguration: @escaping () -> DictationCleanupConfiguration = { .disabled },
+         cleanup: @escaping CleanupHandler = { _ in nil },
          onPhaseChanged: @escaping (DictationPhase) -> Void = { _ in }) {
         self.backendProvider = backendProvider
         self.capture = capture
@@ -107,6 +98,8 @@ final class DictationController {
         self.captionsActive = captionsActive
         self.translationConfiguration = translationConfiguration
         self.translate = translate
+        self.cleanupConfiguration = cleanupConfiguration
+        self.cleanup = cleanup
         self.onPhaseChanged = onPhaseChanged
     }
 
@@ -151,7 +144,6 @@ final class DictationController {
 
         generation += 1
         let session = generation
-        collector.reset()
         let wasReady = phase == .ready
         phase = .starting
         if !wasReady, preparationTask == nil {
@@ -281,11 +273,7 @@ final class DictationController {
             guard let format = await acquired.inputFormat else {
                 throw BackendError.notPrepared
             }
-            let collector = collector
-            try await acquired.start { chunk in
-                guard chunk.isFinal else { return }
-                collector.append(chunk.text)
-            }
+            try await acquired.start { _ in }
             try Task.checkCancellation()
             guard session == generation else { return }
             try capture.start(targetFormat: format) { [weak acquired] buffer in
@@ -323,23 +311,30 @@ final class DictationController {
         guard session == generation else { return }
 
         let authoritativeText = authoritative?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let text = authoritativeText.flatMap { $0.isEmpty ? nil : $0 } ?? collector.text
-        guard !text.isEmpty else {
+        guard let text = authoritativeText.flatMap({ $0.isEmpty ? nil : $0 }) else {
             phase = .result(String(localized: "No speech detected"))
             return
         }
         let configuration = translationConfiguration()
         var output = text
+        var cleaned = false
         var translated = false
         var translationFailed = false
+        if cleanupConfiguration().enabled {
+            phase = .cleaning
+            if let value = await cleanup(text), let valid = DictationCleanupValidator.validate(value) {
+                output = valid
+                cleaned = true
+            }
+        }
         if configuration.enabled,
            let target = configuration.target?.trimmingCharacters(in: .whitespacesAndNewlines),
            !target.isEmpty {
             phase = .translating
-            if let value = await translate(text, sourceLanguage, target) {
-                let cleaned = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !cleaned.isEmpty {
-                    output = cleaned
+            if let value = await translate(output, sourceLanguage, target) {
+                let translatedText = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !translatedText.isEmpty {
+                    output = translatedText
                     translated = true
                 } else {
                     translationFailed = true
@@ -356,7 +351,7 @@ final class DictationController {
             if translated {
                 phase = .result(String(localized: "Translated and inserted"))
             } else if translationFailed {
-                phase = .result(String(localized: "Translation unavailable — original inserted and copied"))
+                phase = .result(String(localized: cleaned ? "Translation unavailable — cleaned text inserted and copied" : "Translation unavailable — original inserted and copied"))
             } else {
                 phase = .result(String(localized: "Inserted and copied"))
             }
@@ -364,7 +359,7 @@ final class DictationController {
             if translated {
                 phase = .result(String(localized: "Translated and copied"))
             } else if translationFailed {
-                phase = .result(String(localized: "Translation unavailable — original copied to Clipboard"))
+                phase = .result(String(localized: cleaned ? "Translation unavailable — cleaned text inserted and copied" : "Translation unavailable — original copied to Clipboard"))
             } else {
                 phase = .result(String(localized: "Copied to Clipboard"))
             }

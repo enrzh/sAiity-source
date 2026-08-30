@@ -82,10 +82,45 @@ enum DictationPhase: Equatable, Sendable {
     case starting
     case dictating
     case transcribing
+    case cleaning
     case translating
     case inserting
+    case limit
+    case recovery(String)
     case result(String)
     case failure(String)
+}
+
+struct DictationCleanupConfiguration: Equatable, Sendable {
+    let enabled: Bool
+    static let disabled = Self(enabled: false)
+}
+
+struct DictationAudioSampleLimit: Sendable {
+    static let maximumSamples = 320_000
+    enum Decision: Equatable, Sendable { case accepted, limited }
+    private(set) var sampleCount = 0
+
+    mutating func accepted(sampleCount: Int) -> Decision {
+        guard sampleCount > 0, self.sampleCount < Self.maximumSamples else { return .limited }
+        let remaining = Self.maximumSamples - self.sampleCount
+        guard sampleCount <= remaining else {
+            self.sampleCount = Self.maximumSamples
+            return .limited
+        }
+        self.sampleCount += sampleCount
+        return self.sampleCount == Self.maximumSamples ? .limited : .accepted
+    }
+}
+
+@MainActor
+enum DictationTerminal: Equatable {
+    case open, released, limited, cancelled
+    mutating func accept(_ value: Self) -> Bool {
+        guard self == .open else { return false }
+        self = value
+        return true
+    }
 }
 
 extension DictationPhase {
