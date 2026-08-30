@@ -11,6 +11,9 @@ final class DictationToastWindow: NSPanel {
         (NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency, NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast)
     }
     static var accessibilityPreferences = systemAccessibilityPreferences
+    static var visibleFramesForTests: (() -> [NSRect])?
+    static var activeFrameForTests: (() -> NSRect?)?
+    static var saveDictationForTests: ((NSRect) -> Void)?
     private let label = NSTextField(labelWithString: "")
     private let spinner = NSProgressIndicator()
     private let resetButton = NSButton()
@@ -80,13 +83,9 @@ final class DictationToastWindow: NSPanel {
         effect.contentView = host
         contentView = effect
         applyAccessibilitySurface()
-        if let saved = FrameStore.loadDictation(), let screen = FrameStore.bestScreen(for: saved) {
-            setFrame(FrameStore.clamp(saved, into: screen.visibleFrame), display: false)
+        if let saved = FrameStore.loadDictation(), let visible = injectedVisibleFrame(for: saved) {
+            setFrame(FrameStore.clamp(saved, into: visible), display: false)
             hasPlacedToast = true
-        }
-        NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification,
-                                               object: self, queue: .main) { [weak self] _ in
-            if self?.suppressFrameSave == false { self?.saveDraggedFrame() }
         }
     }
 
@@ -122,12 +121,11 @@ final class DictationToastWindow: NSPanel {
 
     func show(phase: DictationPhase, autoDismissAfter: Duration?) {
         let p = phase.toastPresentation
-        let needsPlacement = !hasPlacedToast
+        let needsPlacement = !hasPlacedToast && frame.width <= 1
         let frame = self.frame
         show(text: p.value, animated: phase == .preparing || phase == .starting || phase == .dictating || phase == .transcribing || phase == .cleaning || phase == .translating || phase == .inserting, autoDismissAfter: autoDismissAfter)
         if needsPlacement && FrameStore.loadDictation() == nil,
-           let screen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? NSScreen.main {
-            let v = screen.visibleFrame
+           let v = placementVisibleFrame {
             setFrameOrigin(NSPoint(x: v.midX - self.frame.width / 2, y: v.minY + 80))
         }
         hasPlacedToast = true
@@ -139,13 +137,32 @@ final class DictationToastWindow: NSPanel {
         Self.postAccessibility(self, .announcementRequested)
     }
 
+    private var placementVisibleFrame: NSRect? {
+        if let frames = Self.visibleFramesForTests?(), let active = Self.activeFrameForTests?() {
+            return frames.first(where: { $0.contains(NSPoint(x: active.midX, y: active.midY)) }) ?? frames.first
+        }
+        let screen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? NSScreen.main
+        return screen?.visibleFrame
+    }
+
+    private func injectedVisibleFrame(for frame: NSRect) -> NSRect? {
+        if let frames = Self.visibleFramesForTests?() {
+            let center = NSPoint(x: frame.midX, y: frame.midY)
+            return frames.first(where: { $0.contains(center) }) ?? frames.first
+        }
+        return FrameStore.bestScreen(for: frame)?.visibleFrame
+    }
+
     func performResetPosition() -> Bool {
         guard let onResetPosition else { return false }
         onResetPosition()
         return true
     }
 
-    func saveDraggedFrame() { FrameStore.saveDictation(frame) }
+    func saveDraggedFrame() {
+        Self.saveDictationForTests?(frame)
+        FrameStore.saveDictation(frame)
+    }
 
     func beginDrag(at point: NSPoint) { dragStart = point; dragOrigin = frame.origin }
     func drag(to point: NSPoint) {
@@ -194,8 +211,17 @@ final class DictationToastWindow: NSPanel {
         suppressFrameSave = false
     }
 
-    @objc private func resetPositionFromButton() { _ = performResetPosition() }
+    @objc private func resetPositionFromButton() {
+#if SAIITY_TEST_HOOKS
+        resetCallbackCountForTests += 1
+#endif
+        _ = performResetPosition()
+    }
     func performResetButtonAction() { resetButton.performClick(nil) }
+#if SAIITY_TEST_HOOKS
+    var resetButtonBoundsForTests: NSRect { resetButton.convert(resetButton.bounds, to: nil) }
+    private(set) var resetCallbackCountForTests = 0
+#endif
 
     func show(text: String, animated: Bool, autoDismissAfter: Duration? = nil) {
         cancelAutoDismiss()

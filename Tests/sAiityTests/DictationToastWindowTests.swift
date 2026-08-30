@@ -4,7 +4,95 @@ import Testing
 @testable import sAiity
 
 @MainActor
-@Suite struct DictationToastWindowTests {
+@Suite(.serialized) struct DictationToastWindowTests {
+    @Test func firstShowUsesActiveScreenWithoutSavedFrame() {
+        FrameStore.resetDictation()
+        DictationToastWindow.visibleFramesForTests = { [NSRect(x: 0, y: 0, width: 800, height: 600)] }
+        DictationToastWindow.activeFrameForTests = { NSRect(x: 700, y: 500, width: 1, height: 1) }
+        defer { DictationToastWindow.visibleFramesForTests = nil; DictationToastWindow.activeFrameForTests = nil }
+        let window = makeWindow(); window.show(phase: .ready)
+        #expect(window.frame.midX > 350); window.dismiss()
+    }
+
+    @Test func savedFramePrefersItsExistingScreen() {
+        FrameStore.resetDictation(); let saved = NSRect(x: 100, y: 120, width: 240, height: 36)
+        FrameStore.saveDictation(saved); let window = makeWindow()
+        #expect(window.frame.origin == saved.origin); window.dismiss(); FrameStore.resetDictation()
+    }
+
+    @Test func missingSavedScreenFallsBackAndClampsToActiveScreen() {
+        FrameStore.resetDictation(); FrameStore.saveDictation(NSRect(x: 5000, y: 5000, width: 240, height: 36))
+        DictationToastWindow.visibleFramesForTests = { [NSRect(x: 0, y: 0, width: 800, height: 600)] }
+        DictationToastWindow.activeFrameForTests = { NSRect(x: 700, y: 500, width: 1, height: 1) }
+        defer { DictationToastWindow.visibleFramesForTests = nil; DictationToastWindow.activeFrameForTests = nil; FrameStore.resetDictation() }
+        let window = makeWindow(); #expect(window.frame.maxX <= 800 && window.frame.maxY <= 600); window.dismiss()
+    }
+
+    @Test func reduceMotionDirectDismissesWithoutAnimation() async {
+        DictationToastWindow.accessibilityPreferences = { (true, false, false) }
+        defer { DictationToastWindow.accessibilityPreferences = DictationToastWindow.systemAccessibilityPreferences }
+        let window = makeWindow(); window.show(text: "Ready", animated: false, autoDismissAfter: .milliseconds(1))
+        try? await Task.sleep(for: .milliseconds(200)); #expect(!window.isVisible)
+    }
+
+    @Test func reduceTransparencyOnOff() {
+        DictationToastWindow.accessibilityPreferences = { (false, true, false) }
+        let opaque = makeWindow(); opaque.show(text: "x", animated: false); #expect(opaque.isOpaque); opaque.dismiss()
+        DictationToastWindow.accessibilityPreferences = { (false, false, false) }
+        let clear = makeWindow(); clear.show(text: "x", animated: false); #expect(!clear.isOpaque); clear.dismiss()
+        DictationToastWindow.accessibilityPreferences = DictationToastWindow.systemAccessibilityPreferences
+    }
+
+    @Test func increaseContrastOnOff() {
+        DictationToastWindow.accessibilityPreferences = { (false, false, true) }
+        let high = makeWindow(); high.show(text: "x", animated: false); #expect(high.contentView?.layer?.borderWidth == 1); high.dismiss()
+        DictationToastWindow.accessibilityPreferences = { (false, false, false) }
+        let normal = makeWindow(); normal.show(text: "x", animated: false); #expect(normal.contentView?.layer?.borderWidth == 0); normal.dismiss()
+        DictationToastWindow.accessibilityPreferences = DictationToastWindow.systemAccessibilityPreferences
+    }
+
+    @Test func resetEventUsesActualButtonBoundsAndInvokesOnce() {
+        FrameStore.saveDictation(NSRect(x: 200, y: 200, width: 240, height: 36)); let window = makeWindow(); window.orderFrontRegardless()
+        window.onResetPosition = { window.resetPosition() }
+        let b = window.resetButtonBoundsForTests; let p = NSPoint(x: b.midX, y: b.midY)
+        let e = NSEvent.mouseEvent(with: .leftMouseDown, location: p, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)!
+        let u = NSEvent.mouseEvent(with: .leftMouseUp, location: p, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 2, clickCount: 1, pressure: 1)!
+        window.sendEvent(e); window.sendEvent(u); #expect(window.resetCallbackCountForTests == 1); #expect(FrameStore.loadDictation() == nil); window.dismiss()
+    }
+
+    @Test func appDelegateBindingResetsToastThroughActualAction() {
+        FrameStore.saveDictation(NSRect(x: 200, y: 200, width: 240, height: 36))
+        let delegate = AppDelegate(); let window = delegate.dictationToastForTests
+        window.orderFrontRegardless(); let b = window.resetButtonBoundsForTests
+        let p = NSPoint(x: b.midX, y: b.midY)
+        let e = NSEvent.mouseEvent(with: .leftMouseDown, location: p, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 3, clickCount: 1, pressure: 1)!
+        let u = NSEvent.mouseEvent(with: .leftMouseUp, location: p, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 4, clickCount: 1, pressure: 1)!
+        window.sendEvent(e); window.sendEvent(u)
+        #expect(FrameStore.loadDictation() == nil); window.dismiss()
+    }
+
+    @Test func phaseChangesPreserveExactCallerFrame() {
+        let window = makeWindow(); let frame = NSRect(x: 31, y: 42, width: 320, height: 80)
+        window.setFrame(frame, display: false); window.show(phase: .preparing); #expect(window.frame == frame)
+        window.show(phase: .transcribing); #expect(window.frame == frame); window.dismiss()
+    }
+
+    @Test func dragSavesClampedFrameExactlyOnce() {
+        var saveCount = 0
+        DictationToastWindow.saveDictationForTests = { _ in saveCount += 1 }
+        defer { DictationToastWindow.saveDictationForTests = nil }
+        let window = makeWindow(); window.setFrame(NSRect(x: 200, y: 200, width: 240, height: 36), display: false)
+        window.beginDrag(at: NSPoint(x: 10, y: 10)); window.drag(to: NSPoint(x: 5000, y: 5000)); window.endDrag()
+        #expect(saveCount == 1); #expect(FrameStore.loadDictation() == window.frame); window.dismiss()
+    }
+
+    @Test func dragAndResetDoNotChangeKeyOrMainState() {
+        let window = makeWindow(); window.setFrame(NSRect(x: 200, y: 200, width: 240, height: 36), display: false)
+        let keyBefore = window.isKeyWindow; let mainBefore = window.isMainWindow
+        window.beginDrag(at: NSPoint(x: 10, y: 10)); window.drag(to: NSPoint(x: 30, y: 30)); window.endDrag()
+        window.onResetPosition = { window.resetPosition() }; window.performResetButtonAction()
+        #expect(window.isKeyWindow == keyBefore); #expect(window.isMainWindow == mainBefore); window.dismiss()
+    }
     @Test("real drag updates and persists the borderless panel frame")
     func realDragPersistsFrame() {
         let window = makeWindow()

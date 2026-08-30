@@ -69,6 +69,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let capture = SystemAudioCapture()
     private var engine = ASREngine.effective
 
+    override init() {
+        super.init()
+        bindDictationToastActions()
+    }
+
+    func bindDictationToastActions() {
+        dictationToast.onResetPosition = { [weak self] in
+            self?.dictationToast.resetPosition()
+        }
+    }
+
+#if SAIITY_TEST_HOOKS
+    var dictationToastForTests: DictationToastWindow { dictationToast }
+#endif
+
     /// Production action for the deferred Task6 settings control.
     func prepareSelectedWhisperModelForUse(progress: @escaping @Sendable (Progress) -> Void = { _ in }) async throws {
         let choice = WhisperDictationBackend.model
@@ -631,9 +646,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlay.onCopy = { [weak self] in self?.copyCurrentLine() }
         overlay.onOpenWindow = { SettingsWindowController.show() }
         overlay.onClear = { [weak self] in self?.clearCaption() }
-        dictationToast.onResetPosition = { [weak self] in
-            self?.dictationToast.resetPosition()
-        }
+        bindDictationToastActions()
         NotificationCenter.default.addObserver(
             self, selector: #selector(saveTranscriptChangedExternally(_:)),
             name: .saiitySaveTranscriptChanged, object: nil)

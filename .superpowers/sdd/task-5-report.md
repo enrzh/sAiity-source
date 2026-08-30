@@ -28,6 +28,13 @@
 - Existing overlay geometry suite passed 11 tests in the combined focused run.
 - A concurrent-suite frame assertion exposed first-presentation placement overriding a caller frame; placement is now limited to an unset frame.
 
+## Fresh Fixer Verification
+
+- Removed the toast `didMove` persistence observer; drag mouse-up clamps and saves exactly once, with a save-count seam.
+- Reset activation is exercised through window-numbered `sendEvent` mouse down/up events and converted button bounds; AppDelegate binding is shared by init and launch.
+- Added independent screen, accessibility preference, phase-frame, reset, save-count, and key/main focus coverage. The toast test suite is serialized because injected AppKit preferences are process-global.
+- Focused verification: `swift test -c release -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS --jobs 2 --filter 'DictationToastWindowTests|BubbleGeometryTests'` passed 40 tests in 3 suites. `git diff --check` passed.
+
 ## Independent Review Fix Evidence
 
 - RED: added persistence, drag/reset, and announcement seam tests; the focused build failed on each missing API.
