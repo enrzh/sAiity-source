@@ -127,6 +127,32 @@ import Testing
         #expect(controller.phase == .result("Copied to Clipboard"))
     }
 
+    @Test("Whisper dictation transcribes only after capture release")
+    func whisperTranscribesAfterCaptureRelease() async {
+        let log = EventLog()
+        let capture = FakeCapture(log: log)
+        let inserter = FakeInserter()
+        let controller = DictationController(
+            makeBackend: { Issue.record("streaming backend must not be created"); return FakeBackend(log: log) },
+            capture: capture,
+            inserter: inserter,
+            captionsActive: { false },
+            dictationUsesWhisper: { true },
+            transcribeWhisper: { _, _ in
+                log.values.append("whisper.transcribe")
+                return "whisper final"
+            })
+
+        controller.markReady()
+        controller.press()
+        await controller.waitForWorkForTests()
+        controller.release()
+        await controller.waitForWorkForTests()
+
+        #expect(log.values == ["capture.stop", "whisper.transcribe"])
+        #expect(inserter.inserted == ["whisper final"])
+    }
+
     @Test("dictation inserts the authoritative completion instead of an early rolling final")
     func authoritativeCompletionReplacesEarlyHypothesis() async {
         let log = EventLog()

@@ -29,6 +29,10 @@ struct WhisperDictationBackend {
     init(root: URL = ModelRegistry.root, download: @escaping Download = WhisperDictationBackend.realDownload, prepare: @escaping Prepare = WhisperDictationBackend.realPrepare, transcribe: @escaping Transcription = WhisperDictationBackend.realTranscribe) { self.root = root; self.download = download; self.prepare = prepare; self.transcribeHook = transcribe }
     static let supportedLanguageCodes = Set(LanguageCatalog.all.map(\.code))
     @Defaults(rawKey: "whisperDictationModel") static var model = ModelChoice.base
+    static var isSelected: Bool {
+        get { UserDefaults.standard.bool(forKey: "whisperDictationSelected") }
+        set { UserDefaults.standard.set(newValue, forKey: "whisperDictationSelected") }
+    }
     static var locale: String {
         get { let stored = UserDefaults.standard.string(forKey: "whisperDictationLocale") ?? "auto"; let value = canonicalLocale(stored); if value != stored { UserDefaults.standard.set(value, forKey: "whisperDictationLocale") }; return value }
         set { UserDefaults.standard.set(canonicalLocale(newValue), forKey: "whisperDictationLocale") }

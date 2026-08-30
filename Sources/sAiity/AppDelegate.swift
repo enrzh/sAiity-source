@@ -53,6 +53,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                   let translator = self.activeTranslator as? LocalLLMTranslator else { return nil }
             return await translator.cleanup(text)
         },
+        dictationUsesWhisper: { WhisperDictationBackend.isSelected },
+        transcribeWhisper: { samples, locale in
+            try await WhisperDictationBackend().transcribe(samples: samples, locale: locale)
+        },
+        prepareWhisper: {
+            try await WhisperDictationBackend().prepareModel(WhisperDictationBackend.model)
+        },
         onPhaseChanged: { [weak self] phase in
             self?.updateDictationToast(phase)
             self?.scheduleTranslatorEvictionIfIdle()

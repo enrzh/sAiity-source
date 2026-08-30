@@ -31,6 +31,7 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
     private var lifecycle = DictationCaptureLifecycle()
     private var converter: AVAudioConverter?
     private var sampleCount = 0
+    private var convertedSamples: [[Float]] = []
     private var didEmitLimit = false
     var onLimit: (@Sendable () -> Void)?
 
@@ -58,7 +59,7 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
             ])
         }
         self.converter = converter
-        lock.withLock { sampleCount = 0; didEmitLimit = false }
+        lock.withLock { sampleCount = 0; convertedSamples = []; didEmitLimit = false }
 
         input.installTap(onBus: 0, bufferSize: 1024, format: sourceFormat) { [weak self] buffer, _ in
             self?.convert(buffer, to: targetFormat, onBuffer: onBuffer)
@@ -108,6 +109,10 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
         let accounting = acceptConvertedFrame(Int(output.frameLength))
         guard accounting.acceptedFrameCount > 0 else { return }
         output.frameLength = AVAudioFrameCount(accounting.acceptedFrameCount)
+        if let channel = output.floatChannelData?[0] {
+            let samples = Array(UnsafeBufferPointer(start: channel, count: accounting.acceptedFrameCount))
+            lock.withLock { convertedSamples.append(samples) }
+        }
         onBuffer(output)
         if accounting.shouldEmitLimit { onLimit?() }
     }
@@ -124,5 +129,9 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
             if shouldEmit { didEmitLimit = true }
             return (accepted, shouldEmit)
         }
+    }
+
+    var collectedSamples: [[Float]] {
+        lock.withLock { convertedSamples }
     }
 }
