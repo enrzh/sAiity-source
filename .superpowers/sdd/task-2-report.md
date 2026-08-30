@@ -2,13 +2,23 @@
 
 ## Base / Head / Commit
 
-- Review range: `233fb84..HEAD`
-- Implementation commits: `8331cb0`, `4d42fce`, `42921e3`, and `e3c3455` (`fix: serialize Whisper operations with FIFO lock`)
+- Review range: `c63b156..HEAD`
+- Implementation commit: this Task 2 fix (`fix: release Whisper lock after cancellation race`)
 
 ## Files
 
 - `Sources/sAiity/WhisperDictationBackend.swift`
 - `Tests/sAiityTests/WhisperDictationBackendTests.swift`
+
+## Cancellation Race Fix
+
+The FIFO mutex now installs `defer { release() }` immediately after a successful
+`acquire`, before the post-acquire cancellation check and operation. Therefore
+every post-acquire path releases exactly once, including cancellation after a
+waiter continuation has been resumed. Test-only enqueue/acquire barriers make
+the A-held, B-queued, B-resumed-then-cancelled, C-follow-up sequence
+deterministic without sleeps; the test also proves B does not execute and C
+eventually executes.
 
 ## Root Cause / Fix RED
 
@@ -30,7 +40,7 @@ Command:
 swift test -c release -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS --jobs 2 --filter 'WhisperDictationBackendTests'
 ```
 
-Result: exit 0. The real test runner executed 20 tests in 1 suite; all passed.
+Result: exit 0. The focused race test passed.
 
 Final focused command:
 
@@ -38,11 +48,11 @@ Final focused command:
 swift test -c release -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS --jobs 2 --filter 'WhisperDictationBackendTests|LanguageTests'
 ```
 
-Result: exit 0. The real focused command executed 70 tests in 7 suites; all passed. `git diff --check` also passed.
+Result: exit 0. The real focused command executed 30 tests in 2 suites; all passed. `git diff --check` also passed.
 
 ## Concerns
 
-- SwiftPM continues to emit the pre-existing conflicting `swift-syntax` identity warning.
+- SwiftPM continues to emit the pre-existing conflicting `swift-syntax` identity warning and existing Sendable-capture warnings.
 - Lifecycle tests use concrete injected closures; they verify setup/load/marker order only. Production lifecycle sharing on one backend instance is established by code review, not claimed as injected-test proof.
 - No network model download was attempted. A separate documentation-only commit may be made later if needed; this report records the implementation range as `233fb84..HEAD`.
-- No Task 3 integration was made.
+- No Task 3 integration was made; no network model download was attempted.

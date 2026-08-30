@@ -194,6 +194,43 @@ struct WhisperDictationBackendTests {
         #expect(await calls.value == 2)
     }
 
+    @Test("cancelling a resumed waiter releases the mutex exactly once")
+    func cancellationAfterWaiterResumeReleasesMutex() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let firstGate = Gate()
+        let queuedWaiter = Gate()
+        let resumedWaiter = Gate()
+        let calls = Counter()
+        let acquireCount = Counter()
+        WhisperDictationBackend.testAfterAcquire = {
+            await acquireCount.increment()
+            if await acquireCount.value == 2 { await resumedWaiter.open(); await resumedWaiter.waitUntilClosed() }
+        }
+        WhisperDictationBackend.testAfterEnqueue = { await queuedWaiter.open() }
+        defer { WhisperDictationBackend.testAfterAcquire = nil; WhisperDictationBackend.testAfterEnqueue = nil }
+        let backend = WhisperDictationBackend(root: root, transcribe: { _, _, _, _ in
+            await calls.increment()
+            if await calls.value == 1 { await firstGate.wait() }
+            return "ok"
+        })
+
+        let a = Task { try await backend.transcribe(samples: [], locale: Locale(identifier: "en-US")) }
+        await calls.waitUntilValue(1)
+        let b = Task { try await backend.transcribe(samples: [], locale: Locale(identifier: "en-US")) }
+        let c = Task { try await backend.transcribe(samples: [], locale: Locale(identifier: "en-US")) }
+        await queuedWaiter.waitUntilValue(1)
+        await firstGate.open()
+        await resumedWaiter.waitUntilValue(1)
+        b.cancel()
+        await resumedWaiter.close()
+
+        #expect(try await a.value == "ok")
+        do { _ = try await b.value; #expect(Bool(false)) } catch { #expect(error is CancellationError) }
+        #expect(try await c.value == "ok")
+        #expect(await calls.value == 2)
+    }
+
     @Test("cancellation during explicit setup keeps final files and does not write marker")
     func cancellationDuringExplicitSetupPreservesFinalFiles() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -284,6 +321,9 @@ struct WhisperDictationBackendTests {
             while !isOpen { await Task.yield() }
         }
         func open() { isOpen = true }
+        func close() { isOpen = false }
+        func waitUntilValue(_ expected: Int) async { while !isOpen { await Task.yield() } }
+        func waitUntilClosed() async { while isOpen { await Task.yield() } }
     }
 
     private actor EventLog {

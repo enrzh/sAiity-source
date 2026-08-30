@@ -16,6 +16,16 @@ struct WhisperDictationBackend {
     typealias Transcription = @Sendable (String, URL, [[Float]], DecodingOptions) async throws -> String
     private let root: URL; private let download: Download; private let prepare: Prepare; private let transcribeHook: Transcription
     private static let mutexes = MutexRegistry()
+#if SAIITY_TEST_HOOKS
+    static var testAfterEnqueue: (@Sendable () async -> Void)? {
+        get { FIFOAsyncMutex.testAfterEnqueue }
+        set { FIFOAsyncMutex.testAfterEnqueue = newValue }
+    }
+    static var testAfterAcquire: (@Sendable () async -> Void)? {
+        get { FIFOAsyncMutex.testAfterAcquire }
+        set { FIFOAsyncMutex.testAfterAcquire = newValue }
+    }
+#endif
     init(root: URL = ModelRegistry.root, download: @escaping Download = WhisperDictationBackend.realDownload, prepare: @escaping Prepare = WhisperDictationBackend.realPrepare, transcribe: @escaping Transcription = WhisperDictationBackend.realTranscribe) { self.root = root; self.download = download; self.prepare = prepare; self.transcribeHook = transcribe }
     static let supportedLanguageCodes = Set(LanguageCatalog.all.map(\.code))
     @Defaults(rawKey: "whisperDictationModel") static var model = ModelChoice.base
@@ -80,6 +90,10 @@ struct WhisperDictationBackend {
     private static func realTranscribe(_ id: String, _ f: URL, _ s: [[Float]], _ o: DecodingOptions) async throws -> String { let w = try await WhisperKit(model: id, modelRepo: nil, modelFolder: f.path, prewarm: false, load: false, download: false); try await w.setupModels(model: id, modelRepo: nil, modelFolder: f.path, download: false); try await w.loadModels(prewarmMode: true); return (await w.transcribe(audioArrays: s, decodeOptions: o, callback: nil)).compactMap { $0?.first?.text }.joined(separator: " ") }
 }
 private actor FIFOAsyncMutex {
+#if SAIITY_TEST_HOOKS
+    nonisolated(unsafe) static var testAfterEnqueue: (@Sendable () async -> Void)?
+    nonisolated(unsafe) static var testAfterAcquire: (@Sendable () async -> Void)?
+#endif
     private var locked = false
     private var waiters: [UUID: CheckedContinuation<Void, Error>] = [:]
     private var order: [UUID] = []
@@ -92,15 +106,12 @@ private actor FIFOAsyncMutex {
         } onCancel: {
             Task { await self.cancel(id: id) }
         }
+        defer { release() }
+#if SAIITY_TEST_HOOKS
+        await Self.testAfterAcquire?()
+#endif
         try Task.checkCancellation()
-        do {
-            let result = try await operation()
-            release()
-            return result
-        } catch {
-            release()
-            throw error
-        }
+        return try await operation()
     }
 
     private func acquire(id: UUID) async throws {
@@ -116,6 +127,9 @@ private actor FIFOAsyncMutex {
             }
             waiters[id] = continuation
             order.append(id)
+#if SAIITY_TEST_HOOKS
+            Task { await Self.testAfterEnqueue?() }
+#endif
         }
     }
 
