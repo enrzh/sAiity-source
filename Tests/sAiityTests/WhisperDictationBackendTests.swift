@@ -5,6 +5,7 @@ import WhisperKit
 @testable import sAiity
 
 @MainActor
+@Suite(.serialized)
 struct WhisperDictationBackendTests {
 
     private func makeModel(at root: URL, _ choice: WhisperDictationBackend.ModelChoice = .base) throws {
