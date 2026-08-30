@@ -2,7 +2,7 @@
 
 ## STATUS
 
-GREEN. Task 4 生命周期修复完成，commit `fd37e44`。
+GREEN. Task 4 最终 integration boundary 修复完成；提交范围 `e78ad5b..HEAD`。
 
 ## Behavior
 
@@ -48,6 +48,13 @@ swift test -c release -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS --jo
 - Focused verification: 67 tests in 5 suites passed with `--jobs 2`; `git diff --check` passed.
 - Commit: `test: prove Whisper preparation isolation`.
 - Concern: the production AppDelegate method delegates to `WhisperDictationBackend.prepareModelForUse`, whose existing tests exercise the real backend lifecycle and marker cleanup but avoid loading a real WhisperKit model in unit tests; physical/runtime acceptance remains outside this focused run.
+
+## Final Integration Boundary Evidence
+
+- RED: direct AppDelegate delegation and running capture late-callback tests were added before the new seams; the former had no observable production delegation path and the latter could not establish a running lifecycle.
+- GREEN: AppDelegate now has a test-only delegation seam whose default is the real `WhisperDictationBackend.prepareModelForUse`; tests verify selected model, progress/error propagation, marker preservation, and unchanged caption engine/readiness/pool lease snapshots.
+- GREEN: capture tests enter `running` through `beginForTesting`, then stop/take before a controlled late sample callback; no sample crosses the session boundary.
+- Final focused verification: 69 tests in 5 suites passed with `--jobs 2`; `git diff --check` passed.
 
 `git diff --check` passed before commit.
 

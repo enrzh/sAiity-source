@@ -41,6 +41,11 @@ final class ASRBackendPool: ASRBackendProvider {
     private var prepared = false
     private var activeBackend: TranscriptionBackend?
 
+    #if SAIITY_TEST_HOOKS
+    var preparedForTests: Bool { prepared }
+    var hasActiveLeaseForTests: Bool { activeBackend != nil }
+    #endif
+
     init(makeBackend: @escaping () -> TranscriptionBackend,
          idleEvictionDelay: Duration = .seconds(45)) {
         self.makeBackend = makeBackend

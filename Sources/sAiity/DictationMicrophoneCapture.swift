@@ -158,4 +158,19 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
             return samples
         }
     }
+
+    #if SAIITY_TEST_HOOKS
+    func beginForTesting() {
+        lock.withLock {
+            _ = lifecycle.start()
+            sampleCount = 0
+            convertedSamples.removeAll()
+            didEmitLimit = false
+        }
+    }
+
+    func recordConvertedSamplesForTesting(_ samples: [Float]) {
+        _ = storeConvertedFrame(samples)
+    }
+    #endif
 }

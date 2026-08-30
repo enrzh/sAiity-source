@@ -41,10 +41,12 @@ import Testing
     @Test("taking samples owns the capture buffer against a late callback")
     func takeOwnsSamplesAgainstLateCallback() {
         let capture = DictationMicrophoneCapture()
-        _ = capture.acceptConvertedFrame(10)
+        capture.beginForTesting()
+        capture.recordConvertedSamplesForTesting([1, 2])
+        capture.stop()
         let first = capture.takeCollectedSamples()
-        #expect(first.isEmpty)
-        _ = capture.acceptConvertedFrame(10)
+        capture.recordConvertedSamplesForTesting([3, 4])
+        #expect(first == [1, 2])
         #expect(capture.takeCollectedSamples().isEmpty)
     }
 

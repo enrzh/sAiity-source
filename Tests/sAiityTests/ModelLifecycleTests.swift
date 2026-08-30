@@ -226,4 +226,40 @@ import Testing
         #expect(!app.translatorEvictionScheduledForTests)
         #expect(!app.translatorReadyForTests)
     }
+
+    @Test("AppDelegate Whisper preparation delegates through the production seam")
+    func appDelegateWhisperPreparationBoundary() async throws {
+        let selected = WhisperDictationBackend.model
+        let app = AppDelegate()
+        let before = (app.captionEngineForTests, app.captionPoolPreparedForTests, app.captionPoolLeaseForTests)
+        var received: WhisperDictationBackend.ModelChoice?
+        var progressCalls = 0
+        AppDelegate.testWhisperPreparation = { choice, progress in
+            received = choice
+            progress(Progress(totalUnitCount: 1))
+        }
+        defer { AppDelegate.testWhisperPreparation = nil }
+        try await app.prepareSelectedWhisperModelForUse { _ in progressCalls += 1 }
+        let after = (app.captionEngineForTests, app.captionPoolPreparedForTests, app.captionPoolLeaseForTests)
+        #expect(received == selected)
+        #expect(progressCalls == 1)
+        #expect(before.0 == after.0)
+        #expect(before.1 == after.1)
+        #expect(before.2 == after.2)
+    }
+
+    @Test("AppDelegate Whisper preparation failure propagates without readiness")
+    func appDelegateWhisperPreparationFailureBoundary() async {
+        let app = AppDelegate()
+        let wasReady = WhisperDictationBackend.isReady(WhisperDictationBackend.model)
+        AppDelegate.testWhisperPreparation = { _, _ in throw BackendError.notPrepared }
+        defer { AppDelegate.testWhisperPreparation = nil }
+        do {
+            try await app.prepareSelectedWhisperModelForUse()
+            #expect(Bool(false))
+        } catch {
+            #expect((error as? BackendError) == .notPrepared)
+        }
+        #expect(WhisperDictationBackend.isReady(WhisperDictationBackend.model) == wasReady)
+    }
 }

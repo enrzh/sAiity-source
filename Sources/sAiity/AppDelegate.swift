@@ -15,6 +15,9 @@ import NaturalLanguage
 /// Class-level isolation makes that a build error instead.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    #if SAIITY_TEST_HOOKS
+    static var testWhisperPreparation: (@Sendable (WhisperDictationBackend.ModelChoice, @escaping @Sendable (Progress) -> Void) async throws -> Void)?
+    #endif
     private var statusItem: NSStatusItem!
     /// Sparkle. The standard controller drives the whole flow — check, consent,
     /// download, staged install — against the appcast in Info.plist. Automatic
@@ -69,12 +72,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Production action for the deferred Task6 settings control.
     func prepareSelectedWhisperModelForUse(progress: @escaping @Sendable (Progress) -> Void = { _ in }) async throws {
         let choice = WhisperDictationBackend.model
+        #if SAIITY_TEST_HOOKS
+        if let hook = Self.testWhisperPreparation {
+            try await hook(choice, progress)
+            return
+        }
+        #endif
         let backend = WhisperDictationBackend()
         try await backend.prepareModelForUse(choice, progress: progress)
-        guard WhisperDictationBackend.isReady(choice) else {
-            throw BackendError.notPrepared
-        }
     }
+
+    #if SAIITY_TEST_HOOKS
+    var captionEngineForTests: ASREngine { engine }
+    var captionPoolPreparedForTests: Bool { asrBackendPool.preparedForTests }
+    var captionPoolLeaseForTests: Bool { asrBackendPool.hasActiveLeaseForTests }
+    #endif
     /// The current caption lease. The pool remains the owner of the cached
     /// backend; this is held only between caption start and teardown.
     private var captionBackend: TranscriptionBackend?
