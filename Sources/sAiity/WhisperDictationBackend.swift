@@ -46,8 +46,12 @@ struct WhisperDictationBackend {
         return ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"].allSatisfy { name in
             let url = f.appendingPathComponent(name)
             guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]),
-                  values.isRegularFile == true, values.isSymbolicLink != true else { return false }
-            return (values.fileSize ?? 0) > 0
+                  values.isDirectory == true, values.isSymbolicLink != true else { return false }
+            guard let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]) else { return false }
+            return enumerator.contains { item in
+                guard let values = try? item.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]) else { return false }
+                return values.isRegularFile == true && values.isSymbolicLink != true && (values.fileSize ?? 0) > 0
+            }
         }
     }
     static func modelFolder(for c: ModelChoice, under root: URL = ModelRegistry.root) -> URL { folder(c, root) }
@@ -98,8 +102,30 @@ struct WhisperDictationBackend {
     func removeModel(_ c: ModelChoice, under root: URL? = nil) async throws { let root = root ?? self.root; let mutex = await Self.mutexes.mutex(for: "\(root.path):\(c.identifier)"); try await mutex.run { for u in [Self.folder(c, root), root.appendingPathComponent("\(c.folderName).partial")] { do { try FileManager.default.removeItem(at: u) } catch let e as CocoaError where e.code == .fileNoSuchFile { } } } }
     func transcribe(samples: [[Float]], locale: Locale, model c: ModelChoice = model) async throws -> String { let o = try Self.decodingOptions(for: locale); let mutex = await Self.mutexes.mutex(for: "\(root.path):\(c.identifier)"); return try await mutex.run { try await self.transcribeHook(c.identifier, Self.folder(c, self.root), samples, o) } }
     private static func realDownload(_ id: String, _ d: URL, _ p: @escaping @Sendable (Progress) -> Void) async throws -> URL { try await WhisperKit.download(variant: id, downloadBase: d, useBackgroundSession: false, from: "argmaxinc/whisperkit-coreml", token: nil, endpoint: Constants.defaultRemoteEndpoint, progressCallback: p) }
-    private static func realPrepare(_ id: String, _ f: URL) async throws { let w = try await WhisperKit(model: id, modelRepo: nil, modelFolder: f.path, prewarm: false, load: false, download: false); defer { Task { await w.unloadModels() } }; try await w.setupModels(model: id, modelRepo: nil, modelFolder: f.path, download: false); try await w.loadModels(prewarmMode: true) }
-    private static func realTranscribe(_ id: String, _ f: URL, _ s: [[Float]], _ o: DecodingOptions) async throws -> String { let w = try await WhisperKit(model: id, modelRepo: nil, modelFolder: f.path, prewarm: false, load: false, download: false); defer { Task { await w.unloadModels() } }; try await w.setupModels(model: id, modelRepo: nil, modelFolder: f.path, download: false); try await w.loadModels(prewarmMode: true); return (await w.transcribe(audioArrays: s, decodeOptions: o, callback: nil)).compactMap { $0?.first?.text }.joined(separator: " ") }
+    private static func realPrepare(_ id: String, _ f: URL) async throws {
+        let w = try await WhisperKit(model: id, modelRepo: nil, modelFolder: f.path, prewarm: false, load: false, download: false)
+        do {
+            try await w.setupModels(model: id, modelRepo: nil, modelFolder: f.path, download: false)
+            try await w.loadModels(prewarmMode: true)
+        } catch {
+            await w.unloadModels()
+            throw error
+        }
+        await w.unloadModels()
+    }
+    private static func realTranscribe(_ id: String, _ f: URL, _ s: [[Float]], _ o: DecodingOptions) async throws -> String {
+        let w = try await WhisperKit(model: id, modelRepo: nil, modelFolder: f.path, prewarm: false, load: false, download: false)
+        do {
+            try await w.setupModels(model: id, modelRepo: nil, modelFolder: f.path, download: false)
+            try await w.loadModels(prewarmMode: true)
+            let result = (await w.transcribe(audioArrays: s, decodeOptions: o, callback: nil)).compactMap { $0?.first?.text }.joined(separator: " ")
+            await w.unloadModels()
+            return result
+        } catch {
+            await w.unloadModels()
+            throw error
+        }
+    }
 }
 private actor FIFOAsyncMutex {
 #if SAIITY_TEST_HOOKS

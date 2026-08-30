@@ -11,7 +11,9 @@ struct WhisperDictationBackendTests {
         let folder = WhisperDictationBackend.modelFolder(for: choice, under: root)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         for name in ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"] {
-            try Data(repeating: 1, count: 1).write(to: folder.appendingPathComponent(name))
+            let bundle = folder.appendingPathComponent(name)
+            try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
+            try Data(repeating: 1, count: 1).write(to: bundle.appendingPathComponent("coremldata.bin"))
         }
     }
 
@@ -26,7 +28,9 @@ struct WhisperDictationBackendTests {
                 let folder = destination.appendingPathComponent("downloaded", isDirectory: true)
                 try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
                 for name in ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"] {
-                    try Data(repeating: 1, count: 1).write(to: folder.appendingPathComponent(name))
+                    let bundle = folder.appendingPathComponent(name)
+                    try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
+                    try Data(repeating: 1, count: 1).write(to: bundle.appendingPathComponent("coremldata.bin"))
                 }
                 return folder
             },
@@ -46,7 +50,7 @@ struct WhisperDictationBackendTests {
         let backend = WhisperDictationBackend(download: { _, destination, _ in
             let folder = destination.appendingPathComponent("downloaded", isDirectory: true)
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            for name in ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"] { try Data(repeating: 1, count: 1).write(to: folder.appendingPathComponent(name)) }
+            for name in ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"] { let bundle = folder.appendingPathComponent(name); try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true); try Data(repeating: 1, count: 1).write(to: bundle.appendingPathComponent("coremldata.bin")) }
             events.append("download"); return folder
         }, prepare: { _, _ in events.append("setup"); events.append("load"); events.append("release") })
         try await backend.prepareModelForUse(.base, under: root)
@@ -65,7 +69,7 @@ struct WhisperDictationBackendTests {
             try await Task.sleep(for: .milliseconds(10))
             let folder = destination.appendingPathComponent("downloaded", isDirectory: true)
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            for name in ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"] { try Data(repeating: 1, count: 1).write(to: folder.appendingPathComponent(name)) }
+            for name in ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"] { let bundle = folder.appendingPathComponent(name); try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true); try Data(repeating: 1, count: 1).write(to: bundle.appendingPathComponent("coremldata.bin")) }
             events.append("download"); return folder
         }, prepare: { _, _ in events.append("setup"); events.append("load"); events.append("release") })
         try await backend.prepareModelForUse(.base)
@@ -83,7 +87,7 @@ struct WhisperDictationBackendTests {
             try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
             let folder = destination.appendingPathComponent("downloaded", isDirectory: true)
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            for name in ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"] { try Data(repeating: 1, count: 1).write(to: folder.appendingPathComponent(name)) }
+            for name in ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"] { let bundle = folder.appendingPathComponent(name); try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true); try Data(repeating: 1, count: 1).write(to: bundle.appendingPathComponent("coremldata.bin")) }
             return folder
         }, prepare: { _, folder in
             try Data(repeating: 1, count: 1).write(to: folder.appendingPathComponent(".saiity-ready"))
@@ -295,7 +299,7 @@ struct WhisperDictationBackendTests {
             try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
             let folder = destination.appendingPathComponent("downloaded", isDirectory: true)
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            for name in ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"] { try Data(repeating: 1, count: 1).write(to: folder.appendingPathComponent(name)) }
+            for name in ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"] { let bundle = folder.appendingPathComponent(name); try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true); try Data(repeating: 1, count: 1).write(to: bundle.appendingPathComponent("coremldata.bin")) }
             return folder
         })
         async let a: Void = backend.prepareModel(.base, under: first)
