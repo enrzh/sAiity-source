@@ -57,8 +57,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         transcribeWhisper: { samples, locale in
             try await WhisperDictationBackend().transcribe(samples: samples, locale: locale)
         },
-        prepareWhisper: {
-            try await WhisperDictationBackend().prepareModel(WhisperDictationBackend.model)
+        prepareWhisper: { [weak self] in
+            guard let self else { return }
+            try await self.prepareSelectedWhisperModelForUse(progress: { _ in })
         },
         onPhaseChanged: { [weak self] phase in
             self?.updateDictationToast(phase)
@@ -67,6 +68,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let dictationHotkeyMonitor = DictationHotkeyMonitor()
     private let capture = SystemAudioCapture()
     private var engine = ASREngine.effective
+
+    /// Production action for the deferred Task6 settings control.
+    func prepareSelectedWhisperModelForUse(progress: @escaping @Sendable (Progress) -> Void = { _ in }) async throws {
+        let choice = WhisperDictationBackend.model
+        let backend = WhisperDictationBackend()
+        try await backend.prepareModelForUse(choice, progress: progress)
+        guard WhisperDictationBackend.isReady(choice) else {
+            throw BackendError.notPrepared
+        }
+    }
     /// The current caption lease. The pool remains the owner of the cached
     /// backend; this is held only between caption start and teardown.
     private var captionBackend: TranscriptionBackend?

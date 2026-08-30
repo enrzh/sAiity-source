@@ -26,6 +26,12 @@ import Testing
             stopped = true
             log.values.append("capture.stop")
         }
+
+        var samples: [Float] = []
+        func takeCollectedSamples() -> [Float] {
+            defer { samples.removeAll() }
+            return samples
+        }
     }
 
     final class FakeBackend: TranscriptionBackend, @unchecked Sendable {
@@ -138,10 +144,13 @@ import Testing
             inserter: inserter,
             captionsActive: { false },
             dictationUsesWhisper: { true },
-            transcribeWhisper: { _, _ in
+            transcribeWhisper: { samples, _ in
                 log.values.append("whisper.transcribe")
+                #expect(samples == [[1, 2, 3]])
                 return "whisper final"
             })
+
+        capture.samples = [1, 2, 3]
 
         controller.markReady()
         controller.press()

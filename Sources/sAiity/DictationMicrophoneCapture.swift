@@ -35,6 +35,10 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
     private var didEmitLimit = false
     var onLimit: (@Sendable () -> Void)?
 
+    func setLimitHandler(_ handler: (@Sendable () -> Void)?) {
+        onLimit = handler
+    }
+
     var isRunning: Bool {
         lock.withLock { lifecycle.isRunning }
     }
@@ -133,5 +137,13 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
 
     var collectedSamples: [[Float]] {
         lock.withLock { convertedSamples }
+    }
+
+    func takeCollectedSamples() -> [Float] {
+        lock.withLock {
+            let samples = convertedSamples.flatMap { $0 }
+            convertedSamples.removeAll(keepingCapacity: false)
+            return samples
+        }
     }
 }

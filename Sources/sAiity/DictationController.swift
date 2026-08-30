@@ -5,6 +5,13 @@ protocol DictationAudioCapture: AnyObject {
     func start(targetFormat: AVAudioFormat,
                onBuffer: @escaping @Sendable (AVAudioPCMBuffer) -> Void) throws
     func stop()
+    func takeCollectedSamples() -> [Float]
+    func setLimitHandler(_ handler: (@Sendable () -> Void)?)
+}
+
+extension DictationAudioCapture {
+    func takeCollectedSamples() -> [Float] { [] }
+    func setLimitHandler(_ handler: (@Sendable () -> Void)?) {}
 }
 
 extension DictationMicrophoneCapture: DictationAudioCapture {}
@@ -295,7 +302,9 @@ final class DictationController {
         let progress: @Sendable (String) -> Void = { _ in }
         do {
             if dictationUsesWhisper() {
-                let format = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1)!
+                guard let format = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1) else {
+                    throw BackendError.notPrepared
+                }
                 try capture.start(targetFormat: format) { _ in }
                 guard session == generation else {
                     capture.stop()
@@ -317,10 +326,8 @@ final class DictationController {
             try await acquired.start { _ in }
             try Task.checkCancellation()
             guard session == generation else { return }
-            if let microphone = capture as? DictationMicrophoneCapture {
-                microphone.onLimit = { [weak self] in
-                    Task { @MainActor in self?.limit(session: session) }
-                }
+            capture.setLimitHandler { [weak self] in
+                Task { @MainActor in self?.limit(session: session) }
             }
             try capture.start(targetFormat: format) { [weak acquired] buffer in
                 acquired?.feed(buffer)
@@ -347,14 +354,19 @@ final class DictationController {
         capture.stop()
         if dictationUsesWhisper() {
             do {
-                let samples = (capture as? DictationMicrophoneCapture)?.collectedSamples ?? []
-                let authoritative = try await transcribeWhisper(samples, Locale.current)
+                guard session == generation, !Task.isCancelled else { return }
+                let samples = capture.takeCollectedSamples()
+                guard session == generation, !Task.isCancelled else { return }
+                let whisperSamples = samples.isEmpty ? [] : [samples]
+                let authoritative = try await transcribeWhisper(whisperSamples, Locale.current)
                 guard session == generation else { return }
                 await finish(authoritative: authoritative, session: session, sourceLanguage: Locale.current.identifier(.bcp47))
-            } catch is CancellationError {
-                return
-            } catch {
-                guard session == generation else { return }
+        } catch is CancellationError {
+            _ = capture.takeCollectedSamples()
+            return
+        } catch {
+            _ = capture.takeCollectedSamples()
+            guard session == generation else { return }
                 phase = .failure(error.localizedDescription)
             }
             return
@@ -435,6 +447,7 @@ final class DictationController {
                            session: Int,
                            message: String?) async {
         capture.stop()
+        _ = capture.takeCollectedSamples()
         await backendProvider.release(backend, discard: true)
         guard session == generation else { return }
         self.backend = nil
