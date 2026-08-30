@@ -234,11 +234,11 @@ import Testing
         let before = (app.captionEngineForTests, app.captionPoolPreparedForTests, app.captionPoolLeaseForTests)
         var received: WhisperDictationBackend.ModelChoice?
         var progressCalls = 0
-        AppDelegate.testWhisperPreparation = { choice, progress in
+        app.whisperPreparationForTests = { choice, progress in
             received = choice
             progress(Progress(totalUnitCount: 1))
         }
-        defer { AppDelegate.testWhisperPreparation = nil }
+        defer { app.whisperPreparationForTests = nil }
         try await app.prepareSelectedWhisperModelForUse { _ in progressCalls += 1 }
         let after = (app.captionEngineForTests, app.captionPoolPreparedForTests, app.captionPoolLeaseForTests)
         #expect(received == selected)
@@ -252,8 +252,8 @@ import Testing
     func appDelegateWhisperPreparationFailureBoundary() async {
         let app = AppDelegate()
         let wasReady = WhisperDictationBackend.isReady(WhisperDictationBackend.model)
-        AppDelegate.testWhisperPreparation = { _, _ in throw BackendError.notPrepared }
-        defer { AppDelegate.testWhisperPreparation = nil }
+        app.whisperPreparationForTests = { _, _ in throw BackendError.notPrepared }
+        defer { app.whisperPreparationForTests = nil }
         do {
             try await app.prepareSelectedWhisperModelForUse()
             #expect(Bool(false))
@@ -261,5 +261,41 @@ import Testing
             #expect((error as? BackendError) == .notPrepared)
         }
         #expect(WhisperDictationBackend.isReady(WhisperDictationBackend.model) == wasReady)
+    }
+
+    @Test("Whisper preparation does not mutate caption state while blocked")
+    func appDelegateWhisperPreparationPreservesStateMidpoint() async {
+        final class Gate: @unchecked Sendable {
+            var entered = false
+            var continuation: CheckedContinuation<Void, Never>?
+        }
+
+        let gate = Gate()
+        let app = AppDelegate()
+        let before = (app.captionEngineForTests, app.captionPoolPreparedForTests, app.captionPoolLeaseForTests)
+        app.whisperPreparationForTests = { _, _ in
+            gate.entered = true
+            await withCheckedContinuation { continuation in
+                gate.continuation = continuation
+            }
+        }
+        defer { app.whisperPreparationForTests = nil }
+
+        let task = Task { @MainActor in
+            try await app.prepareSelectedWhisperModelForUse()
+        }
+        for _ in 0..<100 where !gate.entered { await Task.yield() }
+        #expect(gate.entered)
+        let during = (app.captionEngineForTests, app.captionPoolPreparedForTests, app.captionPoolLeaseForTests)
+        #expect(during.0 == before.0)
+        #expect(during.1 == before.1)
+        #expect(during.2 == before.2)
+
+        gate.continuation?.resume()
+        _ = await task.result
+        let after = (app.captionEngineForTests, app.captionPoolPreparedForTests, app.captionPoolLeaseForTests)
+        #expect(after.0 == before.0)
+        #expect(after.1 == before.1)
+        #expect(after.2 == before.2)
     }
 }

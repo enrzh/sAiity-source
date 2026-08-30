@@ -16,7 +16,7 @@ import NaturalLanguage
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     #if SAIITY_TEST_HOOKS
-    static var testWhisperPreparation: (@Sendable (WhisperDictationBackend.ModelChoice, @escaping @Sendable (Progress) -> Void) async throws -> Void)?
+    var whisperPreparationForTests: (@Sendable (WhisperDictationBackend.ModelChoice, @escaping @Sendable (Progress) -> Void) async throws -> Void)?
     #endif
     private var statusItem: NSStatusItem!
     /// Sparkle. The standard controller drives the whole flow — check, consent,
@@ -73,7 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func prepareSelectedWhisperModelForUse(progress: @escaping @Sendable (Progress) -> Void = { _ in }) async throws {
         let choice = WhisperDictationBackend.model
         #if SAIITY_TEST_HOOKS
-        if let hook = Self.testWhisperPreparation {
+        if let hook = whisperPreparationForTests {
             try await hook(choice, progress)
             return
         }

@@ -56,6 +56,14 @@ swift test -c release -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS --jo
 - GREEN: capture tests enter `running` through `beginForTesting`, then stop/take before a controlled late sample callback; no sample crosses the session boundary.
 - Final focused verification: 69 tests in 5 suites passed with `--jobs 2`; `git diff --check` passed.
 
+## Midpoint Gate Evidence
+
+- Added a deterministic continuation-gated AppDelegate preparation test. It waits until the production preparation entry is inside its injected preparation seam, asserts caption engine/readiness/pool lease state during the blocked interval, releases the gate, awaits completion, and repeats the same assertions after completion.
+- No production code change was required; this closes the remaining Important review item with direct during-state evidence.
+- RED: the first midpoint run exposed that the shared static preparation hook could be overwritten by a concurrent suite, so the gate never entered.
+- GREEN: the hook is now instance-scoped under `SAIITY_TEST_HOOKS`; the direct test observes the blocked `during` interval and verifies identical caption engine, readiness, and pool lease state before and after release.
+- Final midpoint verification: 70 tests in 5 suites passed with `--jobs 2`; `git diff --check` passed.
+
 `git diff --check` passed before commit.
 
 ## Scope
