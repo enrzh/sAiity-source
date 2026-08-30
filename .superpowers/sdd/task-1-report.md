@@ -3,8 +3,8 @@
 ## Base / Head / Commit
 
 - Base: `5f0429457a616f9ac67c86a21adc731fa3aa743c`
-- Head before commit: `5f0429457a616f9ac67c86a21adc731fa3aa743c`
-- Commit: `98e9b92` (`feat: define Whisper dictation model contract`)
+- Commit range: `98e9b92` + `d2c3d5c`
+- Final head: `d2c3d5c`
 
 ## Files
 
