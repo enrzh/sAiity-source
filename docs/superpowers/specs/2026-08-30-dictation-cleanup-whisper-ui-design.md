@@ -1,214 +1,91 @@
-# Local Dictation Cleanup, Whisper Batch Inference, and Native UI Design
+# Local Dictation Cleanup and Whisper Batch Design
 
-## Status and Baseline
+## Status and scope
 
-This is an implementation-ready macOS-only specification. The historical
-implementation baseline is `main` at `c227ca0`; the current specification
-revision is carried by the commits after it, including `229ab995`. This
-document makes no test or release claim. Implementation starts with focused
-RED tests, followed by the smallest GREEN changes in existing types.
+This is an implementation-ready macOS-only specification. It covers authoritative dictation finalization, optional local cleanup, optional dictation translation, one final insertion or clipboard operation, and release-time Whisper batch recognition. Live captions retain the existing Nemotron/Parakeet streaming path. No iOS, external API, upload, release, navigation redesign, or new model subsystem is included.
 
-## Goal and Scope
+The existing `DictationController.finishDictation()` completion boundary, `ASRBackendPool`, `DictationToastWindow`, `OverlayWindow`, `FrameStore`, `LocalModels`, and existing settings screens remain the integration points. No Manager, Service, Factory, Strategy, Protocol, Adapter, Coordinator, Provider, Registry, or additional model type is added.
 
-After push-to-talk release, sAiity performs an opt-in, local cleanup of the
-authoritative dictation transcript, optionally translates that result, and
-performs one final clipboard and/or text insertion operation. Release-time
-batch Whisper inference is selectable for dictation. Live captions retain
-their streaming Nemotron/Parakeet path.
+## Processing contract
 
-The scope covers macOS dictation cleanup, its prompts and fallback, batch
-Whisper readiness and the 20-second recording limit, independent caption and
-dictation settings, `DictationToastWindow` placement/accessibility, permission
-recovery, and focused tests. It excludes iOS, Windows, Linux, external APIs,
-uploads, live-caption changes, release/signing/distribution, app-wide
-navigation redesign, merged overlay windows, and new abstraction layers.
-
-## Existing Boundaries
-
-Reuse `ASRBackendPool`, `IdleEviction`, `ModelRegistry`,
-`DictationController`, `AVAudioEngine` capture, `DictationToastWindow`,
-`OverlayWindow`, and `FrameStore`. Do not add a Manager, Service, Factory,
-Strategy, Protocol, Adapter, Coordinator, Provider, or Registry. Keep the
-behavior in the existing controller, pool, state, settings, and window types.
-
-`DictationController.finishDictation()` already exists as the completion
-boundary in the current implementation. The implementation must preserve that
-boundary and its single authoritative-finalization call; it must not introduce
-a second completion API.
-
-## Dictation Pipeline and Cleanup Contract
-
-The only accepted order is:
+The only pipeline is:
 
 ```text
 authoritative transcript -> optional cleanup -> optional dictation translation
--> one clipboard and/or text insertion operation
+-> one clipboard/text insertion operation
 ```
 
-Recording release stops capture, drains pending audio, and obtains the
-authoritative batch result. Streaming partials, rolling caption finals, and
-intermediate hypotheses never enter cleanup, translation, clipboard, or
-insertion. Nemotron/Parakeet dictation and captions continue to share the
-existing `ASRBackendPool`; Whisper is a dictation-only batch holder after
-release and never replaces captions. If captions are active, dictation is
-rejected by the existing exclusive-use rule and does not run in parallel.
+Only the single authoritative result returned by the existing finalization call enters cleanup. Streaming partials, rolling caption finals, and intermediate hypotheses never enter cleanup, translation, clipboard, or insertion. Cleanup is opt-in and default-off. It uses only the existing `LocalLLMTranslator` Qwen/Gemma-compatible GGUF generation path. It must never call `HyMT2Translator`, MADLAD, or `TranslationEngine.effective`. No cleanup model is added to `TranslationEngine` or `ModelRegistry`.
 
-Cleanup defaults off and uses the existing local GGUF generation runtime.
-The system prompt requires only punctuation, casing, filler, false-start, and
-repetition correction. It preserves meaning, names, numbers, ordering, and
-uncertainty, and explicitly forbids summary, translation, expansion,
-explanation, invention, and added information. The user prompt contains only
-the authoritative transcript; system and user prompt boundaries remain
-separate. Output is trimmed, then validated: it must be non-empty, contain no
-Markdown fence marker or fenced block, and contain no prose surrounding the
-cleaned transcript. Invalid fenced output is a cleanup failure.
+If no compatible downloaded `LocalModel.selected` GGUF exists, the cleanup control is `Not ready` and offers navigation to the existing Models screen. Dictation still inserts the authoritative original. Cleanup generation gets a separate system prompt and a user prompt containing only the authoritative transcript. The system prompt requests punctuation, casing, filler, false-start, and repetition correction while preserving meaning, names, numbers, order, and uncertainty; it forbids summary, translation, expansion, explanation, invention, and added information.
 
-For cleanup error, timeout, nil output, trimmed-empty output, or invalid
-fenced/prose output, select the original authoritative transcript and continue
-to translation and insertion. Cleanup failure never discards usable speech.
-Translation receives the selected whole result after cleanup. Translation
-failure likewise selects the original dictation result. A user cancel or new
-generation discards every pending and completed downstream output and performs
-no clipboard write or insertion.
+The cleanup validator performs exactly these operations: trim leading and trailing whitespace and control characters; reject empty output; reject any Markdown fence marker or fenced block; reject output beginning with an explanatory prefix; reject output containing multiple commentary paragraphs; accept otherwise as plain text. It uses no length ratio, language detector, echo detector, quote stripping, wrapper removal, or other heuristic. Cleanup failure includes error, timeout, cancellation, nil output, empty output, and validator rejection. Cleanup failure selects the authoritative original.
 
-## Whisper Selection and Asset Ownership
+Translation receives the selected cleaned/original text. Translation failure selects the cleaned transcript if cleanup succeeded; only cleanup failure selects the authoritative original. A user cancel or new session generation invalidates all pending and completed downstream work and performs no write.
 
-The first release selects exactly these two official Whisper model IDs:
+## Whisper models and locales
 
-1. `openai_whisper-base.en` (Whisper `base.en`), English-only, lower latency.
-2. `openai_whisper-small.en` (Whisper `small.en`), English-only, higher
-   accuracy and latency.
+The first release offers exactly these official multilingual WhisperKit model identifiers:
 
-The current `Package.swift` and `Package.resolved` contain no WhisperKit
-dependency. Adding a dependency is a separate implementation change outside
-this documentation commit. The executable implementation must use an approved
-WhisperKit version and its documented model IDs/download API before coding
-against it; the two IDs above are the complete first-release selection.
+| UI choice | WhisperKit identifier | Meaning |
+| --- | --- | --- |
+| Base | `openai_whisper-base` | multilingual base |
+| Small | `openai_whisper-small` | multilingual small |
 
-WhisperKit owns model download, staging, integrity verification, local cache,
-partial-transfer recovery, and removal. The spec does not invent source URLs,
-SHA values, byte sizes, license fields, or a `ModelAsset` manifest. Whisper
-models are not registered with `ModelRegistry`. Readiness comes from the real
-WhisperKit local-model state for the selected ID, never from a fabricated
-registry entry or a file-presence guess. `ModelRegistryTests` therefore retain
-their no-Whisper assertions and continue to cover only registry-owned assets.
+The `.en` identifiers are not used. The local checkout confirms `ModelVariant.base.description == "base"`, `ModelVariant.small.description == "small"`, and `WhisperKit` resolves those variants to the identifiers above.
 
-Settings exposes exactly the two IDs with independent states: Not downloaded,
-Downloading (determinate or indeterminate), Downloaded/Ready, Loading, Ready
-for next dictation, Failed with Retry, and Partially downloaded with Retry or
-Remove. Download, Retry, and Remove are actionable. A selected model that is
-not ready cannot start recording as ready. WhisperKit owns its batch holder
-and cache lifecycle; the existing `ASRBackendPool` remains the shared
-streaming Nemotron/Parakeet pool. Failed holders are released. Whisper batch
-inference is dictation-only and does not alter caption selection, caption
-readiness, caption running state, or translation settings.
+Every language in `LanguageCatalog.all` is selectable for Whisper. That set is the union of `MADLADLanguages.canonicalCodes` and `LanguageCatalog.popular`, using the existing canonical BCP-47 strings, including `en`, `de`, `fr`, `es`, `it`, `pt`, `nl`, `pl`, `ru`, `uk`, `tr`, `ar`, `he`, `hi`, `bn`, `ur`, `fa`, `zh-Hans`, `zh-Hant`, `ja`, `ko`, `th`, `vi`, `id`, `sw`, `am`, `ha`, `yo`, `ig`, `zu`, and `so`, plus the complete MADLAD code set.
 
-## Lifecycle, Audio Cap, and Races
+For a multilingual model, the language hint is the current dictation locale: canonicalize its BCP-47 identifier, take the base ISO-639-1 code accepted by WhisperKit, and pass it in `DecodingOptions.language`. A supported script or region is retained only for sAiity persistence; WhisperKit receives the base language code. If the current locale has no supported base code, pass `language: nil` and `detectLanguage: true`. `auto` is therefore represented only by nil plus detection, and is allowed only for these multilingual model choices. An explicit unsupported hint is rejected before transcription and never silently substituted.
 
-Preparation and microphone recording remain separate. The existing controller
-serializes shortcut press, release, cancel, permission changes, and new
-sessions on its current main-actor boundary. Release marks `transcribing`,
-drains pending audio, and finalizes exactly once through the existing
-`finishDictation()` boundary.
+## Swift package and real API
 
-The 20-second cap is based on successful conversion to 16 kHz mono: exactly
-320000 accepted mono samples reaches the cap. Capture then stops through the
-normal release/drain path and enters `transcribing`; the cap does not affect
-captions. Samples that fail conversion do not advance the count.
+`Package.swift` currently has no WhisperKit dependency and its `sAiity` executable target has no WhisperKit product dependency. The implementation must add this exact package declaration:
 
-Cap, release, cancel, and late task completion use one terminal-transition
-function guarded by the session generation. The first accepted terminal event
-wins. A cap event enters transcription; cancellation wins only if its terminal
-transition is accepted first. A cancel or new generation invalidates all later
-cleanup, translation, clipboard, insertion, and phase updates and releases or
-invalidates stale holders.
+```swift
+.package(url: "https://github.com/argmaxinc/WhisperKit.git", exact: "1.0.0")
+```
 
-## Toast, Placement, and Accessibility
+and this exact executable target dependency:
 
-`DictationToastWindow` remains separate from the caption overlay. Preserve the
-existing subtitle-bubble visual language with readable type, restrained
-opacity, border, shadow, and spacing. Do not add gradients or fading
-backgrounds. Toast phases are permission required, preparing/loading, ready,
-recording, transcribing, cleaning, translating, inserting, success, 20-second
-limit, and failure with its recovery action.
+```swift
+.product(name: "WhisperKit", package: "WhisperKit")
+```
 
-Phase changes do not relocate the window, reset a dragged frame, or restart a
-phase timer. Progress/text updates do none of those actions. Persist the toast
-frame as an `NSRect` string under a key distinct from the caption frame key.
-Placement selection is: saved frame with center containment first, then the
-display with greatest visible-frame overlap, then a valid fallback. Clamp the
-whole frame inside the selected `visibleFrame`; negative screen coordinates
-are valid. On first display placement with no saved frame, use the pointer's
-screen, then the main-window screen, then `NSScreen.main`, then the first
-screen. On `didChangeScreenParameters`, re-run the saved-frame containment,
-overlap, fallback, and whole-frame clamp rules. Never reset placement merely
-because a phase changed.
+`Package.resolved` already verifies version `1.0.0`, revision `25c62997041c134b03ca82731ce2f6fd2cae1eb9`, at that URL. Do not raise the version without a source/API check. The local package manifest exposes the `WhisperKit` library product and target used above; its tools version is 5.9 and its supported macOS minimum is 13, compatible with sAiity's macOS 26 platform declaration.
 
-The toast exposes AX role, stable status label, current value, and live
-announcement for each phase/action. Mouse dragging remains available and
-Settings exposes a `Reset Position` action. Reduce Motion dismisses directly
-without fade and removes nonessential animation. Reduce Transparency uses an
-opaque readable surface. Increase Contrast strengthens border and text
-contrast. Permission/model failures expose their Retry, Download, Remove, or
-settings-recovery action to VoiceOver.
+The holder is one concrete `WhisperDictationBackend` type directly at the existing `DictationController` dependency boundary. It imports `WhisperKit`, owns one configured `WhisperKit` instance, and is not a protocol or manager. It is created only for dictation after recording release; the existing streaming backend pool remains unchanged.
 
-## Permissions, Settings, and Toast Copy
+The wrapper uses `WhisperKit.download(variant:downloadBase:useBackgroundSession:from:token:endpoint:progressCallback:)` for download, passes the returned folder to `WhisperKit.setupModels`, calls `loadModels(prewarmMode: true)` for prewarm/readiness, and calls the real array-based `transcribe` overload with `DecodingOptions`. It reads result text from the returned `TranscriptionResult` values. `prewarmModels()` and `loadModels()` are library APIs; there is no separate WhisperKit readiness API.
 
-Permission state is explicit: unknown/requesting, granted, denied, and
-restricted/unavailable. Denied or unavailable states show the supported macOS
-settings recovery action plus Retry/Recheck; recovery never silently restarts
-recording or changes caption permission.
+WhisperKit is not promised to provide an application cache contract, transaction marker, removal API, or complete-transfer recovery policy. sAiity owns one app-private Whisper folder per identifier. Readiness is true only after the required model files are present and a sAiity completion marker is present following successful `loadModels(prewarmMode: true)`. Download uses a temporary directory, cancellation removes that directory, and the marker is written last. Retry removes the incomplete temporary directory and starts the same download again. Remove calls `FileManager.removeItem` on the selected model folder and its marker; it does not call a nonexistent WhisperKit remove method.
 
-Modify only the existing settings screens. Controls and states are exact:
+Only one operation per model identifier is allowed in flight. A second download, prewarm, or remove awaits the first operation's result. Cancellation invalidates the holder and removes only the interrupted partial directory. Failed holders are released. This is the complete single-flight boundary; there is no global model coordinator.
 
-- Dictation cleanup: Toggle, default off.
-- Dictation recognizer: Picker for the existing streaming Nemotron/Parakeet
-  choice; it remains distinct from Whisper batch selection.
-- Whisper model: Picker with `openai_whisper-base.en` and
-  `openai_whisper-small.en`, each showing the real
-  WhisperKit readiness state and Download/Retry/Remove action.
-- Captions: row that navigates to actionable caption readiness controls; it is
-  not a duplicate or fake readiness indicator in Dictation settings.
-- Permission recovery: explicit state, settings action, and Retry/Recheck.
+## Runtime and fallback details
 
-Use these concise toast phase copies: `Allow Dictation Permission`,
-`Preparing Dictation`, `Ready to Dictate`, `Recording`,
-`Transcribing`, `Cleaning`, `Translating`, `Inserting`,
-`Copied to Clipboard`, `20-Second Limit Reached`, and
-`Dictation Failed: Retry`.
+Cleanup calls only `LocalLLMTranslator.prepare` and its existing generation method for a selected Qwen/Gemma-compatible `LocalModel`; it does not resolve `TranslationEngine.effective`. Translation settings remain independent. If a compatible local model is absent, the toggle stays `Not ready`, Models remains the recovery destination, and the original dictation is inserted.
 
-## Test Matrix
+The 20-second cap counts only successfully converted 16 kHz mono samples: exactly 320000 accepted samples stops capture and enters transcription. Conversion failures do not advance the count. Release, cap, cancel, and new session generation use the controller's existing main-actor serialization and one terminal transition; the first accepted transition wins and finalization runs once.
 
-Add only coverage absent from current generation-guard,
-`finishDictation()`, authoritative-final, and partial-download tests.
+The toast remains a separate window, preserves its existing subtitle-bubble visual language, and adds explicit phases for permission, preparation, recording, transcribing, cleaning, translating, inserting, success, limit, failure, and recovery. Phase updates never move the saved frame. Accessibility exposes role, stable status label, value, live announcement, and Reset Position. Reduced Motion dismisses directly, Reduced Transparency uses an opaque readable surface, and Increase Contrast strengthens border/text contrast.
 
-| Area | Required assertions |
-| --- | --- |
-| Cleanup contract | Separate system/user prompts; trim and reject empty, fenced, and surrounding-prose output; error/timeout/nil/invalid output uses original and continues. |
-| Cleanup ordering | Cleanup receives only authoritative text; translation follows selected result; one insertion/clipboard operation occurs. |
-| Cancel/new generation | Cancel and new generation discard all output and prevent insertion; late cleanup/translation cannot update phase. |
-| Streaming independence | Captions remain streaming Nemotron/Parakeet; their pool and settings remain independent of Whisper batch state. |
-| Whisper ownership | Exactly `openai_whisper-base.en` and `openai_whisper-small.en`; readiness/actions come from WhisperKit state; `ModelRegistryTests` continue to exclude Whisper. |
-| Audio cap | Only successful 16 kHz mono samples count; sample 320000 stops capture and enters transcription; conversion failures do not count; captions are unaffected. |
-| Terminal race | First accepted cap/release/cancel transition wins; cancel wins only if accepted first; drain and finalization happen once. |
-| Toast placement | Independent key, saved-frame center containment, maximum overlap fallback, pointer/main-window/main/first-screen order, negative coordinates, display change, whole-frame clamp, and phase stability. |
-| Accessibility | AX role/status/value/live announcement, Reset Position, Reduce Motion direct dismiss, opaque Reduce Transparency, and Increase Contrast boundaries/text. |
-| Settings | Exact toggle/pickers/actions/states, actionable Captions navigation, permission recovery, and exact phase copy. |
+Settings adds a default-off cleanup toggle, the existing streaming recognizer choice, the two Whisper choices with real local readiness/actions, actionable Download/Retry/Remove controls, and permission recovery. Captions keeps its own readiness screen and never mirrors Whisper state.
 
-## Acceptance Criteria
+## Required tests
 
-The implementation is macOS-only and local-only, cleanup is off by default,
-and partials are never processed. `openai_whisper-base.en` and
-`openai_whisper-small.en` are the only
-Whisper choices, with WhisperKit owning download/cache integrity and no
-Whisper `ModelAsset`. Captions remain streaming Nemotron/Parakeet through the
-shared pool, while dictation rejects overlap. Authoritative text, optional
-cleanup, optional translation, and one final insertion follow the stated
-fallback and generation rules. The 320000-sample cap, serialized terminal
-transition, independent persistent accessible toast, exact settings controls,
-and focused test matrix are explicit. No global navigation, new window
-system, gradient/fading background, speculative abstraction, or release claim
-is introduced.
+Add focused tests for:
 
-Before commit, inspect the full document for unresolved wording and run
-`git diff --check`. This spec change records no test result.
+- exact multilingual identifiers, full `LanguageCatalog.all` locale coverage, current-locale base language hints, explicit unsupported hints, and nil auto-detection;
+- the exact package URL/version/product declaration and the concrete wrapper's `setupModels`, `download`, `loadModels(prewarmMode:)`, `transcribe`, and result-text API calls;
+- download interruption, partial-directory cleanup, retry, marker-based readiness, remove, and concurrent same-identifier single-flight;
+- cleanup runtime exclusion from `HyMT2Translator`, MADLAD, and `TranslationEngine.effective`, plus Not-ready behavior and Models navigation;
+- validator trimming and exact rejection of empty, fenced, explanatory-prefix, and multi-paragraph commentary output;
+- cleanup-success translation failure retaining cleaned text, cleanup failure retaining authoritative original, and one final insertion;
+- authoritative-only input, cancellation/new-generation invalidation, the 320000-sample cap, conversion-failure counting, and caption independence.
+
+## Acceptance and checks
+
+The implementation is local-only, cleanup is off by default, partials are never processed, and only the two multilingual identifiers are selectable. WhisperKit is used through the verified 1.0.0 APIs above; sAiity owns only its folder marker, existence/readiness check, temporary-directory cleanup, and `FileManager` removal. Cleanup uses only the existing Qwen/Gemma-compatible GGUF path. All fallbacks, locale rules, single-flight behavior, terminal race rules, and focused tests above are explicit.
+
+Before committing this documentation change, inspect the full file for unresolved planning language; run `git diff --check`; confirm `git status` shows only this spec changed; and commit with message `docs: finalize dictation model contracts`.
