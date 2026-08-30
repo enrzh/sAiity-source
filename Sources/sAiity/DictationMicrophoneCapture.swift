@@ -93,7 +93,7 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
     private func convert(_ buffer: AVAudioPCMBuffer,
                          to target: AVAudioFormat,
                          onBuffer: @escaping @Sendable (AVAudioPCMBuffer) -> Void) {
-        guard isRunning, let converter else { return }
+        guard lock.withLock({ lifecycle.isRunning }), let converter else { return }
         let ratio = target.sampleRate / buffer.format.sampleRate
         let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 64
         guard let output = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) else { return }
@@ -110,13 +110,11 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
             return buffer
         }
         guard error == nil, output.frameLength > 0 else { return }
-        let accounting = acceptConvertedFrame(Int(output.frameLength))
+        guard let channel = output.floatChannelData?[0] else { return }
+        let rawSamples = Array(UnsafeBufferPointer(start: channel, count: Int(output.frameLength)))
+        let accounting = storeConvertedFrame(rawSamples)
         guard accounting.acceptedFrameCount > 0 else { return }
         output.frameLength = AVAudioFrameCount(accounting.acceptedFrameCount)
-        if let channel = output.floatChannelData?[0] {
-            let samples = Array(UnsafeBufferPointer(start: channel, count: accounting.acceptedFrameCount))
-            lock.withLock { convertedSamples.append(samples) }
-        }
         onBuffer(output)
         if accounting.shouldEmitLimit { onLimit?() }
     }
@@ -129,6 +127,20 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
             guard frameCount > 0, remaining > 0 else { return (0, false) }
             let accepted = min(frameCount, remaining)
             sampleCount += accepted
+            let shouldEmit = sampleCount == DictationAudioSampleLimit.maximumSamples && !didEmitLimit
+            if shouldEmit { didEmitLimit = true }
+            return (accepted, shouldEmit)
+        }
+    }
+
+    private func storeConvertedFrame(_ samples: [Float]) -> (acceptedFrameCount: Int, shouldEmitLimit: Bool) {
+        lock.withLock {
+            guard lifecycle.isRunning, !samples.isEmpty else { return (0, false) }
+            let remaining = DictationAudioSampleLimit.maximumSamples - sampleCount
+            guard remaining > 0 else { return (0, false) }
+            let accepted = min(samples.count, remaining)
+            sampleCount += accepted
+            convertedSamples.append(Array(samples.prefix(accepted)))
             let shouldEmit = sampleCount == DictationAudioSampleLimit.maximumSamples && !didEmitLimit
             if shouldEmit { didEmitLimit = true }
             return (accepted, shouldEmit)

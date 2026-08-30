@@ -217,6 +217,49 @@ import Testing
         #expect(controller.phase != .dictating)
     }
 
+    @Test("ordinary preparation never prepares selected Whisper")
+    func ordinaryPreparationDoesNotPrepareWhisper() async {
+        var whisperPreparations = 0
+        let capture = FakeCapture(log: EventLog())
+        let controller = DictationController(
+            makeBackend: { FakeBackend(log: EventLog()) }, capture: capture,
+            inserter: FakeInserter(), captionsActive: { false },
+            dictationUsesWhisper: { true },
+            prepareWhisper: { whisperPreparations += 1 }, whisperIsReady: { false })
+        controller.prepare(); await controller.waitForWorkForTests()
+        #expect(whisperPreparations == 0)
+        #expect(!capture.started)
+    }
+
+    @Test("Whisper press before explicit readiness fails without preparing")
+    func whisperPressBeforeReadinessDoesNotAutoPrepare() async {
+        var whisperPreparations = 0
+        let controller = DictationController(
+            makeBackend: { FakeBackend(log: EventLog()) }, capture: FakeCapture(log: EventLog()),
+            inserter: FakeInserter(), captionsActive: { false },
+            dictationUsesWhisper: { true },
+            prepareWhisper: { whisperPreparations += 1 }, whisperIsReady: { false })
+        controller.press(); await controller.waitForWorkForTests()
+        #expect(whisperPreparations == 0)
+        #expect(controller.phase == .failure("Whisper dictation is not ready. Prepare it in Settings."))
+    }
+
+    @Test("a delayed limit handler from an old session cannot finish the new session")
+    func oldSessionLimitCannotFinishNewSession() async {
+        let capture = FakeCapture(log: EventLog())
+        let controller = DictationController(
+            makeBackend: { FakeBackend(log: EventLog()) }, capture: capture,
+            inserter: FakeInserter(), captionsActive: { false },
+            dictationUsesWhisper: { true })
+        controller.markReady(); controller.press(); await controller.waitForWorkForTests()
+        for _ in 0..<100 where capture.limitHandler == nil { await Task.yield() }
+        let oldHandler = capture.limitHandler
+        controller.cancel(); await controller.waitForWorkForTests()
+        controller.markReady(); controller.press(); await controller.waitForWorkForTests()
+        oldHandler?(); await Task.yield(); await controller.waitForWorkForTests()
+        #expect(controller.phase == .dictating)
+    }
+
     @Test("Whisper cancellation during transcription does not drain samples twice")
     func whisperCancellationDuringTranscriptionDrainsOnce() async {
         let capture = FakeCapture(log: EventLog()); capture.samples = [7]

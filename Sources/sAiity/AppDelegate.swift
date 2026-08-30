@@ -61,6 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             try await self.prepareSelectedWhisperModelForUse(progress: { _ in })
         },
+        whisperIsReady: { WhisperDictationBackend.isReady(WhisperDictationBackend.model) },
         onPhaseChanged: { [weak self] phase in
             self?.updateDictationToast(phase)
             self?.scheduleTranslatorEvictionIfIdle()

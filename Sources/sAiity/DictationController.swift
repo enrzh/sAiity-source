@@ -33,6 +33,7 @@ final class DictationController {
     typealias WhisperTranscriptionHandler = ([[Float]], Locale) async throws -> String?
     typealias WhisperPreparationHandler = () async throws -> Void
     typealias AudioFormatFactory = () -> AVAudioFormat?
+    typealias WhisperReadinessProvider = () -> Bool
 
     private let backendProvider: any ASRBackendProvider
     private let capture: any DictationAudioCapture
@@ -47,6 +48,7 @@ final class DictationController {
     private let transcribeWhisper: WhisperTranscriptionHandler
     private let prepareWhisper: WhisperPreparationHandler
     private let audioFormatFactory: AudioFormatFactory
+    private let whisperIsReady: WhisperReadinessProvider
 
     private var state = DictationSessionState()
     private var generation = 0
@@ -94,6 +96,7 @@ final class DictationController {
          transcribeWhisper: @escaping WhisperTranscriptionHandler = { _, _ in nil },
          prepareWhisper: @escaping WhisperPreparationHandler = {},
          audioFormatFactory: @escaping AudioFormatFactory = { AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1) },
+         whisperIsReady: @escaping WhisperReadinessProvider = { true },
          onPhaseChanged: @escaping (DictationPhase) -> Void = { _ in }) {
         self.backendProvider = SingleBackendProvider(makeBackend: makeBackend)
         self.capture = capture
@@ -107,6 +110,7 @@ final class DictationController {
         self.transcribeWhisper = transcribeWhisper
         self.prepareWhisper = prepareWhisper
         self.audioFormatFactory = audioFormatFactory
+        self.whisperIsReady = whisperIsReady
         self.onPhaseChanged = onPhaseChanged
     }
 
@@ -122,6 +126,7 @@ final class DictationController {
          transcribeWhisper: @escaping WhisperTranscriptionHandler = { _, _ in nil },
          prepareWhisper: @escaping WhisperPreparationHandler = {},
          audioFormatFactory: @escaping AudioFormatFactory = { AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1) },
+         whisperIsReady: @escaping WhisperReadinessProvider = { true },
          onPhaseChanged: @escaping (DictationPhase) -> Void = { _ in }) {
         self.backendProvider = backendProvider
         self.capture = capture
@@ -135,6 +140,7 @@ final class DictationController {
         self.transcribeWhisper = transcribeWhisper
         self.prepareWhisper = prepareWhisper
         self.audioFormatFactory = audioFormatFactory
+        self.whisperIsReady = whisperIsReady
         self.onPhaseChanged = onPhaseChanged
     }
 
@@ -182,6 +188,11 @@ final class DictationController {
         sessionUsesWhisper = dictationUsesWhisper()
         sessionLocale = sessionUsesWhisper ? Locale(identifier: WhisperDictationBackend.locale) : Locale.current
         captureDrained = false
+        if sessionUsesWhisper && !whisperIsReady() {
+            state.cancel()
+            phase = .failure(String(localized: "Whisper dictation is not ready. Prepare it in Settings."))
+            return
+        }
         terminal = .open
         let wasReady = phase == .ready
         phase = .starting
@@ -272,11 +283,7 @@ final class DictationController {
 
     private func runPreparation(token: Int) async {
         do {
-            if preparationUsesWhisper {
-                try await prepareWhisper()
-            } else {
-                try await backendProvider.prepare(locale: Locale.current) { _ in }
-            }
+            try await backendProvider.prepare(locale: Locale.current) { _ in }
             try Task.checkCancellation()
             guard token == preparationGeneration else {
                 return

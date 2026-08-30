@@ -32,6 +32,14 @@ swift test -c release -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS --jo
 
 结果：63 tests in 5 suites passed。
 
+## Task 4 Audit Fix Evidence
+
+- RED: Whisper-selected ordinary preparation called `prepareWhisper`, and an unready Whisper press auto-prepared; the new counter/readiness tests failed before the fix.
+- GREEN: ordinary preparation now remains on the streaming backend path; Whisper press requires the injected AppDelegate readiness check and reports a clear Settings preparation failure when unavailable.
+- GREEN: converted sample ownership now checks lifecycle and appends under the same lock as limit accounting; delayed old-session handlers remain generation-guarded.
+- Focused verification after audit fixes: 67 tests in 5 suites passed with `--jobs 2`.
+- Commit: `fix: isolate Whisper preparation and sample ownership`.
+
 `git diff --check` passed before commit.
 
 ## Scope

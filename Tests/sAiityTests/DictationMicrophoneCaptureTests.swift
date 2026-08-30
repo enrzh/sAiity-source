@@ -38,6 +38,16 @@ import Testing
         #expect(capture.acceptConvertedFrame(10).acceptedFrameCount == 10)
     }
 
+    @Test("taking samples owns the capture buffer against a late callback")
+    func takeOwnsSamplesAgainstLateCallback() {
+        let capture = DictationMicrophoneCapture()
+        _ = capture.acceptConvertedFrame(10)
+        let first = capture.takeCollectedSamples()
+        #expect(first.isEmpty)
+        _ = capture.acceptConvertedFrame(10)
+        #expect(capture.takeCollectedSamples().isEmpty)
+    }
+
     @Test("capture lifecycle starts once and stops once")
     func lifecycleIsIdempotent() {
         var lifecycle = DictationCaptureLifecycle()
