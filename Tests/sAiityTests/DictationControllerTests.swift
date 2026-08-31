@@ -381,6 +381,28 @@ import Testing
         #expect(controller.phase == .result("Translated and copied"))
     }
 
+    @Test("cleanup falls back when the model drops a protected token")
+    func cleanupPreservesOriginalWhenProtectedTokenIsDropped() async {
+        let input = "Send the project report to team@example.com on 2026-08-31 today."
+        let backend = FakeBackend(log: EventLog())
+        backend.authoritativeResult = input
+        let inserter = FakeInserter()
+        let controller = DictationController(
+            makeBackend: { backend },
+            capture: FakeCapture(log: EventLog()),
+            inserter: inserter,
+            captionsActive: { false },
+            cleanupConfiguration: { DictationCleanupConfiguration(enabled: true) },
+            cleanup: { _ in "Send the project report to another address on 2026-08-31 today." })
+
+        controller.press()
+        await controller.waitForWorkForTests()
+        controller.release()
+        await controller.waitForWorkForTests()
+
+        #expect(inserter.inserted == [input])
+    }
+
     @Test("cancellation during translation cannot insert stale output")
     func cancellationDuringTranslationDiscardsOutput() async {
         final class TranslationGate: @unchecked Sendable {

@@ -63,7 +63,7 @@ import Testing
         #expect(cleanup.contains { $0.asset.id == AssetID.llm(file: "gemma-3-1b-it-Q4_K_M.gguf") })
     }
 
-    @Test("dictation cleanup is off by default and persists independently")
+    @Test("dictation cleanup is on by default and persists independently")
     func dictationCleanupIsIndependent() {
         let defaults = UserDefaults.standard
         let keys = ["dictationCleanupEnabled", "dictationRecognizer"]
@@ -72,7 +72,9 @@ import Testing
         defaults.removeObject(forKey: "dictationCleanupEnabled")
         defaults.removeObject(forKey: "dictationRecognizer")
         let state = AppState()
-        #expect(state.dictationCleanupEnabled == false)
+        #expect(state.dictationCleanupEnabled == true)
+        state.dictationCleanupEnabled = false
+        #expect(defaults.bool(forKey: "dictationCleanupEnabled") == false)
         state.dictationCleanupEnabled = true
         #expect(defaults.bool(forKey: "dictationCleanupEnabled"))
         state.engine = .nemotron

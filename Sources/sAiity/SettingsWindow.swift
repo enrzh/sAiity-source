@@ -241,7 +241,7 @@ final class AppState {
             NotificationCenter.default.post(name: .saiityDictationSettingChanged, object: nil)
         }
     }
-    var dictationCleanupEnabled = UserDefaults.standard.bool(forKey: "dictationCleanupEnabled") {
+    var dictationCleanupEnabled = UserDefaults.standard.object(forKey: "dictationCleanupEnabled") as? Bool ?? true {
         didSet {
             guard dictationCleanupEnabled != oldValue else { return }
             UserDefaults.standard.set(dictationCleanupEnabled, forKey: "dictationCleanupEnabled")

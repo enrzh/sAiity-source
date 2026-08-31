@@ -412,7 +412,8 @@ final class DictationController {
         var translationFailed = false
         if cleanupConfiguration().enabled {
             phase = .cleaning
-            if let value = await cleanup(text), let valid = DictationCleanupValidator.validate(value) {
+            if let value = await cleanup(text),
+               let valid = DictationCleanupValidator.validate(value, preserving: text) {
                 output = valid
                 cleaned = true
             }

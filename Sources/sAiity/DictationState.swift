@@ -122,7 +122,9 @@ struct DictationCleanupConfiguration: Equatable, Sendable {
 }
 
 struct DictationAudioSampleLimit: Sendable {
-    static let maximumSamples = 320_000
+    /// Keep a long press usable for ordinary dictation while bounding the
+    /// in-memory buffer passed to the batch recogniser.
+    static let maximumSamples = 16_000 * 60
     enum Decision: Equatable, Sendable { case accepted, limited }
     private(set) var sampleCount = 0
 

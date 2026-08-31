@@ -12,7 +12,7 @@ APP="build/$NAME.app"
 
 # Version from git, so a bug report can name the build it came from. Falls back
 # to the Info.plist value outside a git checkout.
-GIT_VERSION=$(git describe --tags --always --dirty 2>/dev/null || true)
+GIT_VERSION="${SAIITY_VERSION:-$(git describe --tags --always --dirty 2>/dev/null || true)}"
 # Tags are written v1.0.0; the version a user sees is 1.0.0. Without stripping
 # the prefix the About window and Sparkle's update panel read "v1.0.0" while the
 # appcast that offers the update says "1.0.0" — the same release, named two

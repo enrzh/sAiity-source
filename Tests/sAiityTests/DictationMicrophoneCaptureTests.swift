@@ -4,6 +4,15 @@ import Testing
 @testable import sAiity
 
 @Suite struct DictationMicrophoneCaptureTests {
+    @Test("dictation allows a full minute before applying the safety limit")
+    func sampleLimitAllowsLongHold() {
+        #expect(DictationAudioSampleLimit.maximumSamples == 16_000 * 60)
+
+        var limit = DictationAudioSampleLimit()
+        #expect(limit.accepted(sampleCount: DictationAudioSampleLimit.maximumSamples - 1) == .accepted)
+        #expect(limit.accepted(sampleCount: 1) == .limited)
+    }
+
     @Test("audio sample limit accepts exactly the configured maximum")
     func sampleLimitIsExact() {
         var limit = DictationAudioSampleLimit()
@@ -19,7 +28,7 @@ import Testing
         var accepted = 0
         var limitSignals = 0
         DispatchQueue.concurrentPerform(iterations: 2) { _ in
-            let result = capture.acceptConvertedFrame(200_000)
+            let result = capture.acceptConvertedFrame(DictationAudioSampleLimit.maximumSamples / 2)
             lock.withLock {
                 accepted += result.acceptedFrameCount
                 if result.shouldEmitLimit { limitSignals += 1 }

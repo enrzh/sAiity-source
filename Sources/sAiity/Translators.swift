@@ -194,11 +194,73 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
     static var isAvailable: Bool { true }
     static func isDownloaded() -> Bool { LocalModel.selected?.isDownloaded ?? false }
 
+    static let cleanupSystemPrompt = """
+    You are a conservative speech editor, not a chatbot and not a copywriter.
+    Edit the transcript only when the spoken wording clearly calls for it.
+
+    You may:
+    - remove filler words such as um, uh, and you know
+    - remove accidental repetition
+    - resolve a false start or an explicit self-correction, keeping the final wording
+    - fix obvious punctuation, casing, and spoken punctuation
+    - format an unmistakable spoken list only when the speaker clearly gave one
+
+    You must preserve the meaning, claims, uncertainty, numbers, dates, URLs, email
+    addresses, names, technical terms, tone, and wording whenever possible.
+    Never summarize, expand, embellish, translate, answer a question, or invent.
+    Do not replace specific wording with synonyms unless required by a clear correction.
+    You MUST remove clear speech noise when it is present; do not simply repeat a
+    noisy transcript unchanged. Resolve the latest wording in a self-correction
+    or naming check and keep the final confirmed wording.
+    When the speaker explicitly corrects themselves, remove the superseded wording and
+    keep the replacement. For example:
+    Input: "Um, send the revised contract tomorrow, actually Friday morning."
+    Output: "Send the revised contract Friday morning."
+    Input: "Uh, open the site, I mean the app, and, um, send it."
+    Output: "Open the app and send it."
+    Input: "Go to YouTube, then check the name again — MrBeast? Yes, MrBeast is the name."
+    Output: "Go to YouTube, then check the name again — MrBeast."
+    Never wrap the transcript in quotation marks and never add a label such as "Output:".
+    For short or already-clean text, make no changes. Output only the edited transcript.
+    """
+
+    static func cleanupUserPrompt(_ text: String) -> String {
+        """
+        Edit this speech transcript now. Remove fillers, accidental repeated words,
+        false starts, and superseded wording from explicit self-corrections. Keep the
+        speaker's original intent and voice. Do not return the noisy input unchanged
+        when one of those repairs is obvious.
+        Return only the edited transcript, with no label or explanation.
+
+        <TRANSCRIPT>
+        \(text)
+        </TRANSCRIPT>
+        """
+    }
+
     func cleanup(_ text: String) async -> String? {
         guard llm != nil else { return nil }
-        let user = "Clean up this dictated transcript: fix punctuation, casing, fillers, false starts, and obvious repetition. Output only the cleaned transcript. Never summarize, translate, expand, invent, explain, or change facts, numbers, or names.\n\n<TRANSCRIPT>\n\(text)\n</TRANSCRIPT>"
-        guard let raw = await generate(system: "You clean dictated transcripts. Preserve meaning, facts, numbers, names, order, and uncertainty. Never summarize, translate, expand, explain, invent, or add information. Output only cleaned transcript text.", user: user) else { return nil }
-        return DictationCleanupValidator.validate(raw)
+        let baseline = DictationCleanupValidator.deterministicCleanup(text)
+        guard let raw = await generate(system: Self.cleanupSystemPrompt,
+                                       user: Self.cleanupUserPrompt(baseline)) else {
+            return DictationCleanupValidator.validate(baseline, preserving: text)
+        }
+
+        // Apply the guaranteed speech pass after generation too. This covers a
+        // small model that copies a filler back into an otherwise valid answer.
+        let candidate = DictationCleanupValidator.deterministicCleanup(raw)
+        if let valid = DictationCleanupValidator.validate(candidate, preserving: text) {
+            // If the model ignored the task and copied the raw transcript, use
+            // the deterministic result instead of accepting that unchanged copy.
+            let copiedRaw = candidate.trimmingCharacters(in: .whitespacesAndNewlines) ==
+                text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if copiedRaw,
+               let deterministic = DictationCleanupValidator.validate(baseline, preserving: text) {
+                return deterministic
+            }
+            return valid
+        }
+        return DictationCleanupValidator.validate(baseline, preserving: text)
     }
 
     /// The language name to put in the prompt, always in English.

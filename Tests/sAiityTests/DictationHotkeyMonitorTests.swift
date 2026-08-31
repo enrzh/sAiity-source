@@ -86,6 +86,22 @@ import Testing
                                                        flags: [.maskControl]))
     }
 
+    @Test("event tap preserves the current key edge instead of rebuilding a global snapshot")
+    func eventTapUsesCurrentEdge() {
+        #expect(DictationHotkeyMonitor.eventInput(type: .flagsChanged,
+                                                  key: UInt16(kVK_Control),
+                                                  flags: [.maskControl])
+                == .flagsChanged(UInt16(kVK_Control), isDown: true))
+        #expect(DictationHotkeyMonitor.eventInput(type: .keyDown,
+                                                  key: UInt16(kVK_Space),
+                                                  flags: [])
+                == .keyDown(UInt16(kVK_Space)))
+        #expect(DictationHotkeyMonitor.eventInput(type: .keyUp,
+                                                  key: UInt16(kVK_Space),
+                                                  flags: [])
+                == .keyUp(UInt16(kVK_Space)))
+    }
+
     @Test("only a real control transition produces a callback")
     func transitionDetection() {
         #expect(DictationHotkeyMonitor.hasTransition(from: false, to: true))

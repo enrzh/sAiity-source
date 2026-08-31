@@ -76,6 +76,17 @@ struct DictationChord: Codable, Equatable, Sendable {
         }
     }
 
+    static func modifierIsDown(_ key: UInt16, flags: CGEventFlags) -> Bool {
+        switch Int(key) {
+        case kVK_Command, kVK_RightCommand: flags.contains(.maskCommand)
+        case kVK_Option, kVK_RightOption: flags.contains(.maskAlternate)
+        case kVK_Control, kVK_RightControl: flags.contains(.maskControl)
+        case kVK_Shift, kVK_RightShift: flags.contains(.maskShift)
+        case kVK_Function: flags.contains(.maskSecondaryFn)
+        default: false
+        }
+    }
+
     static func modifierFamily(for key: UInt16) -> Set<UInt16>? {
         switch Int(key) {
         case kVK_Command, kVK_RightCommand:
@@ -225,6 +236,26 @@ final class DictationHotkeyMonitor: NSObject, @unchecked Sendable {
     nonisolated static func isControlDown(flags: CGEventFlags) -> Bool { flags.contains(.maskControl) }
     nonisolated static func hasTransition(from previous: Bool, to current: Bool) -> Bool { previous != current }
 
+    /// Converts one event tap edge into the state-machine input. Normal key
+    /// handling must stay edge-driven; consulting the session-wide key snapshot
+    /// here can briefly report a held modifier as released while another key is
+    /// being delivered.
+    nonisolated static func eventInput(type: CGEventType,
+                                       key: UInt16,
+                                       flags: CGEventFlags) -> DictationChordState.Input? {
+        switch type {
+        case .flagsChanged:
+            guard DictationChord.modifierFamily(for: key) != nil else { return nil }
+            return .flagsChanged(key, isDown: DictationChord.modifierIsDown(key, flags: flags))
+        case .keyDown:
+            return .keyDown(key)
+        case .keyUp:
+            return .keyUp(key)
+        default:
+            return nil
+        }
+    }
+
     func updateChord(_ chord: DictationChord) {
         lock.withLock {
             self.chord = chord
@@ -292,16 +323,15 @@ final class DictationHotkeyMonitor: NSObject, @unchecked Sendable {
         }
         guard type == .flagsChanged || type == .keyDown || type == .keyUp else { return }
         let key = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
+        guard let input = Self.eventInput(type: type, key: key, flags: event.flags) else { return }
 
         let effect: DictationChordState.Effect = lock.withLock {
             guard !suspended else { return .none }
             guard chord.observes(key) else { return .none }
-            var authoritative = Set(chord.observedKeyCodes.filter {
-                Self.physicalKeyDown($0, flags: event.flags)
-            })
-            if type == .keyDown { authoritative.insert(key) }
-            if type == .keyUp { authoritative.remove(key) }
             if requiresAllKeysReleased {
+                let authoritative = Set(chord.observedKeyCodes.filter {
+                    Self.physicalKeyDown($0, flags: event.flags)
+                })
                 if authoritative.isEmpty {
                     requiresAllKeysReleased = false
                     chordState = DictationChordState(chord: chord)
@@ -311,13 +341,16 @@ final class DictationHotkeyMonitor: NSObject, @unchecked Sendable {
                     return .none
                 }
             }
-            return chordState.sync(pressed: authoritative)
+            return chordState.handle(input)
         }
-        switch effect {
-        case .none: break
-        case .start: lock.withLock { onPress }?()
-        case .stop: lock.withLock { onRelease }?()
+        let callback: (@Sendable () -> Void)? = lock.withLock {
+            switch effect {
+            case .none: return nil
+            case .start: return onPress
+            case .stop: return onRelease
+            }
         }
+        callback?()
     }
 
     static func physicalKeyDown(_ key: UInt16, flags: CGEventFlags) -> Bool {

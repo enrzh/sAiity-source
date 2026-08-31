@@ -49,7 +49,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return await self.translateDictatedText(text, source: source, target: target)
         },
         cleanupConfiguration: {
-            DictationCleanupConfiguration(enabled: UserDefaults.standard.bool(forKey: "dictationCleanupEnabled"))
+            DictationCleanupConfiguration(
+                enabled: UserDefaults.standard.object(forKey: "dictationCleanupEnabled") as? Bool ?? true)
         },
         cleanup: { [weak self] text in
             await self?.cleanupDictatedText(text)
