@@ -67,7 +67,25 @@ final class DictationToastWindow: NSPanel {
         resetButton.target = self
         resetButton.action = #selector(resetPositionFromButton)
 
-        let stack = NSStackView(views: [spinner, label, resetButton])
+        let leadingSlot = NSView()
+        let trailingSlot = NSView()
+        leadingSlot.addSubview(spinner)
+        trailingSlot.addSubview(resetButton)
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        resetButton.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            spinner.centerXAnchor.constraint(equalTo: leadingSlot.centerXAnchor),
+            spinner.centerYAnchor.constraint(equalTo: leadingSlot.centerYAnchor),
+            spinner.leadingAnchor.constraint(greaterThanOrEqualTo: leadingSlot.leadingAnchor),
+            spinner.trailingAnchor.constraint(lessThanOrEqualTo: leadingSlot.trailingAnchor),
+            resetButton.centerXAnchor.constraint(equalTo: trailingSlot.centerXAnchor),
+            resetButton.centerYAnchor.constraint(equalTo: trailingSlot.centerYAnchor),
+            resetButton.leadingAnchor.constraint(greaterThanOrEqualTo: trailingSlot.leadingAnchor),
+            resetButton.trailingAnchor.constraint(lessThanOrEqualTo: trailingSlot.trailingAnchor),
+        ])
+
+        let stack = NSStackView(views: [leadingSlot, label, trailingSlot])
+        leadingSlot.widthAnchor.constraint(equalTo: trailingSlot.widthAnchor).isActive = true
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 8
@@ -123,11 +141,14 @@ final class DictationToastWindow: NSPanel {
 
     func show(phase: DictationPhase, autoDismissAfter: Duration?) {
         let p = phase.toastPresentation
-        let needsPlacement = !hasPlacedToast && frame.width <= 1
         let frame = self.frame
+        let visibleFrame = placementVisibleFrame
+        let needsPlacement = !hasPlacedToast &&
+            (frame.width <= 1 || frame.height <= 1 ||
+             (frame.height <= 16 && visibleFrame?.contains(frame) != true))
         show(text: p.value, animated: phase == .preparing || phase == .starting || phase == .dictating || phase == .transcribing || phase == .cleaning || phase == .translating || phase == .inserting, autoDismissAfter: autoDismissAfter)
         if needsPlacement && FrameStore.loadDictation() == nil,
-           let v = placementVisibleFrame {
+           let v = visibleFrame {
             setFrameOrigin(NSPoint(x: v.midX - self.frame.width / 2, y: v.minY + 80))
         }
         hasPlacedToast = true
@@ -172,8 +193,8 @@ final class DictationToastWindow: NSPanel {
         FrameStore.saveDictation(frame)
     }
 
-    func beginDrag(at point: NSPoint) { dragStart = point; dragOrigin = frame.origin }
-    func drag(to point: NSPoint) {
+    func beginDrag(atScreenPoint point: NSPoint) { dragStart = point; dragOrigin = frame.origin }
+    func drag(toScreenPoint point: NSPoint) {
         guard let dragStart else { return }
         setFrameOrigin(NSPoint(x: dragOrigin.x + point.x - dragStart.x, y: dragOrigin.y + point.y - dragStart.y))
     }
@@ -190,9 +211,11 @@ final class DictationToastWindow: NSPanel {
         let resetFrame = resetButton.convert(resetButton.bounds, to: contentView)
         guard !resetFrame.contains(point) else { resetPositionFromButton(); return }
         dragging = true
-        beginDrag(at: point)
+        beginDrag(atScreenPoint: convertPoint(toScreen: event.locationInWindow))
     }
-    override func mouseDragged(with event: NSEvent) { drag(to: contentView?.convert(event.locationInWindow, from: nil) ?? .zero) }
+    override func mouseDragged(with event: NSEvent) {
+        drag(toScreenPoint: convertPoint(toScreen: event.locationInWindow))
+    }
     override func mouseUp(with event: NSEvent) { if dragging { endDrag() } }
 
     override func sendEvent(_ event: NSEvent) {
@@ -228,6 +251,8 @@ final class DictationToastWindow: NSPanel {
     func performResetButtonAction() { resetButton.performClick(nil) }
 #if SAIITY_TEST_HOOKS
     var resetButtonBoundsForTests: NSRect { resetButton.convert(resetButton.bounds, to: nil) }
+    var labelMidXForTests: CGFloat { label.convert(label.bounds, to: contentView).midX }
+    var contentMidXForTests: CGFloat { contentView?.bounds.midX ?? 0 }
     private(set) var resetCallbackCountForTests = 0
 #endif
 

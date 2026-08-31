@@ -24,6 +24,9 @@ import Testing
         let qwen = LocalModel(source: .url("https://example.invalid/qwen.gguf"), file: files[1], label: "QWEN", bytes: 1, recommended: false, note: "", licence: "")
         let other = LocalModel(source: .url("https://example.invalid/other.gguf"), file: files[2], label: "Mistral", bytes: 1, recommended: false, note: "", licence: "")
 
+        #expect(gemma.isCleanupCandidate())
+        #expect(qwen.isCleanupCandidate())
+        #expect(!other.isCleanupCandidate())
         #expect(gemma.isCleanupCompatible())
         #expect(qwen.isCleanupCompatible())
         #expect(!other.isCleanupCompatible())
@@ -227,6 +230,20 @@ import Testing
         #expect(!app.translatorReadyForTests)
     }
 
+    @Test("dictation cleanup prepares an independent local translator")
+    func dictationCleanupPreparesIndependentLocalTranslator() async {
+        var events: [String] = []
+
+        let result = await AppDelegate.performDictationCleanup(
+            "clean this text",
+            prepare: { events.append("prepare") },
+            cleanup: { text in events.append("cleanup:\(text)"); return "Cleaned text." },
+            stop: { events.append("stop") })
+
+        #expect(result == "Cleaned text.")
+        #expect(events == ["prepare", "cleanup:clean this text", "stop"])
+    }
+
     @Test("AppDelegate Whisper preparation delegates through the production seam")
     func appDelegateWhisperPreparationBoundary() async throws {
         let selected = WhisperDictationBackend.model
@@ -266,7 +283,8 @@ import Testing
     @Test("AppDelegate Whisper preparation failure propagates without readiness")
     func appDelegateWhisperPreparationFailureBoundary() async {
         let app = AppDelegate()
-        let wasReady = WhisperDictationBackend.isReady(WhisperDictationBackend.model)
+        let selected = WhisperDictationBackend.model
+        let wasReady = WhisperDictationBackend.isReady(selected)
         app.whisperPreparationForTests = { _, _ in throw BackendError.notPrepared }
         defer { app.whisperPreparationForTests = nil }
         do {
@@ -275,7 +293,7 @@ import Testing
         } catch {
             #expect((error as? BackendError) == .notPrepared)
         }
-        #expect(WhisperDictationBackend.isReady(WhisperDictationBackend.model) == wasReady)
+        #expect(WhisperDictationBackend.isReady(selected) == wasReady)
     }
 
     @Test("Whisper preparation does not mutate caption state while blocked")

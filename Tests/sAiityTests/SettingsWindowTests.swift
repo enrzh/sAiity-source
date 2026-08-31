@@ -47,6 +47,22 @@ import Testing
         #expect(selected)
     }
 
+    @Test("dictation cleanup exposes downloadable Qwen and Gemma assets")
+    func dictationCleanupAssetsAreDownloadableAndFamilyRestricted() {
+        let statuses = TranslationEngine.qwen.assetDescriptors.map(ModelRegistry.status(of:))
+            + TranslationEngine.madlad.assetDescriptors.map(ModelRegistry.status(of:))
+        let cleanup = DictationView.cleanupAssets(from: statuses)
+
+        #expect(!cleanup.isEmpty)
+        #expect(cleanup.allSatisfy {
+            let title = $0.asset.title.lowercased()
+            return title.contains("qwen") || title.contains("gemma")
+        })
+        #expect(!cleanup.contains { $0.asset.id == AssetID.madlad })
+        #expect(cleanup.contains { $0.asset.id == AssetID.llm(file: "Qwen3.5-2B-Q4_K_M.gguf") })
+        #expect(cleanup.contains { $0.asset.id == AssetID.llm(file: "gemma-3-1b-it-Q4_K_M.gguf") })
+    }
+
     @Test("dictation cleanup is off by default and persists independently")
     func dictationCleanupIsIndependent() {
         let defaults = UserDefaults.standard

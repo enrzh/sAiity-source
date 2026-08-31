@@ -163,6 +163,13 @@ struct DictationView: View {
     @State private var inputMonitoringGranted = CGPreflightListenEventAccess()
     @State private var accessibilityGranted = AXIsProcessTrusted()
 
+    internal static func cleanupAssets(from assets: [AssetStatus]) -> [AssetStatus] {
+        let candidateIDs = Set(LocalModel.all
+            .filter { $0.isCleanupCandidate() }
+            .map { AssetID.llm(file: $0.file) })
+        return assets.filter { candidateIDs.contains($0.asset.id) }
+    }
+
     internal static func downloadAction(_ choice: WhisperDictationBackend.ModelChoice, prepare: (WhisperDictationBackend.ModelChoice) async throws -> Void, refresh: () -> Void, setError: (Error) -> Void) async {
         do { try await prepare(choice) } catch { setError(error) }
         refresh()
@@ -255,11 +262,13 @@ struct DictationView: View {
             }
 
             Section("Dictation cleanup") {
+                Text("Choose a local Qwen or Gemma model, then download it here to enable cleanup.")
+                    .font(.caption).foregroundStyle(.secondary)
+                ForEach(Self.cleanupAssets(from: state.assets)) { status in
+                    cleanupModelRow(status)
+                }
                 Toggle("Clean up dictated text", isOn: $state.dictationCleanupEnabled)
                     .disabled(!LocalModel.isCleanupCompatible(state.llmModel))
-                if !LocalModel.isCleanupCompatible(state.llmModel) {
-                    Button("Not ready") { Self.notReadyAction(selectModels: SettingsWindowController.selectModelsPane) }
-                }
             }
 
             Section {
@@ -319,6 +328,7 @@ struct DictationView: View {
         }
         .scrollContentBackground(.hidden)
         .formStyle(.grouped)
+        .task { state.refreshModels() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshPermissions()
         }
@@ -356,6 +366,34 @@ struct DictationView: View {
     private func refreshPermissions() {
         inputMonitoringGranted = CGPreflightListenEventAccess()
         accessibilityGranted = AXIsProcessTrusted()
+    }
+
+    @ViewBuilder
+    private func cleanupModelRow(_ status: AssetStatus) -> some View {
+        if let model = LocalModel.all.first(where: { AssetID.llm(file: $0.file) == status.asset.id }) {
+            HStack(alignment: .top, spacing: 8) {
+                Button { state.llmModel = model } label: {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: model == state.llmModel
+                              ? "largecircle.fill.circle" : "circle")
+                            .foregroundStyle(model == state.llmModel ? Color.accentColor : Color.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) {
+                                Text(model.label).font(.body.weight(.medium))
+                                if model.recommended { Text("recommended").font(.caption2) }
+                            }
+                            Text(model.sizeText).font(.caption2).foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Use \(model.label)")
+                .accessibilityAddTraits(model == state.llmModel ? .isSelected : [])
+                Spacer(minLength: 12)
+                AssetControl(state: state, status: status)
+            }
+            .padding(.vertical, 2)
+        }
     }
 
     private func prepareWhisper(_ choice: WhisperDictationBackend.ModelChoice) {

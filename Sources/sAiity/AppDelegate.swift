@@ -52,10 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DictationCleanupConfiguration(enabled: UserDefaults.standard.bool(forKey: "dictationCleanupEnabled"))
         },
         cleanup: { [weak self] text in
-            guard let self,
-                  LocalModel.isCleanupCompatible(LocalModel.selected),
-                  let translator = self.activeTranslator as? LocalLLMTranslator else { return nil }
-            return await translator.cleanup(text)
+            await self?.cleanupDictatedText(text)
         },
         dictationUsesWhisper: { DictationRecognizer.selected == .whisper },
         transcribeWhisper: { samples, locale in
@@ -83,7 +80,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 #if SAIITY_TEST_HOOKS
     var dictationToastForTests: DictationToastWindow { dictationToast }
+    func updateDictationToastForTests(_ phase: DictationPhase) {
+        updateDictationToast(phase)
+    }
 #endif
+
+    private func cleanupDictatedText(_ text: String) async -> String? {
+        guard LocalModel.isCleanupCompatible(LocalModel.selected) else { return nil }
+        let translator = LocalLLMTranslator()
+        let language = locale.identifier(.bcp47)
+        return await Self.performDictationCleanup(
+            text,
+            prepare: {
+                try await translator.prepare(from: language, to: language) { message in
+                    NSLog("sAiity cleanup progress: \(message)")
+                }
+            },
+            cleanup: { await translator.cleanup($0) },
+            stop: { await translator.stop() })
+    }
+
+    static func performDictationCleanup(
+        _ text: String,
+        prepare: () async throws -> Void,
+        cleanup: (String) async -> String?,
+        stop: () async -> Void
+    ) async -> String? {
+        do {
+            try await prepare()
+            let result = await cleanup(text)
+            await stop()
+            return result
+        } catch {
+            await stop()
+            NSLog("sAiity cleanup unavailable: \(error.localizedDescription)")
+            return nil
+        }
+    }
 
     /// Production action for the deferred Task6 settings control.
     func prepareSelectedWhisperModelForUse(_ choice: WhisperDictationBackend.ModelChoice,
@@ -904,7 +937,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .waitingForInputMonitoring, .preparing:
             dictationToast.show(phase: phase)
         case .ready:
-            dictationToast.show(phase: phase, autoDismissAfter: .seconds(4.5))
+            dictationToast.show(phase: phase)
         case .starting, .dictating, .transcribing, .cleaning, .translating, .inserting, .limit:
             dictationToast.show(phase: phase)
         case .recovery, .result, .failure:

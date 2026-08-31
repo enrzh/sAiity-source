@@ -14,6 +14,35 @@ import Testing
         #expect(window.frame.midX > 350); window.dismiss()
     }
 
+    @Test func firstShowPlacesAnAppKitSizedWindowOnTheActiveScreen() {
+        FrameStore.resetDictation()
+        DictationToastWindow.visibleFramesForTests = { [NSRect(x: 0, y: 0, width: 800, height: 600)] }
+        DictationToastWindow.activeFrameForTests = { NSRect(x: 700, y: 500, width: 1, height: 1) }
+        defer { DictationToastWindow.visibleFramesForTests = nil; DictationToastWindow.activeFrameForTests = nil }
+        let window = makeWindow()
+        window.setFrame(NSRect(x: 0, y: 700, width: 179, height: 16), display: false)
+
+        window.show(phase: .ready)
+
+        #expect(window.frame.midX > 350)
+        #expect(window.frame.maxY <= 600)
+        window.dismiss()
+    }
+
+    @Test func firstShowPlacesAPartiallyOffscreenWindowOnTheActiveScreen() {
+        FrameStore.resetDictation()
+        DictationToastWindow.visibleFramesForTests = { [NSRect(x: 0, y: 0, width: 800, height: 600)] }
+        DictationToastWindow.activeFrameForTests = { NSRect(x: 700, y: 500, width: 1, height: 1) }
+        defer { DictationToastWindow.visibleFramesForTests = nil; DictationToastWindow.activeFrameForTests = nil }
+        let window = makeWindow()
+        window.setFrame(NSRect(x: 700, y: 300, width: 179, height: 16), display: false)
+
+        window.show(phase: .ready)
+
+        #expect(window.frame.maxX <= 800)
+        window.dismiss()
+    }
+
     @Test func savedFramePrefersItsExistingScreen() {
         FrameStore.resetDictation(); let saved = NSRect(x: 100, y: 120, width: 240, height: 36)
         FrameStore.saveDictation(saved); let window = makeWindow()
@@ -82,14 +111,37 @@ import Testing
         DictationToastWindow.saveDictationForTests = { _ in saveCount += 1 }
         defer { DictationToastWindow.saveDictationForTests = nil }
         let window = makeWindow(); window.setFrame(NSRect(x: 200, y: 200, width: 240, height: 36), display: false)
-        window.beginDrag(at: NSPoint(x: 10, y: 10)); window.drag(to: NSPoint(x: 5000, y: 5000)); window.endDrag()
+        window.beginDrag(atScreenPoint: NSPoint(x: 10, y: 10)); window.drag(toScreenPoint: NSPoint(x: 5000, y: 5000)); window.endDrag()
         #expect(saveCount == 1); #expect(FrameStore.loadDictation() == window.frame); window.dismiss()
+    }
+
+    @Test func dragTracksConsecutiveScreenPointerMovement() {
+        let window = makeWindow()
+        window.setFrame(NSRect(x: 200, y: 200, width: 240, height: 36), display: false)
+
+        window.beginDrag(atScreenPoint: NSPoint(x: 300, y: 300))
+        window.drag(toScreenPoint: NSPoint(x: 320, y: 310))
+        #expect(window.frame.origin == NSPoint(x: 220, y: 210))
+        window.drag(toScreenPoint: NSPoint(x: 340, y: 320))
+
+        #expect(window.frame.origin == NSPoint(x: 240, y: 220))
+        window.endDrag()
+        window.dismiss()
+    }
+
+    @Test func readyLabelIsCenteredInTheCapsule() {
+        let window = makeWindow()
+
+        window.show(phase: .ready)
+
+        #expect(abs(window.labelMidXForTests - window.contentMidXForTests) < 0.5)
+        window.dismiss()
     }
 
     @Test func dragAndResetDoNotChangeKeyOrMainState() {
         let window = makeWindow(); window.setFrame(NSRect(x: 200, y: 200, width: 240, height: 36), display: false)
         let keyBefore = window.isKeyWindow; let mainBefore = window.isMainWindow
-        window.beginDrag(at: NSPoint(x: 10, y: 10)); window.drag(to: NSPoint(x: 30, y: 30)); window.endDrag()
+        window.beginDrag(atScreenPoint: NSPoint(x: 10, y: 10)); window.drag(toScreenPoint: NSPoint(x: 30, y: 30)); window.endDrag()
         window.onResetPosition = { window.resetPosition() }; window.performResetButtonAction()
         #expect(window.isKeyWindow == keyBefore); #expect(window.isMainWindow == mainBefore); window.dismiss()
     }
@@ -288,24 +340,13 @@ import Testing
         #expect(DictationPhase.failure("Unavailable").automaticallyDismissesToast)
     }
 
-    @Test("ready feedback fades away after its inactivity timeout")
-    func readyFeedbackFadesAwayAfterInactivity() async {
-        let window = DictationToastWindow(contentRect: .zero,
-                                          styleMask: [.borderless],
-                                          backing: .buffered,
-                                          defer: false)
-
-        window.show(text: "Ready to Dictate", animated: false,
-                    autoDismissAfter: .milliseconds(20))
-        #expect(window.isVisible)
-
-        // The full Swift Testing run schedules all @MainActor suites together;
-        // wait for the AppKit animation to complete instead of assuming a
-        // fixed one-second turn is enough for its completion handler.
-        for _ in 0..<40 where window.isVisible {
-            try? await Task.sleep(for: .milliseconds(100))
-        }
-        #expect(!window.isVisible)
+    @Test("AppDelegate keeps ready feedback visible until dictation starts")
+    func appDelegateKeepsReadyFeedbackVisible() async {
+        let app = AppDelegate()
+        app.updateDictationToastForTests(.ready)
+        try? await Task.sleep(for: .seconds(6))
+        #expect(app.dictationToastForTests.isVisible)
+        app.dictationToastForTests.dismiss()
     }
 
     @Test("new dictation feedback cancels an older ready timeout")

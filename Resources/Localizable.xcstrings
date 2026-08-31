@@ -28,6 +28,15 @@
         "ja": {"stringUnit": {"state": "translated", "value": "音声入力テキストを整理"}}
       }
     },
+    "Choose a local Qwen or Gemma model, then download it here to enable cleanup.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Wähle ein lokales Qwen- oder Gemma-Modell und lade es hier herunter, um die Bereinigung zu aktivieren."}},
+        "es": {"stringUnit": {"state": "translated", "value": "Elige un modelo local de Qwen o Gemma y descárgalo aquí para activar la limpieza."}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Choisissez un modèle Qwen ou Gemma local, puis téléchargez-le ici pour activer le nettoyage."}},
+        "ja": {"stringUnit": {"state": "translated", "value": "ローカルのQwenまたはGemmaモデルを選び、ここでダウンロードしてクリーンアップを有効にします。"}}
+      }
+    },
     "Whisper dictation": {
       "extractionState": "manual",
       "localizations": {
