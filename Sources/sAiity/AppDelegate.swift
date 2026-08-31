@@ -937,7 +937,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .waitingForInputMonitoring, .preparing:
             dictationToast.show(phase: phase)
         case .ready:
-            dictationToast.show(phase: phase)
+            dictationToast.show(phase: phase, autoDismissAfter: .seconds(4.5))
         case .starting, .dictating, .transcribing, .cleaning, .translating, .inserting, .limit:
             dictationToast.show(phase: phase)
         case .recovery, .result, .failure:

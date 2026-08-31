@@ -340,13 +340,12 @@ import Testing
         #expect(DictationPhase.failure("Unavailable").automaticallyDismissesToast)
     }
 
-    @Test("AppDelegate keeps ready feedback visible until dictation starts")
-    func appDelegateKeepsReadyFeedbackVisible() async {
+    @Test("AppDelegate dismisses ready feedback after inactivity")
+    func appDelegateDismissesReadyFeedbackAfterInactivity() async {
         let app = AppDelegate()
         app.updateDictationToastForTests(.ready)
         try? await Task.sleep(for: .seconds(6))
-        #expect(app.dictationToastForTests.isVisible)
-        app.dictationToastForTests.dismiss()
+        #expect(!app.dictationToastForTests.isVisible)
     }
 
     @Test("new dictation feedback cancels an older ready timeout")
