@@ -55,6 +55,15 @@ import Testing
                                                    sourceLanguage: "en-US") == nil)
     }
 
+    @Test("cleanup rejects a translation from a language outside the recognizer allow-list")
+    func translatedRareLanguageResultIsRejected() {
+        let input = "Habari yako rafiki, natumaini uko salama leo."
+        let translated = "Hello my friend, I hope you are safe today."
+        #expect(DictationCleanupValidator.validate(translated,
+                                                   preserving: input,
+                                                   sourceLanguage: "sw-TZ") == nil)
+    }
+
     @Test("cleanup accepts conservative filler and self-correction edits")
     func conservativeSpeechEditIsAccepted() {
         let input = "Um, schedule a meeting with Sara, actually Sarah, tomorrow at 3."
@@ -110,6 +119,16 @@ import Testing
         #expect(prompt.contains("output only"))
         #expect(prompt.contains("tomorrow, actually friday morning"))
         #expect(LocalLLMTranslator.cleanupUserPrompt("hello").lowercased().contains("<transcript>"))
+    }
+
+    @Test("cleanup prompt carries the source language without making it a translation request")
+    func promptCarriesSourceLanguage() {
+        let prompt = LocalLLMTranslator.cleanupUserPrompt(
+            "hallo, ich brauche hilfe",
+            sourceLanguage: "de-DE").lowercased()
+        #expect(prompt.contains("de-de"))
+        #expect(prompt.contains("same language"))
+        #expect(prompt.contains("never translate"))
     }
 
 }

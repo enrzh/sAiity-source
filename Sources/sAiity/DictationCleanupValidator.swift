@@ -81,33 +81,79 @@ enum DictationCleanupValidator {
     }
 
     /// A cleanup model must stay in the language that was spoken. Use the
-    /// transcript's known-language classification first; ASR metadata is only
-    /// a fallback for short or noisy input.
+    /// transcript's language classification first; ASR metadata is only a
+    /// fallback for short, noisy, or long-tail-language input. Do not use the
+    /// translation validator's finite allow-list here: cleanup is expected to
+    /// preserve languages outside NaturalLanguage's supported set too.
     private static func languageWasPreserved(input: String,
                                              output: String,
                                              sourceLanguage: String?) -> Bool {
-        guard let outputLanguage = detectedLanguage(in: output),
-              let outputCode = baseLanguage(outputLanguage),
-              TranslationOutputValidator.recognizableLanguages.contains(outputCode) else {
-            return true
-        }
-
         // ASR language metadata can be stale after a model has been reused for
         // several sessions. The transcript itself is the safer comparison;
         // metadata is intentionally not authoritative here.
-        if let inputLanguage = detectedLanguage(in: input),
-           let inputCode = baseLanguage(inputLanguage),
-           TranslationOutputValidator.recognizableLanguages.contains(inputCode) {
+        let inputCode = detectedLanguage(in: input).flatMap(baseLanguage)
+        let outputCode = detectedLanguage(in: output).flatMap(baseLanguage)
+        if let inputCode, let outputCode {
             return inputCode == outputCode
         }
 
         // Very short or noisy transcripts may not be classified. In that case
         // use the ASR hint, but only after trying the transcript comparison.
-        if let expected = baseLanguage(sourceLanguage),
-           TranslationOutputValidator.recognizableLanguages.contains(expected) {
+        // This also covers a long-tail language that NaturalLanguage cannot
+        // identify while it can still identify an English translation.
+        if let expected = baseLanguage(sourceLanguage), let outputCode {
             return expected == outputCode
         }
+
+        // A script mismatch is useful evidence even when neither language is
+        // in NaturalLanguage's catalogue. It is deliberately one-way: shared
+        // scripts (for example English and Swahili) do not prove equivalence,
+        // so an unknown result remains allowed when no stronger evidence exists.
+        if let inputScript = scriptFamily(in: input),
+           let outputScript = scriptFamily(in: output) {
+            return inputScript == outputScript
+        }
         return true
+    }
+
+    private enum ScriptFamily {
+        case latin, cyrillic, arabic, hebrew, devanagari, bengali, gurmukhi
+        case gujarati, tamil, telugu, kannada, malayalam, thai, lao, khmer
+        case myanmar, hangul, han, japaneseKana, ethiopic, georgian, armenian
+        case greek
+    }
+
+    private static func scriptFamily(in text: String) -> ScriptFamily? {
+        for scalar in text.unicodeScalars {
+            let value = scalar.value
+            switch value {
+            case 0x0041...0x024F, 0x1E00...0x1EFF: return .latin
+            case 0x0370...0x03FF, 0x1F00...0x1FFF: return .greek
+            case 0x0400...0x052F: return .cyrillic
+            case 0x0530...0x058F: return .armenian
+            case 0x10A0...0x10FF, 0x2D00...0x2D2F: return .georgian
+            case 0x0590...0x05FF: return .hebrew
+            case 0x0600...0x06FF, 0x0750...0x077F, 0x08A0...0x08FF: return .arabic
+            case 0x0900...0x097F: return .devanagari
+            case 0x0980...0x09FF: return .bengali
+            case 0x0A00...0x0A7F: return .gurmukhi
+            case 0x0A80...0x0AFF: return .gujarati
+            case 0x0B80...0x0BFF: return .tamil
+            case 0x0C00...0x0C7F: return .telugu
+            case 0x0C80...0x0CFF: return .kannada
+            case 0x0D00...0x0D7F: return .malayalam
+            case 0x0E00...0x0E7F: return .thai
+            case 0x0E80...0x0EFF: return .lao
+            case 0x1000...0x109F, 0xAA60...0xAA7F: return .myanmar
+            case 0x1200...0x137F, 0x1380...0x139F: return .ethiopic
+            case 0x1780...0x17FF: return .khmer
+            case 0x1100...0x11FF, 0xAC00...0xD7AF: return .hangul
+            case 0x3040...0x309F, 0x30A0...0x30FF, 0x31F0...0x31FF: return .japaneseKana
+            case 0x3400...0x4DBF, 0x4E00...0x9FFF, 0xF900...0xFAFF: return .han
+            default: continue
+            }
+        }
+        return nil
     }
 
     private static func detectedLanguage(in text: String) -> String? {

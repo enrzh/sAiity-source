@@ -224,16 +224,25 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
     For short or already-clean text, make no changes. Output only the edited transcript.
     """
 
-    static func cleanupUserPrompt(_ text: String) -> String {
-        """
+    static func cleanupUserPrompt(_ text: String, sourceLanguage: String? = nil) -> String {
+        let languageInstruction: String
+        if let sourceLanguage, !sourceLanguage.isEmpty {
+            let code = sourceLanguage.replacingOccurrences(of: "_", with: "-")
+            let name = englishName(of: code)
+            languageInstruction = "The speaker's language is " + name + " (BCP-47: " + code + "). Preserve that same language exactly. Never translate. The language code is a hint, not a request to translate."
+        } else {
+            languageInstruction = "Infer the speaker's language from the transcript, preserve that same language, and never translate."
+        }
+        return """
         Edit this speech transcript now. Remove fillers, accidental repeated words,
         false starts, and superseded wording from explicit self-corrections. Keep the
-        speaker's original intent and voice. Do not return the noisy input unchanged
-        when one of those repairs is obvious.
+        speaker's original intent and voice.
+        """ + languageInstruction + """
+        Do not return the noisy input unchanged when one of those repairs is obvious.
         Return only the edited transcript, with no label or explanation.
 
         <TRANSCRIPT>
-        \(text)
+        """ + text + """
         </TRANSCRIPT>
         """
     }
@@ -242,7 +251,8 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
         guard llm != nil else { return nil }
         let baseline = DictationCleanupValidator.deterministicCleanup(text)
         guard let raw = await generate(system: Self.cleanupSystemPrompt,
-                                       user: Self.cleanupUserPrompt(baseline)) else {
+                                       user: Self.cleanupUserPrompt(baseline,
+                                                                    sourceLanguage: sourceLanguage)) else {
             return DictationCleanupValidator.validate(baseline,
                                                       preserving: text,
                                                       sourceLanguage: sourceLanguage)
