@@ -80,25 +80,34 @@ enum DictationCleanupValidator {
         return text
     }
 
-    /// A cleanup model must stay in the language that was spoken. Match the
-    /// existing translation guard's minimum length and known-language limits:
-    /// short or long-tail/mixed-language utterances remain governed by the
-    /// existing conservative token checks.
+    /// A cleanup model must stay in the language that was spoken. Use the
+    /// transcript's known-language classification first; ASR metadata is only
+    /// a fallback for short or noisy input.
     private static func languageWasPreserved(input: String,
                                              output: String,
                                              sourceLanguage: String?) -> Bool {
-        guard input.count >= 12,
-              output.count >= 12,
-              let expected = baseLanguage(sourceLanguage),
-              TranslationOutputValidator.recognizableLanguages.contains(expected),
-              let inputLanguage = detectedLanguage(in: input),
-              baseLanguage(inputLanguage) == expected,
-              let outputLanguage = detectedLanguage(in: output),
-              let received = baseLanguage(outputLanguage),
-              TranslationOutputValidator.recognizableLanguages.contains(received) else {
+        guard let outputLanguage = detectedLanguage(in: output),
+              let outputCode = baseLanguage(outputLanguage),
+              TranslationOutputValidator.recognizableLanguages.contains(outputCode) else {
             return true
         }
-        return received == expected
+
+        // ASR language metadata can be stale after a model has been reused for
+        // several sessions. The transcript itself is the safer comparison;
+        // metadata is intentionally not authoritative here.
+        if let inputLanguage = detectedLanguage(in: input),
+           let inputCode = baseLanguage(inputLanguage),
+           TranslationOutputValidator.recognizableLanguages.contains(inputCode) {
+            return inputCode == outputCode
+        }
+
+        // Very short or noisy transcripts may not be classified. In that case
+        // use the ASR hint, but only after trying the transcript comparison.
+        if let expected = baseLanguage(sourceLanguage),
+           TranslationOutputValidator.recognizableLanguages.contains(expected) {
+            return expected == outputCode
+        }
+        return true
     }
 
     private static func detectedLanguage(in text: String) -> String? {

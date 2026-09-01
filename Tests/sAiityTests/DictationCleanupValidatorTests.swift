@@ -39,6 +39,22 @@ import Testing
                                                    sourceLanguage: "en-US") == nil)
     }
 
+    @Test("cleanup rejects a translation even when ASR reports the wrong source language")
+    func translatedResultDoesNotTrustStaleSourceMetadata() {
+        let input = "Please send the revised contract to the legal team before Friday morning."
+        let translated = "Bitte senden Sie den überarbeiteten Vertrag vor Freitagmorgen an das Rechtsteam."
+        #expect(DictationCleanupValidator.validate(translated,
+                                                   preserving: input,
+                                                   sourceLanguage: "de-DE") == nil)
+    }
+
+    @Test("cleanup rejects a translated short utterance")
+    func translatedShortResultIsRejected() {
+        #expect(DictationCleanupValidator.validate("Ruf jetzt an.",
+                                                   preserving: "Call now.",
+                                                   sourceLanguage: "en-US") == nil)
+    }
+
     @Test("cleanup accepts conservative filler and self-correction edits")
     func conservativeSpeechEditIsAccepted() {
         let input = "Um, schedule a meeting with Sara, actually Sarah, tomorrow at 3."
