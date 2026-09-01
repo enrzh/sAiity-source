@@ -238,29 +238,37 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
         """
     }
 
-    func cleanup(_ text: String) async -> String? {
+    func cleanup(_ text: String, sourceLanguage: String? = nil) async -> String? {
         guard llm != nil else { return nil }
         let baseline = DictationCleanupValidator.deterministicCleanup(text)
         guard let raw = await generate(system: Self.cleanupSystemPrompt,
                                        user: Self.cleanupUserPrompt(baseline)) else {
-            return DictationCleanupValidator.validate(baseline, preserving: text)
+            return DictationCleanupValidator.validate(baseline,
+                                                      preserving: text,
+                                                      sourceLanguage: sourceLanguage)
         }
 
         // Apply the guaranteed speech pass after generation too. This covers a
         // small model that copies a filler back into an otherwise valid answer.
         let candidate = DictationCleanupValidator.deterministicCleanup(raw)
-        if let valid = DictationCleanupValidator.validate(candidate, preserving: text) {
+        if let valid = DictationCleanupValidator.validate(candidate,
+                                                          preserving: text,
+                                                          sourceLanguage: sourceLanguage) {
             // If the model ignored the task and copied the raw transcript, use
             // the deterministic result instead of accepting that unchanged copy.
             let copiedRaw = candidate.trimmingCharacters(in: .whitespacesAndNewlines) ==
                 text.trimmingCharacters(in: .whitespacesAndNewlines)
             if copiedRaw,
-               let deterministic = DictationCleanupValidator.validate(baseline, preserving: text) {
+               let deterministic = DictationCleanupValidator.validate(baseline,
+                                                                      preserving: text,
+                                                                      sourceLanguage: sourceLanguage) {
                 return deterministic
             }
             return valid
         }
-        return DictationCleanupValidator.validate(baseline, preserving: text)
+        return DictationCleanupValidator.validate(baseline,
+                                                  preserving: text,
+                                                  sourceLanguage: sourceLanguage)
     }
 
     /// The language name to put in the prompt, always in English.

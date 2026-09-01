@@ -52,8 +52,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DictationCleanupConfiguration(
                 enabled: UserDefaults.standard.object(forKey: "dictationCleanupEnabled") as? Bool ?? true)
         },
-        cleanup: { [weak self] text in
-            await self?.cleanupDictatedText(text)
+        cleanup: { [weak self] text, sourceLanguage in
+            await self?.cleanupDictatedText(text, sourceLanguage: sourceLanguage)
         },
         dictationUsesWhisper: { DictationRecognizer.selected == .whisper },
         transcribeWhisper: { samples, locale in
@@ -86,18 +86,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 #endif
 
-    private func cleanupDictatedText(_ text: String) async -> String? {
+    private func cleanupDictatedText(_ text: String, sourceLanguage: String) async -> String? {
         guard LocalModel.isCleanupCompatible(LocalModel.selected) else { return nil }
         let translator = LocalLLMTranslator()
-        let language = locale.identifier(.bcp47)
         return await Self.performDictationCleanup(
             text,
             prepare: {
-                try await translator.prepare(from: language, to: language) { message in
+                try await translator.prepare(from: sourceLanguage, to: sourceLanguage) { message in
                     NSLog("sAiity cleanup progress: \(message)")
                 }
             },
-            cleanup: { await translator.cleanup($0) },
+            cleanup: { await translator.cleanup($0, sourceLanguage: sourceLanguage) },
             stop: { await translator.stop() })
     }
 

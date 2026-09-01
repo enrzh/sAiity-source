@@ -393,7 +393,32 @@ import Testing
             inserter: inserter,
             captionsActive: { false },
             cleanupConfiguration: { DictationCleanupConfiguration(enabled: true) },
-            cleanup: { _ in "Send the project report to another address on 2026-08-31 today." })
+            cleanup: { _, _ in "Send the project report to another address on 2026-08-31 today." })
+
+        controller.press()
+        await controller.waitForWorkForTests()
+        controller.release()
+        await controller.waitForWorkForTests()
+
+        #expect(inserter.inserted == [input])
+    }
+
+    @Test("cleanup never translates when dictation translation is disabled")
+    func cleanupCannotReplaceTranscriptWithAnotherLanguage() async {
+        let input = "Please send the revised contract to the legal team before Friday morning."
+        let backend = FakeBackend(log: EventLog())
+        backend.authoritativeResult = input
+        let inserter = FakeInserter()
+        let controller = DictationController(
+            makeBackend: { backend },
+            capture: FakeCapture(log: EventLog()),
+            inserter: inserter,
+            captionsActive: { false },
+            translationConfiguration: { .disabled },
+            cleanupConfiguration: { DictationCleanupConfiguration(enabled: true) },
+            cleanup: { _, _ in
+                "Bitte senden Sie den überarbeiteten Vertrag vor Freitagmorgen an das Rechtsteam."
+            })
 
         controller.press()
         await controller.waitForWorkForTests()

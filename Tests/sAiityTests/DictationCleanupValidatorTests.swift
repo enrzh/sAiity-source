@@ -30,6 +30,15 @@ import Testing
             preserving: input) == nil)
     }
 
+    @Test("cleanup rejects a translated result and keeps the spoken language")
+    func translatedResultIsRejected() {
+        let input = "Please send the revised contract to the legal team before Friday morning."
+        let translated = "Bitte senden Sie den überarbeiteten Vertrag vor Freitagmorgen an das Rechtsteam."
+        #expect(DictationCleanupValidator.validate(translated,
+                                                   preserving: input,
+                                                   sourceLanguage: "en-US") == nil)
+    }
+
     @Test("cleanup accepts conservative filler and self-correction edits")
     func conservativeSpeechEditIsAccepted() {
         let input = "Um, schedule a meeting with Sara, actually Sarah, tomorrow at 3."

@@ -1,4 +1,5 @@
 import Foundation
+import NaturalLanguage
 
 enum DictationCleanupValidator {
     /// Applies the speech repairs that should never depend on a small local
@@ -47,7 +48,9 @@ enum DictationCleanupValidator {
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    static func validate(_ value: String, preserving input: String? = nil) -> String? {
+    static func validate(_ value: String,
+                         preserving input: String? = nil,
+                         sourceLanguage: String? = nil) -> String? {
         var text = value.trimmingCharacters(in: .whitespacesAndNewlines.union(.controlCharacters))
         guard !text.isEmpty, !text.contains("```") else { return nil }
         if let input, !isWrappedInQuotes(input), isWrappedInQuotes(text) {
@@ -70,8 +73,46 @@ enum DictationCleanupValidator {
             guard protectedTokens(in: input).allSatisfy({ text.range(of: $0, options: .caseInsensitive) != nil }) else {
                 return nil
             }
+            guard languageWasPreserved(input: input, output: text, sourceLanguage: sourceLanguage) else {
+                return nil
+            }
         }
         return text
+    }
+
+    /// A cleanup model must stay in the language that was spoken. Match the
+    /// existing translation guard's minimum length and known-language limits:
+    /// short or long-tail/mixed-language utterances remain governed by the
+    /// existing conservative token checks.
+    private static func languageWasPreserved(input: String,
+                                             output: String,
+                                             sourceLanguage: String?) -> Bool {
+        guard input.count >= 12,
+              output.count >= 12,
+              let expected = baseLanguage(sourceLanguage),
+              TranslationOutputValidator.recognizableLanguages.contains(expected),
+              let inputLanguage = detectedLanguage(in: input),
+              baseLanguage(inputLanguage) == expected,
+              let outputLanguage = detectedLanguage(in: output),
+              let received = baseLanguage(outputLanguage),
+              TranslationOutputValidator.recognizableLanguages.contains(received) else {
+            return true
+        }
+        return received == expected
+    }
+
+    private static func detectedLanguage(in text: String) -> String? {
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(text)
+        return recognizer.dominantLanguage?.rawValue
+    }
+
+    private static func baseLanguage(_ value: String?) -> String? {
+        guard let value else { return nil }
+        return value.replacingOccurrences(of: "_", with: "-")
+            .split(separator: "-")
+            .first?
+            .lowercased()
     }
 
     private static func replace(_ value: String, pattern: String, with template: String) -> String {

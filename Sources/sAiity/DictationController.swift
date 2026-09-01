@@ -29,7 +29,7 @@ final class DictationController {
     typealias BackendFactory = () -> TranscriptionBackend
     typealias TranslationConfigurationProvider = () -> DictationTranslationConfiguration
     typealias TranslationHandler = (String, String, String) async -> String?
-    typealias CleanupHandler = (String) async -> String?
+    typealias CleanupHandler = (String, String) async -> String?
     typealias WhisperTranscriptionHandler = ([[Float]], Locale) async throws -> String?
     typealias AudioFormatFactory = () -> AVAudioFormat?
     typealias WhisperReadinessProvider = () -> Bool
@@ -88,7 +88,7 @@ final class DictationController {
          translationConfiguration: @escaping TranslationConfigurationProvider = { .disabled },
         translate: @escaping TranslationHandler = { _, _, _ in nil },
          cleanupConfiguration: @escaping () -> DictationCleanupConfiguration = { .disabled },
-         cleanup: @escaping CleanupHandler = { _ in nil },
+         cleanup: @escaping CleanupHandler = { _, _ in nil },
          dictationUsesWhisper: @escaping () -> Bool = { false },
          transcribeWhisper: @escaping WhisperTranscriptionHandler = { _, _ in nil },
          audioFormatFactory: @escaping AudioFormatFactory = { AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1) },
@@ -116,7 +116,7 @@ final class DictationController {
          translationConfiguration: @escaping TranslationConfigurationProvider = { .disabled },
         translate: @escaping TranslationHandler = { _, _, _ in nil },
          cleanupConfiguration: @escaping () -> DictationCleanupConfiguration = { .disabled },
-         cleanup: @escaping CleanupHandler = { _ in nil },
+         cleanup: @escaping CleanupHandler = { _, _ in nil },
          dictationUsesWhisper: @escaping () -> Bool = { false },
          transcribeWhisper: @escaping WhisperTranscriptionHandler = { _, _ in nil },
          audioFormatFactory: @escaping AudioFormatFactory = { AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1) },
@@ -412,8 +412,10 @@ final class DictationController {
         var translationFailed = false
         if cleanupConfiguration().enabled {
             phase = .cleaning
-            if let value = await cleanup(text),
-               let valid = DictationCleanupValidator.validate(value, preserving: text) {
+            if let value = await cleanup(text, sourceLanguage),
+               let valid = DictationCleanupValidator.validate(value,
+                                                              preserving: text,
+                                                              sourceLanguage: sourceLanguage) {
                 output = valid
                 cleaned = true
             }
