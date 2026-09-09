@@ -24,6 +24,25 @@ RELEASE_REPO="enrzh/sAiity"
 RELEASE_ASSET_URL="https://github.com/$RELEASE_REPO/releases/download/v$VERSION/sAiity-$VERSION.zip"
 [ -f "$KEY" ] || { echo "FATAL: $KEY missing — generate with: openssl genpkey -algorithm ED25519 -out $KEY"; exit 1; }
 
+# Sparkle's signer expects its base64-encoded Ed25519 seed, while the checked
+# out private key is kept as a PKCS#8 PEM. Apple's LibreSSL cannot sign
+# Ed25519, so use Sparkle's own signer and convert only into a temporary file.
+SPARKLE_SIGNER="${SPARKLE_SIGNER:-.build/artifacts/sparkle/Sparkle/bin/sign_update}"
+[ -x "$SPARKLE_SIGNER" ] || {
+    echo "FATAL: Sparkle signer missing at $SPARKLE_SIGNER; resolve Sparkle first." >&2
+    exit 1
+}
+SPARKLE_KEY="$KEY"
+SPARKLE_KEY_TEMP=""
+if grep -q "BEGIN PRIVATE KEY" "$KEY"; then
+    SPARKLE_KEY_TEMP=$(mktemp "${TMPDIR:-/tmp}/saiity-sparkle-key.XXXXXX")
+    awk '/BEGIN PRIVATE KEY/{inside=1; next} /END PRIVATE KEY/{inside=0} inside {print}' "$KEY" \
+        | tr -d '\r\n' | base64 -D | tail -c 32 | base64 > "$SPARKLE_KEY_TEMP"
+    SPARKLE_KEY="$SPARKLE_KEY_TEMP"
+fi
+cleanup_sparkle_key() { [ -z "$SPARKLE_KEY_TEMP" ] || rm -f "$SPARKLE_KEY_TEMP"; }
+trap cleanup_sparkle_key EXIT
+
 if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
     echo "FATAL: version must be valid SemVer, for example 2.4.0 or 2.4.0-rc.1" >&2
     exit 1
@@ -51,7 +70,7 @@ ZIP="build/sAiity.zip"
 [ -f "$ZIP" ] || { echo "FATAL: $ZIP missing after notarize"; exit 1; }
 
 # Sparkle's edSignature is a raw Ed25519 signature of the archive, base64.
-SIG=$(openssl pkeyutl -sign -inkey "$KEY" -rawin -in "$ZIP" | base64)
+SIG=$("$SPARKLE_SIGNER" -p --ed-key-file "$SPARKLE_KEY" "$ZIP")
 LEN=$(stat -f%z "$ZIP")
 DATE=$(date -R)
 
