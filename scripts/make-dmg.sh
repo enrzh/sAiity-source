@@ -58,7 +58,9 @@ SetFile -a C "$MOUNT" 2>/dev/null || true
 # needs Automation permission, and a build machine that has not granted it still
 # has to produce a working image. The Applications symlink is what actually
 # makes the image installable; the arrangement is presentation.
-osascript <<APPLESCRIPT >/dev/null 2>&1 || echo "note: Finder layout skipped (Automation permission); the image still works"
+# Finder can wait indefinitely when Automation permission has not been granted.
+# Bound that presentation-only step so the installable image is still shipped.
+if ! perl -e 'alarm 20; exec @ARGV' /usr/bin/osascript <<APPLESCRIPT >/dev/null 2>&1
 tell application "Finder"
     tell disk "$VOLNAME"
         open
@@ -81,6 +83,9 @@ tell application "Finder"
     end tell
 end tell
 APPLESCRIPT
+then
+    echo "note: Finder layout skipped (Automation permission or timeout); the image still works"
+fi
 
 sync
 hdiutil detach "$MOUNT" >/dev/null
