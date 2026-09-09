@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 /// A single-file download with real byte-level progress, resume for
 /// interrupted transfers, and a replace that cannot leave the user with
@@ -32,13 +33,21 @@ enum FileDownloader {
     /// minutes later as an opaque llama.cpp load error.
     static let ggufMagic = Data("GGUF".utf8)
 
+    #if SAIITY_TEST_HOOKS
+    /// Tests replace the transport with a URLProtocol without changing the
+    /// production downloader's URLSession behaviour.
+    static var testSessionConfiguration: (() -> URLSessionConfiguration)?
+    #endif
+
     static func download(from url: URL,
                          to destination: URL,
                          expectedBytes: Int64? = nil,
                          requireMagic: Data? = nil,
+                         expectedSHA256: String? = nil,
                          progress: @escaping ProgressSink) async throws {
         try await attempt(from: url, to: destination, expectedBytes: expectedBytes,
-                          requireMagic: requireMagic, retried: false,
+                          requireMagic: requireMagic, expectedSHA256: expectedSHA256,
+                          retried: false,
                           progress: progress)
     }
 
@@ -46,6 +55,7 @@ enum FileDownloader {
                                 to destination: URL,
                                 expectedBytes: Int64?,
                                 requireMagic: Data?,
+                                expectedSHA256: String?,
                                 retried: Bool,
                                 progress: @escaping ProgressSink) async throws {
         let fm = FileManager.default
@@ -77,7 +87,12 @@ enum FileDownloader {
             fm.createFile(atPath: part.path, contents: nil)
         }
 
-        let session = URLSession(configuration: .default)
+        #if SAIITY_TEST_HOOKS
+        let configuration = testSessionConfiguration?() ?? .default
+        #else
+        let configuration = URLSessionConfiguration.default
+        #endif
+        let session = URLSession(configuration: configuration)
         defer { session.finishTasksAndInvalidate() }
 
         let writer = RangeWriter(part: part, marker: marker, resumeOffset: offset,
@@ -96,7 +111,8 @@ enum FileDownloader {
             }
             return try await attempt(from: url, to: destination,
                                      expectedBytes: expectedBytes,
-                                     requireMagic: requireMagic, retried: true,
+                                     requireMagic: requireMagic,
+                                     expectedSHA256: expectedSHA256, retried: true,
                                      progress: progress)
         } catch RangeWriter.Failure.io(let underlying) {
             // A local write failure (disk full, most likely) does not make the
@@ -118,7 +134,13 @@ enum FileDownloader {
         // install and then read as a complete model everywhere isDownloaded
         // checks only existence.
         let size = (try? fm.attributesOfItem(atPath: part.path)[.size]) as? Int64 ?? 0
-        if let want = writer.knownTotal ?? expectedBytes, want > 0, size != want {
+        if let want = expectedBytes, want > 0, size != want {
+            try? fm.removeItem(at: part)
+            try? fm.removeItem(at: marker)
+            throw TranslationEngineError.notAvailable(
+                String(localized: "Download of \(destination.lastPathComponent) ended incomplete. Try again."))
+        }
+        if let want = writer.knownTotal, want > 0, size != want {
             try? fm.removeItem(at: part)
             try? fm.removeItem(at: marker)
             throw TranslationEngineError.notAvailable(
@@ -137,6 +159,16 @@ enum FileDownloader {
                     String(localized: "\(destination.lastPathComponent) is not a GGUF model file. Use the direct download link from the model page."))
             }
         }
+        if let expectedSHA256 {
+            let expected = expectedSHA256.trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            guard let actual = try? sha256(of: part), actual == expected else {
+                try? fm.removeItem(at: part)
+                try? fm.removeItem(at: marker)
+                throw TranslationEngineError.notAvailable(
+                    String(localized: "\(destination.lastPathComponent) failed its integrity check. Try again."))
+            }
+        }
 
         do {
             if fm.fileExists(atPath: destination.path) {
@@ -153,6 +185,16 @@ enum FileDownloader {
         }
         try? fm.removeItem(at: marker)
         progress(DownloadProgress(fraction: 1, note: String(localized: "Done.")))
+    }
+
+    private static func sha256(of file: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: file)
+        defer { try? handle.close() }
+        var digest = SHA256()
+        while let data = try handle.read(upToCount: 4 * 1024 * 1024), !data.isEmpty {
+            digest.update(data: data)
+        }
+        return digest.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     private static func validatorMarker(for part: URL) -> URL {

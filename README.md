@@ -71,10 +71,18 @@ the application identity, not to a bare SwiftPM executable.
 
 The release test command is:
 
-    swift test -c release -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS
+    DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}" xcrun swift test -c release -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS
 
 A plain debug test run is not the supported verification path on this
 toolchain.
+
+The build scripts use `/Applications/Xcode.app/Contents/Developer` through
+`DEVELOPER_DIR` by default and do not change global `xcode-select`. Override
+that variable when another installed Xcode is required.
+
+Model downloads check the available volume capacity before starting. Downloads
+are staged and can be cancelled or resumed from Settings; model bytes are not
+included in the application bundle.
 
 ## Layout
 
@@ -91,7 +99,18 @@ toolchain.
 
 ## Release
 
-Download the current build from
-[GitHub Releases](https://github.com/enrzh/sAiity/releases).
+The current signed and notarized release is [sAiity 2.3.4](https://github.com/enrzh/sAiity/releases/tag/v2.3.4).
+
+- [Download the DMG](https://github.com/enrzh/sAiity/releases/download/v2.3.4/sAiity-2.3.4.dmg)
+- [Download the ZIP](https://github.com/enrzh/sAiity/releases/download/v2.3.4/sAiity-2.3.4.zip)
+- [Sparkle update feed](https://enrzh.github.io/sAiity/appcast.xml)
+
+This release improves dictation responsiveness and cleanup, makes translation
+fallbacks more predictable, adds waveform feedback, and keeps subtitle history
+scrollable with transcript export.
+
+DMG SHA-256: `2f64caec3fec3ea7470d30a588f08d18854994552fb31cc839926ddcec75ab15`
+
+ZIP SHA-256: `c8e9972cff2c7d86f891747c4229c08c00da491a1eb88104aa86e6b37222e73c`
 
 sAiity is part of the [aiity](https://aiity.de) family.

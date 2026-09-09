@@ -48,6 +48,17 @@ struct ModelRegistryTests {
         #expect(ids.filter { $0.hasPrefix("mt.llm.") }.count == LocalModel.all.count)
     }
 
+    @Test("Translation assets keep advanced models out of the primary group")
+    func translationAssetsHaveClearTiers() {
+        let madlad = TranslationEngine.madlad.assetDescriptors
+        let specialist = TranslationEngine.hyMT2.assetDescriptors
+        let local = TranslationEngine.qwen.assetDescriptors
+
+        #expect(madlad.allSatisfy { !$0.isAdvanced })
+        #expect(specialist.allSatisfy { $0.isAdvanced })
+        #expect(local.allSatisfy { $0.isAdvanced })
+    }
+
     @Test("Everything the app downloads can be downloaded and deleted from the UI")
     func ourAssetsAreFullyManageable() {
         let imported = Set(LocalModel.custom.compactMap {

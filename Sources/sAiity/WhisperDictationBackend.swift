@@ -102,8 +102,16 @@ struct WhisperDictationBackend {
     }
     func removeModel(_ c: ModelChoice, under root: URL? = nil) async throws { let root = root ?? self.root; let mutex = await Self.mutexes.mutex(for: "\(root.path):\(c.identifier)"); try await mutex.run { for u in [Self.folder(c, root), root.appendingPathComponent("\(c.folderName).partial")] { do { try FileManager.default.removeItem(at: u) } catch let e as CocoaError where e.code == .fileNoSuchFile { } } } }
     func transcribe(samples: [[Float]], locale: Locale, model c: ModelChoice = model) async throws -> String { let o = try Self.decodingOptions(for: locale); let mutex = await Self.mutexes.mutex(for: "\(root.path):\(c.identifier)"); return try await mutex.run { try await self.transcribeHook(c.identifier, Self.folder(c, self.root), samples, o) } }
-    private static func realDownload(_ id: String, _ d: URL, _ p: @escaping @Sendable (Progress) -> Void) async throws -> URL { try await WhisperKit.download(variant: id, downloadBase: d, useBackgroundSession: false, from: "argmaxinc/whisperkit-coreml", token: nil, endpoint: Constants.defaultRemoteEndpoint, progressCallback: p) }
-    private static func realPrepare(_ id: String, _ f: URL) async throws {
+    private static let realDownload: Download = { id, d, p in
+        try await WhisperKit.download(variant: id,
+                                      downloadBase: d,
+                                      useBackgroundSession: false,
+                                      from: "argmaxinc/whisperkit-coreml",
+                                      token: nil,
+                                      endpoint: Constants.defaultRemoteEndpoint,
+                                      progressCallback: p)
+    }
+    private static let realPrepare: Prepare = { id, f in
         let w = try await WhisperKit(model: id, modelRepo: nil, modelFolder: f.path, prewarm: false, load: false, download: false)
         do {
             try await w.setupModels(model: id, modelRepo: nil, modelFolder: f.path, download: false)
@@ -114,7 +122,7 @@ struct WhisperDictationBackend {
         }
         await w.unloadModels()
     }
-    private static func realTranscribe(_ id: String, _ f: URL, _ s: [[Float]], _ o: DecodingOptions) async throws -> String {
+    private static let realTranscribe: Transcription = { id, f, s, o in
         let w = try await WhisperKit(model: id, modelRepo: nil, modelFolder: f.path, prewarm: false, load: false, download: false)
         do {
             try await w.setupModels(model: id, modelRepo: nil, modelFolder: f.path, download: false)

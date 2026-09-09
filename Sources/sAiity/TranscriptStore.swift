@@ -108,25 +108,52 @@ actor TranscriptStore {
     /// so a two-hour meeting costs nothing per line.
     func append(_ chunk: TranscriptChunk, locale: String,
                 translation: String?, translateTo: String?,
-                turn: Bool = false) {
+                turn: Bool = false) throws {
         guard let handle else { return }
         let seg = Segment(i: index, t0: chunk.start, t1: chunk.end,
                           text: chunk.text, loc: locale,
                           tr: translation, trLoc: translateTo,
                           words: chunk.words.isEmpty ? nil : chunk.words,
                           turn: turn ? true : nil)
-        guard var data = try? JSONEncoder().encode(seg) else { return }
+        var data = try JSONEncoder().encode(seg)
         data.append(0x0A)
-        try? handle.write(contentsOf: data)
+        do {
+            try handle.write(contentsOf: data)
+        } catch {
+            failRecording()
+            throw error
+        }
         index += 1
         meta?.lineCount = index
         // Keep the session listing roughly honest even if the app never gets a
         // clean shutdown; a full rewrite per line would be wasteful.
-        if index % 20 == 0 { try? writeMeta() }
+        if index % 20 == 0 {
+            do {
+                try writeMeta()
+            } catch {
+                failRecording()
+                throw error
+            }
+        }
     }
 
     func end() throws {
-        guard handle != nil else { return }
+        guard let activeHandle = handle else { return }
+        handle = nil
+        var failure: Error?
+        do { try activeHandle.close() } catch { failure = error }
+        handle = nil
+        meta?.endedAt = Date()
+        do { try writeMeta() } catch { failure = failure ?? error }
+        dir = nil
+        meta = nil
+        if let failure { throw failure }
+    }
+
+    /// A failed append must not leave the UI believing recording continues.
+    /// Close the handle and finish the metadata best-effort so the lines that
+    /// did reach disk remain a readable, bounded session.
+    private func failRecording() {
         try? handle?.close()
         handle = nil
         meta?.endedAt = Date()

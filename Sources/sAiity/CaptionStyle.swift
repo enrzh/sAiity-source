@@ -61,11 +61,49 @@ struct CaptionStyle: Equatable, Codable, Sendable {
     /// How much space to leave between the bubble and the screen edge. Applies
     /// to the automatic width and to how far the bubble may be pushed.
     var screenMargin: Double = 24
+    /// Maximum height of the bubble's scrollable subtitle history, in points.
+    var maxHeight: Double = 260
 
     var showTranslation: Bool = true
     var hidden: Bool = false           // hide the bubble without stopping capture
 
     static let key = "captionStyle"
+
+    private enum CodingKeys: String, CodingKey {
+        case original, translation, lineGap, cornerRadius, glassStyle, tintHex
+        case widthFraction, screenMargin, maxHeight, showTranslation, hidden
+    }
+
+    init() {
+        original = .original
+        translation = .translation
+        lineGap = 6
+        cornerRadius = 22
+        glassStyle = 0
+        tintHex = ""
+        widthFraction = 0.62
+        screenMargin = 24
+        maxHeight = 260
+        showTranslation = true
+        hidden = false
+    }
+
+    /// Decode older preferences without discarding the complete style just
+    /// because the height setting did not exist in that version.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        original = try c.decodeIfPresent(TextStyle.self, forKey: .original) ?? .original
+        translation = try c.decodeIfPresent(TextStyle.self, forKey: .translation) ?? .translation
+        lineGap = try c.decodeIfPresent(Double.self, forKey: .lineGap) ?? 6
+        cornerRadius = try c.decodeIfPresent(Double.self, forKey: .cornerRadius) ?? 22
+        glassStyle = try c.decodeIfPresent(Int.self, forKey: .glassStyle) ?? 0
+        tintHex = try c.decodeIfPresent(String.self, forKey: .tintHex) ?? ""
+        widthFraction = try c.decodeIfPresent(Double.self, forKey: .widthFraction) ?? 0.62
+        screenMargin = try c.decodeIfPresent(Double.self, forKey: .screenMargin) ?? 24
+        maxHeight = try c.decodeIfPresent(Double.self, forKey: .maxHeight) ?? 260
+        showTranslation = try c.decodeIfPresent(Bool.self, forKey: .showTranslation) ?? true
+        hidden = try c.decodeIfPresent(Bool.self, forKey: .hidden) ?? false
+    }
 
     static var current: CaptionStyle {
         get {

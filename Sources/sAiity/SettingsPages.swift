@@ -14,13 +14,18 @@ import SwiftUI
 /// honestly: they can be measured but no app can delete them.
 struct ModelsView: View {
     @Bindable var state: AppState
+    @State private var showAdvancedTranslation = false
 
     /// Recommended first, otherwise registry order. The Recognition section
     /// used to open with the fast Nemotron tier — the ~640 MB variant whose own
     /// description warns it costs roughly double the encoder work — above the
     /// balanced one that is actually the right first download.
-    private func assets(_ family: ModelAsset.Family) -> [AssetStatus] {
-        state.assets.filter { $0.asset.family == family }
+    private func assets(_ family: ModelAsset.Family, advanced: Bool? = nil) -> [AssetStatus] {
+        state.assets.filter {
+            guard $0.asset.family == family else { return false }
+            guard let advanced else { return true }
+            return $0.asset.isAdvanced == advanced
+        }
             .enumerated()
             .sorted { a, b in
                 a.element.asset.recommended == b.element.asset.recommended
@@ -37,12 +42,21 @@ struct ModelsView: View {
             }
 
             Section {
-                ForEach(assets(.translation)) { assetRow($0) }
+                ForEach(assets(.translation, advanced: false)) { assetRow($0) }
             } header: {
                 Text("Translation")
             } footer: {
-                Text("Only one translator runs at a time — pick it under Captions.")
+                Text("MADLAD is the recommended local translator.")
                     .font(.caption)
+            }
+
+            DisclosureGroup(isExpanded: $showAdvancedTranslation) {
+                ForEach(assets(.translation, advanced: true)) { assetRow($0) }
+                Text("Optional specialist and local LLM models.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } label: {
+                Text("Advanced translation")
             }
 
             Section {
@@ -58,12 +72,12 @@ struct ModelsView: View {
                     Spacer()
                     Button("Remove All…", role: .destructive) { confirmRemoveAll() }
                         .controlSize(.small)
-                        .disabled(ModelRegistry.ownedTotalBytes() == 0)
+                        .disabled(state.ownedBytes == 0)
                 }
             } header: {
                 Text("Storage")
             } footer: {
-                Text("Everything runs on this Mac, so the models live here rather than on a server. Removing them all frees the space; anything you select again is downloaded once more.")
+                Text("Models stay on this Mac. Remove them to reclaim space.")
                     .font(.caption)
             }
 
@@ -164,7 +178,9 @@ struct DictationView: View {
     @State private var accessibilityGranted = AXIsProcessTrusted()
 
     internal static func cleanupAssets(from assets: [AssetStatus]) -> [AssetStatus] {
+        let selectedFile = LocalModel.selected?.file
         let candidateIDs = Set(LocalModel.all
+            .filter { !$0.isLegacy || $0.file == selectedFile }
             .filter { $0.isCleanupCandidate() }
             .map { AssetID.llm(file: $0.file) })
         return assets.filter { candidateIDs.contains($0.asset.id) }
@@ -262,7 +278,7 @@ struct DictationView: View {
             }
 
             Section("Dictation cleanup") {
-                Text("Choose a local Qwen or Gemma model, then download it here to enable cleanup.")
+                Text("Choose a local model to clean up dictated text.")
                     .font(.caption).foregroundStyle(.secondary)
                 ForEach(Self.cleanupAssets(from: state.assets)) { status in
                     cleanupModelRow(status)
@@ -552,6 +568,7 @@ private struct DictationShortcutRecorder: NSViewRepresentable {
 /// across four tabs, which made a simple app feel like a control panel.
 struct CaptionsView: View {
     @Bindable var state: AppState
+    @State private var showAdvancedTranslation = false
 
     var body: some View {
         Form {
@@ -637,7 +654,7 @@ struct CaptionsView: View {
                     slider("Pause length", $state.speechGapHoldMs,
                            Double(SpeechGap.range.lowerBound)...Double(SpeechGap.range.upperBound),
                            "%.0f ms")
-                    Text("Clause pauses in ordinary speech run 200–500 ms and the pause at the end of a sentence is longer, so \(SpeechGap.defaultHoldMs) ms is the measured default. Shorter splits sentences at commas and hands the translator fragments; longer delays every translation and eventually lets the length cap cut one mid-word.")
+                    Text("The default is \(SpeechGap.defaultHoldMs) ms. Shorter values split on breaths; longer values delay translation.")
                         .font(.caption).foregroundStyle(.secondary)
                     // The slider applies live to the running session; this is
                     // the feedback loop it never had. Tuning used to mean
@@ -681,16 +698,29 @@ struct CaptionsView: View {
                     }
                 }
                 if state.translateTo != nil {
-                    Picker("Translated by", selection: $state.translationEngine) {
-                        ForEach(TranslationEngine.allCases, id: \.self) { e in
-                            Text(e.displayName).tag(Optional(e))
+                    Picker("Translation engine", selection: Binding(
+                        get: { state.translationEngine ?? .recommended },
+                        set: { state.translationEngine = $0 })) {
+                        ForEach(TranslationEngine.primaryCases, id: \.self) { e in
+                            Text("\(e.displayName) · recommended").tag(e)
+                        }
+                        if showAdvancedTranslation || state.translationEngine?.isAdvanced == true {
+                            Section("Advanced") {
+                                ForEach(TranslationEngine.advancedCases, id: \.self) { e in
+                                    Text("\(e.displayName) · experimental").tag(e)
+                                }
+                            }
                         }
                     }
-                    .pickerStyle(.segmented)
+                    .pickerStyle(.menu)
+                    if !showAdvancedTranslation && state.translationEngine?.isAdvanced != true {
+                        Button("Show advanced engines…") { showAdvancedTranslation = true }
+                            .controlSize(.small)
+                    }
                     if let te = state.translationEngine {
                         Text(te.summary).font(.caption).foregroundStyle(.secondary)
                     } else {
-                        Label("No translator chosen yet. \(TranslationEngine.recommended.displayName) is the one to start with: the broad-coverage default and a measured fast path. Download it under Models.",
+                        Label("MADLAD is the recommended local translator. Download it under Models.",
                               systemImage: "sparkles")
                             .font(.caption).foregroundStyle(.secondary)
                     }
@@ -703,7 +733,7 @@ struct CaptionsView: View {
                     }
                     if state.translationEngine == .qwen {
                         HStack {
-                            Button("Choose model…") { state.showLocalModels = true }
+                            Button("Choose experimental model…") { state.showLocalModels = true }
                                 .controlSize(.small)
                             if let m = state.llmModel {
                                 // Say whether the bytes are here. The advertised
@@ -726,8 +756,8 @@ struct CaptionsView: View {
                     }
                     .pickerStyle(.segmented)
                     Text(state.translationTiming == .live
-                         ? "Retranslates the sentence as it grows, so a rough translation appears within a couple of seconds and settles when the sentence closes. Noticeably more translator work — with a local LLM every update takes a second or more, so this suits MADLAD."
-                         : "One translation per sentence, when the pause or the punctuation closes it. Best quality for the least work — the translator always sees the whole thought.")
+                         ? "Shows a rough translation while the sentence grows. Uses more model work."
+                         : "Translates once when the sentence closes. Best quality with the least work.")
                         .font(.caption).foregroundStyle(.secondary)
                     if let te = state.translationEngine {
                         Text("Licence: \(te.licence)")
@@ -791,6 +821,9 @@ struct CaptionsView: View {
             slider("Corner radius", $state.style.cornerRadius, 0...40, "%.0f")
             slider("Width", $state.style.widthFraction, 0.3...1.0, "%.0f%%", scale: 100)
             slider("Gap to screen edge", $state.style.screenMargin, 0...160, "%.0f")
+            slider("Maximum height", $state.style.maxHeight, 120...720, "%.0f")
+            Text("Older subtitle rows stay inside the bubble and scroll when this limit is reached.")
+                .font(.caption).foregroundStyle(.secondary)
             Text("Width is a setting rather than something measured from the text — that is what stops the bubble resizing and re-centring on every line. Drag an edge to override it; a dragged width may go right to the screen edge.")
                 .font(.caption).foregroundStyle(.secondary)
         } header: {
@@ -804,6 +837,7 @@ struct CaptionsView: View {
                     state.style.cornerRadius = d.cornerRadius
                     state.style.widthFraction = d.widthFraction
                     state.style.screenMargin = d.screenMargin
+                    state.style.maxHeight = d.maxHeight
                     state.style.hidden = d.hidden
                     state.captionClickThrough = true
                     NotificationCenter.default.post(name: .saiityResetBubble, object: nil)
@@ -1517,22 +1551,22 @@ private struct TranscriptViewerSheet: View {
 
 // MARK: - Qwen models
 
-/// Pick which Qwen build does the translating.
+/// Pick which experimental local model does translation or cleanup.
 ///
-/// The 0.8B is deliberately shown with a warning rather than hidden: it is the
-/// fastest option and people will reach for it, but a sub-billion instruct model
-/// invents and drops meaning badly enough that a wrong translation is worse than
-/// none. Saying so is more useful than quietly omitting it.
 struct LocalModelsView: View {
     @Bindable var state: AppState
     @Environment(\.dismiss) private var dismiss
 
+    private var visibleModels: [LocalModel] {
+        LocalModel.all.filter { !$0.isLegacy || $0 == state.llmModel }
+    }
+
     var body: some View {
-        SheetShell(title: "Local LLM models",
+        SheetShell(title: "Experimental local models",
                    subtitle: "Qwen, Gemma, or your own GGUF · one is used at a time",
                    width: 520, height: 560) {
             List {
-                ForEach(LocalModel.all) { m in
+                ForEach(visibleModels) { m in
                     HStack(alignment: .top) {
                         // The radio is a Button so Tab reaches it and VoiceOver
                         // announces it as selectable, with the selection trait.

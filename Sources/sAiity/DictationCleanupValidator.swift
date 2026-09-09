@@ -5,14 +5,12 @@ enum DictationCleanupValidator {
     /// Applies the speech repairs that should never depend on a small local
     /// model following an instruction. Keep this deliberately conservative:
     /// semantic rewrites still belong to the cleanup model.
-    static func deterministicCleanup(_ value: String) -> String {
-        var text = value
-            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        text = replace(text,
-                       pattern: #"(?i)(?<![\p{L}\p{N}])(?:um+|uh+|erm?|you know)(?![\p{L}\p{N}])[,;:]?\s*"#,
-                       with: "")
+    static func deterministicCleanup(_ value: String, sourceLanguage: String? = nil) -> String {
+        var text = normalizeWhitespace(value)
+        let language = baseLanguage(sourceLanguage) ?? detectedLanguage(in: text).flatMap(baseLanguage)
+        text = applySpokenFormatting(text, language: language)
+        text = normalizeWhitespace(text)
+        text = removeFillers(text, language: language)
 
         // ASR commonly repeats a word while the speaker is deciding what to
         // say. Repeat until stable so "please please please" is handled too.
@@ -37,7 +35,8 @@ enum DictationCleanupValidator {
                        pattern: #"(?i)\?\s+yes,\s+[^?!.]+\s+is\s+the\s+name\.?"#,
                        with: ".")
 
-        text = replace(text, pattern: #"\s+([,.;!?])"#, with: "$1")
+        text = normalizeWhitespace(text)
+        text = replace(text, pattern: #"[ \t]+([,.;!?])"#, with: "$1")
         text = replace(text, pattern: #"([,;:])\s*([,.])"#, with: "$1")
         text = replace(text,
                        pattern: #"(?i),\s+(?=(?:today|tomorrow|yesterday|now|tonight)\b)"#,
@@ -45,7 +44,188 @@ enum DictationCleanupValidator {
         if let first = text.first, first.isLowercase {
             text.replaceSubrange(text.startIndex...text.startIndex, with: String(first).uppercased())
         }
-        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return capitalizeBulletItems(normalizeWhitespace(text))
+    }
+
+    /// Turns explicit spoken layout commands into real document structure. The
+    /// model receives this already-formatted baseline and can refine it without
+    /// having to infer every command from a single noisy pass.
+    private static func applySpokenFormatting(_ value: String, language: String?) -> String {
+        var text = value
+        let lineBreaks: [(String, String)]
+        switch language {
+        case "de":
+            lineBreaks = [
+                (#"(?i)(?<![\p{L}\p{N}])(?:neuer Absatz|absatzumbruch)(?![\p{L}\p{N}])[,;:]?[ \t]*"#, "\n\n"),
+                (#"(?i)(?<![\p{L}\p{N}])(?:neue Zeile|zeilenumbruch)(?![\p{L}\p{N}])[,;:]?[ \t]*"#, "\n"),
+                (#"(?i)(?<![\p{L}\p{N}])(?:Aufzählungspunkt|Aufzählung)(?![\p{L}\p{N}])[,;:]?[ \t]*"#, "\n• "),
+            ]
+        case "fr":
+            lineBreaks = [
+                (#"(?i)(?<![\p{L}\p{N}])(?:nouveau paragraphe|saut de paragraphe)(?![\p{L}\p{N}])[,;:]?[ \t]*"#, "\n\n"),
+                (#"(?i)(?<![\p{L}\p{N}])(?:nouvelle ligne|saut de ligne)(?![\p{L}\p{N}])[,;:]?[ \t]*"#, "\n"),
+                (#"(?i)(?<![\p{L}\p{N}])(?:puce|point de liste)(?![\p{L}\p{N}])[,;:]?[ \t]*"#, "\n• "),
+            ]
+        case "es":
+            lineBreaks = [
+                (#"(?i)(?<![\p{L}\p{N}])(?:nuevo párrafo|salto de párrafo)(?![\p{L}\p{N}])[,;:]?[ \t]*"#, "\n\n"),
+                (#"(?i)(?<![\p{L}\p{N}])(?:nueva línea|salto de línea)(?![\p{L}\p{N}])[,;:]?[ \t]*"#, "\n"),
+                (#"(?i)(?<![\p{L}\p{N}])(?:viñeta|punto de lista)(?![\p{L}\p{N}])[,;:]?[ \t]*"#, "\n• "),
+            ]
+        case "it":
+            lineBreaks = [
+                (#"(?i)(?<![\p{L}\p{N}])(?:nuovo paragrafo|interruzione di paragrafo)(?![\p{L}\p{N}])[,;:]?[ \t]*"#, "\n\n"),
+                (#"(?i)(?<![\p{L}\p{N}])(?:nuova riga|interruzione di riga)(?![\p{L}\p{N}])[,;:]?[ \t]*"#, "\n"),
+                (#"(?i)(?<![\p{L}\p{N}])(?:punto elenco|elenco puntato)(?![\p{L}\p{N}])[,;:]?[ \t]*"#, "\n• "),
+            ]
+        case "pt":
+            lineBreaks = [
+                (#"(?i)(?<![\p{L}\p{N}])(?:novo parágrafo|quebra de parágrafo)(?![\p{L}\p{N}])[,;:]?[ \t]*"#, "\n\n"),
+                (#"(?i)(?<![\p{L}\p{N}])(?:nova linha|quebra de linha)(?![\p{L}\p{N}])[,;:]?[ \t]*"#, "\n"),
+                (#"(?i)(?<![\p{L}\p{N}])(?:marcador|ponto de lista)(?![\p{L}\p{N}])[,;:]?[ \t]*"#, "\n• "),
+            ]
+        default:
+            lineBreaks = [
+                (#"(?i)(?<![\p{L}\p{N}])(?:new paragraph|paragraph break)(?![\p{L}\p{N}])[,;:]?[ \t]*"#, "\n\n"),
+                (#"(?i)(?<![\p{L}\p{N}])(?:new line|newline|line break)(?![\p{L}\p{N}])[,;:]?[ \t]*"#, "\n"),
+                (#"(?i)(?<![\p{L}\p{N}])(?:bullet point|bullet|list item)(?![\p{L}\p{N}])[,;:]?[ \t]*"#, "\n• "),
+            ]
+        }
+        for (pattern, replacement) in lineBreaks {
+            text = replace(text, pattern: pattern, with: replacement)
+        }
+
+        let punctuation: [(String, String)]
+        switch language {
+        case "de":
+            punctuation = [
+                (#"(?i)(?<![\p{L}\p{N}])Fragezeichen(?![\p{L}\p{N}])"#, "?"),
+                (#"(?i)(?<![\p{L}\p{N}])Ausrufezeichen(?![\p{L}\p{N}])"#, "!"),
+                (#"(?i)(?<![\p{L}\p{N}])Punkt(?![\p{L}\p{N}])"#, "."),
+                (#"(?i)(?<![\p{L}\p{N}])Semikolon(?![\p{L}\p{N}])"#, ";"),
+                (#"(?i)(?<![\p{L}\p{N}])Doppelpunkt(?![\p{L}\p{N}])"#, ":"),
+                (#"(?i)(?<![\p{L}\p{N}])Komma(?![\p{L}\p{N}])"#, ","),
+            ]
+        case "fr":
+            punctuation = [
+                (#"(?i)(?<![\p{L}\p{N}])point d'interrogation(?![\p{L}\p{N}])"#, "?"),
+                (#"(?i)(?<![\p{L}\p{N}])point d'exclamation(?![\p{L}\p{N}])"#, "!"),
+                (#"(?i)(?<![\p{L}\p{N}])(?:point final|point)(?![\p{L}\p{N}])"#, "."),
+                (#"(?i)(?<![\p{L}\p{N}])point-virgule(?![\p{L}\p{N}])"#, ";"),
+                (#"(?i)(?<![\p{L}\p{N}])deux-points(?![\p{L}\p{N}])"#, ":"),
+                (#"(?i)(?<![\p{L}\p{N}])virgule(?![\p{L}\p{N}])"#, ","),
+            ]
+        case "es":
+            punctuation = [
+                (#"(?i)(?<![\p{L}\p{N}])signo de interrogación(?![\p{L}\p{N}])"#, "?"),
+                (#"(?i)(?<![\p{L}\p{N}])signo de exclamación(?![\p{L}\p{N}])"#, "!"),
+                (#"(?i)(?<![\p{L}\p{N}])dos puntos(?![\p{L}\p{N}])"#, ":"),
+                (#"(?i)(?<![\p{L}\p{N}])punto y coma(?![\p{L}\p{N}])"#, ";"),
+                (#"(?i)(?<![\p{L}\p{N}])punto(?![\p{L}\p{N}])"#, "."),
+                (#"(?i)(?<![\p{L}\p{N}])coma(?![\p{L}\p{N}])"#, ","),
+            ]
+        case "it":
+            punctuation = [
+                (#"(?i)(?<![\p{L}\p{N}])punto interrogativo(?![\p{L}\p{N}])"#, "?"),
+                (#"(?i)(?<![\p{L}\p{N}])punto esclamativo(?![\p{L}\p{N}])"#, "!"),
+                (#"(?i)(?<![\p{L}\p{N}])due punti(?![\p{L}\p{N}])"#, ":"),
+                (#"(?i)(?<![\p{L}\p{N}])punto e virgola(?![\p{L}\p{N}])"#, ";"),
+                (#"(?i)(?<![\p{L}\p{N}])punto(?![\p{L}\p{N}])"#, "."),
+                (#"(?i)(?<![\p{L}\p{N}])virgola(?![\p{L}\p{N}])"#, ","),
+            ]
+        case "pt":
+            punctuation = [
+                (#"(?i)(?<![\p{L}\p{N}])ponto de interrogação(?![\p{L}\p{N}])"#, "?"),
+                (#"(?i)(?<![\p{L}\p{N}])ponto de exclamação(?![\p{L}\p{N}])"#, "!"),
+                (#"(?i)(?<![\p{L}\p{N}])dois pontos(?![\p{L}\p{N}])"#, ":"),
+                (#"(?i)(?<![\p{L}\p{N}])ponto e vírgula(?![\p{L}\p{N}])"#, ";"),
+                (#"(?i)(?<![\p{L}\p{N}])ponto(?![\p{L}\p{N}])"#, "."),
+                (#"(?i)(?<![\p{L}\p{N}])vírgula(?![\p{L}\p{N}])"#, ","),
+            ]
+        default:
+            punctuation = [
+                (#"(?i)(?<![\p{L}\p{N}])question mark(?![\p{L}\p{N}])"#, "?"),
+                (#"(?i)(?<![\p{L}\p{N}])exclamation (?:mark|point)(?![\p{L}\p{N}])"#, "!"),
+                (#"(?i)(?<![\p{L}\p{N}])(?:full stop|period)(?![\p{L}\p{N}])"#, "."),
+                (#"(?i)(?<![\p{L}\p{N}])semicolon(?![\p{L}\p{N}])"#, ";"),
+                (#"(?i)(?<![\p{L}\p{N}])colon(?![\p{L}\p{N}])"#, ":"),
+                (#"(?i)(?<![\p{L}\p{N}])comma(?![\p{L}\p{N}])"#, ","),
+                (#"(?i)(?<![\p{L}\p{N}])ellipsis(?![\p{L}\p{N}])"#, "…"),
+                (#"(?i)(?<![\p{L}\p{N}])(?:em dash|long dash)(?![\p{L}\p{N}])"#, "—"),
+                (#"(?i)(?<![\p{L}\p{N}])(?:open quote|begin quote)(?![\p{L}\p{N}])"#, "“"),
+                (#"(?i)(?<![\p{L}\p{N}])(?:close quote|end quote)(?![\p{L}\p{N}])"#, "”"),
+            ]
+        }
+        for (pattern, replacement) in punctuation {
+            text = replace(text, pattern: pattern, with: replacement)
+        }
+        return text
+    }
+
+    private static func removeFillers(_ value: String, language: String?) -> String {
+        let fillers: [String]
+        switch language {
+        case "de": fillers = ["ähm+", "äh", "öhm+", "hm+"]
+        case "fr": fillers = ["euh+", "hum+"]
+        case "es": fillers = ["eh+", "em+"]
+        case "it": fillers = ["ehm+", "eh+"]
+        case "pt": fillers = ["hum+"]
+        default: fillers = ["um+", "uh+", "erm+", "er", "hmm+", "mmm+"]
+        }
+        let fillerPattern = #"(?i)(?<![\p{L}\p{N}])(?:"#
+            + fillers.joined(separator: "|")
+            + #")(?![\p{L}\p{N}])(?:[ \t]*[,;:])?[ \t]*"#
+        var text = replace(value, pattern: fillerPattern, with: "")
+
+        // These words can carry meaning, so only remove them when the speaker
+        // marked them as discourse fillers with punctuation.
+        let punctuated: [String]
+        switch language {
+        case "de": punctuated = ["also", "na ja", "sozusagen"]
+        case "fr": punctuated = ["enfin", "voilà"]
+        case "es": punctuated = ["like", "pues", "este", "o sea"]
+        case "it": punctuated = ["cioè", "diciamo"]
+        case "pt": punctuated = ["tipo", "assim", "quer dizer"]
+        default: punctuated = ["like", "well", "you know"]
+        }
+        let punctuatedPattern = #"(?i)(?<![\p{L}\p{N}])(?:"#
+            + punctuated.joined(separator: "|")
+            + #")(?![\p{L}\p{N}])[ \t]*[,;:][ \t]*"#
+        text = replace(text, pattern: punctuatedPattern, with: "")
+        if language == "en" || language == nil {
+            text = replace(text,
+                           pattern: #"(?i)^\s*(?:you know|basically|well)[ \t]*[,;:][ \t]*"#,
+                           with: "")
+        }
+        return text
+    }
+
+    private static func capitalizeBulletItems(_ value: String) -> String {
+        value
+            .components(separatedBy: "\n")
+            .map { line in
+                guard line.hasPrefix("• ") else { return line }
+                let start = line.index(line.startIndex, offsetBy: 2)
+                guard start < line.endIndex else { return line }
+                let first = line[start]
+                guard first.isLowercase else { return line }
+                return String(line[..<start]) + String(first).uppercased() + line[line.index(after: start)...]
+            }
+            .joined(separator: "\n")
+    }
+
+    private static func normalizeWhitespace(_ value: String) -> String {
+        let normalized = value
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        let lines = normalized.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { line in
+                String(line)
+                    .replacingOccurrences(of: "[\\t ]+", with: " ", options: .regularExpression)
+                    .trimmingCharacters(in: .whitespaces)
+            }
+        return replace(lines.joined(separator: "\n"), pattern: #"\n{3,}"#, with: "\n\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     static func validate(_ value: String,
@@ -61,10 +241,14 @@ enum DictationCleanupValidator {
         // They are a transport sentinel, never a valid dictation result.
         let compact = text.replacingOccurrences(of: " ", with: "")
         guard compact != "...", compact != "…" else { return nil }
-        let prefixes = ["Here is", "Here's", "Cleaned transcript:", "Cleaned text:", "The cleaned transcript is:"]
+        let prefixes = [
+            "Here is", "Here's", "Cleaned transcript:", "Cleaned text:",
+            "The cleaned transcript is:", "I cannot help", "I can't help",
+            "I'm sorry, I", "I’m sorry, I", "As an AI",
+        ]
         guard !prefixes.contains(where: { text.lowercased().hasPrefix($0.lowercased()) }) else { return nil }
         let paragraphs = text.components(separatedBy: "\n\n").filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        guard paragraphs.count <= 1 else { return nil }
+        guard paragraphs.count <= 1 || isStructuredList(text) else { return nil }
         if let input {
             let inputWords = words(in: input)
             let outputWords = words(in: text)
@@ -178,6 +362,19 @@ enum DictationCleanupValidator {
 
     private static func words(in text: String) -> [Substring] {
         text.split { $0.isWhitespace || $0.isPunctuation }
+    }
+
+    private static func isStructuredList(_ text: String) -> Bool {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: true)
+        guard lines.count >= 2 else { return false }
+        let pattern = #"^\s*(?:[•*+-]|\d+[.)])\s+\S+"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
+        return lines.allSatisfy { line in
+            let value = String(line)
+            return regex.firstMatch(in: value,
+                                    range: NSRange(value.startIndex..<value.endIndex,
+                                                   in: value)) != nil
+        }
     }
 
     private static func isWrappedInQuotes(_ text: String) -> Bool {

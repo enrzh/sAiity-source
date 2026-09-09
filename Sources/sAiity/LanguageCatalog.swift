@@ -77,14 +77,23 @@ enum LanguageCatalog {
 
     static func language(_ code: String) -> AppLanguage { AppLanguage(code: code) }
 
+    /// Capability sets are static model metadata, not runtime work. Keep one
+    /// table so every picker and warning reads the same answer without
+    /// spawning async tasks or rescanning every engine for every row.
+    private static let supportedCodesByEngine: [TranslationEngine: Set<String>] = [
+        .madlad: MADLADLanguageProvider.canonicalCodes,
+        .hyMT2: HyMT2LanguageProvider.canonicalCodes,
+        .qwen: LLMLanguageProvider.canonicalCodes,
+    ]
+
+    static func supportedCodes(for engine: TranslationEngine) -> Set<String> {
+        supportedCodesByEngine[engine] ?? []
+    }
+
     /// Which engines can translate into this language, in the app's own
     /// recommendation order. Used to offer a way forward instead of greying a
     /// row out and saying nothing.
     static func engines(supporting code: String) async -> [TranslationEngine] {
-        var out: [TranslationEngine] = []
-        for e in TranslationEngine.allCases {
-            if await e.languages.supportedCanonicalCodes().contains(code) { out.append(e) }
-        }
-        return out
+        TranslationEngine.allCases.filter { supportedCodes(for: $0).contains(code) }
     }
 }

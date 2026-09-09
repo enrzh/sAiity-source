@@ -47,6 +47,14 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
     case hyMT2
     case qwen
 
+    /// Keep the normal path deliberately small. The other engines remain
+    /// available for users who knowingly want to trade certainty for a
+    /// specialist or an experimental local LLM.
+    static let primaryCases: [TranslationEngine] = [.madlad]
+    static let advancedCases: [TranslationEngine] = [.hyMT2, .qwen]
+
+    var isAdvanced: Bool { self != .madlad }
+
     /// The chosen translator, or nothing. Same reasoning as `ASREngine.selected`:
     /// defaulting to MADLAD badged a 1.86 GB model "in use" on a Mac that had
     /// never downloaded it and had translation switched off.
@@ -73,9 +81,9 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
         case .madlad:
             return String(localized: "MADLAD-400-3B, a dedicated translation model on MLX. Best quality of the local options and Apache-2.0, so it can ship. 1.86 GB, and about 0.2 seconds per sentence once loaded, measured — the fastest of the downloadable engines, and it only ever translates, so it cannot wander off answering the speaker.")
         case .hyMT2:
-            return String(localized: "A translation-specialized 1.8B GGUF for the 37 language codes listed by Tencent's model card. Opt-in Q4_K_M download; MADLAD remains the broad-coverage default.")
+            return String(localized: "Optional specialist for 37 languages. Keep it in Advanced until a language-pair benchmark shows it beats MADLAD for your use case.")
         case .qwen:
-            return String(localized: "A small local LLM doing the translation — about 1.2 seconds per sentence on the recommended Qwen 2B, measured. Most flexible of the options: choose from Qwen and Gemma builds, or add your own GGUF by URL or from disk. Stay at 2B-class or above; sub-billion models keep answering or echoing the caption instead of translating it.")
+            return String(localized: "Experimental local LLM translation. Useful for cleanup and language experiments, but less predictable than a dedicated translation model. Choose a Qwen, Gemma, or custom GGUF under Advanced.")
         }
     }
 
@@ -166,9 +174,12 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
                     // An imported file has nothing to download — it is already
                     // in place, so it gets no install path at all.
                     install: m.downloadURL.map { url in
-                        { sink in
-                            try await FileDownloader.download(from: url, to: m.localURL,
-                                                              expectedBytes: m.bytes,
+                        let destination = m.localURL
+                        let expectedBytes = m.bytes
+                        return { @Sendable sink in
+                            try await FileDownloader.download(from: url,
+                                                              to: destination,
+                                                              expectedBytes: expectedBytes,
                                                               requireMagic: FileDownloader.ggufMagic,
                                                               progress: sink)
                         }

@@ -47,7 +47,9 @@ struct LocalModelTests {
     func importRoundTrip() throws {
         let src = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("sha256-\(UUID().uuidString)")   // Ollama-style, no extension
-        try Data(repeating: 7, count: 4096).write(to: src)
+        var valid = Data("GGUF".utf8)
+        valid.append(Data(repeating: 7, count: 4092))
+        try valid.write(to: src)
         defer { try? FileManager.default.removeItem(at: src) }
 
         let before = LocalModel.custom.count
@@ -64,6 +66,18 @@ struct LocalModelTests {
         LocalModel.removeCustom(m)
         #expect(!FileManager.default.fileExists(atPath: m.localURL.path), "file survived removal")
         #expect(LocalModel.custom.count == before)
+    }
+
+    @Test("Importing a non-GGUF file fails before registration")
+    func rejectsNonGGUFImport() throws {
+        let src = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("not-a-model-\(UUID().uuidString)")
+        try Data(repeating: 7, count: 4096).write(to: src)
+        defer { try? FileManager.default.removeItem(at: src) }
+
+        #expect(throws: TranslationEngineError.self) {
+            try LocalModel.addCustom(importing: src)
+        }
     }
 
     @Test("Built-ins are never removable from the catalogue and all have sources")

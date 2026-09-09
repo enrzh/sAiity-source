@@ -11,6 +11,11 @@ struct HyMT2TranslationTests {
         #expect(TranslationEngine.recommended.rawValue == "madlad")
         #expect(TranslationEngine.hyMT2.displayName == "Hy-MT2")
         #expect(TranslationEngine.hyMT2 != TranslationEngine.recommended)
+        #expect(TranslationEngine.primaryCases == [.madlad])
+        #expect(TranslationEngine.advancedCases == [.hyMT2, .qwen])
+        #expect(!TranslationEngine.madlad.isAdvanced)
+        #expect(TranslationEngine.hyMT2.isAdvanced)
+        #expect(TranslationEngine.qwen.isAdvanced)
     }
 
     @Test("Hy-MT2 uses conservative first-pass and retry sampling")

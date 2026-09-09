@@ -203,6 +203,7 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
     - remove accidental repetition
     - resolve a false start or an explicit self-correction, keeping the final wording
     - fix obvious punctuation, casing, and spoken punctuation
+    - turn explicit spoken layout commands into real formatting: "new line", "new paragraph", and "bullet point"
     - format an unmistakable spoken list only when the speaker clearly gave one
 
     You must preserve the meaning, claims, uncertainty, numbers, dates, URLs, email
@@ -220,6 +221,23 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
     Output: "Open the app and send it."
     Input: "Go to YouTube, then check the name again — MrBeast? Yes, MrBeast is the name."
     Output: "Go to YouTube, then check the name again — MrBeast."
+    Input: "Bullet point buy milk bullet point call Anna bullet point send the invoice."
+    Output:
+    • Buy milk
+    • Call Anna
+    • Send the invoice.
+    Input: "First line new line second line, comma actually with punctuation."
+    Output:
+    First line
+    Second line, actually with punctuation.
+    Spoken words such as "comma", "period", "question mark", and "colon" are
+    punctuation commands when they are clearly used as commands. Do not turn a
+    normal mention of a bullet, line, or period into formatting. A bullet list may
+    use one bullet per line; do not add a preamble or explanation.
+    Remove disfluencies by context, not by blindly deleting words: "like" can be
+    a real verb, "also" can be meaningful in German, and "well" can be content.
+    Delete them only when they function as speech fillers. Preserve meaningful
+    hesitation, uncertainty, quoted speech, and the speaker's tone.
     Never wrap the transcript in quotation marks and never add a label such as "Output:".
     For short or already-clean text, make no changes. Output only the edited transcript.
     """
@@ -234,8 +252,9 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
             languageInstruction = "Infer the speaker's language from the transcript, preserve that same language, and never translate."
         }
         return """
-        Edit this speech transcript now. Remove fillers, accidental repeated words,
-        false starts, and superseded wording from explicit self-corrections. Keep the
+        Edit this speech transcript now. Remove contextually obvious fillers,
+        accidental repeated words, false starts, and superseded wording from explicit
+        self-corrections. Apply explicit spoken formatting commands and keep the
         speaker's original intent and voice.
         """ + languageInstruction + """
         Do not return the noisy input unchanged when one of those repairs is obvious.
@@ -249,7 +268,8 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
 
     func cleanup(_ text: String, sourceLanguage: String? = nil) async -> String? {
         guard llm != nil else { return nil }
-        let baseline = DictationCleanupValidator.deterministicCleanup(text)
+        let baseline = DictationCleanupValidator.deterministicCleanup(text,
+                                                                       sourceLanguage: sourceLanguage)
         guard let raw = await generate(system: Self.cleanupSystemPrompt,
                                        user: Self.cleanupUserPrompt(baseline,
                                                                     sourceLanguage: sourceLanguage)) else {
@@ -260,7 +280,8 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
 
         // Apply the guaranteed speech pass after generation too. This covers a
         // small model that copies a filler back into an otherwise valid answer.
-        let candidate = DictationCleanupValidator.deterministicCleanup(raw)
+        let candidate = DictationCleanupValidator.deterministicCleanup(raw,
+                                                                        sourceLanguage: sourceLanguage)
         if let valid = DictationCleanupValidator.validate(candidate,
                                                           preserving: text,
                                                           sourceLanguage: sourceLanguage) {

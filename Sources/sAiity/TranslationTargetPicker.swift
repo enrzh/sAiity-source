@@ -27,6 +27,12 @@ struct TranslationTargetPicker: View {
         LanguageCatalog.all.filter { $0.matches(query) }
     }
     private var available: [AppLanguage] { matches.filter { supported.contains($0.code) } }
+    private var recommendedAvailable: [AppLanguage] {
+        available.filter { engine != .qwen || LLMLanguageProvider.isStrong($0.code) }
+    }
+    private var experimentalAvailable: [AppLanguage] {
+        available.filter { engine == .qwen && !LLMLanguageProvider.isStrong($0.code) }
+    }
     private var elsewhere: [AppLanguage] { matches.filter { !supported.contains($0.code) } }
 
     /// Whose language coverage this list reflects.
@@ -79,15 +85,21 @@ struct TranslationTargetPicker: View {
                 list
             }
         }
-        .task { await loadSupported() }
-        .onChange(of: state.translationEngine) { Task { await loadSupported() } }
+        // The task identity cancels stale work when the engine changes. The
+        // capability lookup itself is synchronous static metadata.
+        .task(id: engine) { loadSupported() }
     }
 
     private var list: some View {
         List {
-            if !available.isEmpty {
+            if !recommendedAvailable.isEmpty {
                 Section("Available with \(engine.displayName)") {
-                    ForEach(available) { row($0) }
+                    ForEach(recommendedAvailable) { row($0) }
+                }
+            }
+            if !experimentalAvailable.isEmpty {
+                Section("Experimental with \(engine.displayName)") {
+                    ForEach(experimentalAvailable) { row($0, experimental: true) }
                 }
             }
             if !elsewhere.isEmpty {
@@ -103,7 +115,7 @@ struct TranslationTargetPicker: View {
         .listStyle(.inset)
     }
 
-    private func row(_ lang: AppLanguage) -> some View {
+    private func row(_ lang: AppLanguage, experimental: Bool = false) -> some View {
         // A real Button, not an onTapGesture on a passive view: gestures are
         // invisible to the keyboard and to VoiceOver, so the menu bar's "All
         // languages…" opened a sheet a keyboard user could not operate at all.
@@ -114,9 +126,8 @@ struct TranslationTargetPicker: View {
             HStack {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(lang.displayName)
-                    if engine == .qwen,
-                       !LLMLanguageProvider.strongTier.contains(lang.code) {
-                        Text("Outside Qwen's strongest languages — quality varies.")
+                    if experimental {
+                        Text("Experimental quality — verify important translations.")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                 }
@@ -142,9 +153,9 @@ struct TranslationTargetPicker: View {
         .padding(.vertical, 1)
     }
 
-    private func loadSupported() async {
+    private func loadSupported() {
         loading = true
-        supported = await engine.languages.supportedCanonicalCodes()
+        supported = LanguageCatalog.supportedCodes(for: engine)
         loading = false
     }
 }
@@ -175,7 +186,7 @@ struct TargetUnsupportedNotice: View {
                 }
             }
         }
-        .task(id: target) {
+        .task(id: "\(target)|\(state.translationEngine?.rawValue ?? "recommended")") {
             engines = await LanguageCatalog.engines(supporting: target)
                 .filter { $0 != state.translationEngine }
         }

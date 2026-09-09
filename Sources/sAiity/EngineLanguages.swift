@@ -6,6 +6,9 @@ import Foundation
 /// answer "can MADLAD do Swahili?" for an engine the user has not selected and
 /// whose 1.86 GB of weights are not on disk. An instance method could not.
 protocol TranslationLanguageProvider {
+    /// Immutable capability metadata used by language pickers and warnings.
+    static var canonicalCodes: Set<String> { get }
+
     /// Canonical BCP-47 codes this engine accepts.
     static func supportedCanonicalCodes() async -> Set<String>
 
@@ -29,6 +32,8 @@ extension TranslationEngine {
 // MARK: - MADLAD
 
 enum MADLADLanguageProvider: TranslationLanguageProvider {
+    static let canonicalCodes = MADLADLanguages.canonicalCodes
+
     static func supportedCanonicalCodes() async -> Set<String> { MADLADLanguages.canonicalCodes }
 
     /// Resolution ladder, most specific first. MADLAD demands an exact vocab
@@ -58,11 +63,14 @@ enum MADLADLanguageProvider: TranslationLanguageProvider {
 // MARK: - Qwen
 
 enum LLMLanguageProvider: TranslationLanguageProvider {
-    /// An instruct LLM has no hard language list — what varies is quality, not
-    /// capability. Offering the full catalogue and being honest about quality
-    /// beats inventing a boundary the model does not have.
+    static let canonicalCodes: Set<String> = Set(LanguageCatalog.all.map(\.code))
+
+    /// An instruct LLM has no hard language list, so the full catalogue remains
+    /// reachable in Advanced. The picker separates the languages we are
+    /// comfortable recommending from the long tail instead of treating them
+    /// as equally reliable.
     static func supportedCanonicalCodes() async -> Set<String> {
-        Set(LanguageCatalog.all.map(\.code))
+        canonicalCodes
     }
 
     /// Languages Qwen is documented to handle well. Everything outside this is
@@ -72,6 +80,15 @@ enum LLMLanguageProvider: TranslationLanguageProvider {
         "cs", "pl", "ar", "fa", "he", "tr", "ja", "ko", "vi", "th", "id", "ms",
         "hi", "bn", "ur", "uk", "el", "ro", "hu", "sv", "da", "fi", "no",
     ]
+
+    static func isStrong(_ canonical: String) -> Bool {
+        let normalized = canonical.replacingOccurrences(of: "_", with: "-")
+        if strongTier.contains(normalized) { return true }
+        guard let base = normalized.split(separator: "-").first.map(String.init) else {
+            return false
+        }
+        return strongTier.contains(base)
+    }
 
     /// Qwen is told a language NAME, not a code — the prompt is what consumes
     /// it. Always in English: the prompt and its examples are English, and
@@ -139,8 +156,10 @@ enum HyMT2LanguageProvider: TranslationLanguageProvider {
         "yue": "Cantonese",
     ]
 
+    static let canonicalCodes = Set(names.keys)
+
     static func supportedCanonicalCodes() async -> Set<String> {
-        Set(names.keys)
+        canonicalCodes
     }
 
     static func nativeCode(for canonical: String) -> String? {

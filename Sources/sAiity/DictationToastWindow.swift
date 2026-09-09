@@ -1,5 +1,37 @@
 import AppKit
 
+private final class DictationWaveformView: NSView {
+    private var levels = Array(repeating: CGFloat(0.08), count: 28)
+
+    override var isFlipped: Bool { true }
+
+    func setLevels(_ values: [Float]) {
+        guard !values.isEmpty else { return }
+        levels = values.map { CGFloat(min(1, max(0.06, $0))) }
+        needsDisplay = true
+    }
+
+    func reset() {
+        levels = Array(repeating: 0.08, count: 28)
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        let gap: CGFloat = 2
+        let width = max(1, (bounds.width - gap * CGFloat(levels.count - 1))
+            / CGFloat(levels.count))
+        let mid = bounds.midY
+        for (index, level) in levels.enumerated() {
+            let height = max(3, bounds.height * 0.9 * level)
+            let x = CGFloat(index) * (width + gap)
+            let rect = NSRect(x: x, y: mid - height / 2, width: width, height: height)
+            NSColor.white.withAlphaComponent(0.9).setFill()
+            NSBezierPath(roundedRect: rect, xRadius: width / 2, yRadius: width / 2).fill()
+        }
+    }
+}
+
 extension NSAccessibility.Role {
     static let status = Self(rawValue: "AXStatus")
 }
@@ -17,6 +49,7 @@ final class DictationToastWindow: NSPanel {
     static var saveDictationForTests: ((NSRect) -> Void)?
 #endif
     private let label = NSTextField(labelWithString: "")
+    private let waveform = DictationWaveformView()
     private let spinner = NSProgressIndicator()
     private let resetButton = NSButton()
     private var autoDismissTask: Task<Void, Never>?
@@ -56,6 +89,12 @@ final class DictationToastWindow: NSPanel {
         label.textColor = .white
         label.alignment = .center
         label.lineBreakMode = .byTruncatingTail
+        label.setAccessibilityRole(.staticText)
+
+        waveform.setAccessibilityRole(.image)
+        waveform.setAccessibilityLabel(String(localized: "Audio waveform"))
+        waveform.isHidden = true
+        waveform.translatesAutoresizingMaskIntoConstraints = false
 
         spinner.style = .spinning
         spinner.controlSize = .small
@@ -84,8 +123,24 @@ final class DictationToastWindow: NSPanel {
             resetButton.trailingAnchor.constraint(lessThanOrEqualTo: trailingSlot.trailingAnchor),
         ])
 
-        let stack = NSStackView(views: [leadingSlot, label, trailingSlot])
+        let middleSlot = NSView()
+        middleSlot.addSubview(label)
+        middleSlot.addSubview(waveform)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: middleSlot.leadingAnchor),
+            label.trailingAnchor.constraint(equalTo: middleSlot.trailingAnchor),
+            label.topAnchor.constraint(equalTo: middleSlot.topAnchor),
+            label.bottomAnchor.constraint(equalTo: middleSlot.bottomAnchor),
+            waveform.centerXAnchor.constraint(equalTo: middleSlot.centerXAnchor),
+            waveform.centerYAnchor.constraint(equalTo: middleSlot.centerYAnchor),
+            waveform.widthAnchor.constraint(equalToConstant: 128),
+            waveform.heightAnchor.constraint(equalToConstant: 20),
+        ])
+
+        let stack = NSStackView(views: [leadingSlot, middleSlot, trailingSlot])
         leadingSlot.widthAnchor.constraint(equalTo: trailingSlot.widthAnchor).isActive = true
+        middleSlot.widthAnchor.constraint(equalToConstant: 128).isActive = true
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 8
@@ -98,7 +153,6 @@ final class DictationToastWindow: NSPanel {
             stack.trailingAnchor.constraint(equalTo: host.trailingAnchor),
             stack.topAnchor.constraint(equalTo: host.topAnchor),
             stack.bottomAnchor.constraint(equalTo: host.bottomAnchor),
-            label.widthAnchor.constraint(greaterThanOrEqualToConstant: 86),
         ])
         effect.contentView = host
         contentView = effect
@@ -147,6 +201,7 @@ final class DictationToastWindow: NSPanel {
             (frame.width <= 1 || frame.height <= 1 ||
              (frame.height <= 16 && visibleFrame?.contains(frame) != true))
         show(text: p.value, animated: phase == .preparing || phase == .starting || phase == .dictating || phase == .transcribing || phase == .cleaning || phase == .translating || phase == .inserting, autoDismissAfter: autoDismissAfter)
+        if phase == .dictating { showWaveform() }
         if needsPlacement && FrameStore.loadDictation() == nil,
            let v = visibleFrame {
             setFrameOrigin(NSPoint(x: v.midX - self.frame.width / 2, y: v.minY + 80))
@@ -253,11 +308,14 @@ final class DictationToastWindow: NSPanel {
     var resetButtonBoundsForTests: NSRect { resetButton.convert(resetButton.bounds, to: nil) }
     var labelMidXForTests: CGFloat { label.convert(label.bounds, to: contentView).midX }
     var contentMidXForTests: CGFloat { contentView?.bounds.midX ?? 0 }
+    var waveformVisibleForTests: Bool { !waveform.isHidden }
     private(set) var resetCallbackCountForTests = 0
 #endif
 
     func show(text: String, animated: Bool, autoDismissAfter: Duration? = nil) {
         cancelAutoDismiss()
+        label.isHidden = false
+        waveform.isHidden = true
         label.stringValue = text
         setAccessibilityValue(text)
         setAccessibilityEnabled(true)
@@ -316,7 +374,29 @@ final class DictationToastWindow: NSPanel {
                     self.autoDismissTask = nil
                 }
             }
+            // A borderless nonactivating panel can skip the AppKit animation
+            // completion callback when the window server is settling or a
+            // test host has no active app. Keep the dismissal deterministic.
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(0.9))
+                guard let self, self.presentationGeneration == generation else { return }
+                self.orderOut(nil)
+                self.alphaValue = 1
+                self.autoDismissTask = nil
+            }
         }
+    }
+
+    func updateWaveform(_ values: [Float]) {
+        waveform.setLevels(values)
+    }
+
+    private func showWaveform() {
+        waveform.reset()
+        label.isHidden = true
+        waveform.isHidden = false
+        contentView?.layoutSubtreeIfNeeded()
+        contentView?.displayIfNeeded()
     }
 
     private func orderFrontForPresentation() {

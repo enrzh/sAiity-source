@@ -47,6 +47,10 @@ import Foundation
 /// name. A fire with nothing pending is a no-op downstream.
 struct SpeechGapDetector {
 
+    init(holdFrames: Int) {
+        self.holdFrames = holdFrames
+    }
+
     /// Frames of quiet that make a pause. Set from `SpeechGap.holdMs`.
     var holdFrames: Int
 

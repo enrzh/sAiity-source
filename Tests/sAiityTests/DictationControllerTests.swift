@@ -17,6 +17,7 @@ import Testing
         var stopCalls = 0
         var takeCalls = 0
         var limitHandler: (@Sendable () -> Void)?
+        var waveformHandler: (@Sendable ([Float]) -> Void)?
 
         init(log: EventLog) { self.log = log }
 
@@ -38,6 +39,9 @@ import Testing
             return samples
         }
         func setLimitHandler(_ handler: (@Sendable () -> Void)?) { limitHandler = handler }
+        func setWaveformHandler(_ handler: (@Sendable ([Float]) -> Void)?) { waveformHandler = handler }
+
+        func emitWaveform(_ values: [Float]) { waveformHandler?(values) }
     }
 
     final class FakeBackend: TranscriptionBackend, @unchecked Sendable {
@@ -263,7 +267,7 @@ import Testing
             inserter: FakeInserter(), captionsActive: { false },
             dictationUsesWhisper: { true },
             transcribeWhisper: { _, _ in
-                await withCheckedContinuation { continuation in
+                _ = await withCheckedContinuation { continuation in
                     transcriptionContinuation = continuation
                 }
                 return nil
@@ -379,6 +383,29 @@ import Testing
         #expect(phases.contains("translating"))
         #expect(phases.contains("inserting"))
         #expect(controller.phase == .result("Translated and copied"))
+    }
+
+    @Test("dictation forwards live microphone levels to its waveform")
+    func forwardsWaveformLevels() async {
+        let capture = FakeCapture(log: EventLog())
+        final class WaveformBox: @unchecked Sendable {
+            var levels: [[Float]] = []
+        }
+        let box = WaveformBox()
+        let controller = DictationController(
+            makeBackend: { FakeBackend(log: EventLog()) },
+            capture: capture,
+            inserter: FakeInserter(),
+            captionsActive: { false },
+            onWaveform: { box.levels.append($0) })
+
+        controller.markReady()
+        controller.press()
+        await controller.waitForWorkForTests()
+        capture.emitWaveform([0.1, 0.8])
+        #expect(box.levels == [[0.1, 0.8]])
+        controller.cancel()
+        await controller.waitForWorkForTests()
     }
 
     @Test("cleanup falls back when the model drops a protected token")

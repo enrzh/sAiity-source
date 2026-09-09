@@ -122,6 +122,7 @@ final class AccessibleIconButton: NSImageView {
 /// underneath.
 final class BubbleContentView: NSView {
     var onCopy: (() -> Void)?
+    var onSaveTranscript: (() -> Void)?
     var onOpenWindow: (() -> Void)?
     var onClear: (() -> Void)?
 
@@ -147,6 +148,7 @@ final class BubbleContentView: NSView {
     private var dotBesideIcon: NSLayoutConstraint!
     private let menuButton = AccessibleIconButton()
     private let copyButton = AccessibleIconButton()
+    private let saveButton = AccessibleIconButton()
     private let clearButton = AccessibleIconButton()
     private let recordDot = NSView()
     private var copyFlashWork: DispatchWorkItem?
@@ -180,6 +182,13 @@ final class BubbleContentView: NSView {
         copyButton.alphaValue = 0
         copyButton.toolTip = String(localized: "Copy this line")
 
+        saveButton.image = NSImage(systemSymbolName: "square.and.arrow.down",
+                                   accessibilityDescription: nil)?
+            .withSymbolConfiguration(cfg)
+        saveButton.contentTintColor = NSColor.white.withAlphaComponent(0.75)
+        saveButton.alphaValue = 0
+        saveButton.toolTip = String(localized: "Save transcript")
+
         // Wipe what is on screen without stopping recognition — for the moment
         // a caption is still sitting over something you want to see, or a line
         // you would rather not leave on a shared screen.
@@ -204,6 +213,8 @@ final class BubbleContentView: NSView {
         menuButton.setAccessibilityLabel(String(localized: "Open sAiity settings"))
         copyButton.setAccessibilityRole(.button)
         copyButton.setAccessibilityLabel(String(localized: "Copy this caption"))
+        saveButton.setAccessibilityRole(.button)
+        saveButton.setAccessibilityLabel(String(localized: "Save transcript"))
         clearButton.setAccessibilityRole(.button)
         clearButton.setAccessibilityLabel(String(localized: "Clear the caption"))
         recordDot.setAccessibilityRole(.image)
@@ -216,12 +227,13 @@ final class BubbleContentView: NSView {
             self?.onCopy?()
             self?.flashCopied()
         }
+        saveButton.onPress = { [weak self] in self?.onSaveTranscript?() }
         clearButton.onPress = { [weak self] in self?.onClear?() }
-        for b in [menuButton, copyButton, clearButton] {
+        for b in [menuButton, copyButton, saveButton, clearButton] {
             b.onAccessibilityFocus = { [weak self] in self?.setControls(visible: true) }
         }
 
-        for v in [menuButton, copyButton, clearButton, recordDot] {
+        for v in [menuButton, copyButton, saveButton, clearButton, recordDot] {
             v.translatesAutoresizingMaskIntoConstraints = false
             addSubview(v)
         }
@@ -239,7 +251,11 @@ final class BubbleContentView: NSView {
             recordDot.heightAnchor.constraint(equalToConstant: 8),
             recordDot.centerYAnchor.constraint(equalTo: menuButton.centerYAnchor),
 
-            copyButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
+            saveButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
+            saveButton.centerYAnchor.constraint(equalTo: menuButton.centerYAnchor),
+
+            copyButton.trailingAnchor.constraint(equalTo: saveButton.leadingAnchor,
+                                                  constant: -14),
             copyButton.centerYAnchor.constraint(equalTo: menuButton.centerYAnchor),
 
             // Immediately left of Copy, in the same right-hand action cluster.
@@ -271,6 +287,7 @@ final class BubbleContentView: NSView {
     private var dragRegion: NSRect { clickThroughText ? controlStrip : bounds }
 
     private var copyRect: NSRect { copyButton.frame.insetBy(dx: -10, dy: -10) }
+    private var saveRect: NSRect { saveButton.frame.insetBy(dx: -10, dy: -10) }
     private var menuRect: NSRect { menuButton.frame.insetBy(dx: -10, dy: -10) }
     private var clearRect: NSRect { clearButton.frame.insetBy(dx: -10, dy: -10) }
 
@@ -316,7 +333,7 @@ final class BubbleContentView: NSView {
         guard interactive else { return }
         if let resize = resizeCursor(at: p) {
             resize.set()
-        } else if copyRect.contains(p) || menuRect.contains(p) || clearRect.contains(p) {
+        } else if copyRect.contains(p) || saveRect.contains(p) || menuRect.contains(p) || clearRect.contains(p) {
             NSCursor.arrow.set()
         } else {
             NSCursor.openHand.set()
@@ -375,6 +392,7 @@ final class BubbleContentView: NSView {
             ctx.allowsImplicitAnimation = true
             menuButton.animator().alphaValue = visible ? 1 : 0
             copyButton.animator().alphaValue = visible ? 1 : 0
+            saveButton.animator().alphaValue = visible ? 1 : 0
             clearButton.animator().alphaValue = visible ? 1 : 0
             layoutSubtreeIfNeeded()
         }
@@ -387,6 +405,10 @@ final class BubbleContentView: NSView {
 
         if copyRect.contains(p) {
             copyButton.onPress?()
+            return
+        }
+        if saveRect.contains(p) {
+            saveButton.onPress?()
             return
         }
         if clearRect.contains(p) {
@@ -436,6 +458,104 @@ final class BubbleContentView: NSView {
     }
 }
 
+/// A single original/translation pair in the scrollable subtitle history.
+private final class CaptionRowView: NSView {
+    let original = NSTextField(labelWithString: "")
+    let translation = NSTextField(labelWithString: "")
+    private let stack = NSStackView()
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        translatesAutoresizingMaskIntoConstraints = false
+        stack.orientation = .vertical
+        stack.alignment = .centerX
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+
+        for text in [original, translation] {
+            text.alignment = .center
+            text.lineBreakMode = .byWordWrapping
+            text.cell?.wraps = true
+            text.translatesAutoresizingMaskIntoConstraints = false
+            text.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        }
+        original.setAccessibilityRole(.staticText)
+        original.setAccessibilityLabel(String(localized: "Live caption"))
+        translation.setAccessibilityRole(.staticText)
+        translation.setAccessibilityLabel(String(localized: "Translation"))
+        stack.addArrangedSubview(original)
+        stack.addArrangedSubview(translation)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
+        let width = max(1, bounds.width)
+        original.preferredMaxLayoutWidth = width
+        translation.preferredMaxLayoutWidth = width
+    }
+
+    func apply(style: CaptionStyle, staleDim: CGFloat, reserveTranslation: Bool) {
+        original.font = style.original.font
+        original.textColor = style.original.color
+        original.alphaValue = style.original.opacity
+        original.maximumNumberOfLines = style.original.maxLines
+        translation.font = style.translation.font
+        translation.textColor = style.translation.color
+        translation.alphaValue = style.translation.opacity * staleDim
+        translation.maximumNumberOfLines = style.translation.maxLines
+        stack.spacing = CGFloat(style.lineGap)
+        translation.isHidden = !style.showTranslation
+            || (translation.stringValue.isEmpty && !reserveTranslation)
+    }
+
+    func set(entry: CaptionHistoryEntry, style: CaptionStyle, staleDim: CGFloat,
+             reserveTranslation: Bool) {
+        original.stringValue = entry.original
+        translation.stringValue = entry.translation ?? ""
+        apply(style: style,
+              staleDim: entry.translationIsStale ? staleDim : 1,
+              reserveTranslation: reserveTranslation)
+    }
+
+    static func textHeight(_ text: String, font: NSFont, width: CGFloat,
+                           maxLines: Int) -> CGFloat {
+        guard !text.isEmpty else { return 0 }
+        let rect = (text as NSString).boundingRect(
+            with: NSSize(width: max(1, width), height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font])
+        var height = ceil(rect.height)
+        if maxLines > 0 {
+            let line = ceil(font.ascender - font.descender + font.leading)
+            height = min(height, line * CGFloat(maxLines) + 2)
+        }
+        return height
+    }
+
+    static func height(for entry: CaptionHistoryEntry, style: CaptionStyle,
+                       originalFont: NSFont, translationFont: NSFont,
+                       width: CGFloat, reserveTranslation: Bool) -> CGFloat {
+        let original = textHeight(entry.original, font: originalFont,
+                                  width: width, maxLines: style.original.maxLines)
+        guard style.showTranslation,
+              reserveTranslation || !(entry.translation ?? "").isEmpty else {
+            return original
+        }
+        let t = entry.translation ?? " "
+        return original + CGFloat(style.lineGap)
+            + textHeight(t, font: translationFont, width: width,
+                         maxLines: style.translation.maxLines)
+    }
+}
+
 /// The caption bubble: a borderless Liquid Glass panel that floats above
 /// everything, passes clicks through, and can be picked up by its top strip.
 ///
@@ -449,11 +569,12 @@ final class BubbleContentView: NSView {
 ///   - level `.screenSaver` + `.fullScreenAuxiliary` — stays visible over
 ///     full-screen video instead of vanishing.
 final class OverlayWindow: NSPanel {
-    private let label = NSTextField(labelWithString: "")
-    private let translationLabel = NSTextField(labelWithString: "")
-    private let stack = NSStackView()
+    private let scrollView = NSScrollView()
+    private let historyStack = NSStackView()
     private let glass = NSGlassEffectView()
     private let host = BubbleContentView()
+    private var history = CaptionHistory()
+    private var rowViews: [Int: CaptionRowView] = [:]
 
     private var saveWork: DispatchWorkItem?
     private var hasCustomFrame = false
@@ -463,6 +584,11 @@ final class OverlayWindow: NSPanel {
     var onCopy: (() -> Void)? {
         get { host.onCopy }
         set { host.onCopy = newValue }
+    }
+
+    var onSaveTranscript: (() -> Void)? {
+        get { host.onSaveTranscript }
+        set { host.onSaveTranscript = newValue }
     }
 
     var onOpenWindow: (() -> Void)? {
@@ -505,57 +631,28 @@ final class OverlayWindow: NSPanel {
         // no tintColor, which washes the text out.
         glass.style = .regular
 
-        // Both lines are configured together, deliberately.
-        //
-        // They were configured separately, and one line differed: the original
-        // got a lowered horizontal compression resistance and the translation
-        // did not. An NSTextField at the default priority refuses to be drawn
-        // narrower than its text, so instead of wrapping inside the bubble a
-        // long translation pushed straight through it — and since the bubble is
-        // held against the screen edge, "through the bubble" means off the
-        // screen, with the line clipped mid-word. Short lines fit, so it only
-        // ever showed up on long translated captions.
-        //
-        // The two roles differ in font, colour and line count. They must not
-        // differ in how they wrap.
-        for text in [label, translationLabel] {
-            text.alignment = .center
-            text.lineBreakMode = .byWordWrapping
-            text.cell?.wraps = true
-            text.translatesAutoresizingMaskIntoConstraints = false
-            text.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-            // Wrap to the bubble, never to the text's own preferred width.
-            text.preferredMaxLayoutWidth = Self.minWidth - Self.hPadding * 2
-        }
-
-        label.font = .systemFont(ofSize: 30, weight: .semibold)
-        label.textColor = .white
-        label.maximumNumberOfLines = 3
-
-        translationLabel.font = .systemFont(ofSize: 24, weight: .medium)
-        translationLabel.textColor = NSColor.systemTeal
-        translationLabel.maximumNumberOfLines = 2
-        translationLabel.isHidden = true
-
-        stack.orientation = .vertical
-        stack.alignment = .centerX
-        stack.spacing = 6
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        label.setAccessibilityRole(.staticText)
-        label.setAccessibilityLabel(String(localized: "Live caption"))
-        translationLabel.setAccessibilityRole(.staticText)
-        translationLabel.setAccessibilityLabel(String(localized: "Translation"))
-        stack.addArrangedSubview(label)
-        stack.addArrangedSubview(translationLabel)
+        historyStack.orientation = .vertical
+        historyStack.alignment = .leading
+        historyStack.spacing = 10
+        historyStack.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
+        scrollView.verticalScrollElasticity = .automatic
+        scrollView.documentView = historyStack
+        historyStack.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor).isActive = true
 
         host.translatesAutoresizingMaskIntoConstraints = false
-        host.addSubview(stack)
+        host.addSubview(scrollView)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: 24),
-            stack.trailingAnchor.constraint(equalTo: host.trailingAnchor, constant: -24),
+            scrollView.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: 24),
+            scrollView.trailingAnchor.constraint(equalTo: host.trailingAnchor, constant: -24),
             // Leave room for the control strip so hovering never covers the text.
-            stack.topAnchor.constraint(equalTo: host.topAnchor, constant: 34),
-            stack.bottomAnchor.constraint(equalTo: host.bottomAnchor, constant: -14),
+            scrollView.topAnchor.constraint(equalTo: host.topAnchor, constant: 34),
+            scrollView.bottomAnchor.constraint(equalTo: host.bottomAnchor, constant: -14),
         ])
 
         // Content must go through `contentView`, not addSubview: only the
@@ -563,7 +660,7 @@ final class OverlayWindow: NSPanel {
         glass.contentView = host
         contentView = glass
 
-        contentMinSize = NSSize(width: 280, height: 80)
+        contentMinSize = NSSize(width: 280, height: 110)
         restoreFrame()
         applyStyle(CaptionStyle.current)
 
@@ -717,25 +814,6 @@ final class OverlayWindow: NSPanel {
     /// Wide enough that the corner controls never collide with the text.
     private static var minWidth: CGFloat { BubbleGeometry.minWidth }
 
-    private func measure(_ text: String, font: NSFont, width: CGFloat,
-                         maxLines: Int = 0) -> NSSize {
-        guard !text.isEmpty else { return .zero }
-        let r = (text as NSString).boundingRect(
-            with: NSSize(width: width, height: .greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: [.font: font])
-        var h = ceil(r.height)
-        if maxLines > 0 {
-            // maxLines is a growth CAP, and the label truncates at the same
-            // number — so measuring past it would size the window for text
-            // nobody can see. Text longer than the cap wraps down to that many
-            // lines and is elided only beyond it.
-            let line = ceil(font.ascender - font.descender + font.leading)
-            h = min(h, line * CGFloat(maxLines) + 2)
-        }
-        return NSSize(width: ceil(r.width), height: h)
-    }
-
     /// The width the bubble should have, independent of what it is showing.
     ///
     /// THIS is the fix for "the bubble moves when a translation arrives". The
@@ -772,6 +850,7 @@ final class OverlayWindow: NSPanel {
     private static let shrinkHold: TimeInterval = 1.5
     private var shrinkWork: DispatchWorkItem?
     private var allowShrink = false
+    private var scrollToLatestPending = false
 
     /// Gated on an actual size change: glass costs more per resize than a
     /// visual-effect view, and captions update several times a second.
@@ -794,25 +873,25 @@ final class OverlayWindow: NSPanel {
         // in agreement with what is actually drawn — measuring a wrap at one
         // width and laying it out at another is how a bubble ends up with a
         // line more than it has room for.
-        label.preferredMaxLayoutWidth = contentW
-        translationLabel.preferredMaxLayoutWidth = contentW
-
         // Only the HEIGHT responds to content: text wraps inside a fixed width
-        // and the bubble grows upward from its bottom edge.
-        var contentH = measure(label.stringValue, font: st.original.font,
-                               width: contentW, maxLines: st.original.maxLines).height
-        if !translationLabel.isHidden {
-            // A space when the row is reserved but empty, so it holds exactly
-            // one line rather than collapsing and changing height the moment a
-            // translation lands.
-            let t = translationLabel.stringValue.isEmpty ? " " : translationLabel.stringValue
-            contentH += CGFloat(st.lineGap)
-                + measure(t, font: st.translation.font, width: contentW,
-                          maxLines: st.translation.maxLines).height
+        // and the bubble grows until the persisted limit, then the scroll view
+        // carries the older rows.
+        var contentH: CGFloat = 0
+        let originalFont = st.original.font
+        let translationFont = st.translation.font
+        for (index, entry) in history.entries.enumerated() {
+            let reserve = reservesTranslationRow
+                && entry.sentenceID == history.entries.last?.sentenceID
+            contentH += CaptionRowView.height(for: entry, style: st,
+                                              originalFont: originalFont,
+                                              translationFont: translationFont,
+                                              width: contentW,
+                                              reserveTranslation: reserve)
+            if index > 0 { contentH += historyStack.spacing }
         }
-        // Never taller than 40% of the screen, whatever the maths says.
+        let configuredMax = max(110, CGFloat(st.maxHeight))
         let targetH = min(max(110, contentH + Self.topPadding + Self.bottomPadding),
-                          v.height * 0.4)
+                          min(configuredMax, v.height * 0.8))
 
         var height = targetH
         if immediateShrink || allowShrink || targetH >= frame.height - 0.5 {
@@ -935,14 +1014,14 @@ final class OverlayWindow: NSPanel {
         // here any more: the original used to be fixed white/semibold and the
         // translation fixed teal/medium, so half the style fields were read but
         // could never be changed and the rest were not read at all.
-        label.font = st.original.font
-        label.textColor = st.original.color
-        label.maximumNumberOfLines = st.original.maxLines
-        translationLabel.font = st.translation.font
-        translationLabel.textColor = st.translation.color
-        translationLabel.maximumNumberOfLines = st.translation.maxLines
-        translationLabel.alphaValue = st.translation.opacity
-        stack.spacing = CGFloat(st.lineGap)
+        for entry in history.entries {
+            rowViews[entry.sentenceID]?.set(
+                entry: entry,
+                style: st,
+                staleDim: staleDim,
+                reserveTranslation: reservesTranslationRow
+                    && entry.sentenceID == history.entries.last?.sentenceID)
+        }
 
         glass.cornerRadius = st.cornerRadius
         switch st.glassStyle {
@@ -963,7 +1042,7 @@ final class OverlayWindow: NSPanel {
         // reads as a broken shortcut.
         if st.hidden {
             orderOut(nil)
-        } else if !label.stringValue.isEmpty, !isVisible {
+        } else if !history.entries.isEmpty, !isVisible {
             orderFrontRegardless()
         }
         sizeToFit(immediateShrink: true)
@@ -973,8 +1052,10 @@ final class OverlayWindow: NSPanel {
     /// to speak.
     func showPreview() {
         let st = CaptionStyle.current
-        show(text: CaptionStyle.sampleOriginal, isFinal: true)
-        showTranslation(st.showTranslation ? CaptionStyle.sampleTranslation : "")
+        clearHistory()
+        show(text: CaptionStyle.sampleOriginal, isFinal: true, sentenceID: -1)
+        showTranslation(st.showTranslation ? CaptionStyle.sampleTranslation : "",
+                        forSentenceID: -1)
         orderFrontRegardless()
     }
 
@@ -1002,17 +1083,21 @@ final class OverlayWindow: NSPanel {
 
     /// `text` is shown dimmed while volatile so it is visually obvious the
     /// engine may still revise it.
-    func show(text: String, isFinal: Bool) {
-        label.stringValue = text
+    func show(text: String, isFinal: Bool, sentenceID: Int? = nil) {
+        let id = sentenceID ?? history.entries.last?.sentenceID ?? -1
+        if !text.isEmpty {
+            history.upsertOriginal(text, sentenceID: id)
+            renderHistory(changedSentenceID: id)
+        }
         // effectiveStyle, not CaptionStyle.current: captions update several
         // times a second, and reading the raw style here dropped the
         // accessibility adjustments applyStyle had just made — Increase
         // Contrast survived only until the next caption arrived.
         let st = effectiveStyle
-        label.alphaValue = isFinal ? st.original.opacity : st.original.volatileOpacity
-        sizeToFit()
+        rowViews[id]?.original.alphaValue = isFinal
+            ? st.original.opacity : st.original.volatileOpacity
         guard !st.hidden else { orderOut(nil); return }
-        if !text.isEmpty, !isVisible { orderFrontRegardless() }
+        if !history.entries.isEmpty, !isVisible { orderFrontRegardless() }
     }
 
     /// Shown under the original line.
@@ -1026,17 +1111,30 @@ final class OverlayWindow: NSPanel {
     /// they just read beats an empty row, which is what translating slower
     /// than recognising used to produce.
     func showTranslation(_ text: String, stale: Bool = false) {
-        translationLabel.stringValue = text
-        translationLabel.isHidden = text.isEmpty && !reservesTranslationRow
-        translationLabel.alphaValue = effectiveStyle.translation.opacity * (stale ? staleDim : 1)
-        sizeToFit()
+        guard let id = history.entries.last?.sentenceID else { return }
+        showTranslation(text, forSentenceID: id, stale: stale)
+    }
+
+    func showTranslation(_ text: String, forSentenceID sentenceID: Int,
+                         stale: Bool = false) {
+        // An empty value is used when translation is switched off. Keep the
+        // history intact; the style controls whether those rows are visible.
+        if !text.isEmpty {
+            history.upsertTranslation(text, forSentenceID: sentenceID, stale: stale)
+        }
+        renderHistory(changedSentenceID: text.isEmpty ? nil : sentenceID)
     }
 
     /// The source moved on while this translation stayed. Same dimming as
     /// `showTranslation(stale: true)` without re-setting the text.
     func markTranslationStale() {
-        guard !translationLabel.stringValue.isEmpty else { return }
-        translationLabel.alphaValue = effectiveStyle.translation.opacity * staleDim
+        guard let id = history.entries.last?.sentenceID else { return }
+        markTranslationStale(forSentenceID: id)
+    }
+
+    func markTranslationStale(forSentenceID sentenceID: Int) {
+        history.markTranslationStale(forSentenceID: sentenceID)
+        renderHistory(changedSentenceID: sentenceID)
     }
 
     /// Hold a line of space for the translation for as long as translation is
@@ -1049,19 +1147,81 @@ final class OverlayWindow: NSPanel {
     var reservesTranslationRow = false {
         didSet {
             guard reservesTranslationRow != oldValue else { return }
-            if reservesTranslationRow {
-                translationLabel.isHidden = false
-            } else if translationLabel.stringValue.isEmpty {
-                translationLabel.isHidden = true
-            }
+            renderHistory()
             sizeToFit(immediateShrink: true)
         }
     }
 
-    func clear() {
-        label.stringValue = ""
-        translationLabel.stringValue = ""
-        translationLabel.isHidden = true
+    /// Replace the visible history, used by the recent-caption recap and the
+    /// settings preview. The live transcript remains the source of truth.
+    func showHistory(_ entries: [CaptionHistoryEntry]) {
+        history.replace(with: entries)
+        renderHistory()
+        guard !history.entries.isEmpty, !CaptionStyle.current.hidden else { return }
+        orderFrontRegardless()
+    }
+
+    func clearHistory() {
+        history.clear()
+        renderHistory()
         orderOut(nil)
+    }
+
+    func clear() { clearHistory() }
+
+    private func renderHistory(changedSentenceID: Int? = nil) {
+        let visibleIDs = Set(history.entries.map(\.sentenceID))
+        let staleRows = rowViews.filter { !visibleIDs.contains($0.key) }
+        for (id, row) in staleRows {
+            historyStack.removeArrangedSubview(row)
+            row.removeFromSuperview()
+            rowViews.removeValue(forKey: id)
+        }
+
+        let st = effectiveStyle
+        for (index, entry) in history.entries.enumerated() {
+            let row: CaptionRowView
+            let isNew: Bool
+            if let existing = rowViews[entry.sentenceID] {
+                row = existing
+                isNew = false
+            } else {
+                row = CaptionRowView()
+                row.widthAnchor.constraint(equalTo: historyStack.widthAnchor).isActive = true
+                rowViews[entry.sentenceID] = row
+                isNew = true
+            }
+            if isNew || changedSentenceID == nil || changedSentenceID == entry.sentenceID {
+                row.set(entry: entry, style: st, staleDim: staleDim,
+                        reserveTranslation: reservesTranslationRow
+                            && entry.sentenceID == history.entries.last?.sentenceID)
+            }
+
+            let current = index < historyStack.arrangedSubviews.count
+                ? historyStack.arrangedSubviews[index] : nil
+            if current !== row {
+                if row.superview === historyStack {
+                    historyStack.removeArrangedSubview(row)
+                }
+                historyStack.insertArrangedSubview(row, at: index)
+            }
+        }
+        historyStack.needsLayout = true
+        historyStack.layoutSubtreeIfNeeded()
+        scrollView.needsLayout = true
+        scrollView.layoutSubtreeIfNeeded()
+        sizeToFit()
+        // New captions should keep the newest row in view. The dispatch also
+        // runs after AppKit has updated the document height.
+        guard !scrollToLatestPending else { return }
+        scrollToLatestPending = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.scrollToLatestPending = false
+            let maxY = max(0, self.historyStack.bounds.height
+                - self.scrollView.contentView.bounds.height)
+            self.scrollView.contentView.scroll(to: NSPoint(x: 0, y: maxY))
+            self.scrollView.reflectScrolledClipView(self.scrollView.contentView)
+        }
     }
 }

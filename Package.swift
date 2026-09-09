@@ -9,12 +9,14 @@ let package = Package(
         // Parakeet + a genuinely streaming Nemotron RNN-T, both CoreML/ANE.
         // Zero external dependencies of its own, which is why it is preferred
         // over the MLX route to the same Nemotron checkpoint.
-        .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.15.0"),
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "0.15.5"),
         // MADLAD-400-3B-MT (T5 seq2seq) on MLX — the only Swift package that
         // compiles a dedicated translation model on this toolchain.
-        // NOTE: this package pins mlx-swift-lm to branch "main", so builds are
-        // not fully reproducible through it. Pin explicitly if that bites.
-        .package(url: "https://github.com/soniqo/speech-swift", branch: "main"),
+        // Pin the known-good revision. speech-swift still pins mlx-swift-lm to
+        // its main branch transitively; the CI package-resolution check keeps
+        // that drift visible until the upstream package publishes a release.
+        .package(url: "https://github.com/soniqo/speech-swift",
+                 revision: "37c99dd856cfacfe952b2e48ecdb3c9dedc77625"),
         // Qwen via llama.cpp/GGUF. Ships a binaryTarget, so no cmake.
         .package(url: "https://github.com/obra/LLM.swift",
                  revision: "c2144e1a0e29c280ec6080b7da85e876d51f8509"),
@@ -28,7 +30,7 @@ let package = Package(
         // In-app updates. Without this a shipped build can never be fixed after
         // the fact — a bad bug would live forever on every Mac that has it.
         .package(url: "https://github.com/sparkle-project/Sparkle",
-                 from: "2.9.5"),
+                 exact: "2.9.5"),
         .package(url: "https://github.com/argmaxinc/WhisperKit.git", exact: "1.0.0"),
     ],
     targets: [

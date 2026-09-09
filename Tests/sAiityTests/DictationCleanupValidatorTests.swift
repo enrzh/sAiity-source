@@ -85,6 +85,45 @@ import Testing
             "Go to YouTube, then search for MrBeast.")
     }
 
+    @Test("deterministic cleanup turns spoken layout commands into a list")
+    func spokenLayoutCommandsBecomeStructure() {
+        let input = "Bullet point buy milk comma bullet point call Anna comma bullet point send the invoice."
+        #expect(DictationCleanupValidator.deterministicCleanup(input) ==
+            "• Buy milk,\n• Call Anna,\n• Send the invoice.")
+    }
+
+    @Test("deterministic cleanup understands localized layout commands")
+    func localizedLayoutCommandsBecomeStructure() {
+        #expect(DictationCleanupValidator.deterministicCleanup(
+            "Aufzählungspunkt milch kaufen Aufzählungspunkt Anna anrufen",
+            sourceLanguage: "de-DE") ==
+            "• Milch kaufen\n• Anna anrufen")
+        #expect(DictationCleanupValidator.deterministicCleanup(
+            "Viñeta comprar leche viñeta llamar a Ana",
+            sourceLanguage: "es-ES") ==
+            "• Comprar leche\n• Llamar a Ana")
+    }
+
+    @Test("filler phrases are removed only in discourse positions")
+    func contextualFillerPhrases() {
+        #expect(DictationCleanupValidator.deterministicCleanup(
+            "You know, send the report, well, today.") ==
+            "Send the report today.")
+        #expect(DictationCleanupValidator.deterministicCleanup(
+            "You know the answer.") ==
+            "You know the answer.")
+    }
+
+    @Test("filler detection respects the spoken language")
+    func languageAwareFillers() {
+        #expect(DictationCleanupValidator.deterministicCleanup(
+            "Ähm, also, bitte sende den Bericht.", sourceLanguage: "de-DE") ==
+            "Bitte sende den Bericht.")
+        #expect(DictationCleanupValidator.deterministicCleanup(
+            "Um relatório sobre amanhã.", sourceLanguage: "pt-BR") ==
+            "Um relatório sobre amanhã.")
+    }
+
     @Test("cleanup removes model-added outer quotes")
     func modelAddedQuotesAreRemoved() {
         let input = "Please send the report today."
@@ -114,6 +153,8 @@ import Testing
         let prompt = LocalLLMTranslator.cleanupSystemPrompt.lowercased()
         #expect(prompt.contains("filler"))
         #expect(prompt.contains("self-correction"))
+        #expect(prompt.contains("bullet point"))
+        #expect(prompt.contains("new line"))
         #expect(prompt.contains("numbers"))
         #expect(prompt.contains("never summarize"))
         #expect(prompt.contains("output only"))
@@ -129,6 +170,40 @@ import Testing
         #expect(prompt.contains("de-de"))
         #expect(prompt.contains("same language"))
         #expect(prompt.contains("never translate"))
+    }
+
+    @Test("cleanup accepts conservative edits across supported and long-tail scripts")
+    func languageMatrixPreservesSpokenLanguage() {
+        let cases: [(input: String, output: String, source: String)] = [
+            ("Ähm, bitte sende den Bericht morgen.",
+             "Bitte sende den Bericht morgen.", "de-DE"),
+            ("Euh, envoie le rapport demain.",
+             "Envoie le rapport demain.", "fr-FR"),
+            ("Um, envía el informe mañana.",
+             "Envía el informe mañana.", "es-ES"),
+            ("مرحبا، أرسل التقرير غدا.",
+             "أرسل التقرير غدا.", "ar-SA"),
+            ("ええと、明日レポートを送ってください。",
+             "明日レポートを送ってください。", "ja-JP"),
+        ]
+
+        for item in cases {
+            #expect(DictationCleanupValidator.validate(
+                item.output,
+                preserving: item.input,
+                sourceLanguage: item.source) == item.output)
+        }
+    }
+
+    @Test("cleanup rejects assistant-style output instead of inserting it")
+    func assistantStyleOutputIsRejected() {
+        let input = "Please send the revised contract tomorrow."
+        #expect(DictationCleanupValidator.validate(
+            "Here is the cleaned transcript: Please send the revised contract tomorrow.",
+            preserving: input) == nil)
+        #expect(DictationCleanupValidator.validate(
+            "I cannot help with that request.",
+            preserving: input) == nil)
     }
 
 }

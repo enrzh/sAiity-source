@@ -28,6 +28,15 @@
         "ja": {"stringUnit": {"state": "translated", "value": "音声入力テキストを整理"}}
       }
     },
+    "Not enough free space for %@. Need about %@; only %@ is available.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Nicht genug Speicherplatz für %@. Benötigt werden etwa %@; verfügbar sind nur %@."}},
+        "es": {"stringUnit": {"state": "translated", "value": "No hay suficiente espacio libre para %@. Se necesitan unos %@; solo hay %@ disponibles."}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Espace libre insuffisant pour %@. Il faut environ %@ ; seulement %@ sont disponibles."}},
+        "ja": {"stringUnit": {"state": "translated", "value": "%@に必要な空き容量が不足しています。必要量は約%@ですが、利用できるのは%@のみです。"}}
+      }
+    },
     "Choose a local Qwen or Gemma model, then download it here to enable cleanup.": {
       "extractionState": "manual",
       "localizations": {
@@ -5869,6 +5878,22 @@
         }
       }
     },
+    "Maximum height": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Maximale Höhe" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Altura máxima" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Hauteur maximale" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "最大の高さ" } }
+      }
+    },
+    "Older subtitle rows stay inside the bubble and scroll when this limit is reached.": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Ältere Untertitelzeilen bleiben in der Sprechblase und werden bei Erreichen dieses Limits scrollbar." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Las líneas de subtítulos anteriores permanecen en la burbuja y se desplazan al alcanzar este límite." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Les anciennes lignes de sous-titres restent dans la bulle et défilent lorsque cette limite est atteinte." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "以前の字幕行はバブル内に残り、この上限に達するとスクロールできます。" } }
+      }
+    },
     "Medium": {
       "localizations": {
         "de": {
@@ -6392,6 +6417,7 @@
         }
       }
     },
+    "Audio waveform": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Audio-Wellenform" } }, "es": { "stringUnit": { "state": "translated", "value": "Forma de onda de audio" } }, "fr": { "stringUnit": { "state": "translated", "value": "Forme d’onde audio" } }, "ja": { "stringUnit": { "state": "translated", "value": "オーディオ波形" } } } },
     "Accessibility access is enabled": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Bedienungshilfen aktiviert" } }, "es": { "stringUnit": { "state": "translated", "value": "Acceso a Accesibilidad activado" } }, "fr": { "stringUnit": { "state": "translated", "value": "Accès à l’accessibilité activé" } }, "ja": { "stringUnit": { "state": "translated", "value": "アクセシビリティアクセスが有効です" } } } },
     "Accessibility": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Bedienungshilfen" } }, "es": { "stringUnit": { "state": "translated", "value": "Accesibilidad" } }, "fr": { "stringUnit": { "state": "translated", "value": "Accessibilité" } }, "ja": { "stringUnit": { "state": "translated", "value": "アクセシビリティ" } } } },
     "After granting access, quit and reopen sAiity.": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Beende sAiity nach dem Erteilen des Zugriffs und öffne die App erneut." } }, "es": { "stringUnit": { "state": "translated", "value": "Después de conceder el acceso, cierra sAiity y vuelve a abrirlo." } }, "fr": { "stringUnit": { "state": "translated", "value": "Après avoir accordé l’accès, quittez puis rouvrez sAiity." } }, "ja": { "stringUnit": { "state": "translated", "value": "アクセスを許可した後、sAiityを終了して再度開いてください。" } } } },
@@ -8954,6 +8980,14 @@
         }
       }
     },
+    "Could not save subtitles": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Untertitel konnten nicht gespeichert werden" } },
+        "es": { "stringUnit": { "state": "translated", "value": "No se han podido guardar los subtítulos" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Impossible d’enregistrer les sous-titres" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "字幕を保存できませんでした" } }
+      }
+    },
     "Save transcript": {
       "localizations": {
         "de": {
@@ -8980,6 +9014,14 @@
             "value": "文字起こしを保存"
           }
         }
+      }
+    },
+    "Subtitles saved": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Untertitel gespeichert" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Subtítulos guardados" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Sous-titres enregistrés" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "字幕を保存しました" } }
       }
     },
     "Save transcripts of sessions": {
@@ -10280,6 +10322,14 @@
         }
       }
     },
+    "%@ failed its integrity check. Try again.": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "%@ hat die Integritätsprüfung nicht bestanden. Versuche es erneut." } },
+        "es": { "stringUnit": { "state": "translated", "value": "%@ no superó la comprobación de integridad. Inténtalo de nuevo." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "%@ a échoué au contrôle d’intégrité. Réessaie." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "%@ は整合性チェックに失敗しました。もう一度お試しください。" } }
+      }
+    },
     "That URL did not answer with a downloadable file (HTTP %lld).": {
       "extractionState": "manual",
       "localizations": {
@@ -10365,6 +10415,14 @@
             "value": "このファイルは空か、読み取れません。"
           }
         }
+      }
+    },
+    "That file is not a GGUF model file.": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Diese Datei ist keine GGUF-Modelldatei." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Este archivo no es un modelo GGUF." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Ce fichier n’est pas un modèle GGUF." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "このファイルはGGUFモデルではありません。" } }
       }
     },
     "That means a one-time model download — you choose which.": {
@@ -10859,6 +10917,14 @@
             "value": "文字起こしをコピーしました"
           }
         }
+      }
+    },
+    "Transcript recording stopped": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Transkriptaufzeichnung angehalten" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Grabación de la transcripción detenida" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Enregistrement de la transcription arrêté" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "文字起こしの記録を停止しました" } }
       }
     },
     "Transcript deleted": {
@@ -13046,6 +13112,186 @@
             "value": "翻訳エンジンがまだ選択されていません。%@は幅広い言語をカバーするデフォルトで、実測でも高速な選択肢です。「モデル」からダウンロードしてください。"
           }
         }
+      }
+    },
+    "MADLAD is the recommended local translator. Pick the target language under Captions.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "MADLAD ist der empfohlene lokale Übersetzer. Wähle die Zielsprache unter Untertitel." } },
+        "es": { "stringUnit": { "state": "translated", "value": "MADLAD es el traductor local recomendado. Elige el idioma de destino en Subtítulos." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "MADLAD est le traducteur local recommandé. Choisissez la langue cible dans Sous-titres." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "MADLADは推奨のローカル翻訳エンジンです。字幕で翻訳先の言語を選択してください。" } }
+      }
+    },
+    "Advanced translation": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Erweiterte Übersetzung" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Traducción avanzada" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Traduction avancée" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "高度な翻訳" } }
+      }
+    },
+    "Specialist and local LLM models are optional. Use them when you have a tested reason to prefer them.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Spezialisten- und lokale LLM-Modelle sind optional. Verwende sie nur, wenn du einen geprüften Grund dafür hast." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Los modelos especializados y LLM locales son opcionales. Úsalos cuando tengas un motivo comprobado para preferirlos." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Les modèles spécialisés et les LLM locaux sont facultatifs. Utilisez-les lorsque vous avez une raison testée de les préférer." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "専門モデルとローカルLLMはオプションです。使う理由を確認できた場合に選択してください。" } }
+      }
+    },
+    "%@ · recommended": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "%@ · empfohlen" } },
+        "es": { "stringUnit": { "state": "translated", "value": "%@ · recomendado" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "%@ · recommandé" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "%@ · 推奨" } }
+      }
+    },
+    "%@ · experimental": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "%@ · experimentell" } },
+        "es": { "stringUnit": { "state": "translated", "value": "%@ · experimental" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "%@ · expérimental" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "%@ · 実験的" } }
+      }
+    },
+    "Choose experimental model…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Experimentelles Modell auswählen …" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Elegir modelo experimental…" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Choisir un modèle expérimental…" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "実験モデルを選択…" } }
+      }
+    },
+    "MADLAD is the recommended local translator. Download it under Models.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "MADLAD ist der empfohlene lokale Übersetzer. Lade ihn unter Modelle herunter." } },
+        "es": { "stringUnit": { "state": "translated", "value": "MADLAD es el traductor local recomendado. Descárgalo en Modelos." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "MADLAD est le traducteur local recommandé. Téléchargez-le dans Modèles." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "MADLADは推奨のローカル翻訳エンジンです。「モデル」からダウンロードしてください。" } }
+      }
+    },
+    "Advanced": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Erweitert" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Avanzado" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Avancé" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "詳細" } }
+      }
+    },
+    "Translation engine": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Übersetzungsmodell" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Motor de traducción" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Moteur de traduction" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "翻訳エンジン" } }
+      }
+    },
+    "Experimental local models": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Experimentelle lokale Modelle" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Modelos locales experimentales" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Modèles locaux expérimentaux" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "実験的なローカルモデル" } }
+      }
+    },
+    "Optional specialist for 37 languages. Keep it in Advanced until a language-pair benchmark shows it beats MADLAD for your use case.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Optionales Spezialmodell für 37 Sprachen. Lass es unter Erweitert, bis ein Sprachpaar-Benchmark zeigt, dass es für deinen Anwendungsfall besser als MADLAD ist." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Especialista opcional para 37 idiomas. Déjalo en Avanzado hasta que una evaluación por pares de idiomas demuestre que supera a MADLAD en tu caso." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Spécialiste optionnel pour 37 langues. Gardez-le dans Avancé jusqu'à ce qu'un benchmark par paire de langues montre qu'il dépasse MADLAD pour votre usage." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "37言語に対応するオプションの専門モデルです。言語ペアのベンチマークで用途におけるMADLAD超えが確認されるまで、詳細設定に置いてください。" } }
+      }
+    },
+    "Experimental local LLM translation. Useful for cleanup and language experiments, but less predictable than a dedicated translation model. Choose a Qwen, Gemma, or custom GGUF under Advanced.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Experimentelle Übersetzung mit einem lokalen LLM. Nützlich für Bereinigung und Sprachtests, aber weniger vorhersehbar als ein dediziertes Übersetzungsmodell. Wähle unter Erweitert ein Qwen-, Gemma- oder eigenes GGUF-Modell." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Traducción experimental con un LLM local. Es útil para limpieza y experimentos de idiomas, pero es menos predecible que un modelo de traducción dedicado. Elige un Qwen, Gemma o GGUF propio en Avanzado." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Traduction expérimentale avec un LLM local. Utile pour le nettoyage et les expériences linguistiques, mais moins prévisible qu'un modèle de traduction dédié. Choisissez un Qwen, Gemma ou GGUF personnalisé dans Avancé." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ローカルLLMによる実験的な翻訳です。クリーンアップや言語実験には便利ですが、専用翻訳モデルより予測しにくい動作になります。詳細設定でQwen、Gemma、またはカスタムGGUFを選択してください。" } }
+      }
+    },
+    "Experimental quality — verify important translations.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Experimentelle Qualität – wichtige Übersetzungen prüfen." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Calidad experimental: verifica las traducciones importantes." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Qualité expérimentale — vérifiez les traductions importantes." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "実験的な品質です。重要な翻訳は確認してください。" } }
+      }
+    },
+    "Experimental with %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Experimentell mit %@" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Experimental con %@" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Expérimental avec %@" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "%@で実験的" } }
+      }
+    },
+    "MADLAD is the recommended local translator.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "MADLAD ist der empfohlene lokale Übersetzer." } },
+        "es": { "stringUnit": { "state": "translated", "value": "MADLAD es el traductor local recomendado." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "MADLAD est le traducteur local recommandé." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "MADLADは推奨のローカル翻訳エンジンです。" } }
+      }
+    },
+    "Optional specialist and local LLM models.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Optionale Spezial- und lokale LLM-Modelle." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Modelos especializados y LLM locales opcionales." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Modèles spécialisés et LLM locaux facultatifs." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "オプションの専門モデルとローカルLLMです。" } }
+      }
+    },
+    "Models stay on this Mac. Remove them to reclaim space.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Modelle bleiben auf diesem Mac. Entferne sie, um Speicherplatz freizugeben." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Los modelos permanecen en este Mac. Elimínalos para recuperar espacio." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Les modèles restent sur ce Mac. Supprimez-les pour récupérer de l'espace." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "モデルはこのMacに保存されます。削除すると容量を確保できます。" } }
+      }
+    },
+    "Choose a local model to clean up dictated text.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Wähle ein lokales Modell, um diktierten Text zu bereinigen." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Elige un modelo local para limpiar el texto dictado." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Choisissez un modèle local pour nettoyer le texte dicté." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "音声入力テキストを整理するローカルモデルを選択します。" } }
+      }
+    },
+    "The default is %@ ms. Shorter values split on breaths; longer values delay translation.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Der Standardwert ist %@ ms. Kürzere Werte teilen bei Atempausen; längere verzögern die Übersetzung." } },
+        "es": { "stringUnit": { "state": "translated", "value": "El valor predeterminado es %@ ms. Los valores menores dividen en las pausas; los mayores retrasan la traducción." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "La valeur par défaut est de %@ ms. Les valeurs plus courtes coupent aux respirations ; les plus longues retardent la traduction." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "デフォルトは%@ msです。短い値は息継ぎで分割し、長い値は翻訳を遅らせます。" } }
+      }
+    },
+    "Show advanced engines…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Erweiterte Modelle anzeigen …" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Mostrar motores avanzados…" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Afficher les moteurs avancés…" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "詳細なエンジンを表示…" } }
       }
     }
   },

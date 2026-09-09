@@ -87,6 +87,14 @@ struct LanguageTests {
         #expect(LLMLanguageProvider.nativeCode(for: "sw") == "Swahili")
     }
 
+    @Test("Qwen separates its stronger languages from the experimental long tail")
+    func qwenQualityTiersAreExplicit() {
+        #expect(LLMLanguageProvider.isStrong("de"))
+        #expect(LLMLanguageProvider.isStrong("de-DE"))
+        #expect(LLMLanguageProvider.isStrong("zh-Hans"))
+        #expect(!LLMLanguageProvider.isStrong("sw"))
+    }
+
     @Test("A language no engine can do is never offered as if it could be")
     func everyOfferedLanguageHasAnEngine() async {
         for lang in LanguageCatalog.all.prefix(60) {

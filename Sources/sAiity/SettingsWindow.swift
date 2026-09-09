@@ -171,6 +171,9 @@ final class AppState {
         }
     }
     var ownedTotal: String = "—"
+    /// Measured with the same inventory pass as `ownedTotal`, so the storage
+    /// button does not rescan the model tree on every SwiftUI update.
+    var ownedBytes: Int64 = 0
     /// Bytes under our models root that belong to no known asset.
     var strayTotal: String?
     /// The single in-flight download, by `ModelAsset.id`. One slot rather than a
@@ -312,11 +315,13 @@ final class AppState {
     }
 
     func refreshModels() {
-        assets = ModelRegistry.snapshot()
+        let inventory = ModelRegistry.inventorySnapshot()
+        assets = inventory.assets
         loadFailures = LoadHealth.all
-        let total = ModelRegistry.ownedTotalBytes()
+        let total = inventory.ownedBytes
+        ownedBytes = total
         ownedTotal = total > 0 ? ModelRegistry.format(total) : String(localized: "nothing downloaded")
-        let stray = ModelRegistry.strayBytes()
+        let stray = inventory.strayBytes
         // Only worth mentioning once it is a real amount; a few KB of cache
         // metadata is noise.
         strayTotal = stray > 8 << 20 ? ModelRegistry.format(stray) : nil
@@ -330,6 +335,13 @@ final class AppState {
     /// report — some give bytes, some a fraction, some nothing at all.
     func download(_ asset: ModelAsset) async {
         guard activeDownload == nil, let install = asset.install else { return }
+        if let required = asset.advertisedBytes,
+           let available = ModelRegistry.availableDiskBytes(),
+           available < required {
+            modelError = String(localized: "Not enough free space for \(asset.title). Need about \(ModelRegistry.format(required)); only \(ModelRegistry.format(available)) is available.")
+            refreshModels()
+            return
+        }
         activeDownload = asset.id
         downloadProgress = DownloadProgress(note: "Starting…")
         modelError = nil
@@ -474,8 +486,7 @@ final class AppState {
         // nothing is chosen produced a flatly false claim — "MADLAD cannot
         // translate into English" — from an engine the user had not picked.
         let asked = translationEngine ?? .recommended
-        targetSupportedByEngine = await asked.languages
-            .supportedCanonicalCodes().contains(t)
+        targetSupportedByEngine = LanguageCatalog.supportedCodes(for: asked).contains(t)
     }
     var llmModel: LocalModel? = LocalModel.selected {
         didSet {

@@ -55,6 +55,14 @@ enum AssetUse: Sendable {
     case whenTranslator(TranslationEngine)
     case whenQwenVariant(file: String)
 
+    var isAdvanced: Bool {
+        switch self {
+        case .whenTranslator(let engine): return engine.isAdvanced
+        case .whenQwenVariant: return true
+        case .never, .whenRecognitionEngine, .whenNemotronTier: return false
+        }
+    }
+
     /// True when this asset is the one currently selected to do its job.
     var isSelected: Bool {
         switch self {
@@ -105,6 +113,8 @@ struct ModelAsset: Identifiable, Sendable {
     let storage: AssetStorage
     let removal: AssetRemoval
     let use: AssetUse
+
+    var isAdvanced: Bool { use.isAdvanced }
     /// Nil for assets only macOS can install (Apple speech locales and
     /// translation pairs are requested through their own framework flows).
     let install: (@Sendable (@escaping ProgressSink) async throws -> Void)?
@@ -128,6 +138,15 @@ struct AssetStatus: Identifiable, Sendable {
         if let b = asset.advertisedBytes { return ModelRegistry.format(b) }
         return "—"
     }
+}
+
+/// One coherent filesystem read used by the model settings page. Keeping the
+/// totals beside the per-asset statuses prevents three independent directory
+/// scans from disagreeing during a download.
+struct ModelInventory: Sendable {
+    let assets: [AssetStatus]
+    let ownedBytes: Int64
+    let strayBytes: Int64
 }
 
 /// The one place that knows about every model on disk.
@@ -160,6 +179,19 @@ enum ModelRegistry {
 
     static func format(_ bytes: Int64) -> String {
         ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
+    /// Returns the capacity macOS considers safe for an important write. The
+    /// model root may not exist yet on a fresh install, so ask its parent
+    /// volume through the root URL rather than requiring the directory first.
+    static func availableDiskBytes(at url: URL = root) -> Int64? {
+        let keys: Set<URLResourceKey> = [
+            .volumeAvailableCapacityForImportantUsageKey,
+            .volumeAvailableCapacityKey,
+        ]
+        guard let values = try? url.resourceValues(forKeys: keys) else { return nil }
+        return values.volumeAvailableCapacityForImportantUsage
+            ?? values.volumeAvailableCapacity.map(Int64.init)
     }
 
     // MARK: - The catalogue
@@ -210,7 +242,16 @@ enum ModelRegistry {
     }
 
     static func snapshot() -> [AssetStatus] {
-        assets().map(status(of:))
+        inventorySnapshot().assets
+    }
+
+    static func inventorySnapshot() -> ModelInventory {
+        let statuses = assets().map(status(of:))
+        let owned = byteSize(of: root)
+        let known = statuses.reduce(Int64(0)) { $0 + $1.bytesOnDisk }
+        return ModelInventory(assets: statuses,
+                              ownedBytes: owned,
+                              strayBytes: max(0, owned - known))
     }
 
     // MARK: - Totals
@@ -226,10 +267,7 @@ enum ModelRegistry {
     /// showing separately rather than folding into some model's row and
     /// overstating it.
     static func strayBytes() -> Int64 {
-        let known = snapshot().reduce(Int64(0)) { sum, s in
-            return sum + s.bytesOnDisk
-        }
-        return max(0, ownedTotalBytes() - known)
+        inventorySnapshot().strayBytes
     }
 
     // MARK: - Removing

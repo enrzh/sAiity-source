@@ -73,4 +73,16 @@ import Testing
         #expect(!secondStop)
         #expect(!lifecycle.isRunning)
     }
+
+    @Test("waveform levels distinguish silence from speech")
+    func waveformLevelsHaveUsefulRange() {
+        let silence = DictationMicrophoneCapture.waveformLevelsForTesting(
+            Array(repeating: Float.zero, count: 280))
+        let speech = DictationMicrophoneCapture.waveformLevelsForTesting(
+            Array(repeating: Float(0.08), count: 280))
+
+        #expect(silence.allSatisfy { $0 == 0.06 })
+        #expect(speech.allSatisfy { $0 > 0.5 })
+        #expect(speech != silence)
+    }
 }

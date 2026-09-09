@@ -31,12 +31,20 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
     private var lifecycle = DictationCaptureLifecycle()
     private var converter: AVAudioConverter?
     private var sampleCount = 0
-    private var convertedSamples: [[Float]] = []
+    // Keep one contiguous buffer so releasing a long dictation does not need
+    // to allocate and flatten one array per audio callback.
+    private var convertedSamples: [Float] = []
     private var didEmitLimit = false
+    private var waveformFrameCounter = 0
+    private var waveformHandler: (@Sendable ([Float]) -> Void)?
     var onLimit: (@Sendable () -> Void)?
 
     func setLimitHandler(_ handler: (@Sendable () -> Void)?) {
         onLimit = handler
+    }
+
+    func setWaveformHandler(_ handler: (@Sendable ([Float]) -> Void)?) {
+        lock.withLock { waveformHandler = handler }
     }
 
     var isRunning: Bool {
@@ -63,7 +71,12 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
             ])
         }
         self.converter = converter
-        lock.withLock { sampleCount = 0; convertedSamples = []; didEmitLimit = false }
+        lock.withLock {
+            sampleCount = 0
+            convertedSamples = []
+            didEmitLimit = false
+            waveformFrameCounter = 0
+        }
 
         input.installTap(onBus: 0, bufferSize: 1024, format: sourceFormat) { [weak self] buffer, _ in
             self?.convert(buffer, to: targetFormat, onBuffer: onBuffer)
@@ -111,12 +124,45 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
         }
         guard error == nil, output.frameLength > 0 else { return }
         guard let channel = output.floatChannelData?[0] else { return }
-        let rawSamples = Array(UnsafeBufferPointer(start: channel, count: Int(output.frameLength)))
+        let rawSamples = UnsafeBufferPointer(start: channel, count: Int(output.frameLength))
         let accounting = storeConvertedFrame(rawSamples)
         guard accounting.acceptedFrameCount > 0 else { return }
         output.frameLength = AVAudioFrameCount(accounting.acceptedFrameCount)
+        let emitWaveform = lock.withLock {
+            waveformFrameCounter += 1
+            guard waveformFrameCounter >= 3 else { return false }
+            waveformFrameCounter = 0
+            return waveformHandler != nil
+        }
+        if emitWaveform {
+            let levels = Self.waveformLevels(rawSamples, count: accounting.acceptedFrameCount)
+            let handler = lock.withLock { waveformHandler }
+            handler?(levels)
+        }
+        // Feed the recognizer after sampling the level. A streaming backend is
+        // allowed to do synchronous work here; letting it run first made the
+        // visual feedback stall whenever inference briefly occupied the audio
+        // callback.
         onBuffer(output)
         if accounting.shouldEmitLimit { onLimit?() }
+    }
+
+    private static func waveformLevels(_ samples: UnsafeBufferPointer<Float>,
+                                       count: Int,
+                                       barCount: Int = 28) -> [Float] {
+        guard count > 0 else { return [] }
+        return (0..<barCount).map { bar in
+            let start = count * bar / barCount
+            let end = max(start + 1, count * (bar + 1) / barCount)
+            let slice = samples[start..<min(end, count)]
+            let meanSquare = slice.reduce(into: Float.zero) { sum, sample in
+                sum += sample * sample
+            } / Float(max(1, slice.count))
+            // Square-rooted RMS keeps quiet speech visible without flattening
+            // louder syllables into a solid block. Audio samples are normalized
+            // floats, so 8x gives ordinary speech enough range to move the bars.
+            return min(1, max(0.06, sqrt(meanSquare) * 8.0))
+        }
     }
 
     /// Accounts one successfully converted buffer atomically. The returned
@@ -133,27 +179,31 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
         }
     }
 
-    private func storeConvertedFrame(_ samples: [Float]) -> (acceptedFrameCount: Int, shouldEmitLimit: Bool) {
+    private func storeConvertedFrame(_ samples: UnsafeBufferPointer<Float>) -> (acceptedFrameCount: Int, shouldEmitLimit: Bool) {
         lock.withLock {
             guard lifecycle.isRunning, !samples.isEmpty else { return (0, false) }
             let remaining = DictationAudioSampleLimit.maximumSamples - sampleCount
             guard remaining > 0 else { return (0, false) }
             let accepted = min(samples.count, remaining)
             sampleCount += accepted
-            convertedSamples.append(Array(samples.prefix(accepted)))
+            convertedSamples.append(contentsOf: samples.prefix(accepted))
             let shouldEmit = sampleCount == DictationAudioSampleLimit.maximumSamples && !didEmitLimit
             if shouldEmit { didEmitLimit = true }
             return (accepted, shouldEmit)
         }
     }
 
+    private func storeConvertedFrame(_ samples: [Float]) -> (acceptedFrameCount: Int, shouldEmitLimit: Bool) {
+        samples.withUnsafeBufferPointer { storeConvertedFrame($0) }
+    }
+
     var collectedSamples: [[Float]] {
-        lock.withLock { convertedSamples }
+        lock.withLock { convertedSamples.isEmpty ? [] : [convertedSamples] }
     }
 
     func takeCollectedSamples() -> [Float] {
         lock.withLock {
-            let samples = convertedSamples.flatMap { $0 }
+            let samples = convertedSamples
             convertedSamples.removeAll(keepingCapacity: false)
             return samples
         }
@@ -166,11 +216,18 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
             sampleCount = 0
             convertedSamples.removeAll()
             didEmitLimit = false
+            waveformFrameCounter = 0
         }
     }
 
     func recordConvertedSamplesForTesting(_ samples: [Float]) {
         _ = storeConvertedFrame(samples)
+    }
+
+    static func waveformLevelsForTesting(_ samples: [Float], barCount: Int = 28) -> [Float] {
+        samples.withUnsafeBufferPointer {
+            waveformLevels($0, count: samples.count, barCount: barCount)
+        }
     }
     #endif
 }

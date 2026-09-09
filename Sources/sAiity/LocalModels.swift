@@ -102,30 +102,22 @@ struct LocalModel: Identifiable, Sendable, Equatable, Codable {
 
     static var all: [LocalModel] { builtIn + custom }
 
-    /// Register a model at a direct URL. The size comes from a HEAD request so
-    /// completeness can be judged later; a server that sends no Content-Length
-    /// yields nil, which downstream treats as unknown rather than zero.
+    /// Kept for compatibility with existing installations, but no longer
+    /// offered as a normal cleanup choice because it is too small for reliable
+    /// rewriting or translation.
+    static let legacyModelFiles: Set<String> = ["Qwen3.5-0.8B-Q4_K_M.gguf"]
+
+    var isLegacy: Bool { Self.legacyModelFiles.contains(file) }
+
+    /// Register a model at a direct URL. Probe the first four bytes as well as
+    /// reading the size: hosts that reject HEAD still work, and a pasted model
+    /// page is rejected before it gets registered as a model.
     static func addCustom(url: URL) async throws -> LocalModel {
         var name = safeFilename(url.lastPathComponent)
         if !name.lowercased().hasSuffix(".gguf") { name += ".gguf" }
         name = uniqueFilename(name)
 
-        var req = URLRequest(url: url)
-        req.httpMethod = "HEAD"
-        let (_, response) = try await URLSession.shared.data(for: req)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw TranslationEngineError.notAvailable(
-                String(localized: "That URL did not answer with a downloadable file (HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0))."))
-        }
-        // A 200 of type text/html is a model PAGE, not a model — the most
-        // likely paste. Refusing it here, at add time, beats installing the
-        // page as a .gguf that fails minutes later inside llama.cpp.
-        if let type = http.value(forHTTPHeaderField: "Content-Type"),
-           type.lowercased().contains("text/html") {
-            throw TranslationEngineError.notAvailable(
-                String(localized: "That URL answers with a web page, not a model file. Use the direct download link."))
-        }
-        let length = http.expectedContentLength > 0 ? http.expectedContentLength : nil
+        let length = try await remoteGGUFSize(at: url)
 
         let m = LocalModel(source: .url(url.absoluteString), file: name,
                            label: name.replacingOccurrences(of: ".gguf", with: ""),
@@ -143,8 +135,15 @@ struct LocalModel: Identifiable, Sendable, Equatable, Codable {
     static func addCustom(importing fileURL: URL) throws -> LocalModel {
         let size = (try? FileManager.default.attributesOfItem(
             atPath: fileURL.path)[.size] as? Int64) ?? 0
-        guard size > 0 else {
+        guard size >= Int64(FileDownloader.ggufMagic.count) else {
             throw TranslationEngineError.notAvailable(String(localized: "That file is empty or unreadable."))
+        }
+        let sourceHandle = try FileHandle(forReadingFrom: fileURL)
+        let magic = try sourceHandle.read(upToCount: FileDownloader.ggufMagic.count)
+        try? sourceHandle.close()
+        guard magic == FileDownloader.ggufMagic else {
+            throw TranslationEngineError.notAvailable(
+                String(localized: "That file is not a GGUF model file."))
         }
         var name = safeFilename(fileURL.lastPathComponent)
         // Ollama blobs are named sha256-…; give them a usable extension.
@@ -155,8 +154,13 @@ struct LocalModel: Identifiable, Sendable, Equatable, Codable {
         let dest = directory.appendingPathComponent(name)
         let staging = dest.appendingPathExtension("part")
         try? FileManager.default.removeItem(at: staging)
-        try FileManager.default.copyItem(at: fileURL, to: staging)
-        try FileManager.default.moveItem(at: staging, to: dest)
+        do {
+            try FileManager.default.copyItem(at: fileURL, to: staging)
+            try FileManager.default.moveItem(at: staging, to: dest)
+        } catch {
+            try? FileManager.default.removeItem(at: staging)
+            throw error
+        }
 
         let m = LocalModel(source: .importedFile, file: name,
                            label: name.replacingOccurrences(of: ".gguf", with: ""),
@@ -165,6 +169,60 @@ struct LocalModel: Identifiable, Sendable, Equatable, Codable {
                            licence: String(localized: "Your own model — check its terms at the source"))
         custom = custom + [m]
         return m
+    }
+
+    /// HEAD is metadata, not a guaranteed capability. Some object stores and
+    /// signed download endpoints return 403/405 for it while serving GET
+    /// normally, so fall back to a four-byte ranged GET and Content-Range.
+    private static func remoteGGUFSize(at url: URL) async throws -> Int64? {
+        var headSize: Int64?
+        var headStatus = 0
+        do {
+            var request = URLRequest(url: url)
+            request.httpMethod = "HEAD"
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+            headStatus = http.statusCode
+            if let type = http.value(forHTTPHeaderField: "Content-Type"),
+               type.lowercased().contains("text/html") {
+                throw TranslationEngineError.notAvailable(
+                    String(localized: "That URL answers with a web page, not a model file. Use the direct download link."))
+            }
+            if http.statusCode == 200, http.expectedContentLength > 0 {
+                headSize = http.expectedContentLength
+            }
+        } catch let error as TranslationEngineError {
+            throw error
+        } catch {
+            // The ranged GET below is the compatibility path.
+        }
+
+        var probe = URLRequest(url: url)
+        probe.httpMethod = "GET"
+        probe.setValue("bytes=0-3", forHTTPHeaderField: "Range")
+        probe.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+        let (data, response) = try await URLSession.shared.data(for: probe)
+        guard let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode) else {
+            throw TranslationEngineError.notAvailable(
+                String(localized: "That URL did not answer with a downloadable file (HTTP \(headStatus))."))
+        }
+        if let type = http.value(forHTTPHeaderField: "Content-Type"),
+           type.lowercased().contains("text/html") {
+            throw TranslationEngineError.notAvailable(
+                String(localized: "That URL answers with a web page, not a model file. Use the direct download link."))
+        }
+        guard data.prefix(FileDownloader.ggufMagic.count) == FileDownloader.ggufMagic else {
+            throw TranslationEngineError.notAvailable(
+                String(localized: "That file is not a GGUF model file."))
+        }
+
+        if let range = http.value(forHTTPHeaderField: "Content-Range"),
+           let slash = range.lastIndex(of: "/"),
+           let total = Int64(range[range.index(after: slash)...]), total > 0 {
+            return total
+        }
+        return headSize ?? (http.expectedContentLength > 0 ? http.expectedContentLength : nil)
     }
 
     /// Forget a custom model and delete its file. Built-ins cannot be removed

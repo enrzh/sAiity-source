@@ -251,6 +251,16 @@ import Testing
         #expect(DictationPhase.recovery("Retry").toastPresentation.value == "Retry")
     }
 
+    @Test("dictating feedback uses a waveform instead of the phase text")
+    func dictatingPhaseShowsWaveform() {
+        let window = makeWindow()
+        window.show(phase: .dictating)
+        #expect(window.waveformVisibleForTests)
+        window.show(phase: .transcribing)
+        #expect(!window.waveformVisibleForTests)
+        window.dismiss()
+    }
+
     @Test("phase updates do not reposition the toast")
     func phaseUpdatesPreserveFrame() {
         let window = makeWindow()

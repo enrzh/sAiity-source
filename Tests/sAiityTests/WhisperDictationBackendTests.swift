@@ -22,10 +22,10 @@ struct WhisperDictationBackendTests {
     func normalPreparationOnlyDownloads() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        var events: [String] = []
+        let events = EventLog()
         let backend = WhisperDictationBackend(
             download: { _, destination, _ in
-                events.append("download")
+                await events.append("download")
                 let folder = destination.appendingPathComponent("downloaded", isDirectory: true)
                 try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
                 for name in ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"] {
@@ -35,11 +35,11 @@ struct WhisperDictationBackendTests {
                 }
                 return folder
             },
-            prepare: { _, _ in events.append("setup"); events.append("load") })
+            prepare: { _, _ in await events.append("setup"); await events.append("load") })
 
         try await backend.prepareModel(.base, under: root)
 
-        #expect(events == ["download"])
+        #expect(await events.value == ["download"])
         #expect(!WhisperDictationBackend.isReady(.base, under: root))
     }
 
@@ -47,16 +47,16 @@ struct WhisperDictationBackendTests {
     func explicitPreparationOrder() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        var events: [String] = []
+        let events = EventLog()
         let backend = WhisperDictationBackend(download: { _, destination, _ in
             let folder = destination.appendingPathComponent("downloaded", isDirectory: true)
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             for name in ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"] { let bundle = folder.appendingPathComponent(name); try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true); try Data(repeating: 1, count: 1).write(to: bundle.appendingPathComponent("coremldata.bin")) }
-            events.append("download"); return folder
-        }, prepare: { _, _ in events.append("setup"); events.append("load"); events.append("release") })
+            await events.append("download"); return folder
+        }, prepare: { _, _ in await events.append("setup"); await events.append("load"); await events.append("release") })
         try await backend.prepareModelForUse(.base, under: root)
-        events.append(FileManager.default.fileExists(atPath: WhisperDictationBackend.modelFolder(for: .base, under: root).appendingPathComponent(".saiity-ready").path) ? "marker" : "missing")
-        #expect(events == ["download", "setup", "load", "release", "marker"])
+        await events.append(FileManager.default.fileExists(atPath: WhisperDictationBackend.modelFolder(for: .base, under: root).appendingPathComponent(".saiity-ready").path) ? "marker" : "missing")
+        #expect(await events.value == ["download", "setup", "load", "release", "marker"])
         #expect(WhisperDictationBackend.isReady(.base, under: root))
     }
 
@@ -64,27 +64,27 @@ struct WhisperDictationBackendTests {
     func explicitPreparationUsesOneRuntime() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        var events: [String] = []
+        let events = EventLog()
         let backend = WhisperDictationBackend(root: root, download: { _, destination, _ in
             try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
             try await Task.sleep(for: .milliseconds(10))
             let folder = destination.appendingPathComponent("downloaded", isDirectory: true)
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             for name in ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"] { let bundle = folder.appendingPathComponent(name); try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true); try Data(repeating: 1, count: 1).write(to: bundle.appendingPathComponent("coremldata.bin")) }
-            events.append("download"); return folder
-        }, prepare: { _, _ in events.append("setup"); events.append("load"); events.append("release") })
+            await events.append("download"); return folder
+        }, prepare: { _, _ in await events.append("setup"); await events.append("load"); await events.append("release") })
         try await backend.prepareModelForUse(.base)
-        events.append(FileManager.default.fileExists(atPath: root.appendingPathComponent("whisper-openai_whisper-base/.saiity-ready").path) ? "marker" : "missing")
-        #expect(events == ["download", "setup", "load", "release", "marker"])
+        await events.append(FileManager.default.fileExists(atPath: root.appendingPathComponent("whisper-openai_whisper-base/.saiity-ready").path) ? "marker" : "missing")
+        #expect(await events.value == ["download", "setup", "load", "release", "marker"])
     }
 
     @Test("failed explicit preparation removes final model, marker, and partial so retry can succeed")
     func failedPreparationCleansAndRetries() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        var attempts = 0
+        let attempts = Counter()
         let backend = WhisperDictationBackend(root: root, download: { _, destination, _ in
-            attempts += 1
+            await attempts.increment()
             try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
             let folder = destination.appendingPathComponent("downloaded", isDirectory: true)
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -92,12 +92,12 @@ struct WhisperDictationBackendTests {
             return folder
         }, prepare: { _, folder in
             try Data(repeating: 1, count: 1).write(to: folder.appendingPathComponent(".saiity-ready"))
-            if attempts == 1 { throw TestError.failed }
+            if await attempts.value == 1 { throw TestError.failed }
         })
         do { try await backend.prepareModelForUse(.base); #expect(Bool(false)) } catch { #expect((error as? TestError) == .failed) }
         #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("whisper-openai_whisper-base").path))
         try await backend.prepareModelForUse(.base)
-        #expect(attempts == 2)
+        #expect(await attempts.value == 2)
         #expect(WhisperDictationBackend.isReady(.base, under: root))
     }
 
@@ -118,23 +118,23 @@ struct WhisperDictationBackendTests {
     func transcriptionUsesCustomRootAndHook() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        var called = false
+        let called = Flag()
         let backend = WhisperDictationBackend(root: root, transcribe: { _, folder, _, options in
-            called = true
+            await called.set(true)
             #expect(folder.path.hasPrefix(root.path))
             #expect(options.language == "en")
             return "ok"
         })
         #expect(try await backend.transcribe(samples: [], locale: Locale(identifier: "en-US")) == "ok")
-        #expect(called)
+        #expect(await called.value)
     }
 
     @Test("unsupported locale rejects before transcription hook")
     func unsupportedLocaleRejectsBeforeHook() async {
-        var called = false
-        let backend = WhisperDictationBackend(transcribe: { _, _, _, _ in called = true; return "bad" })
+        let called = Flag()
+        let backend = WhisperDictationBackend(transcribe: { _, _, _, _ in await called.set(true); return "bad" })
         do { _ = try await backend.transcribe(samples: [], locale: Locale(identifier: "xx-YY")); #expect(Bool(false)) } catch { #expect((error as? WhisperDictationError) == .unsupportedLocale("xx-YY")) }
-        #expect(!called)
+        #expect(!(await called.value))
     }
 
     @Test("cancelled preparation removes only partial state")
@@ -336,6 +336,14 @@ struct WhisperDictationBackendTests {
 
         func append(_ event: String) {
             value.append(event)
+        }
+    }
+
+    private actor Flag {
+        private(set) var value = false
+
+        func set(_ newValue: Bool) {
+            value = newValue
         }
     }
 

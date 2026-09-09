@@ -232,16 +232,16 @@ import Testing
 
     @Test("dictation cleanup prepares an independent local translator")
     func dictationCleanupPreparesIndependentLocalTranslator() async {
-        var events: [String] = []
+        let events = EventLog()
 
         let result = await AppDelegate.performDictationCleanup(
             "clean this text",
-            prepare: { events.append("prepare") },
-            cleanup: { text in events.append("cleanup:\(text)"); return "Cleaned text." },
-            stop: { events.append("stop") })
+            prepare: { await events.append("prepare") },
+            cleanup: { text in await events.append("cleanup:\(text)"); return "Cleaned text." },
+            stop: { await events.append("stop") })
 
         #expect(result == "Cleaned text.")
-        #expect(events == ["prepare", "cleanup:clean this text", "stop"])
+        #expect(await events.value == ["prepare", "cleanup:clean this text", "stop"])
     }
 
     @Test("AppDelegate Whisper preparation delegates through the production seam")
@@ -249,17 +249,17 @@ import Testing
         let selected = WhisperDictationBackend.model
         let app = AppDelegate()
         let before = (app.captionEngineForTests, app.captionPoolPreparedForTests, app.captionPoolLeaseForTests)
-        var received: WhisperDictationBackend.ModelChoice?
-        var progressCalls = 0
+        let received = ValueBox<WhisperDictationBackend.ModelChoice?>(nil)
+        let progressCalls = LockedCounter()
         app.whisperPreparationForTests = { choice, progress in
-            received = choice
+            await received.set(choice)
             progress(Progress(totalUnitCount: 1))
         }
         defer { app.whisperPreparationForTests = nil }
-        try await app.prepareSelectedWhisperModelForUse { _ in progressCalls += 1 }
+        try await app.prepareSelectedWhisperModelForUse { _ in progressCalls.increment() }
         let after = (app.captionEngineForTests, app.captionPoolPreparedForTests, app.captionPoolLeaseForTests)
-        #expect(received == selected)
-        #expect(progressCalls == 1)
+        #expect(await received.value == selected)
+        #expect(progressCalls.value == 1)
         #expect(before.0 == after.0)
         #expect(before.1 == after.1)
         #expect(before.2 == after.2)
@@ -268,16 +268,16 @@ import Testing
     @Test("explicit Whisper preparation freezes the clicked choice")
     func explicitWhisperChoiceIsNotReread() async throws {
         let app = AppDelegate()
-        var received: WhisperDictationBackend.ModelChoice?
-        app.whisperPreparationForTests = { choice, _ in received = choice }
+        let received = ValueBox<WhisperDictationBackend.ModelChoice?>(nil)
+        app.whisperPreparationForTests = { choice, _ in await received.set(choice) }
         defer { app.whisperPreparationForTests = nil }
         try await app.prepareSelectedWhisperModelForUse(.base)
         WhisperDictationBackend.model = .small
-        #expect(received == .base)
-        received = nil
+        #expect(await received.value == .base)
+        await received.set(nil)
         try await app.prepareSelectedWhisperModelForUse(.small)
         WhisperDictationBackend.model = .base
-        #expect(received == .small)
+        #expect(await received.value == .small)
     }
 
     @Test("AppDelegate Whisper preparation failure propagates without readiness")
@@ -330,5 +330,46 @@ import Testing
         #expect(after.0 == before.0)
         #expect(after.1 == before.1)
         #expect(after.2 == before.2)
+    }
+
+    private actor EventLog {
+        private(set) var value: [String] = []
+
+        func append(_ event: String) {
+            value.append(event)
+        }
+    }
+
+    private actor Counter {
+        private(set) var value = 0
+
+        func increment() {
+            value += 1
+        }
+    }
+
+    private final class LockedCounter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var count = 0
+
+        var value: Int {
+            lock.withLock { count }
+        }
+
+        func increment() {
+            lock.withLock { count += 1 }
+        }
+    }
+
+    private actor ValueBox<Value: Sendable> {
+        private(set) var value: Value
+
+        init(_ value: Value) {
+            self.value = value
+        }
+
+        func set(_ value: Value) {
+            self.value = value
+        }
     }
 }

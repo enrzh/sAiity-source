@@ -7,6 +7,14 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# Use the full Xcode toolchain without changing the user's global xcode-select.
+# CI and local callers can override this for another installed Xcode.
+export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
+if ! xcrun --find xcstringstool >/dev/null 2>&1; then
+    echo "FATAL: Xcode is required. Set DEVELOPER_DIR to an installed Xcode developer directory." >&2
+    exit 1
+fi
+
 NAME="sAiity"
 APP="build/$NAME.app"
 
@@ -33,19 +41,6 @@ GIT_COUNT=$(git rev-list --count HEAD 2>/dev/null || echo "1")
 # first time this line executed.
 NOTARIZE=0
 for arg in "$@"; do [ "$arg" = "--notarize" ] && NOTARIZE=1; done
-if [ "$NOTARIZE" = 1 ]; then
-    swift build -c release
-else
-    swift build -c release -Xswiftc -DSAIITY_TEST_HOOKS
-fi
-rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-# The filename here MUST match CFBundleExecutable exactly, capital A included.
-# If it does not, codesign still succeeds and the app just silently fails to
-# launch from Finder with no diagnostic.
-FW_SRC=".build/out/Products/Release"
-cp ".build/release/$NAME" "$APP/Contents/MacOS/$NAME"
-cp Resources/Info.plist "$APP/Contents/Info.plist"
 
 SIGN_ID="${SAIITY_SIGN_ID:-}"
 if [ -z "$SIGN_ID" ]; then
@@ -56,6 +51,37 @@ if [ -z "$SIGN_ID" ]; then
     SIGN_ID=$(security find-identity -v -p codesigning 2>/dev/null \
               | grep -m1 "Apple Development" | sed -E 's/.*"(.*)"/\1/' || true)
 fi
+if [ "$NOTARIZE" = 1 ]; then
+    case "$SIGN_ID" in
+        "Developer ID Application"*) ;;
+        *) echo "FATAL: notarisation needs a Developer ID Application certificate." >&2
+           echo "       Current identity: ${SIGN_ID:-ad-hoc}" >&2
+           exit 1 ;;
+    esac
+    PROFILE="${SAIITY_NOTARY_PROFILE:-saiity}"
+    if ! xcrun notarytool history --keychain-profile "$PROFILE" >/dev/null 2>&1; then
+        echo "FATAL: notarisation profile '$PROFILE' is not available in the keychain." >&2
+        echo "       Store it with: xcrun notarytool store-credentials '$PROFILE'" >&2
+        exit 1
+    fi
+fi
+if [ "$NOTARIZE" = 1 ]; then
+    swift build -c release
+else
+    swift build -c release -Xswiftc -DSAIITY_TEST_HOOKS
+fi
+rm -rf "$APP"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+# The filename here MUST match CFBundleExecutable exactly, capital A included.
+# If it does not, codesign still succeeds and the app just silently fails to
+# launch from Finder with no diagnostic.
+cp ".build/release/$NAME" "$APP/Contents/MacOS/$NAME"
+cp Resources/Info.plist "$APP/Contents/Info.plist"
+
+# SwiftPM's product directory is architecture-specific (for example,
+# .build/arm64-apple-macosx/release). Do not guess a legacy path: a guessed
+# path leaves dynamic frameworks out of the bundle while codesign still passes.
+FW_SRC=$(swift build -c release --show-bin-path)
 
 
 
@@ -64,14 +90,32 @@ fi
 # up — the app builds and signs fine, then dies at launch with
 # "Library not loaded: @rpath/llama.framework/...". Copy them in and point the
 # binary's rpath at Contents/Frameworks.
-if compgen -G "$FW_SRC/*.framework" >/dev/null; then
-    mkdir -p "$APP/Contents/Frameworks"
-    for fw in "$FW_SRC"/*.framework; do
-        ditto "$fw" "$APP/Contents/Frameworks/$(basename "$fw")"
-    done
-    install_name_tool -add_rpath "@executable_path/../Frameworks" \
-        "$APP/Contents/MacOS/$NAME" 2>/dev/null || true
+frameworks=()
+for fw in "$FW_SRC"/*.framework; do
+    [ -d "$fw" ] || continue
+    frameworks+=("$fw")
+done
+if [ "${#frameworks[@]}" -eq 0 ]; then
+    echo "FATAL: no framework products found in $FW_SRC" >&2
+    exit 1
 fi
+mkdir -p "$APP/Contents/Frameworks"
+for fw in "${frameworks[@]}"; do
+    ditto "$fw" "$APP/Contents/Frameworks/$(basename "$fw")"
+done
+install_name_tool -add_rpath "@executable_path/../Frameworks" \
+    "$APP/Contents/MacOS/$NAME" 2>/dev/null || true
+
+# A valid outer signature does not prove that dyld can resolve all nested code.
+# Fail before signing if any @rpath dependency is absent from the bundle.
+while IFS= read -r dependency; do
+    relative="${dependency#@rpath/}"
+    [ "$relative" = "$dependency" ] && continue
+    [ -e "$APP/Contents/Frameworks/$relative" ] || {
+        echo "FATAL: missing bundled dependency $dependency" >&2
+        exit 1
+    }
+done < <(otool -L "$APP/Contents/MacOS/$NAME" | awk '$1 ~ /^@rpath\// { print $1 }')
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 # Localizations. SwiftUI keys against Bundle.main's Localizable table, so the
@@ -211,6 +255,11 @@ fi
 # Fail loudly on the one mismatch that is otherwise invisible.
 PLIST_EXEC=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP/Contents/Info.plist")
 [ -x "$APP/Contents/MacOS/$PLIST_EXEC" ] || { echo "FATAL: CFBundleExecutable '$PLIST_EXEC' missing in Contents/MacOS"; exit 1; }
+"$APP/Contents/MacOS/$NAME" --version >/dev/null || {
+    echo "FATAL: built app failed its --version launch smoke test" >&2
+    exit 1
+}
+echo "launch smoke: --version passed"
 echo "built: $APP"
 
 # Notarisation. Requires a Developer ID Application certificate and a stored
@@ -227,14 +276,6 @@ echo "built: $APP"
 #   xcrun notarytool store-credentials "saiity" \
 #         --apple-id <you@example.com> --team-id <TEAMID> --password <app-specific-password>
 if [ "${1:-}" = "--notarize" ]; then
-    case "$SIGN_ID" in
-        "Developer ID Application"*) ;;
-        *) echo "FATAL: notarisation needs a Developer ID Application certificate."
-           echo "       Current identity: ${SIGN_ID:-ad-hoc}"
-           echo "       Create one in Xcode → Settings → Accounts → Manage Certificates → +"
-           exit 1 ;;
-    esac
-    PROFILE="${SAIITY_NOTARY_PROFILE:-saiity}"
     ZIP="build/$NAME.zip"
     SUBMIT_ZIP="build/$NAME-submit.zip"
 

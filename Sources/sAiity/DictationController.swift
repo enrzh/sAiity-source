@@ -7,11 +7,13 @@ protocol DictationAudioCapture: AnyObject {
     func stop()
     func takeCollectedSamples() -> [Float]
     func setLimitHandler(_ handler: (@Sendable () -> Void)?)
+    func setWaveformHandler(_ handler: (@Sendable ([Float]) -> Void)?)
 }
 
 extension DictationAudioCapture {
     func takeCollectedSamples() -> [Float] { [] }
     func setLimitHandler(_ handler: (@Sendable () -> Void)?) {}
+    func setWaveformHandler(_ handler: (@Sendable ([Float]) -> Void)?) {}
 }
 
 extension DictationMicrophoneCapture: DictationAudioCapture {}
@@ -30,6 +32,7 @@ final class DictationController {
     typealias TranslationConfigurationProvider = () -> DictationTranslationConfiguration
     typealias TranslationHandler = (String, String, String) async -> String?
     typealias CleanupHandler = (String, String) async -> String?
+    typealias WaveformHandler = @Sendable ([Float]) -> Void
     typealias WhisperTranscriptionHandler = ([[Float]], Locale) async throws -> String?
     typealias AudioFormatFactory = () -> AVAudioFormat?
     typealias WhisperReadinessProvider = () -> Bool
@@ -43,6 +46,7 @@ final class DictationController {
     private let onPhaseChanged: (DictationPhase) -> Void
     private let cleanupConfiguration: () -> DictationCleanupConfiguration
     private let cleanup: CleanupHandler
+    private let onWaveform: WaveformHandler
     private let dictationUsesWhisper: () -> Bool
     private let transcribeWhisper: WhisperTranscriptionHandler
     private let audioFormatFactory: AudioFormatFactory
@@ -89,6 +93,7 @@ final class DictationController {
         translate: @escaping TranslationHandler = { _, _, _ in nil },
          cleanupConfiguration: @escaping () -> DictationCleanupConfiguration = { .disabled },
          cleanup: @escaping CleanupHandler = { _, _ in nil },
+         onWaveform: @escaping WaveformHandler = { _ in },
          dictationUsesWhisper: @escaping () -> Bool = { false },
          transcribeWhisper: @escaping WhisperTranscriptionHandler = { _, _ in nil },
          audioFormatFactory: @escaping AudioFormatFactory = { AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1) },
@@ -102,6 +107,7 @@ final class DictationController {
         self.translate = translate
         self.cleanupConfiguration = cleanupConfiguration
         self.cleanup = cleanup
+        self.onWaveform = onWaveform
         self.dictationUsesWhisper = dictationUsesWhisper
         self.transcribeWhisper = transcribeWhisper
         self.audioFormatFactory = audioFormatFactory
@@ -117,6 +123,7 @@ final class DictationController {
         translate: @escaping TranslationHandler = { _, _, _ in nil },
          cleanupConfiguration: @escaping () -> DictationCleanupConfiguration = { .disabled },
          cleanup: @escaping CleanupHandler = { _, _ in nil },
+         onWaveform: @escaping WaveformHandler = { _ in },
          dictationUsesWhisper: @escaping () -> Bool = { false },
          transcribeWhisper: @escaping WhisperTranscriptionHandler = { _, _ in nil },
          audioFormatFactory: @escaping AudioFormatFactory = { AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1) },
@@ -130,6 +137,7 @@ final class DictationController {
         self.translate = translate
         self.cleanupConfiguration = cleanupConfiguration
         self.cleanup = cleanup
+        self.onWaveform = onWaveform
         self.dictationUsesWhisper = dictationUsesWhisper
         self.transcribeWhisper = transcribeWhisper
         self.audioFormatFactory = audioFormatFactory
@@ -321,6 +329,7 @@ final class DictationController {
                 capture.setLimitHandler { [weak self] in
                     Task { @MainActor in self?.limit(session: session) }
                 }
+                capture.setWaveformHandler(onWaveform)
                 try capture.start(targetFormat: format) { _ in }
                 guard session == generation else {
                     capture.stop()
@@ -345,6 +354,7 @@ final class DictationController {
             capture.setLimitHandler { [weak self] in
                 Task { @MainActor in self?.limit(session: session) }
             }
+            capture.setWaveformHandler(onWaveform)
             try capture.start(targetFormat: format) { [weak acquired] buffer in
                 acquired?.feed(buffer)
             }
@@ -477,6 +487,7 @@ final class DictationController {
     private func drainCapture() -> [Float] {
         guard !captureDrained else { return [] }
         captureDrained = true
+        capture.setWaveformHandler(nil)
         capture.stop()
         return capture.takeCollectedSamples()
     }

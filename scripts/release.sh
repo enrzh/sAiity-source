@@ -24,9 +24,28 @@ RELEASE_REPO="enrzh/sAiity"
 RELEASE_ASSET_URL="https://github.com/$RELEASE_REPO/releases/download/v$VERSION/sAiity-$VERSION.zip"
 [ -f "$KEY" ] || { echo "FATAL: $KEY missing — generate with: openssl genpkey -algorithm ED25519 -out $KEY"; exit 1; }
 
-git tag -a "v$VERSION" -m "sAiity $VERSION" 2>/dev/null || echo "tag v$VERSION exists, reusing"
+if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+    echo "FATAL: version must be valid SemVer, for example 2.4.0 or 2.4.0-rc.1" >&2
+    exit 1
+fi
 
-./build-app.sh --notarize
+if [ -n "$(git status --porcelain)" ]; then
+    echo "FATAL: release requires a clean working tree; refusing to tag or ship local changes." >&2
+    exit 1
+fi
+
+if git rev-parse --verify --quiet "refs/tags/v$VERSION" >/dev/null; then
+    echo "FATAL: tag v$VERSION already exists; choose a new version or inspect the existing release." >&2
+    exit 1
+fi
+
+SAIITY_VERSION="$VERSION" ./build-app.sh --notarize
+
+# Refuse to create release metadata for a bundle that is structurally invalid or
+# no longer passes Apple's local signature verifier.
+plutil -lint build/sAiity.app/Contents/Info.plist >/dev/null
+test -x build/sAiity.app/Contents/MacOS/sAiity
+codesign --verify --deep --strict build/sAiity.app
 
 ZIP="build/sAiity.zip"
 [ -f "$ZIP" ] || { echo "FATAL: $ZIP missing after notarize"; exit 1; }
@@ -57,6 +76,12 @@ cat > build/appcast.xml <<XML
 XML
 
 cp "$ZIP" "build/sAiity-$VERSION.zip"
+
+# Only create the tag after the notarised archive, signature, appcast, and
+# release copy have all completed. A failed release must not leave a tag
+# behind.
+git tag -a "v$VERSION" -m "sAiity $VERSION"
+
 echo
 echo "Release artifacts ready:"
 echo "  build/sAiity-$VERSION.zip   ($LEN bytes, notarised, stapled)"

@@ -1,0 +1,62 @@
+name: macOS verification
+
+on:
+  push:
+    paths:
+      - "Sources/**"
+      - "Tests/**"
+      - "Resources/**"
+      - "Package.swift"
+      - "Package.resolved"
+      - "build-app.sh"
+      - "scripts/**"
+      - ".github/workflows/macos.yml"
+  pull_request:
+    paths:
+      - "Sources/**"
+      - "Tests/**"
+      - "Resources/**"
+      - "Package.swift"
+      - "Package.resolved"
+      - "build-app.sh"
+      - "scripts/**"
+      - ".github/workflows/macos.yml"
+
+jobs:
+  verify:
+    runs-on: macos-26
+    env:
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Resolve the locked package graph
+        run: xcrun swift package resolve
+
+      - name: Reject package-lock drift
+        run: git diff --exit-code -- Package.resolved
+
+      - name: Run release tests
+        run: xcrun swift test -c release -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS
+
+      - name: Build release binary
+        run: xcrun swift build -c release
+
+      - name: Assemble signed app bundle
+        run: ./build-app.sh
+
+      - name: Smoke-test app bundle
+        run: |
+          plutil -lint build/sAiity.app/Contents/Info.plist
+          test -x build/sAiity.app/Contents/MacOS/sAiity
+          codesign --verify --deep --strict build/sAiity.app
+          build/sAiity.app/Contents/MacOS/sAiity --version
+
+      - name: Check repository formatting
+        run: git diff --check

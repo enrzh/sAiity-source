@@ -36,6 +36,7 @@ struct CaptionStyleTests {
         ("tintHex",                   { $0.tintHex = "112233" }),
         ("widthFraction",             { $0.widthFraction = 0.9 }),
         ("screenMargin",              { $0.screenMargin = 77 }),
+        ("maxHeight",                  { $0.maxHeight = 480 }),
         ("showTranslation",           { $0.showTranslation.toggle() }),
         ("hidden",                    { $0.hidden.toggle() }),
     ]
@@ -103,5 +104,17 @@ struct CaptionStyleTests {
         // the edge" needs.
         #expect(s.screenMargin > 0)
         #expect(s.widthFraction > 0 && s.widthFraction <= 1)
+        #expect(s.maxHeight >= 110)
+    }
+
+    @Test("Styles from before the height setting keep their values")
+    func legacyStyleDecodesWithHeightDefault() throws {
+        let legacy = """
+        {"original":{"fontSize":42,"weight":0.3,"colorHex":"FFFFFF","opacity":1,"volatileOpacity":0.72,"maxLines":4},"translation":{"fontSize":26,"weight":0,"colorHex":"9FE8FF","opacity":1,"volatileOpacity":1,"maxLines":4},"lineGap":9,"cornerRadius":12,"glassStyle":1,"tintHex":"","widthFraction":0.7,"screenMargin":30,"showTranslation":false,"hidden":false}
+        """.data(using: .utf8)!
+        let style = try JSONDecoder().decode(CaptionStyle.self, from: legacy)
+        #expect(style.original.fontSize == 42)
+        #expect(style.showTranslation == false)
+        #expect(style.maxHeight == 260)
     }
 }
