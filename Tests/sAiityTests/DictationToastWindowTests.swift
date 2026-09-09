@@ -308,7 +308,14 @@ import Testing
         #expect(events == ["launch returned"])
         try? await Task.sleep(for: .milliseconds(50))
         #expect(events == ["launch returned"])
-        try? await Task.sleep(for: .milliseconds(300))
+
+        // The callback is intentionally deferred, but a busy CI window server
+        // can delay the main-actor task beyond the nominal 250 ms grace period.
+        // Wait for the behavior with a bounded timeout instead of asserting a
+        // precise wall-clock delivery time.
+        for _ in 0..<20 where events.count == 1 {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
         #expect(events == ["launch returned", "dictation setup"])
     }
 
