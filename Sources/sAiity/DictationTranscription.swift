@@ -248,7 +248,7 @@ enum DictationTranscriptMerger {
     }
 
     private static func append(_ value: String, to output: inout String) {
-        let next = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let next = normalizedRecognizerText(value)
         guard !next.isEmpty else { return }
         guard !output.isEmpty else {
             output = next
@@ -277,6 +277,19 @@ enum DictationTranscriptMerger {
             output += " "
         }
         output += remainder
+    }
+
+    /// Whisper can emit this transport marker for a silent span. It is not
+    /// spoken text, and replacing it with a space preserves the boundary
+    /// between valid text on either side without inventing a new sentence.
+    private static func normalizedRecognizerText(_ value: String) -> String {
+        var text = value
+        text = text.replacingOccurrences(
+            of: #"(?i)\[\s*BLANK[ _-]+AUDIO\s*\]"#,
+            with: " ", options: .regularExpression)
+        text = text.replacingOccurrences(of: #"[ \t]+"#, with: " ", options: .regularExpression)
+        text = text.replacingOccurrences(of: #"[ \t]+([,.;!?])"#, with: "$1", options: .regularExpression)
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func units(in text: String) -> [Unit] {

@@ -571,6 +571,7 @@ final class OverlayWindow: NSPanel {
 
     private var saveWork: DispatchWorkItem?
     private var hasCustomFrame = false
+    private var appliedHidden = CaptionStyle.current.hidden
     /// Width chosen by dragging an edge; nil = size to the text.
     private var userWidth: CGFloat?
 
@@ -1041,20 +1042,37 @@ final class OverlayWindow: NSPanel {
         // now has its own global hot key — did nothing visible until the next
         // caption chunk happened to arrive, which during a pause in speech
         // reads as a broken shortcut.
+        let wasHidden = appliedHidden
+        appliedHidden = st.hidden
         if st.hidden {
             orderOut(nil)
         } else if !history.entries.isEmpty {
             presentIfNeeded()
+        } else if wasHidden {
+            reveal()
         }
         sizeToFit(immediateShrink: true)
+    }
+
+    /// Reveal an intentionally enabled bubble even before the first caption
+    /// arrives. Keeping this separate from `presentIfNeeded` avoids showing an
+    /// empty panel on launch while making the Show Bubble toggle immediate.
+    func reveal() {
+        guard !CaptionStyle.current.hidden else { return }
+        guard let screen = FrameStore.bestScreen(for: frame) ?? NSScreen.main else { return }
+        if frame.width <= 1 || frame.height <= 1 {
+            setFrameInternal(defaultFrame(on: screen), display: false)
+        }
+        sizeToFit(immediateShrink: true)
+        presentIfNeeded(allowEmpty: true)
     }
 
     /// Present the bubble from one place. A panel can retain a logically valid
     /// but unusable frame after launch, display changes, or a saved frame from
     /// another monitor. Ordering that frame front does not make the bubble
     /// visible; repair it first, then raise the panel explicitly.
-    private func presentIfNeeded() {
-        guard !CaptionStyle.current.hidden, !history.entries.isEmpty else {
+    private func presentIfNeeded(allowEmpty: Bool = false) {
+        guard !CaptionStyle.current.hidden, allowEmpty || !history.entries.isEmpty else {
             orderOut(nil)
             return
         }

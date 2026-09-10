@@ -409,11 +409,13 @@ final class DictationController {
     private func finish(session: Int) async {
         guard session == generation else { return }
         let samples = drainCapture()
+        NSLog("sAiity dictation capture: \(samples.count) samples at \(Int(sessionSampleRate)) Hz (\(String(format: "%.2f", Double(samples.count) / sessionSampleRate))s)")
         if sessionUsesWhisper {
             do {
                 if let transcribeWhisperSegments,
                    sessionLocale.identifier == "auto" {
                     let regions = segmenter.segment(samples, sampleRate: sessionSampleRate)
+                    NSLog("sAiity dictation transcription: Whisper Auto, \(regions.count) region(s)")
                     guard session == generation, !Task.isCancelled else { return }
                     let transcription = try await transcribeWhisperSegments(samples,
                                                                               regions,
@@ -444,6 +446,7 @@ final class DictationController {
         if let segmented = backend as? any DictationSegmentTranscriber {
             do {
                 let regions = segmenter.segment(samples, sampleRate: sessionSampleRate)
+                NSLog("sAiity dictation transcription: segmented \(regions.count) region(s) with \(backend.name)")
                 guard session == generation, !Task.isCancelled else { return }
                 let transcription = try await segmented.transcribeDictation(samples: samples,
                                                                               regions: regions)

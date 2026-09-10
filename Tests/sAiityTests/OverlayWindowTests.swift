@@ -5,6 +5,29 @@ import Testing
 
 @MainActor
 @Suite struct OverlayWindowTests {
+    @Test("explicitly revealing the subtitle bubble works before the first caption")
+    func revealBeforeFirstCaption() {
+        let defaults = UserDefaults.standard
+        let styleKey = CaptionStyle.key
+        let previousStyle = defaults.data(forKey: styleKey)
+        var style = CaptionStyle.current
+        style.hidden = false
+        CaptionStyle.current = style
+        defer {
+            if let previousStyle {
+                defaults.set(previousStyle, forKey: styleKey)
+            } else {
+                defaults.removeObject(forKey: styleKey)
+            }
+        }
+
+        let window = OverlayWindow()
+        window.reveal()
+
+        #expect(window.isVisible)
+        window.orderOut(nil)
+    }
+
     @Test("subtitle bubble presents its first caption without a layout crash")
     func firstCaptionPresentation() {
         let defaults = UserDefaults.standard

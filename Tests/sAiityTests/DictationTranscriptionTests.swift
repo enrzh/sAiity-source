@@ -64,6 +64,9 @@ import WhisperKit
 
     @Test("transcript merger removes overlap and applies script-aware spacing")
     func transcriptMerging() {
+        #expect(DictationTranscriptMerger.merge(["I don't know.[BLANK_AUDIO]Do you know me?"]) == "I don't know. Do you know me?")
+        #expect(DictationTranscriptMerger.merge(["hello [BLANK_AUDIO], world"]) == "hello, world")
+        #expect(DictationTranscriptMerger.merge(["[BLANK_AUDIO]"]) == "")
         #expect(DictationTranscriptMerger.merge(["hello world", "world again"]) == "hello world again")
         #expect(DictationTranscriptMerger.merge(["你好", "世界"]) == "你好世界")
         #expect(DictationTranscriptMerger.merge(["你好世界", "世界很好"]) == "你好世界很好")

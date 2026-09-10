@@ -1584,6 +1584,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var st = CaptionStyle.current
         st.hidden.toggle()
         CaptionStyle.current = st
+        if !st.hidden { overlay.reveal() }
     }
 
     /// "What did I miss": flash the last few closed sentences in the bubble,

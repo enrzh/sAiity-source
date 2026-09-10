@@ -28,6 +28,12 @@ struct DictationCaptureLifecycle: Sendable {
 final class DictationMicrophoneCapture: @unchecked Sendable {
     private let engine = AVAudioEngine()
     private let lock = NSLock()
+    /// Core Audio can already have entered the tap when stop() is called.
+    /// Keep those callbacks alive until they finish; otherwise the lifecycle
+    /// flag below makes the last buffer disappear before it reaches the store.
+    private let callbackCondition = NSCondition()
+    private var activeConversions = 0
+    private var stopping = false
     private var lifecycle = DictationCaptureLifecycle()
     private var converter: AVAudioConverter?
     private var sampleCount = 0
@@ -48,12 +54,20 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
     }
 
     var isRunning: Bool {
-        lock.withLock { lifecycle.isRunning }
+        callbackCondition.lock()
+        defer { callbackCondition.unlock() }
+        return lifecycle.isRunning && !stopping
     }
 
     func start(targetFormat: AVAudioFormat,
                onBuffer: @escaping @Sendable (AVAudioPCMBuffer) -> Void) throws {
-        guard lock.withLock({ lifecycle.start() }) else { return }
+        callbackCondition.lock()
+        guard lifecycle.start() else {
+            callbackCondition.unlock()
+            return
+        }
+        stopping = false
+        callbackCondition.unlock()
 
         let input = engine.inputNode
         let sourceFormat = input.outputFormat(forBus: 0)
@@ -70,7 +84,9 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
                 NSLocalizedDescriptionKey: String(localized: "Could not prepare the microphone for dictation.")
             ])
         }
+        callbackCondition.lock()
         self.converter = converter
+        callbackCondition.unlock()
         lock.withLock {
             sampleCount = 0
             convertedSamples.removeAll(keepingCapacity: true)
@@ -93,21 +109,58 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
     }
 
     func stop() {
-        guard lock.withLock({ lifecycle.stop() }) else { return }
+        callbackCondition.lock()
+        guard lifecycle.isRunning else {
+            callbackCondition.unlock()
+            return
+        }
+        if stopping {
+            while stopping { callbackCondition.wait() }
+            callbackCondition.unlock()
+            return
+        }
+        stopping = true
+        callbackCondition.unlock()
+
+        // Stop producing new tap callbacks first. A callback already in flight
+        // is counted below and is allowed to append its converted samples.
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
+
+        callbackCondition.lock()
+        while activeConversions > 0 { callbackCondition.wait() }
+        _ = lifecycle.stop()
         converter = nil
+        stopping = false
+        callbackCondition.broadcast()
+        callbackCondition.unlock()
     }
 
     private func finishStartFailure() {
-        lock.withLock { _ = lifecycle.stop() }
+        callbackCondition.lock()
+        _ = lifecycle.stop()
         converter = nil
+        stopping = false
+        callbackCondition.broadcast()
+        callbackCondition.unlock()
     }
 
     private func convert(_ buffer: AVAudioPCMBuffer,
                          to target: AVAudioFormat,
                          onBuffer: @escaping @Sendable (AVAudioPCMBuffer) -> Void) {
-        guard lock.withLock({ lifecycle.isRunning }), let converter else { return }
+        callbackCondition.lock()
+        guard lifecycle.isRunning, !stopping, let converter else {
+            callbackCondition.unlock()
+            return
+        }
+        activeConversions += 1
+        callbackCondition.unlock()
+        defer {
+            callbackCondition.lock()
+            activeConversions -= 1
+            if activeConversions == 0 { callbackCondition.broadcast() }
+            callbackCondition.unlock()
+        }
         let ratio = target.sampleRate / buffer.format.sampleRate
         let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 64
         guard let output = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) else { return }
