@@ -49,7 +49,7 @@ struct TranslationTargetPicker: View {
     }
     private var engine: TranslationEngine {
         configuredEngine
-            ?? (scope == .dictation ? TranslationEngine.selected : nil)
+            ?? (scope == .dictation ? TranslationEngine.dictationEffective : nil)
             ?? .recommended
     }
 
@@ -66,7 +66,7 @@ struct TranslationTargetPicker: View {
     var body: some View {
         SheetShell(title: title,
                    subtitle: configuredEngine == nil
-                       && !(scope == .dictation && TranslationEngine.selected != nil)
+                       && !(scope == .dictation && TranslationEngine.visibleSelection(TranslationEngine.selected) != nil)
                        ? "\(engine.displayName) — recommended, not chosen yet"
                        : "Using \(engine.displayName)",
                    width: 500, height: 560) {

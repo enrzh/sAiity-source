@@ -413,14 +413,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func selectedTranslationEngine(for scope: TranslationEngineScope) -> TranslationEngine? {
         switch scope {
         case .captions:
-            return TranslationEngine.selected
+            return TranslationEngine.visibleSelection(TranslationEngine.selected)
         case .dictation:
             // Dictation's picker visibly offers the recommended engine even
             // before the user has persisted a choice. Treat that recommendation
             // as the runtime default so enabling translation does not silently
             // produce an unconfigured translator.
-            return TranslationEngine.dictationSelected
-                ?? TranslationEngine.selected
+            return TranslationEngine.visibleSelection(TranslationEngine.dictationSelected)
+                ?? TranslationEngine.visibleSelection(TranslationEngine.selected)
                 ?? .recommended
         }
     }
@@ -792,6 +792,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var saveTranscript = UserDefaults.standard.bool(forKey: "saveTranscript")
     private var recordingSince: Date?
     private var recordedLines = 0
+    private var subtitleSessionStartedAt: Date?
     /// Untruncated, unlike the overlay label — never copy from the view.
     private var lastFinalText = ""
     private var lastVolatileText = ""
@@ -1428,33 +1429,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setStatus("Session copied (\(sessionLines.count) lines)")
     }
 
-    /// Save the current live session directly from the bubble. This is
-    /// intentionally independent of the opt-in persistent recorder: a viewer
-    /// can keep captions ephemeral and still export the lines they chose to
-    /// keep.
+    /// Save the current live session directly into the transcript library. This
+    /// is intentionally independent of the opt-in persistent recorder.
     private func saveSubtitlesTranscript() {
-        guard !sessionLines.isEmpty else {
-            setStatus("That transcript has no lines.")
-            return
-        }
-        let panel = NSSavePanel()
-        panel.title = String(localized: "Save transcript")
-        panel.allowedContentTypes = [UTType(filenameExtension: "srt") ?? .utf8PlainText]
-        panel.canCreateDirectories = true
-        let df = DateFormatter()
-        df.locale = Locale(identifier: "en_US_POSIX")
-        df.dateFormat = "yyyy-MM-dd-HHmm"
-        panel.nameFieldStringValue = "sAiity-subtitles-\(df.string(from: Date())).srt"
-        panel.begin { [weak self] response in
-            guard response == .OK, let url = panel.url else { return }
-            do {
-                try Export.srt(self?.sessionLines ?? []).write(to: url,
-                                                               atomically: true,
-                                                               encoding: .utf8)
-                self?.setStatus("Subtitles saved")
-            } catch {
-                NSLog("sAiity subtitle export failed: \(error.localizedDescription)")
-                self?.setStatus("Could not save subtitles")
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            // Wait for any in-flight translation and ordered store append to
+            // settle, so the library copy contains the final visible state.
+            await self.transcriptWriteChain?.value
+            let segments = self.sessionLines
+            guard !segments.isEmpty else {
+                self.setStatus("That transcript has no lines.")
+                return
+            }
+            let locale = self.locale.identifier(.bcp47)
+            let target = self.translateTo
+            let startedAt = self.subtitleSessionStartedAt ?? Date()
+            let work = Task.detached(priority: .userInitiated) {
+                Result { try TranscriptStore.saveSession(segments, locale: locale,
+                                                          translateTo: target,
+                                                          startedAt: startedAt) }
+            }
+            switch await work.value {
+            case .success:
+                SessionCatalog.invalidate()
+                self.setStatus("Transcript saved to library")
+            case .failure(let error):
+                NSLog("sAiity transcript library save failed: \(error.localizedDescription)")
+                self.setStatus("Could not save transcript")
             }
         }
     }
@@ -1743,6 +1745,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlay.reservesTranslationRow =
             translateTo != nil && CaptionStyle.current.showTranslation
         sessionLines.removeAll()
+        subtitleSessionStartedAt = Date()
         pendingTranslations = 0
         shownTranslationID = nil
         clearedSentenceID = nil

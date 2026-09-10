@@ -41,44 +41,21 @@ struct LocalModel: Identifiable, Sendable, Equatable, Codable {
     // MARK: - Built-ins
 
     static let builtIn: [LocalModel] = [
-        LocalModel(source: .huggingFace(repo: "unsloth/Qwen3.5-0.8B-GGUF",
-                                        file: "Qwen3.5-0.8B-Q4_K_M.gguf"),
-                   file: "Qwen3.5-0.8B-Q4_K_M.gguf",
-                   label: String(localized: "Qwen3.5 0.8B"), bytes: 533 * 1_048_576, recommended: false,
-                   note: String(localized: "Fast, but too small for usable translation — it drops and invents meaning. Listed for completeness."),
-                   licence: "Apache-2.0 (Alibaba Qwen) · huggingface.co/unsloth"),
-        LocalModel(source: .huggingFace(repo: "unsloth/Qwen3.5-2B-GGUF",
-                                        file: "Qwen3.5-2B-Q4_K_M.gguf"),
-                   file: "Qwen3.5-2B-Q4_K_M.gguf",
-                   label: String(localized: "Qwen3.5 2B"), bytes: 1281 * 1_048_576, recommended: true,
-                   note: String(localized: "The smallest size whose translation quality holds up. A sensible first choice if you want an LLM doing this."),
-                   licence: "Apache-2.0 (Alibaba Qwen) · huggingface.co/unsloth"),
-        LocalModel(source: .huggingFace(repo: "unsloth/Qwen3.5-2B-GGUF",
-                                        file: "Qwen3.5-2B-Q5_K_M.gguf"),
-                   file: "Qwen3.5-2B-Q5_K_M.gguf",
-                   label: String(localized: "Qwen3.5 2B (Q5)"), bytes: 1435 * 1_048_576, recommended: false,
-                   note: String(localized: "Slightly better quality than Q4 for ~150 MB more."),
-                   licence: "Apache-2.0 (Alibaba Qwen) · huggingface.co/unsloth"),
-        LocalModel(source: .huggingFace(repo: "unsloth/Qwen3.5-4B-GGUF",
-                                        file: "Qwen3.5-4B-Q4_K_M.gguf"),
-                   file: "Qwen3.5-4B-Q4_K_M.gguf",
-                   label: String(localized: "Qwen3.5 4B"), bytes: 2741 * 1_048_576, recommended: false,
-                   note: String(localized: "Best quality of the Qwen sizes, but roughly twice the time per sentence — likely too slow to keep up."),
-                   licence: "Apache-2.0 (Alibaba Qwen) · huggingface.co/unsloth"),
-        // Gemma: repeatedly benchmarked as the strongest small translator, and
+        // Gemma is the supported local cleanup family. Qwen downloads were
+        // unreliable in the app and are intentionally no longer advertised.
         // LLM.swift's template resolver recognises the family from the GGUF's
         // own metadata, so the chat framing is right without any code of ours.
         LocalModel(source: .huggingFace(repo: "unsloth/gemma-3-1b-it-GGUF",
                                         file: "gemma-3-1b-it-Q4_K_M.gguf"),
                    file: "gemma-3-1b-it-Q4_K_M.gguf",
-                   label: String(localized: "Gemma 3 1B"), bytes: 806_058_272, recommended: false,
-                   note: String(localized: "Google's small model — noticeably better at translation per parameter than same-size Qwen, and fast. Worth trying if 2B feels slow."),
+                   label: String(localized: "Gemma 3 1B"), bytes: 806_058_272, recommended: true,
+                   note: String(localized: "Fast local cleanup model and the recommended starting point."),
                    licence: "Gemma Terms of Use (Google) · huggingface.co/unsloth"),
         LocalModel(source: .huggingFace(repo: "unsloth/gemma-3-4b-it-GGUF",
                                         file: "gemma-3-4b-it-Q4_K_M.gguf"),
                    file: "gemma-3-4b-it-Q4_K_M.gguf",
                    label: String(localized: "Gemma 3 4B"), bytes: 2_489_894_016, recommended: false,
-                   note: String(localized: "The quality pick among the LLM options. About the speed of Qwen 4B; the prompt heuristics here were tuned on Qwen, so behaviour may differ slightly."),
+                   note: String(localized: "Higher-quality cleanup, with more memory use and slower processing."),
                    licence: "Gemma Terms of Use (Google) · huggingface.co/unsloth"),
     ]
 
@@ -102,10 +79,12 @@ struct LocalModel: Identifiable, Sendable, Equatable, Codable {
 
     static var all: [LocalModel] { builtIn + custom }
 
-    /// Kept for compatibility with existing installations, but no longer
-    /// offered as a normal cleanup choice because it is too small for reliable
-    /// rewriting or translation.
-    static let legacyModelFiles: Set<String> = ["Qwen3.5-0.8B-Q4_K_M.gguf"]
+    /// Filenames from the old Qwen catalogue. Keeping the names here lets
+    /// legacy files be recognised as legacy without advertising them again.
+    static let legacyModelFiles: Set<String> = [
+        "Qwen3.5-0.8B-Q4_K_M.gguf", "Qwen3.5-2B-Q4_K_M.gguf",
+        "Qwen3.5-2B-Q5_K_M.gguf", "Qwen3.5-4B-Q4_K_M.gguf"
+    ]
 
     var isLegacy: Bool { Self.legacyModelFiles.contains(file) }
 

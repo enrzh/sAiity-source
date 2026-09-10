@@ -190,6 +190,49 @@ actor TranscriptStore {
         }
     }
 
+    /// Save an in-memory transcript as a normal library session. This is used
+    /// by the subtitle bubble's Save action, so saving does not create an
+    /// export file or require persistent recording to have been enabled.
+    nonisolated static func saveSession(_ segments: [Segment], locale: String,
+                                        translateTo: String?, startedAt: Date = Date()) throws -> SessionRef {
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "yyyy-MM-dd'T'HHmmss"
+        let stamp = fmt.string(from: startedAt)
+        var id = stamp
+        var directory = sessionsDir.appendingPathComponent(id, isDirectory: true)
+        var suffix = 2
+        while FileManager.default.fileExists(atPath: directory.path) {
+            id = "\(stamp)-\(suffix)"
+            directory = sessionsDir.appendingPathComponent(id, isDirectory: true)
+            suffix += 1
+        }
+
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
+        let meta = SessionMeta(id: id, startedAt: startedAt, endedAt: Date(),
+                               locale: locale, translateTo: translateTo,
+                               lineCount: segments.count)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(meta).write(to: directory.appendingPathComponent("meta.json"),
+                                       options: .atomic)
+
+        var lines = Data()
+        let segmentEncoder = JSONEncoder()
+        for segment in segments {
+            lines.append(try segmentEncoder.encode(segment))
+            lines.append(0x0A)
+        }
+        try lines.write(to: directory.appendingPathComponent("segments.jsonl"), options: .atomic)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600],
+                                               ofItemAtPath: directory.appendingPathComponent("meta.json").path)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600],
+                                               ofItemAtPath: directory.appendingPathComponent("segments.jsonl").path)
+        return SessionRef(id: id, url: directory, meta: meta)
+    }
+
 
 
     nonisolated static func segments(of session: SessionRef) -> [Segment] {

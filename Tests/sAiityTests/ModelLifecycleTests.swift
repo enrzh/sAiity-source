@@ -5,7 +5,7 @@ import Testing
 
 @MainActor
 @Suite struct ModelLifecycleTests {
-    @Test("cleanup compatibility requires a downloaded Qwen or Gemma GGUF")
+    @Test("cleanup compatibility requires a downloaded supported GGUF")
     func cleanupCompatibilityIsRestricted() {
         let qwen = LocalModel(source: .url("https://example.invalid/qwen.gguf"), file: "qwen.gguf", label: "Qwen", bytes: 1, recommended: false, note: "", licence: "")
         #expect(!qwen.isCleanupCompatible())

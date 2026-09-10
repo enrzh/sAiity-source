@@ -47,7 +47,7 @@ import Testing
         #expect(selected)
     }
 
-    @Test("dictation cleanup exposes downloadable Qwen and Gemma assets")
+    @Test("dictation cleanup exposes supported Gemma assets only")
     func dictationCleanupAssetsAreDownloadableAndFamilyRestricted() {
         let statuses = TranslationEngine.qwen.assetDescriptors.map(ModelRegistry.status(of:))
             + TranslationEngine.madlad.assetDescriptors.map(ModelRegistry.status(of:))
@@ -56,11 +56,12 @@ import Testing
         #expect(!cleanup.isEmpty)
         #expect(cleanup.allSatisfy {
             let title = $0.asset.title.lowercased()
-            return title.contains("qwen") || title.contains("gemma")
+            return title.contains("gemma")
         })
         #expect(!cleanup.contains { $0.asset.id == AssetID.madlad })
-        #expect(cleanup.contains { $0.asset.id == AssetID.llm(file: "Qwen3.5-2B-Q4_K_M.gguf") })
         #expect(cleanup.contains { $0.asset.id == AssetID.llm(file: "gemma-3-1b-it-Q4_K_M.gguf") })
+        #expect(cleanup.contains { $0.asset.id == AssetID.llm(file: "gemma-3-4b-it-Q4_K_M.gguf") })
+        #expect(!cleanup.contains { $0.asset.title.lowercased().contains("qwen") })
     }
 
     @Test("dictation cleanup is on by default and persists independently")
@@ -153,6 +154,24 @@ import Testing
         state.translationEngine = .qwen
         #expect(state.dictationTranslationEngine == .hyMT2)
         #expect(TranslationEngine.dictationEffective == .hyMT2)
+    }
+
+    @Test("legacy Qwen translation selections fall back to MADLAD")
+    func legacyQwenSelectionDoesNotRemainInVisiblePicker() {
+        let defaults = UserDefaults.standard
+        let keys = ["translationEngine", "dictationTranslationEngine"]
+        let snapshot = keys.map { ($0, defaults.object(forKey: $0)) }
+        defer {
+            snapshot.forEach { key, value in
+                if let value { defaults.set(value, forKey: key) }
+                else { defaults.removeObject(forKey: key) }
+            }
+        }
+        defaults.set(TranslationEngine.qwen.rawValue, forKey: "translationEngine")
+        defaults.set(TranslationEngine.qwen.rawValue, forKey: "dictationTranslationEngine")
+        #expect(TranslationEngine.visibleSelection(TranslationEngine.selected) == nil)
+        #expect(TranslationEngine.effective == .madlad)
+        #expect(TranslationEngine.dictationEffective == .madlad)
     }
 
     @Test("first dictation target initialization inherits captions once, including Off")

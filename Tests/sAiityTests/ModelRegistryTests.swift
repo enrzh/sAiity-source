@@ -44,7 +44,7 @@ struct ModelRegistryTests {
         // only reach the pairs macOS had, and it kept a whole second code path
         // alive for one engine.
         #expect(!ids.contains { $0.contains("apple") }, "Apple was removed; a stale asset remains")
-        // One per Qwen variant, so the sheet and the Models page agree.
+        // Cleanup models are catalogued separately from translation engines.
         #expect(ids.filter { $0.hasPrefix("mt.llm.") }.count == LocalModel.all.count)
     }
 
@@ -56,7 +56,8 @@ struct ModelRegistryTests {
 
         #expect(madlad.allSatisfy { !$0.isAdvanced })
         #expect(specialist.allSatisfy { $0.isAdvanced })
-        #expect(local.allSatisfy { $0.isAdvanced })
+        #expect(local.allSatisfy { $0.family == .cleanup })
+        #expect(!local.contains { $0.title.lowercased().contains("qwen") })
     }
 
     @Test("Everything the app downloads can be downloaded and deleted from the UI")

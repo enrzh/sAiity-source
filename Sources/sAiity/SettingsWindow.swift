@@ -184,7 +184,7 @@ final class AppState {
     var activeDownload: String?
     var downloadProgress: DownloadProgress?
     var modelError: String?
-    var translationEngine: TranslationEngine? = TranslationEngine.selected {
+    var translationEngine: TranslationEngine? = TranslationEngine.visibleSelection(TranslationEngine.selected) {
         didSet {
             guard translationEngine != oldValue else { return }
             TranslationEngine.selected = translationEngine
@@ -248,7 +248,7 @@ final class AppState {
     }
     /// Optional dedicated engine for press-to-talk translation. When unset,
     /// dictation follows the existing Captions engine for compatibility.
-    var dictationTranslationEngine: TranslationEngine? = TranslationEngine.dictationSelected {
+    var dictationTranslationEngine: TranslationEngine? = TranslationEngine.visibleSelection(TranslationEngine.dictationSelected) {
         didSet {
             guard dictationTranslationEngine != oldValue else { return }
             TranslationEngine.dictationSelected = dictationTranslationEngine
@@ -518,8 +518,8 @@ final class AppState {
         // whatever was current when the AppState singleton was created, which
         // is one of the ways "selecting a model appears to do nothing".
         engine = ASREngine.selected
-        translationEngine = TranslationEngine.selected
-        dictationTranslationEngine = TranslationEngine.dictationSelected
+        translationEngine = TranslationEngine.visibleSelection(TranslationEngine.selected)
+        dictationTranslationEngine = TranslationEngine.visibleSelection(TranslationEngine.dictationSelected)
         llmModel = LocalModel.selected
         // Was missing, so a target picked from the menu bar never appeared here.
         adoptTarget(UserDefaults.standard.string(forKey: "translateTo"))

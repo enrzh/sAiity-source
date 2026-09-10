@@ -49,7 +49,7 @@ final class Retranslator {
         // 1.86 GB download from a menu item that said "Translate", with the
         // progress sink thrown away. Ask the two questions that can actually
         // be answered before committing to anything.
-        guard let chosen = TranslationEngine.selected else {
+        guard let chosen = TranslationEngine.visibleSelection(TranslationEngine.selected) else {
             onFinish(String(localized: "No translator chosen. Pick one under Settings → Captions."))
             return
         }

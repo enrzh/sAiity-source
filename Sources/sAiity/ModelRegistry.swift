@@ -54,11 +54,13 @@ enum AssetUse: Sendable {
     case whenNemotronTier(chunkMs: Int)
     case whenTranslator(TranslationEngine)
     case whenQwenVariant(file: String)
+    case whenCleanupModel(file: String)
 
     var isAdvanced: Bool {
         switch self {
         case .whenTranslator(let engine): return engine.isAdvanced
         case .whenQwenVariant: return true
+        case .whenCleanupModel: return false
         case .never, .whenRecognitionEngine, .whenNemotronTier: return false
         }
     }
@@ -78,6 +80,8 @@ enum AssetUse: Sendable {
             // `selected?.file == f`, never `selected!` and never `?? ""` — with
             // nothing chosen this has to be false, not "matches the empty name".
             return TranslationEngine.selected == .qwen && LocalModel.selected?.file == f
+        case .whenCleanupModel(let f):
+            return LocalModel.selected?.file == f
         }
     }
 }
@@ -85,7 +89,7 @@ enum AssetUse: Sendable {
 /// One downloadable thing, described once so every surface agrees about it.
 struct ModelAsset: Identifiable, Sendable {
     enum Family: Int, Sendable, Comparable {
-        case recognition, translation
+        case recognition, translation, cleanup
         static func < (a: Family, b: Family) -> Bool { a.rawValue < b.rawValue }
     }
 

@@ -92,7 +92,15 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
     /// available for users who knowingly want to trade certainty for a
     /// specialist or an experimental local LLM.
     static let primaryCases: [TranslationEngine] = [.madlad]
-    static let advancedCases: [TranslationEngine] = [.hyMT2, .qwen]
+    static let advancedCases: [TranslationEngine] = [.hyMT2]
+    /// Engines that are safe to expose in the translation pickers. The local
+    /// LLM case remains internal for cleanup compatibility and old installs.
+    static let userSelectableCases: [TranslationEngine] = [.madlad, .hyMT2]
+
+    static func visibleSelection(_ engine: TranslationEngine?) -> TranslationEngine? {
+        guard let engine, userSelectableCases.contains(engine) else { return nil }
+        return engine
+    }
 
     var isAdvanced: Bool { self != .madlad }
 
@@ -112,11 +120,13 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
 
     /// The translator to build once one is needed. Guarded by `selected` at the
     /// point translation is switched on.
-    static var effective: TranslationEngine { selected ?? recommended }
+    static var effective: TranslationEngine {
+        visibleSelection(selected) ?? recommended
+    }
 
     /// Preserve existing behavior when no dedicated dictation choice exists.
     static var dictationEffective: TranslationEngine {
-        dictationSelected ?? selected ?? recommended
+        visibleSelection(dictationSelected ?? selected) ?? recommended
     }
 
     var displayName: String {
@@ -211,7 +221,7 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
             return LocalModel.all.map { m in
                 ModelAsset(
                     id: AssetID.llm(file: m.file),
-                    family: .translation,
+                    family: .cleanup,
                     title: m.label,
                     detail: m.note,
                     // The one line where the catalogue's own recommendation
@@ -221,7 +231,7 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
                     advertisedBytes: m.bytes,
                     storage: .file(m.localURL, expectedBytes: m.bytes),
                     removal: .remove(m.localURL),
-                    use: .whenQwenVariant(file: m.file),
+                    use: .whenCleanupModel(file: m.file),
                     // An imported file has nothing to download — it is already
                     // in place, so it gets no install path at all.
                     install: m.downloadURL.map { url in

@@ -82,7 +82,7 @@ struct LocalModelTests {
 
     @Test("Built-ins are never removable from the catalogue and all have sources")
     func builtInsAreStable() {
-        #expect(LocalModel.builtIn.count >= 6)
+        #expect(LocalModel.builtIn.count == 2)
         for m in LocalModel.builtIn {
             #expect(m.downloadURL != nil, "\(m.file) has no download URL")
             #expect(m.bytes != nil && m.bytes! > 100 * 1_048_576,
@@ -93,13 +93,14 @@ struct LocalModelTests {
         // two suggestions is not a suggestion.
         #expect(LocalModel.builtIn.filter(\.recommended).count == 1)
         #expect(LocalModel.suggested != nil)
+        #expect(LocalModel.suggested?.label == "Gemma 3 1B")
+        #expect(LocalModel.builtIn.allSatisfy { !$0.label.lowercased().contains("qwen") })
     }
 
     /// The contract this file used to assert was the opposite: an unset or stale
     /// preference resolved to the recommended model. That is exactly what made a
-    /// fresh install show Qwen3.5 2B selected, with its advertised size beside
-    /// it, on a Mac that had never downloaded it — and turned the first Start
-    /// into a 1.25 GB download nobody had agreed to.
+    /// fresh install show a large cleanup model selected, with its advertised
+    /// size beside it, on a Mac that had never downloaded it.
     @Test("Nothing is selected until the user selects something")
     func nothingIsPreselected() {
         let saved = UserDefaults.standard.string(forKey: "qwenModelFile")

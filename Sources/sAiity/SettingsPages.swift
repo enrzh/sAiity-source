@@ -82,12 +82,17 @@ struct ModelsView: View {
                 }
 
                 SettingsSection(title: "Advanced translation",
-                                subtitle: "Optional specialist and local language models.") {
+                                subtitle: "Optional specialist translation model.") {
                     DisclosureGroup(isExpanded: $showAdvancedTranslation) {
                         ForEach(assets(.translation, advanced: true)) { assetRow($0) }
                     } label: {
                         Label("Show advanced models", systemImage: "chevron.right")
                     }
+                }
+
+                SettingsSection(title: "Dictation cleanup",
+                                subtitle: "Optional local models for punctuation, fillers, and spoken formatting.") {
+                    ForEach(assets(.cleanup)) { assetRow($0) }
                 }
 
                 SettingsSection(title: "Storage",
@@ -375,7 +380,7 @@ struct DictationView: View {
                             .foregroundStyle(LocalModel.isCleanupCompatible(state.llmModel)
                                              ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.orange))
                         Spacer()
-                        Button("Manage") { SettingsWindowController.selectModelsPane() }
+                        Button("Manage") { state.showLocalModels = true }
                             .controlSize(.small)
                     }
                 }
@@ -420,6 +425,9 @@ struct DictationView: View {
                                     target: $state.dictationTranslateTo,
                                     title: "Translate dictation to",
                                     scope: .dictation)
+        }
+        .sheet(isPresented: $state.showLocalModels) {
+            LocalModelsView(state: state)
         }
     }
 
@@ -767,24 +775,6 @@ struct CaptionsView: View {
                     // change, so this has to be checked rather than assumed.
                     if let t = state.translateTo, !state.targetSupportedByEngine {
                         TargetUnsupportedNotice(state: state, target: t)
-                    }
-                    if state.translationEngine == .qwen {
-                        HStack {
-                            Button("Choose experimental model…") { state.showLocalModels = true }
-                                .controlSize(.small)
-                            if let m = state.llmModel {
-                                // Say whether the bytes are here. The advertised
-                                // size alone read as "installed and this big".
-                                Text(m.isDownloaded
-                                     ? "\(m.label) · \(m.sizeText)"
-                                     : "\(m.label) · \(m.sizeText) — not downloaded yet")
-                                    .font(.caption)
-                                    .foregroundStyle(m.isDownloaded ? .secondary : Color.orange)
-                            } else if let s = LocalModel.suggested {
-                                Text("No model chosen — \(s.label) is the one to start with")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
                     }
                     Picker("Translation mode", selection: $state.translationTiming) {
                         ForEach(TranslationTiming.allCases, id: \.self) { t in
@@ -1560,9 +1550,9 @@ private struct TranscriptViewerSheet: View {
 
 
 
-// MARK: - Qwen models
+// MARK: - Dictation cleanup models
 
-/// Pick which experimental local model does translation or cleanup.
+/// Pick which local model does dictation cleanup.
 ///
 struct LocalModelsView: View {
     @Bindable var state: AppState
@@ -1573,8 +1563,8 @@ struct LocalModelsView: View {
     }
 
     var body: some View {
-        SheetShell(title: "Experimental local models",
-                   subtitle: "Qwen, Gemma, or your own GGUF · one is used at a time",
+        SheetShell(title: "Dictation cleanup models",
+                   subtitle: "Gemma or your own GGUF · one is used at a time",
                    width: 520, height: 560) {
             List {
                 ForEach(visibleModels) { m in

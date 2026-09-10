@@ -418,6 +418,10 @@ final class BubbleContentView: NSView {
 }
 
 /// A single original/translation pair in the scrollable subtitle history.
+private final class FlippedDocumentView: NSView {
+    override var isFlipped: Bool { true }
+}
+
 private final class CaptionRowView: NSView {
     let original = NSTextField(labelWithString: "")
     let translation = NSTextField(labelWithString: "")
@@ -555,7 +559,7 @@ final class OverlayWindow: NSPanel {
     /// the document height while rows are being inserted, which can re-enter
     /// layout during the first presentation on macOS 27. Rows are positioned
     /// explicitly instead, so the scroll view always has a real frame to draw.
-    private let historyStack = NSView()
+    private let historyStack = FlippedDocumentView()
     // NSGlassEffectView is still changing across macOS 26/27 and can tear
     // down its hosted hierarchy while a caption row is being inserted. The
     // AppKit visual-effect view gives the same translucent surface with a

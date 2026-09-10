@@ -13529,6 +13529,51 @@
         "fr": { "stringUnit": { "state": "translated", "value": "Afficher les moteurs avancés…" } },
         "ja": { "stringUnit": { "state": "translated", "value": "詳細なエンジンを表示…" } }
       }
+    },
+    "Transcript saved to library": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Transkript in der Bibliothek gespeichert" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Transcripción guardada en la biblioteca" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Transcription enregistrée dans la bibliothèque" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "文字起こしをライブラリに保存しました" } }
+      }
+    },
+    "Could not save transcript": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Transkript konnte nicht gespeichert werden" } },
+        "es": { "stringUnit": { "state": "translated", "value": "No se ha podido guardar la transcripción" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Impossible d’enregistrer la transcription" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "文字起こしを保存できませんでした" } }
+      }
+    },
+    "Fast local cleanup model and the recommended starting point.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Schnelles lokales Bereinigungsmodell und die empfohlene erste Wahl." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Modelo local rápido para limpieza y opción recomendada para empezar." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Modèle local rapide pour le nettoyage et choix recommandé pour commencer." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "高速なローカル整理モデルで、最初に推奨される選択肢です。" } }
+      }
+    },
+    "Higher-quality cleanup, with more memory use and slower processing.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Höhere Bereinigungsqualität bei mehr Speicherbedarf und langsamerer Verarbeitung." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Limpieza de mayor calidad, con más memoria y un procesamiento más lento." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Nettoyage de meilleure qualité, avec plus de mémoire et un traitement plus lent." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "メモリ使用量と処理時間は増えますが、より高品質に整理します。" } }
+      }
+    },
+    "Dictation cleanup models": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Diktat-Bereinigungsmodelle" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Modelos para limpiar dictados" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Modèles de nettoyage de la dictée" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "音声入力の整理モデル" } }
+      }
     }
   },
   "version": "1.0"
