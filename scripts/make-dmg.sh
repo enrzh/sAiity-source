@@ -41,6 +41,23 @@ else
 fi
 cp Resources/AppIcon.icns "$STAGE/.VolumeIcon.icns" 2>/dev/null || true
 
+# Finder stores the icon positions and background alias in the volume's
+# .DS_Store. Reuse the last known-good styled image when Finder Automation is
+# unavailable on the build machine; this keeps the presentation stable while
+# leaving the AppleScript below free to refresh it for a new layout.
+LAYOUT_SOURCE="${SAIITY_DMG_LAYOUT_SOURCE:-build/$NAME-2.3.5.dmg}"
+if [ -f "$LAYOUT_SOURCE" ]; then
+    SEED_MOUNT=$(hdiutil attach -nobrowse -readonly -noverify "$LAYOUT_SOURCE" 2>/dev/null \
+        | grep -Eo '/Volumes/.*$' | head -1 || true)
+    if [ -n "$SEED_MOUNT" ]; then
+        if [ -f "$SEED_MOUNT/.DS_Store" ]; then
+            cp "$SEED_MOUNT/.DS_Store" "$STAGE/.DS_Store"
+            echo "reused: Finder layout from $LAYOUT_SOURCE"
+        fi
+        hdiutil detach "$SEED_MOUNT" >/dev/null 2>&1 || true
+    fi
+fi
+
 # A read-write image first, so the Finder can be told where the two icons go;
 # then convert to a compressed read-only one for distribution.
 RW="build/$NAME-rw.dmg"

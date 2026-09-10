@@ -54,7 +54,7 @@ extension FluidStreamingEngine {
 /// would still overlap a new pump with the teardown. AppDelegate prevents that
 /// with its session state machine and a single-flight restart chain; if this
 /// type ever gains another caller, that has to be enforced rather than assumed.
-final class StreamingASRBackend: TranscriptionBackend, @unchecked Sendable {
+final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscriber, @unchecked Sendable {
     let name: String
     private let engine: any FluidStreamingEngine
 
@@ -333,6 +333,42 @@ final class StreamingASRBackend: TranscriptionBackend, @unchecked Sendable {
         }
         let t = rest.trimmingCharacters(in: .whitespacesAndNewlines)
         if !t.isEmpty { emit?(stampedFinal(t)) }
+    }
+
+    /// Deferred, authoritative dictation path. The live caption pump never
+    /// enters this method: each region gets a fresh decoder state while the
+    /// already-loaded engine and model weights remain resident.
+    func transcribeDictation(samples: [Float],
+                             regions: [DictationSpeechRegion]) async throws -> DictationTranscriptionResult {
+        await stopPumpAndClearPending()
+        sessionStarted = false
+        emit = nil
+        await engine.setPartial { _ in }
+
+        var transcripts: [DictationRegionTranscript] = []
+        do {
+            for region in regions {
+                try Task.checkCancellation()
+                await engine.reset()
+                let audio = Array(samples[region.audioRange])
+                guard !audio.isEmpty else { continue }
+                try await engine.process(audio)
+                let text = await engine.finishSession()?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let language = await engine.detectedLanguage()
+                if !text.isEmpty {
+                    transcripts.append(DictationRegionTranscript(text: text, language: language))
+                }
+                // Keep the reset explicit even though finish() currently clears
+                // the manager. This is the invariant that protects the next
+                // region if the engine implementation changes.
+                await engine.reset()
+            }
+        } catch {
+            await engine.reset()
+            throw error
+        }
+        return DictationTranscriptionResult(regions: transcripts)
     }
 
     /// Finish a short dictation utterance without sending the authoritative

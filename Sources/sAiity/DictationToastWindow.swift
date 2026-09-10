@@ -1,7 +1,7 @@
 import AppKit
 
 private final class DictationWaveformView: NSView {
-    private var levels = Array(repeating: CGFloat(0.08), count: 28)
+    private var levels = Array(repeating: CGFloat(0.08), count: 32)
 
     override var isFlipped: Bool { true }
 
@@ -12,7 +12,7 @@ private final class DictationWaveformView: NSView {
     }
 
     func reset() {
-        levels = Array(repeating: 0.08, count: 28)
+        levels = Array(repeating: 0.08, count: 32)
         needsDisplay = true
     }
 
@@ -38,6 +38,8 @@ extension NSAccessibility.Role {
 
 @MainActor
 final class DictationToastWindow: NSPanel {
+    private static let toastSize = NSSize(width: 224, height: 54)
+    private static let centerContentWidth: CGFloat = 172
     static var postAccessibility: (Any, NSAccessibility.Notification) -> Void = NSAccessibility.post(element:notification:)
     static let systemAccessibilityPreferences: () -> (Bool, Bool, Bool) = {
         (NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency, NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast)
@@ -81,11 +83,18 @@ final class DictationToastWindow: NSPanel {
         setAccessibilityLabel("Dictation")
         setAccessibilityEnabled(true)
 
-        let effect = NSGlassEffectView()
-        effect.style = .regular
-        effect.cornerRadius = 22
+        // NSGlassEffectView can tear down its hosted hierarchy while a phase
+        // update changes the label on macOS 27. Use the stable AppKit material
+        // view and keep the content hierarchy explicit.
+        let effect = NSVisualEffectView()
+        effect.material = .hudWindow
+        effect.blendingMode = .behindWindow
+        effect.state = .active
+        effect.wantsLayer = true
+        effect.layer?.cornerRadius = 18
+        effect.layer?.masksToBounds = true
 
-        label.font = .systemFont(ofSize: 13, weight: .medium)
+        label.font = .systemFont(ofSize: 13, weight: .semibold)
         label.textColor = .white
         label.alignment = .center
         label.lineBreakMode = .byTruncatingTail
@@ -106,55 +115,40 @@ final class DictationToastWindow: NSPanel {
         resetButton.target = self
         resetButton.action = #selector(resetPositionFromButton)
 
-        let leadingSlot = NSView()
-        let trailingSlot = NSView()
-        leadingSlot.addSubview(spinner)
-        trailingSlot.addSubview(resetButton)
+        let host = NSView()
+        host.addSubview(spinner)
+        host.addSubview(resetButton)
+        host.addSubview(label)
+        host.addSubview(waveform)
         spinner.translatesAutoresizingMaskIntoConstraints = false
         resetButton.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            spinner.centerXAnchor.constraint(equalTo: leadingSlot.centerXAnchor),
-            spinner.centerYAnchor.constraint(equalTo: leadingSlot.centerYAnchor),
-            spinner.leadingAnchor.constraint(greaterThanOrEqualTo: leadingSlot.leadingAnchor),
-            spinner.trailingAnchor.constraint(lessThanOrEqualTo: leadingSlot.trailingAnchor),
-            resetButton.centerXAnchor.constraint(equalTo: trailingSlot.centerXAnchor),
-            resetButton.centerYAnchor.constraint(equalTo: trailingSlot.centerYAnchor),
-            resetButton.leadingAnchor.constraint(greaterThanOrEqualTo: trailingSlot.leadingAnchor),
-            resetButton.trailingAnchor.constraint(lessThanOrEqualTo: trailingSlot.trailingAnchor),
-        ])
-
-        let middleSlot = NSView()
-        middleSlot.addSubview(label)
-        middleSlot.addSubview(waveform)
         label.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: middleSlot.leadingAnchor),
-            label.trailingAnchor.constraint(equalTo: middleSlot.trailingAnchor),
-            label.topAnchor.constraint(equalTo: middleSlot.topAnchor),
-            label.bottomAnchor.constraint(equalTo: middleSlot.bottomAnchor),
-            waveform.centerXAnchor.constraint(equalTo: middleSlot.centerXAnchor),
-            waveform.centerYAnchor.constraint(equalTo: middleSlot.centerYAnchor),
-            waveform.widthAnchor.constraint(equalToConstant: 128),
-            waveform.heightAnchor.constraint(equalToConstant: 20),
+            spinner.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: 8),
+            spinner.centerYAnchor.constraint(equalTo: host.centerYAnchor),
+            spinner.widthAnchor.constraint(equalToConstant: 16),
+            spinner.heightAnchor.constraint(equalToConstant: 16),
+            resetButton.trailingAnchor.constraint(equalTo: host.trailingAnchor, constant: -8),
+            resetButton.centerYAnchor.constraint(equalTo: host.centerYAnchor),
+            resetButton.widthAnchor.constraint(equalToConstant: 16),
+            resetButton.heightAnchor.constraint(equalToConstant: 16),
+            label.centerXAnchor.constraint(equalTo: host.centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: host.centerYAnchor),
+            label.widthAnchor.constraint(equalToConstant: Self.centerContentWidth),
+            label.heightAnchor.constraint(equalToConstant: 34),
+            waveform.centerXAnchor.constraint(equalTo: host.centerXAnchor),
+            waveform.centerYAnchor.constraint(equalTo: host.centerYAnchor),
+            waveform.widthAnchor.constraint(equalToConstant: Self.centerContentWidth),
+            waveform.heightAnchor.constraint(equalToConstant: 34),
         ])
-
-        let stack = NSStackView(views: [leadingSlot, middleSlot, trailingSlot])
-        leadingSlot.widthAnchor.constraint(equalTo: trailingSlot.widthAnchor).isActive = true
-        middleSlot.widthAnchor.constraint(equalToConstant: 128).isActive = true
-        stack.orientation = .horizontal
-        stack.alignment = .centerY
-        stack.spacing = 8
-        stack.edgeInsets = NSEdgeInsets(top: 9, left: 14, bottom: 9, right: 14)
-        let host = NSView()
-        host.addSubview(stack)
-        stack.translatesAutoresizingMaskIntoConstraints = false
+        effect.addSubview(host)
+        host.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: host.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: host.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: host.topAnchor),
-            stack.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+            host.leadingAnchor.constraint(equalTo: effect.leadingAnchor),
+            host.trailingAnchor.constraint(equalTo: effect.trailingAnchor),
+            host.topAnchor.constraint(equalTo: effect.topAnchor),
+            host.bottomAnchor.constraint(equalTo: effect.bottomAnchor),
         ])
-        effect.contentView = host
         contentView = effect
         applyAccessibilitySurface()
         if let saved = FrameStore.loadDictation(), let visible = injectedVisibleFrame(for: saved) {
@@ -308,6 +302,7 @@ final class DictationToastWindow: NSPanel {
     var resetButtonBoundsForTests: NSRect { resetButton.convert(resetButton.bounds, to: nil) }
     var labelMidXForTests: CGFloat { label.convert(label.bounds, to: contentView).midX }
     var contentMidXForTests: CGFloat { contentView?.bounds.midX ?? 0 }
+    var waveformFrameForTests: NSRect { waveform.convert(waveform.bounds, to: contentView) }
     var waveformVisibleForTests: Bool { !waveform.isHidden }
     private(set) var resetCallbackCountForTests = 0
 #endif
@@ -323,10 +318,16 @@ final class DictationToastWindow: NSPanel {
         spinner.isHidden = !animated
         animated ? spinner.startAnimation(nil) : spinner.stopAnimation(nil)
         alphaValue = 1
-        let size = contentView?.fittingSize ?? NSSize(width: 150, height: 34)
-        setContentSize(NSSize(width: max(150, size.width), height: 36))
+        // The toast has one stable footprint across preparation, recording,
+        // and result states. Only the content changes, so the user's eye never
+        // chases a moving panel while the status updates.
+        // Keep the width fixed as well: measuring fittingSize while AppKit is
+        // laying out can re-enter layout on macOS 27, and the label already
+        // truncates long status messages safely inside this footprint.
+        setContentSize(Self.toastSize)
+        // Resolve the fixed hierarchy before display. This avoids a one-frame
+        // stale layout on macOS 27 and keeps production geometry deterministic.
         contentView?.layoutSubtreeIfNeeded()
-        contentView?.displayIfNeeded()
         display()
         // `isVisible` can remain true after AppKit has accepted an order request
         // that the window server dropped during launch. Always re-order the panel
@@ -339,8 +340,6 @@ final class DictationToastWindow: NSPanel {
         Task { @MainActor [weak self] in
             await Task.yield()
             guard let self, self.isVisible else { return }
-            self.contentView?.layoutSubtreeIfNeeded()
-            self.contentView?.displayIfNeeded()
             self.display()
             self.orderFrontRegardless()
         }
@@ -395,8 +394,6 @@ final class DictationToastWindow: NSPanel {
         waveform.reset()
         label.isHidden = true
         waveform.isHidden = false
-        contentView?.layoutSubtreeIfNeeded()
-        contentView?.displayIfNeeded()
     }
 
     private func orderFrontForPresentation() {

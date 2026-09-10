@@ -20,6 +20,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var whisperPreparationForTests: (@Sendable (WhisperDictationBackend.ModelChoice, @escaping @Sendable (Progress) -> Void) async throws -> Void)?
     #endif
     private var statusItem: NSStatusItem!
+    /// Launch Services may deliver an open URL before AppKit has finished
+    /// launching the delegate. Queue it until the status item and menu exist.
+    private var launchFinished = false
+    private var pendingOpenURLs: [URL] = []
     /// Sparkle. The standard controller drives the whole flow — check, consent,
     /// download, staged install — against the appcast in Info.plist. Automatic
     /// checks are off until the user opts in.
@@ -49,12 +53,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return nil }
             return await self.translateDictatedText(text, source: source, target: target)
         },
+        detailedTranslate: { [weak self] text, transcription, target in
+            guard let self else { return nil }
+            return await self.translateDictatedText(text,
+                                                    transcription: transcription,
+                                                    target: target)
+        },
         cleanupConfiguration: {
             DictationCleanupConfiguration(
                 enabled: UserDefaults.standard.object(forKey: "dictationCleanupEnabled") as? Bool ?? true)
         },
         cleanup: { [weak self] text, sourceLanguage in
             await self?.cleanupDictatedText(text, sourceLanguage: sourceLanguage)
+        },
+        detailedCleanup: { [weak self] transcription in
+            await self?.cleanupDictatedText(transcription)
         },
         onWaveform: { [weak self] levels in
             Task { @MainActor [weak self] in
@@ -64,6 +77,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dictationUsesWhisper: { DictationRecognizer.selected == .whisper },
         transcribeWhisper: { samples, locale in
             try await WhisperDictationBackend().transcribe(samples: samples, locale: locale)
+        },
+        transcribeWhisperSegments: { samples, regions, locale in
+            try await WhisperDictationBackend().transcribeDictation(samples: samples,
+                                                                     regions: regions,
+                                                                     locale: locale)
         },
         whisperIsReady: { WhisperDictationBackend.isReady(WhisperDictationBackend.model) },
         onPhaseChanged: { [weak self] phase in
@@ -93,8 +111,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 #endif
 
     private func cleanupDictatedText(_ text: String, sourceLanguage: String) async -> String? {
+        await cleanupDictatedText(text,
+                                  languageMetadata: DictationLanguageMetadata(language: sourceLanguage,
+                                                                               text: text))
+    }
+
+    private func cleanupDictatedText(_ text: String,
+                                     languageMetadata: DictationLanguageMetadata) async -> String? {
         guard LocalModel.isCleanupCompatible(LocalModel.selected) else { return nil }
         let translator = LocalLLMTranslator()
+        let sourceLanguage = languageMetadata.dominantLanguage ?? "auto"
         return await Self.performDictationCleanup(
             text,
             prepare: {
@@ -102,8 +128,79 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     NSLog("sAiity cleanup progress: \(message)")
                 }
             },
-            cleanup: { await translator.cleanup($0, sourceLanguage: sourceLanguage) },
+            cleanup: {
+                await translator.cleanup($0,
+                                         sourceLanguage: sourceLanguage,
+                                         languageMetadata: languageMetadata)
+            },
             stop: { await translator.stop() })
+    }
+
+    /// Cleans mixed dictation one recognised region at a time. This keeps the
+    /// cleanup model's conservative single-language contract local to a region
+    /// while preserving the original region metadata for translation. A
+    /// translated cleanup result is still rejected by the per-region validator
+    /// and by the final mixed-language validation below.
+    private func cleanupDictatedText(_ transcription: DictationTranscriptionResult) async -> DictationTranscriptionResult? {
+        guard LocalModel.isCleanupCompatible(LocalModel.selected) else { return nil }
+        // Cleanup uses its own GGUF instance. Release a warm caption translator
+        // first so Dictation never doubles native model memory at the exact
+        // moment it starts another local inference operation.
+        await unloadTranslator(reason: "dictation cleanup")
+        let translator = LocalLLMTranslator()
+        let preparationLanguage = transcription.languageMetadata.dominantLanguage ?? "en"
+        do {
+            try await translatorInferenceGate.run {
+                try await translator.prepare(from: preparationLanguage,
+                                             to: preparationLanguage) { message in
+                    NSLog("sAiity cleanup progress: \(message)")
+                }
+            }
+
+            var cleanedRegions: [DictationRegionTranscript] = []
+            for region in transcription.regions {
+                let source = region.language == "auto" ? nil : region.language
+                let metadata = DictationLanguageMetadata(regions: [region])
+                let candidate = try? await translatorInferenceGate.run {
+                    await translator.cleanup(region.text,
+                                             sourceLanguage: source,
+                                             languageMetadata: metadata)
+                }
+                let cleaned = candidate.flatMap {
+                    DictationCleanupValidator.validate($0,
+                                                       preserving: region.text,
+                                                       sourceLanguage: source,
+                                                       languageMetadata: metadata)
+                } ?? region.text
+                cleanedRegions.append(DictationRegionTranscript(text: cleaned,
+                                                                language: region.language))
+            }
+
+            let result = DictationTranscriptionResult(regions: cleanedRegions)
+            guard DictationCleanupValidator.validate(result.text,
+                                                     preserving: transcription.text,
+                                                     sourceLanguage: transcription.languageMetadata.dominantLanguage,
+                                                     languageMetadata: transcription.languageMetadata) != nil else {
+                await stopTranslator(translator)
+                return nil
+            }
+            await stopTranslator(translator)
+            return result
+        } catch {
+            await stopTranslator(translator)
+            NSLog("sAiity cleanup unavailable: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Model destruction is a native operation too. It must sit behind the
+    /// same gate as prepare and inference, otherwise a queued dictation region
+    /// can enter llama/MLX while the previous model is being torn down.
+    private func stopTranslator(_ translator: Translating?) async {
+        guard let translator else { return }
+        _ = try? await translatorInferenceGate.run {
+            await translator.stop()
+        }
     }
 
     static func performDictationCleanup(
@@ -184,6 +281,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var activeTranslator: Translating?
+    private var activeTranslatorEngine: TranslationEngine?
+    private var translatorPreparedTarget: String?
+    private let translatorInferenceGate = TranslationInferenceGate()
     private var translatorReady = false
     private let translatorIdleEviction = IdleEviction()
     private var translatorUsers = 0
@@ -204,7 +304,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Order matters: the outgoing model is released *before* the incoming one
     /// is constructed, so the peak is one model rather than two.
     @MainActor
-    private func swapTranslator() {
+    private func swapTranslator(for scope: TranslationEngineScope = .captions) {
         translatorIdleEviction.cancel()
         translatorGeneration += 1
         let generation = translatorGeneration
@@ -219,13 +319,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await self.waitForTranslatorUsersToFinish()
             let outgoing = self.activeTranslator
             self.activeTranslator = nil
+            self.activeTranslatorEngine = nil
+            self.translatorPreparedTarget = nil
             self.translatorReady = false
-            await outgoing?.stop()
+            await self.stopTranslator(outgoing)
             // A newer choice landed while we were releasing. Let that one do the
             // loading rather than paying for a model already superseded.
             guard generation == self.translatorGeneration else { return }
-            self.activeTranslator = TranslationEngine.effective.makeTranslator()
-            await self.prepareTranslatorIfNeeded()
+            let selected = self.selectedTranslationEngine(for: scope) ?? .recommended
+            self.activeTranslatorEngine = selected
+            self.activeTranslator = selected.makeTranslator()
+            await self.prepareTranslatorIfNeeded(scope: scope)
         }
     }
 
@@ -237,8 +341,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         await waitForTranslatorUsersToFinish()
         let outgoing = activeTranslator
         activeTranslator = nil
+        activeTranslatorEngine = nil
+        translatorPreparedTarget = nil
         translatorReady = false
-        await outgoing?.stop()
+        await stopTranslator(outgoing)
         MemoryPolicy.releaseCaches()
         NSLog("sAiity memory: released translator (\(reason)) — \(MemoryPolicy.describeFootprint())")
     }
@@ -304,6 +410,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         requestedTarget ?? captionsTarget
     }
 
+    private func selectedTranslationEngine(for scope: TranslationEngineScope) -> TranslationEngine? {
+        switch scope {
+        case .captions:
+            return TranslationEngine.selected
+        case .dictation:
+            // Dictation's picker visibly offers the recommended engine even
+            // before the user has persisted a choice. Treat that recommendation
+            // as the runtime default so enabling translation does not silently
+            // produce an unconfigured translator.
+            return TranslationEngine.dictationSelected
+                ?? TranslationEngine.selected
+                ?? .recommended
+        }
+    }
+
+    private func translationTarget(for scope: TranslationEngineScope,
+                                   requestedTarget: String?) -> String? {
+        switch scope {
+        case .captions:
+            return Self.translationTargetForPreparation(captionsTarget: translateTo,
+                                                        requestedTarget: requestedTarget)
+        case .dictation:
+            return requestedTarget ?? SettingsWindowController.state.dictationTranslateTo
+        }
+    }
+
     /// Load (and if necessary download) the selected translator. This was the
     /// missing link: the translator object was constructed but `prepare()` was
     /// never called, so MADLAD and Qwen never downloaded their weights and
@@ -312,24 +444,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @discardableResult
     private func prepareTranslatorIfNeeded(requestedTarget: String? = nil,
                                            allowWithoutCaptions: Bool = false,
-                                           sourceLanguage: String? = nil) async -> Bool {
+                                           sourceLanguage: String? = nil,
+                                           scope: TranslationEngineScope = .captions) async -> Bool {
         translatorIdleEviction.cancel()
-        guard let target = Self.translationTargetForPreparation(captionsTarget: translateTo,
-                                                                requestedTarget: requestedTarget) else {
+        guard let target = translationTarget(for: scope, requestedTarget: requestedTarget) else {
             return false
         }
-        guard !translatorReady else { return true }
-        guard TranslationEngine.selected != nil else {
+        guard let selectedEngine = selectedTranslationEngine(for: scope) else {
             // A target without a translator: honest, and recoverable in one step.
-            setStatus("No translator chosen — pick one in Settings → Captions")
+            setStatus("No translator chosen — pick one in Settings")
             return false
         }
-        let selectedEngine = TranslationEngine.effective
+        guard activeTranslator == nil || activeTranslatorEngine == selectedEngine else {
+            // A different scoped choice is still in use. Let the caller replace
+            // it through the serialized swap path instead of releasing native
+            // state during inference.
+            return false
+        }
+        // Preparation also crosses into MLX/llama native state. Hold the same
+        // lifetime lease as inference so a target/engine swap cannot release
+        // the object while its async load is suspended.
+        beginTranslatorUse()
+        defer { endTranslatorUse() }
         let generation = translatorGeneration
         if activeTranslator == nil {
             activeTranslator = selectedEngine.makeTranslator()
+            activeTranslatorEngine = selectedEngine
         }
         guard let engine = activeTranslator else { return false }
+        if translatorReady && translatorPreparedTarget == target {
+            return true
+        }
         // Loading is deferred until a session is actually running, deliberately.
         // Choosing a target used to load the model there and then — 1.9 GB for
         // MADLAD, up to 2.5 GB for a large GGUF — and hold it for as long as the
@@ -341,7 +486,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return false
         }
         let src = sourceLanguage ?? detectedLanguage ?? locale.identifier(.bcp47)
-        NSLog("sAiity translator: selected=\(TranslationEngine.effective.rawValue) object=\(engine.name) src=\(src) dst=\(target)")
+        NSLog("sAiity translator: selected=\(selectedEngine.rawValue) object=\(engine.name) src=\(src) dst=\(target) scope=\(scope.rawValue)")
         // Frozen BEFORE the await, like `target` above and for the same
         // reason: the user can switch translator — or Qwen model — while
         // prepare() runs, and reading `.effective` again at the end would
@@ -350,22 +495,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // none: it offers "Re-download" for a file that is perfectly fine.
         let assetID = selectedEngine.activeAssetID
         do {
-            try await engine.prepare(from: src, to: target) { [weak self] msg in
-                NSLog("sAiity translator progress: \(msg)")
-                Task { @MainActor in self?.setStatus(localized: msg) }
+            try await translatorInferenceGate.run {
+                try await engine.prepare(from: src, to: target) { [weak self] msg in
+                    NSLog("sAiity translator progress: \(msg)")
+                    Task { @MainActor in self?.setStatus(localized: msg) }
+                }
             }
             // A settings change can replace the model while prepare() is
             // suspended. Never mark that stale instance ready or let a caller
             // translate through it after the replacement has started.
             guard generation == translatorGeneration,
-                  TranslationEngine.effective == selectedEngine,
+                  activeTranslatorEngine == selectedEngine,
                   activeTranslator != nil else { return false }
             translatorReady = true
+            translatorPreparedTarget = target
             if let assetID { LoadHealth.clear(assetID) }
             setStatus("Translating with \(selectedEngine.displayName)")
             return true
         } catch {
             translatorReady = false
+            // A native loader can leave a partially constructed model object
+            // behind before throwing. Drop it before the next attempt; keeping
+            // that object alive is both wasted memory and unsafe for llama/MLX.
+            let failed = activeTranslator
+            activeTranslator = nil
+            activeTranslatorEngine = nil
+            translatorPreparedTarget = nil
+            await stopTranslator(failed)
             // Bytes on disk that refuse to load are damage worth remembering —
             // the Models page turns this into a "Re-download" the user can
             // actually connect to the error, instead of the same status-line
@@ -394,6 +550,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                        source: String,
                                        target: String) async -> String? {
         translatorIdleEviction.cancel()
+        // Dictation may use a different engine than captions. Switch through
+        // the serialized lifecycle before entering native inference, and keep
+        // the model resident between regions and presses.
+        let desiredEngine = TranslationEngine.dictationEffective
+        if activeTranslator == nil || activeTranslatorEngine != desiredEngine {
+            swapTranslator(for: .dictation)
+        }
         // A settings change replaces the translator asynchronously. Do not
         // translate against the old model while that replacement is in flight.
         let generation = translatorGeneration
@@ -414,9 +577,78 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         guard await prepareTranslatorIfNeeded(requestedTarget: target,
                                               allowWithoutCaptions: true,
-                                              sourceLanguage: source),
+                                              sourceLanguage: source,
+                                              scope: .dictation),
               let engine = activeTranslator else { return nil }
-        return await engine.translate(text, from: source, to: target)
+        do {
+            return try await translatorInferenceGate.run {
+                await engine.translate(text, from: source, to: target)
+            }
+        } catch {
+            NSLog("sAiity dictation translation unavailable: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private func translateDictatedText(_ text: String,
+                                       transcription: DictationTranscriptionResult,
+                                       target: String) async -> String? {
+        guard transcription.languageMetadata.containsMultipleLanguages,
+              transcription.regions.count > 1 else {
+            let source = transcription.languageMetadata.dominantLanguage ?? "auto"
+            return await translateDictatedText(text, source: source, target: target)
+        }
+
+        // A mixed transcript is translated region by region. Hold one use
+        // lease and one gate operation for the complete run: the loaded native
+        // model cannot be evicted or retargeted between regions, and no other
+        // caption/dictation inference can enter while this authoritative result
+        // is being assembled.
+        translatorIdleEviction.cancel()
+        let desiredEngine = TranslationEngine.dictationEffective
+        if activeTranslator == nil || activeTranslatorEngine != desiredEngine {
+            swapTranslator(for: .dictation)
+        }
+        let generation = translatorGeneration
+        await translatorSwap?.value
+        guard generation == translatorGeneration else { return nil }
+        beginTranslatorUse()
+        defer {
+            endTranslatorUse()
+            scheduleTranslatorEvictionIfIdle()
+        }
+        guard SettingsWindowController.state.translateDictation,
+              SettingsWindowController.state.dictationTranslateTo == target,
+              await prepareTranslatorIfNeeded(requestedTarget: target,
+                                               allowWithoutCaptions: true,
+                                               sourceLanguage: transcription.languageMetadata.dominantLanguage,
+                                               scope: .dictation),
+              let engine = activeTranslator else { return nil }
+
+        do {
+            return try await translatorInferenceGate.run {
+                var translated: [String] = []
+                translated.reserveCapacity(transcription.regions.count)
+                for region in transcription.regions {
+                    try Task.checkCancellation()
+                    let source = region.language
+                        ?? transcription.languageMetadata.dominantLanguage
+                        ?? "auto"
+                    guard let value = await engine.translate(region.text,
+                                                              from: source,
+                                                              to: target) else {
+                        return nil
+                    }
+                    translated.append(value)
+                }
+                return DictationTranscriptMerger.merge(translated)
+            }
+        } catch is CancellationError {
+            return nil
+        } catch {
+            NSLog("sAiity dictation translation unavailable: \(error.localizedDescription)")
+            return nil
+        }
     }
 
     /// Model loading/release and native inference must never overlap. The
@@ -454,7 +686,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               !dictationController.isBusy,
               translatorSwap == nil,
               !liveTranslationBusy,
-              pendingTranslations == 0 else { return }
+              pendingTranslations == 0,
+              translatorUsers == 0 else { return }
         translatorIdleEviction.schedule(
             after: .seconds(45),
             shouldEvict: { [weak self] in
@@ -465,6 +698,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     && self.translatorSwap == nil
                     && !self.liveTranslationBusy
                     && self.pendingTranslations == 0
+                    && self.translatorUsers == 0
             },
             evict: { [weak self] in
                 guard let self else { return }
@@ -666,32 +900,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// feed the new engine buffers in the old engine's format.
     private var captureFormat: AVAudioFormat?
 
-    /// Recently chosen targets, so the menu stays short without being a fixed
-    /// list that ignores what this person actually uses.
-    @Defaults("recentTranslateTargets") private var recentTargets: [String] = []
-    @Defaults("recentDictationTranslateTargets") private var recentDictationTargets: [String] = []
-
-    private func rememberTarget(_ code: String) {
-        var r = recentTargets.filter { $0 != code }
-        r.insert(code, at: 0)
-        recentTargets = Array(r.prefix(6))
-    }
-
-    private func rememberDictationTarget(_ code: String) {
-        var r = recentDictationTargets.filter { $0 != code }
-        r.insert(code, at: 0)
-        recentDictationTargets = Array(r.prefix(6))
-    }
-
-    @objc private func showLanguagePicker() {
-        SettingsWindowController.show()
-        SettingsWindowController.state.showTranslationPicker = true
-    }
-
-    @objc private func showDictationLanguagePicker() {
-        SettingsWindowController.showDictationTranslationPicker()
-    }
-
     /// An LSUIElement app has no App menu, so this is the ONLY route to the
     /// version string and to the third-party notices the licences require to
     /// travel with the binary.
@@ -722,7 +930,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard aboutResignObserver == nil else { return }
         aboutResignObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { _ in
-                MainActor.assumeIsolated {
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
                     ForegroundActivation.end()
                     if let t = self.aboutResignObserver {
                         NotificationCenter.default.removeObserver(t)
@@ -764,7 +973,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.toolTip = String(localized: "sAiity — on-device live subtitles")
         overlay.onCopy = { [weak self] in self?.copyCurrentLine() }
         overlay.onSaveTranscript = { [weak self] in self?.saveSubtitlesTranscript() }
-        overlay.onOpenWindow = { SettingsWindowController.show() }
         overlay.onClear = { [weak self] in self?.clearCaption() }
         bindDictationToastActions()
         NotificationCenter.default.addObserver(
@@ -774,7 +982,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // land on the session the user is watching rather than the next one.
         NotificationCenter.default.addObserver(
             forName: .saiitySpeechGapChanged, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.capture.applySpeechGapSettings() }
+                Task { @MainActor [weak self] in self?.capture.applySpeechGapSettings() }
             }
         rebuildMenu()
         if SettingsWindowController.state.dictationEnabled {
@@ -784,7 +992,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         NotificationCenter.default.addObserver(forName: .saiityDictationSettingChanged,
                                                object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated {
+            Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.dictationHotkeyMonitor.updateChord(SettingsWindowController.state.dictationChord)
                 if SettingsWindowController.state.dictationEnabled {
@@ -803,8 +1011,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         NotificationCenter.default.addObserver(forName: .saiityDictationShortcutRecordingChanged,
                                                object: nil, queue: .main) { [weak self] note in
-            MainActor.assumeIsolated {
-                self?.dictationHotkeyMonitor.setSuspended(note.object as? Bool ?? false)
+            let suspended = note.object as? Bool ?? false
+            Task { @MainActor [weak self] in
+                self?.dictationHotkeyMonitor.setSuspended(suspended)
             }
         }
 
@@ -818,32 +1027,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         NotificationCenter.default.addObserver(forName: .saiityResetBubble, object: nil,
                                                queue: .main) { [weak self] _ in
-            self?.overlay.resetPosition()
+            Task { @MainActor [weak self] in self?.overlay.resetPosition() }
         }
         NotificationCenter.default.addObserver(forName: .saiityShowAbout, object: nil,
                                                queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.showAbout() }
+            Task { @MainActor [weak self] in self?.showAbout() }
         }
         NotificationCenter.default.addObserver(forName: .saiityMicSettingChanged, object: nil,
                                                queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated {
+            Task { @MainActor [weak self] in
                 guard let self else { return }
-                Task { @MainActor in
-                    await self.capture.applyMicSetting()
-                    // Say what happened: turning it off mid-session is exactly
-                    // the moment someone wants confirmation that it is off.
-                    switch self.capture.micStatus {
-                    case .off where self.state.isActive:
-                        self.setStatus("Microphone released — captions continue from system audio")
-                    case .mixing:
-                        self.setStatus("Microphone added to the captions")
-                    case .denied:
-                        self.setStatus("Captions run without your microphone — allow sAiity under System Settings → Privacy & Security → Microphone")
-                    case .failed:
-                        self.setStatus("Captions run without your microphone — it could not be started")
-                    default:
-                        break
-                    }
+                await self.capture.applyMicSetting()
+                // Say what happened: turning it off mid-session is exactly
+                // the moment someone wants confirmation that it is off.
+                switch self.capture.micStatus {
+                case .off where self.state.isActive:
+                    self.setStatus("Microphone released — captions continue from system audio")
+                case .mixing:
+                    self.setStatus("Microphone added to the captions")
+                case .denied:
+                    self.setStatus("Captions run without your microphone — allow sAiity under System Settings → Privacy & Security → Microphone")
+                case .failed:
+                    self.setStatus("Captions run without your microphone — it could not be started")
+                default:
+                    break
                 }
             }
         }
@@ -869,7 +1076,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(forName: .saiityTranslateTargetChanged, object: nil,
                                                queue: .main) { [weak self] note in
             let t = note.userInfo?["target"] as? String
-            MainActor.assumeIsolated {
+            Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.translateTo = t
                 // Hold the row open for as long as translation is on, so the
@@ -892,8 +1099,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                                queue: .main) { [weak self] note in
             guard let raw = note.userInfo?["engine"] as? String,
                   let e = ASREngine(rawValue: raw) else { return }
-            // Delivered on .main, but the closure itself is nonisolated.
-            MainActor.assumeIsolated { self?.engineChanged(to: e) }
+            // Delivered on .main, but the closure itself is nonisolated. Hop
+            // explicitly instead of assuming the dispatch queue is the actor.
+            Task { @MainActor [weak self] in self?.engineChanged(to: e) }
         }
 
         // Nemotron is one multilingual model that identifies the language from
@@ -918,6 +1126,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if TestHooks.openSettings {
             SettingsWindowController.show()
         }
+        if TestHooks.preview {
+            // The window server can drop an order request made in the first
+            // applicationDidFinishLaunching pass. Use the same settled-launch
+            // boundary as the dictation toast so the preview exercises the
+            // real overlay rather than a window that exists but is not drawn.
+            Self.scheduleAfterLaunch { [weak self] in
+                self?.overlay.showPreview()
+            }
+        }
+        launchFinished = true
+        let pending = pendingOpenURLs
+        pendingOpenURLs.removeAll(keepingCapacity: true)
+        if !pending.isEmpty { handleOpenURLs(pending) }
     }
 
     private func startDictationHotkey() -> Bool {
@@ -1069,28 +1290,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dictationItem.isEnabled = false
         menu.addItem(dictationItem)
 
-        let captionsTranslation = translationMenuItem(
-            scope: .captions,
-            title: "Captions: Translate to",
-            currentTarget: translateTo,
-            recentTargets: recentTargets)
-        captionsTranslation.image = Self.menuSymbol("globe")
-        menu.addItem(captionsTranslation)
-
-        let dictationTranslation = translationMenuItem(
-            scope: .dictation,
-            title: "Dictation: Translate to",
-            currentTarget: SettingsWindowController.state.dictationTranslateTo,
-            recentTargets: recentDictationTargets)
-        dictationTranslation.image = Self.menuSymbol("globe")
-        menu.addItem(dictationTranslation)
-
-        // Everything about transcripts has left this menu: the saved-session
-        // submenu, the Save-transcript toggle, and both Copy commands. They
-        // live on the Transcripts page, which can do what a menu never could —
-        // show the lines, search them, export them. Copying the current line
-        // is still one click away on the bubble itself, where you are already
-        // looking when you want it.
+        // Translation, transcript export, and model choices live in Settings.
+        // The menu stays focused on actions needed while captions are running.
 
         menu.addItem(.separator())
         // "Settings…" with ⌘, — the name and the shortcut every Mac app uses
@@ -1099,9 +1300,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                   keyEquivalent: ",")
         settings.image = Self.menuSymbol("gear")
         menu.addItem(settings)
-        // About moved to Settings → General. It is not a thing you reach for
-        // mid-session, but it must stay reachable *somewhere*: it is the only
-        // surface for the third-party licences and the credits this app ships.
+        // About lives in the secondary About & Support sheet. It is not a thing
+        // you reach for mid-session, but remains reachable with the licences.
         let update = NSMenuItem(title: String(localized: "Check for Updates…"),
                                 action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)),
                                 keyEquivalent: "")
@@ -1115,47 +1315,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         quit.target = NSApp
         menu.addItem(quit)
         assignTargets(menu)
+        guard let statusItem else { return }
         statusItem.menu = menu
     }
 
-
-    private func translationMenuItem(scope: TranslationMenuScope,
-                                     title: String.LocalizationValue,
-                                     currentTarget: String?,
-                                     recentTargets: [String]) -> NSMenuItem {
-        let item = NSMenuItem(title: String(localized: title), action: nil, keyEquivalent: "")
-        let menu = NSMenu()
-        let preferred = Locale.preferredLanguages.prefix(4).map {
-            Locale(identifier: $0).language.languageCode?.identifier ?? $0
-        }
-        let entries = TranslationMenuModel.entries(
-            scope: scope,
-            currentTarget: currentTarget,
-            recentTargets: recentTargets,
-            preferredLanguages: Array(preferred),
-            fallbackLanguages: ["en", "de"])
-        for entry in entries {
-            let title = entry.selection.code.map { AppLanguage(code: $0).displayName }
-                ?? String(localized: "Off")
-            let mi = NSMenuItem(title: title,
-                                action: #selector(pickTranslation(_:)), keyEquivalent: "")
-            mi.representedObject = entry.selection
-            mi.state = entry.isSelected ? .on : .off
-            menu.addItem(mi)
-        }
-
-        menu.addItem(.separator())
-        let allSelector: Selector = scope == .captions
-            ? #selector(showLanguagePicker)
-            : #selector(showDictationLanguagePicker)
-        let all = NSMenuItem(title: String(localized: "All languages…"), action: allSelector,
-                             keyEquivalent: "")
-        menu.addItem(all)
-
-        assignTargets(menu)
-        item.submenu = menu
-        return item
-    }
 
     /// Only claim items that have not already chosen a target — otherwise this
     /// steals actions meant for NSApp.
@@ -1388,26 +1551,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 
 
-    /// Picking from the menu bar only announces the choice. The notification
-    /// handler is the single place that rebuilds the translator, so the menu and
-    /// the Settings window cannot drift apart or do the work twice.
-    @objc private func pickTranslation(_ sender: NSMenuItem) {
-        guard let selection = sender.representedObject as? TranslationMenuSelection else { return }
-        switch selection.scope {
-        case .captions:
-            guard selection.code != translateTo else { return }
-            if let target = selection.code { rememberTarget(target) }
-            NotificationCenter.default.post(name: .saiityTranslateTargetChanged, object: nil,
-                                            userInfo: ["target": selection.code as Any])
-        case .dictation:
-            let state = SettingsWindowController.state
-            guard selection.code != state.dictationTranslateTo else { return }
-            if let target = selection.code { rememberDictationTarget(target) }
-            state.dictationTranslateTo = selection.code
-        }
-    }
-
-
     @objc private func toggle() {
         state.isActive ? stop() : start()
     }
@@ -1507,6 +1650,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// and `stop` on an idle one do nothing, so an automation that fires
     /// twice cannot invert the user's intent the way a bare toggle would.
     func application(_ application: NSApplication, open urls: [URL]) {
+        guard launchFinished else {
+            pendingOpenURLs.append(contentsOf: urls)
+            return
+        }
+        handleOpenURLs(urls)
+    }
+
+    private func handleOpenURLs(_ urls: [URL]) {
         for url in urls where url.scheme == "saiity" {
             let verb = (url.host ?? url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))).lowercased()
             NSLog("sAiity url: \(verb)")
@@ -1521,6 +1672,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case "copyall": copyWholeSession()
             case "bubble": toggleBubbleHidden()
             case "recent": showRecentCaptions()
+            // A deterministic preview is useful for Shortcuts and for checking
+            // the overlay after a display or macOS update without starting ASR.
+            case "preview": overlay.showPreview()
             default:
                 NSLog("sAiity url: unknown verb \(verb)")
             }
@@ -2077,9 +2231,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 scheduleTranslatorEvictionIfIdle()
             }
+            beginTranslatorUse()
+            defer { endTranslatorUse() }
             guard let engine = activeTranslator else { return }
-            guard let out = await engine.translate(text, from: srcCode, to: target),
-                  !out.isEmpty else { return }
+            guard let out = try? await translatorInferenceGate.run({
+                await engine.translate(text, from: srcCode, to: target)
+            }), !out.isEmpty else { return }
             // Same guards as the authoritative path: not across a session
             // boundary, and only under the sentence it translates. The
             // `!sentenceClosed` leg drops a partial that resolves after the
@@ -2222,13 +2379,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.pendingTranslations -= 1
                 self.scheduleTranslatorEvictionIfIdle()
             }
+            self.beginTranslatorUse()
+            defer { self.endTranslatorUse() }
             guard let target, let engine = activeTranslator else { return nil }
             // Empty counts as nothing translated. MADLAD returns "" for a short
             // or noisy caption — it has no emptiness check, unlike the LLM path's
             // sanitizer — and an empty string is non-nil, so it would otherwise
             // record a translation that is not there.
-            guard let out = await engine.translate(text, from: srcCode, to: target),
-                  !out.isEmpty else { return nil }
+            guard let out = try? await translatorInferenceGate.run({
+                await engine.translate(text, from: srcCode, to: target)
+            }), !out.isEmpty else { return nil }
             if TestHooks.verboseLogging {
                 NSLog("sAiity translated [\(TranslationEngine.effective.rawValue)]: \(out)")
             }

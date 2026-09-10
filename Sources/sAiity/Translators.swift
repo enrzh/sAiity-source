@@ -242,9 +242,21 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
     For short or already-clean text, make no changes. Output only the edited transcript.
     """
 
-    static func cleanupUserPrompt(_ text: String, sourceLanguage: String? = nil) -> String {
+    static func cleanupUserPrompt(_ text: String,
+                                  sourceLanguage: String? = nil,
+                                  languageMetadata: DictationLanguageMetadata? = nil) -> String {
         let languageInstruction: String
-        if let sourceLanguage, !sourceLanguage.isEmpty {
+        if let languageMetadata, languageMetadata.containsMultipleLanguages {
+            let names = languageMetadata.regionLanguages.compactMap { code in
+                code.map { englishName(of: $0) }
+            }
+            var uniqueNames: [String] = []
+            for name in names where !uniqueNames.contains(name) {
+                uniqueNames.append(name)
+            }
+            let detected = uniqueNames.isEmpty ? "multiple languages" : uniqueNames.joined(separator: ", ")
+            languageInstruction = "The speaker intentionally used multiple languages in this transcript (detected spans include \(detected)). Preserve the language of every span exactly. Never translate German words into English, English words into German, Chinese into English, or any other span into another language. Clean each span in place and keep the code-switching."
+        } else if let sourceLanguage, !sourceLanguage.isEmpty {
             let code = sourceLanguage.replacingOccurrences(of: "_", with: "-")
             let name = englishName(of: code)
             languageInstruction = "The speaker's language is " + name + " (BCP-47: " + code + "). Preserve that same language exactly. Never translate. The language code is a hint, not a request to translate."
@@ -266,16 +278,20 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
         """
     }
 
-    func cleanup(_ text: String, sourceLanguage: String? = nil) async -> String? {
+    func cleanup(_ text: String,
+                 sourceLanguage: String? = nil,
+                 languageMetadata: DictationLanguageMetadata? = nil) async -> String? {
         guard llm != nil else { return nil }
         let baseline = DictationCleanupValidator.deterministicCleanup(text,
                                                                        sourceLanguage: sourceLanguage)
         guard let raw = await generate(system: Self.cleanupSystemPrompt,
                                        user: Self.cleanupUserPrompt(baseline,
-                                                                    sourceLanguage: sourceLanguage)) else {
+                                                                    sourceLanguage: sourceLanguage,
+                                                                    languageMetadata: languageMetadata)) else {
             return DictationCleanupValidator.validate(baseline,
                                                       preserving: text,
-                                                      sourceLanguage: sourceLanguage)
+                                                      sourceLanguage: sourceLanguage,
+                                                      languageMetadata: languageMetadata)
         }
 
         // Apply the guaranteed speech pass after generation too. This covers a
@@ -284,7 +300,8 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
                                                                         sourceLanguage: sourceLanguage)
         if let valid = DictationCleanupValidator.validate(candidate,
                                                           preserving: text,
-                                                          sourceLanguage: sourceLanguage) {
+                                                          sourceLanguage: sourceLanguage,
+                                                          languageMetadata: languageMetadata) {
             // If the model ignored the task and copied the raw transcript, use
             // the deterministic result instead of accepting that unchanged copy.
             let copiedRaw = candidate.trimmingCharacters(in: .whitespacesAndNewlines) ==
@@ -292,14 +309,16 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
             if copiedRaw,
                let deterministic = DictationCleanupValidator.validate(baseline,
                                                                       preserving: text,
-                                                                      sourceLanguage: sourceLanguage) {
+                                                                      sourceLanguage: sourceLanguage,
+                                                                      languageMetadata: languageMetadata) {
                 return deterministic
             }
             return valid
         }
         return DictationCleanupValidator.validate(baseline,
                                                   preserving: text,
-                                                  sourceLanguage: sourceLanguage)
+                                                  sourceLanguage: sourceLanguage,
+                                                  languageMetadata: languageMetadata)
     }
 
     /// The language name to put in the prompt, always in English.
@@ -432,53 +451,34 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
     private let flightLock = NSLock()
     private var inFlight = false
 
-    /// One generation, bounded by `timeout`. Nil means it overran — and an
-    /// overrun is terminal for the instance, so the caller must not retry it.
+    /// One generation. The watchdog used here previously returned `nil` while
+    /// the native decode task was still running. That made the caller discard
+    /// the LLM and allowed llama.cpp to touch released state, which terminated
+    /// the app instead of producing a translation. Native generation is not
+    /// cooperatively cancellable, so its lifetime must remain structured: log
+    /// a slow call, but keep the model alive until the call actually returns.
     private func generate(system: String, user: String, temp: Float = 0.1) async -> String? {
         guard let llm else { return nil }
         let t0 = Date()
-        let out: String? = await withTaskGroup(of: String?.self) { group in
-            group.addTask {
-                // Re-apply the template before every generation, as ghost-pepper
-                // does: the `template` didSet re-arms the stop sequence and the
-                // thinking tokens, and clearing history stops one caption from
-                // conditioning the next.
-                llm.useResolvedTemplate(systemPrompt: system)
+        // Re-apply the template before every generation, as ghost-pepper does:
+        // the `template` didSet re-arms the stop sequence and the thinking
+        // tokens, and clearing history stops one caption from conditioning the
+        // next.
+        llm.useResolvedTemplate(systemPrompt: system)
 
-                // Not every family HAS a system role. The resolver returns the
-                // Gemma (and Mistral) presets with the system prompt DISCARDED —
-                // so Gemma received zero instructions and answered with the
-                // empty sentinel every time. When the resolved template carries
-                // no system prompt, fold the instructions into the user turn;
-                // and only Qwen-style templates get the pre-closed <think>
-                // pair, because injecting think tokens a model never saw in
-                // training reads to it as garbage input.
-                let carriesSystem = llm.template?.systemPrompt != nil
-                let effectiveUser = carriesSystem ? user : system + "\n\n" + user
-                let thinking: ThinkingMode = carriesSystem ? .suppressed : .none
+        // Not every family HAS a system role. The resolver returns the Gemma
+        // (and Mistral) presets with the system prompt discarded, so fold the
+        // instructions into the user turn for those templates.
+        let carriesSystem = llm.template?.systemPrompt != nil
+        let effectiveUser = carriesSystem ? user : system + "\n\n" + user
+        let thinking: ThinkingMode = carriesSystem ? .suppressed : .none
 
-                llm.history = []
-                llm.temp = temp
-                await llm.respond(to: effectiveUser, thinking: thinking)
-                return llm.output
-            }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(Self.timeout * 1_000_000_000))
-                return nil
-            }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
-        }
-        guard let out else {
-            // A generation that overran cannot be cancelled — the decode loop
-            // holds the LLMCore actor with no suspension point, so stop() and
-            // task cancellation are both inert. The instance is unusable from
-            // here on; drop it so the next call rebuilds rather than queueing
-            // behind a stranded generation forever.
-            NSLog("sAiity qwen: generation exceeded \(Int(Self.timeout))s — discarding this instance")
-            self.llm = nil
-            return nil
+        llm.history = []
+        llm.temp = temp
+        await llm.respond(to: effectiveUser, thinking: thinking)
+        let out = llm.output
+        if Date().timeIntervalSince(t0) > Self.timeout {
+            NSLog("sAiity qwen: generation exceeded \(Int(Self.timeout))s; keeping completed result")
         }
         NSLog(String(format: "sAiity qwen: %.1fs", Date().timeIntervalSince(t0)))
         return out
@@ -563,7 +563,12 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
     /// `generate`), and that decode loop keeps its own model alive until it
     /// finishes on its own. Dropping our reference here is still correct; it
     /// just means the release happens when the stranded loop ends.
-    func stop() async { llm = nil }
+    func stop() async {
+        llm = nil
+        // llama.cpp keeps backend allocations in a process-wide cache. Drop
+        // them before a dictation translation loads another native model.
+        MemoryPolicy.releaseCaches()
+    }
 
     /// GGUF fetch with real progress and a non-destructive replace. An imported
     /// file has no source to fetch from — if its bytes are gone, they are gone,

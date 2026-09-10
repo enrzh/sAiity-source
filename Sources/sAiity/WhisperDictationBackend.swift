@@ -3,6 +3,184 @@ import WhisperKit
 
 enum WhisperDictationError: Error, Equatable { case unsupportedLocale(String) }
 
+protocol WhisperModelResource: Sendable {
+    func unload() async
+}
+
+/// Keeps one loaded native model resident for a short idle window.
+///
+/// The cache owns the resource and leases it for the duration of each native
+/// operation. This prevents the idle task from unloading a model while a
+/// decode is still running, while the caller's per-model mutex continues to
+/// enforce the single-inference invariant.
+actor WhisperModelCache<Key: Hashable & Sendable, Resource: WhisperModelResource> {
+    typealias Loader = @Sendable (Key) async throws -> Resource
+
+    private struct Entry {
+        let resource: Resource
+        var activeUsers = 0
+        var evictionToken = UUID()
+        var invalidated = false
+    }
+
+    private let idleDuration: Duration
+    private let loader: Loader
+    private var entries: [Key: Entry] = [:]
+    private var evictionTasks: [Key: Task<Void, Never>] = [:]
+
+    init(idleDuration: Duration = .seconds(45), loader: @escaping Loader) {
+        self.idleDuration = idleDuration
+        self.loader = loader
+    }
+
+    func withModel<T: Sendable>(for key: Key,
+                                operation: @escaping @Sendable (Resource) async throws -> T) async throws -> T {
+        let resource = try await acquire(key)
+        do {
+            let value = try await operation(resource)
+            await release(key)
+            return value
+        } catch {
+            await release(key)
+            throw error
+        }
+    }
+
+    func invalidate(_ key: Key) async {
+        evictionTasks.removeValue(forKey: key)?.cancel()
+        guard var entry = entries[key] else { return }
+        if entry.activeUsers > 0 {
+            entry.invalidated = true
+            entries[key] = entry
+            return
+        }
+        entries.removeValue(forKey: key)
+        await entry.resource.unload()
+    }
+
+#if SAIITY_TEST_HOOKS
+    var residentCountForTests: Int { entries.count }
+#endif
+
+    private func acquire(_ key: Key) async throws -> Resource {
+        if var entry = entries[key], !entry.invalidated {
+            entry.activeUsers += 1
+            entries[key] = entry
+            scheduleEviction(for: key, token: entry.evictionToken)
+            return entry.resource
+        }
+
+        let resource = try await loader(key)
+        do {
+            try Task.checkCancellation()
+        } catch {
+            await resource.unload()
+            throw error
+        }
+
+        // A caller can invalidate while the loader is suspended. Reuse the
+        // existing resident resource and release the duplicate immediately.
+        if var existing = entries[key], !existing.invalidated {
+            await resource.unload()
+            existing.activeUsers += 1
+            entries[key] = existing
+            scheduleEviction(for: key, token: existing.evictionToken)
+            return existing.resource
+        }
+
+        var entry = Entry(resource: resource)
+        entry.activeUsers = 1
+        entries[key] = entry
+        scheduleEviction(for: key, token: entry.evictionToken)
+        return resource
+    }
+
+    private func release(_ key: Key) async {
+        guard var entry = entries[key] else { return }
+        entry.activeUsers = max(0, entry.activeUsers - 1)
+        guard entry.activeUsers == 0 else {
+            entries[key] = entry
+            return
+        }
+        if entry.invalidated {
+            entries.removeValue(forKey: key)
+            evictionTasks.removeValue(forKey: key)?.cancel()
+            await entry.resource.unload()
+            return
+        }
+        entry.evictionToken = UUID()
+        entries[key] = entry
+        scheduleEviction(for: key, token: entry.evictionToken)
+    }
+
+    private func scheduleEviction(for key: Key, token: UUID) {
+        evictionTasks.removeValue(forKey: key)?.cancel()
+        let delay = idleDuration
+        evictionTasks[key] = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            await self?.evictIfIdle(key, token: token)
+        }
+    }
+
+    private func evictIfIdle(_ key: Key, token: UUID) async {
+        guard let entry = entries[key],
+              entry.evictionToken == token,
+              entry.activeUsers == 0,
+              !entry.invalidated else { return }
+        entries.removeValue(forKey: key)
+        evictionTasks.removeValue(forKey: key)
+        await entry.resource.unload()
+    }
+}
+
+struct WhisperModelCacheKey: Hashable, Sendable {
+    let identifier: String
+    let folderPath: String
+}
+
+actor LoadedWhisperDictationModel: WhisperModelResource {
+    private let whisper: WhisperKit
+
+    init(identifier: String, folder: URL) async throws {
+        let model = try await WhisperKit(model: identifier,
+                                         modelRepo: nil,
+                                         modelFolder: folder.path,
+                                         prewarm: false,
+                                         load: false,
+                                         download: false)
+        do {
+            try await model.setupModels(model: identifier,
+                                        modelRepo: nil,
+                                        modelFolder: folder.path,
+                                        download: false)
+            try await model.loadModels(prewarmMode: true)
+        } catch {
+            await model.unloadModels()
+            throw error
+        }
+        whisper = model
+    }
+
+    func transcribe(_ samples: [Float],
+                    options: DecodingOptions) async -> (text: String, language: String?) {
+        await transcribe([samples], options: options)
+    }
+
+    func transcribe(_ samples: [[Float]],
+                    options: DecodingOptions) async -> (text: String, language: String?) {
+        let results = await whisper.transcribe(audioArrays: samples,
+                                               decodeOptions: options,
+                                               callback: nil)
+        let decoded = results.compactMap { $0 }.flatMap { $0 }
+        return (decoded.map(\.text).joined(separator: " "), decoded.first?.language)
+    }
+
+    func unload() async {
+        await whisper.unloadModels()
+    }
+}
+
 struct WhisperDictationBackend {
     enum ModelChoice: String, CaseIterable, Equatable, Sendable {
         case base, small
@@ -14,8 +192,13 @@ struct WhisperDictationBackend {
     typealias Download = @Sendable (String, URL, @escaping @Sendable (Progress) -> Void) async throws -> URL
     typealias Prepare = @Sendable (String, URL) async throws -> Void
     typealias Transcription = @Sendable (String, URL, [[Float]], DecodingOptions) async throws -> String
-    private let root: URL; private let download: Download; private let prepare: Prepare; private let transcribeHook: Transcription
+    typealias SegmentTranscription = @Sendable (String, URL, [Float], DecodingOptions) async throws -> DictationRegionTranscript
+    private let root: URL; private let download: Download; private let prepare: Prepare; private let transcribeHook: Transcription; private let segmentTranscribeHook: SegmentTranscription?
     private static let mutexes = MutexRegistry()
+    private static let modelCache = WhisperModelCache<WhisperModelCacheKey, LoadedWhisperDictationModel>(idleDuration: .seconds(45)) { key in
+        try await LoadedWhisperDictationModel(identifier: key.identifier,
+                                              folder: URL(fileURLWithPath: key.folderPath))
+    }
 #if SAIITY_TEST_HOOKS
     static var testAfterEnqueue: (@Sendable () async -> Void)? {
         get { FIFOAsyncMutex.testAfterEnqueue }
@@ -26,7 +209,17 @@ struct WhisperDictationBackend {
         set { FIFOAsyncMutex.testAfterAcquire = newValue }
     }
 #endif
-    init(root: URL = ModelRegistry.root, download: @escaping Download = WhisperDictationBackend.realDownload, prepare: @escaping Prepare = WhisperDictationBackend.realPrepare, transcribe: @escaping Transcription = WhisperDictationBackend.realTranscribe) { self.root = root; self.download = download; self.prepare = prepare; self.transcribeHook = transcribe }
+    init(root: URL = ModelRegistry.root,
+         download: @escaping Download = WhisperDictationBackend.realDownload,
+         prepare: @escaping Prepare = WhisperDictationBackend.realPrepare,
+         transcribe: @escaping Transcription = WhisperDictationBackend.realTranscribe,
+         segmentTranscribe: SegmentTranscription? = nil) {
+        self.root = root
+        self.download = download
+        self.prepare = prepare
+        self.transcribeHook = transcribe
+        self.segmentTranscribeHook = segmentTranscribe
+    }
     static let supportedLanguageCodes = Set(LanguageCatalog.all.map(\.code))
     @Defaults(rawKey: "whisperDictationModel") static var model = ModelChoice.base
     static var isSelected: Bool {
@@ -70,9 +263,11 @@ struct WhisperDictationBackend {
                 try Task.checkCancellation()
                 try Data().write(to: folder.appendingPathComponent(c.readinessMarkerName), options: .atomic)
             } catch is CancellationError {
+                await Self.modelCache.invalidate(Self.cacheKey(c, root))
                 try? FileManager.default.removeItem(at: root.appendingPathComponent("\(c.folderName).partial"))
                 throw CancellationError()
             } catch {
+                await Self.modelCache.invalidate(Self.cacheKey(c, root))
                 try? FileManager.default.removeItem(at: Self.folder(c, root).appendingPathComponent(c.readinessMarkerName))
                 try? FileManager.default.removeItem(at: Self.folder(c, root))
                 try? FileManager.default.removeItem(at: root.appendingPathComponent("\(c.folderName).partial"))
@@ -100,8 +295,71 @@ struct WhisperDictationBackend {
             throw error
         }
     }
-    func removeModel(_ c: ModelChoice, under root: URL? = nil) async throws { let root = root ?? self.root; let mutex = await Self.mutexes.mutex(for: "\(root.path):\(c.identifier)"); try await mutex.run { for u in [Self.folder(c, root), root.appendingPathComponent("\(c.folderName).partial")] { do { try FileManager.default.removeItem(at: u) } catch let e as CocoaError where e.code == .fileNoSuchFile { } } } }
+    func removeModel(_ c: ModelChoice, under root: URL? = nil) async throws {
+        let root = root ?? self.root
+        let mutex = await Self.mutexes.mutex(for: "\(root.path):\(c.identifier)")
+        try await mutex.run {
+            await Self.modelCache.invalidate(Self.cacheKey(c, root))
+            for url in [Self.folder(c, root), root.appendingPathComponent("\(c.folderName).partial")] {
+                do {
+                    try FileManager.default.removeItem(at: url)
+                } catch let error as CocoaError where error.code == .fileNoSuchFile {
+                    continue
+                }
+            }
+        }
+    }
     func transcribe(samples: [[Float]], locale: Locale, model c: ModelChoice = model) async throws -> String { let o = try Self.decodingOptions(for: locale); let mutex = await Self.mutexes.mutex(for: "\(root.path):\(c.identifier)"); return try await mutex.run { try await self.transcribeHook(c.identifier, Self.folder(c, self.root), samples, o) } }
+
+    /// Authoritative Auto-mode transcription for one press-to-talk recording.
+    /// WhisperKit is loaded once for the whole call; only the decoder state is
+    /// reused between sequential region decodes.
+    func transcribeDictation(samples: [Float],
+                             regions: [DictationSpeechRegion],
+                             locale: Locale,
+                             model c: ModelChoice = model) async throws -> DictationTranscriptionResult {
+        let options = try Self.decodingOptions(for: locale)
+        guard !samples.isEmpty, !regions.isEmpty else {
+            return DictationTranscriptionResult(regions: [])
+        }
+        let mutex = await Self.mutexes.mutex(for: "\(root.path):\(c.identifier)")
+        return try await mutex.run {
+            if let segmentTranscribeHook {
+                var transcripts: [DictationRegionTranscript] = []
+                for region in regions {
+                    try Task.checkCancellation()
+                    let audio = Array(samples[region.audioRange])
+                    guard !audio.isEmpty else { continue }
+                    let decoded = try await segmentTranscribeHook(c.identifier,
+                                                                  Self.folder(c, self.root),
+                                                                  audio,
+                                                                  options)
+                    let text = decoded.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !text.isEmpty {
+                        transcripts.append(DictationRegionTranscript(text: text,
+                                                                     language: decoded.language))
+                    }
+                }
+                return DictationTranscriptionResult(regions: transcripts)
+            }
+
+            return try await Self.modelCache.withModel(for: Self.cacheKey(c, self.root)) { loaded in
+                var transcripts: [DictationRegionTranscript] = []
+                for region in regions {
+                    try Task.checkCancellation()
+                    let audio = Array(samples[region.audioRange])
+                    guard !audio.isEmpty else { continue }
+                    let decoded = await loaded.transcribe(audio, options: options)
+                    let text = decoded.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !text.isEmpty {
+                        transcripts.append(DictationRegionTranscript(text: text,
+                                                                     language: decoded.language))
+                    }
+                }
+                return DictationTranscriptionResult(regions: transcripts)
+            }
+        }
+    }
     private static let realDownload: Download = { id, d, p in
         try await WhisperKit.download(variant: id,
                                       downloadBase: d,
@@ -112,28 +370,19 @@ struct WhisperDictationBackend {
                                       progressCallback: p)
     }
     private static let realPrepare: Prepare = { id, f in
-        let w = try await WhisperKit(model: id, modelRepo: nil, modelFolder: f.path, prewarm: false, load: false, download: false)
-        do {
-            try await w.setupModels(model: id, modelRepo: nil, modelFolder: f.path, download: false)
-            try await w.loadModels(prewarmMode: true)
-        } catch {
-            await w.unloadModels()
-            throw error
-        }
-        await w.unloadModels()
+        let key = WhisperModelCacheKey(identifier: id, folderPath: f.path)
+        try await Self.modelCache.withModel(for: key) { _ in () }
     }
     private static let realTranscribe: Transcription = { id, f, s, o in
-        let w = try await WhisperKit(model: id, modelRepo: nil, modelFolder: f.path, prewarm: false, load: false, download: false)
-        do {
-            try await w.setupModels(model: id, modelRepo: nil, modelFolder: f.path, download: false)
-            try await w.loadModels(prewarmMode: true)
-            let result = (await w.transcribe(audioArrays: s, decodeOptions: o, callback: nil)).compactMap { $0?.first?.text }.joined(separator: " ")
-            await w.unloadModels()
-            return result
-        } catch {
-            await w.unloadModels()
-            throw error
+        let key = WhisperModelCacheKey(identifier: id, folderPath: f.path)
+        return try await Self.modelCache.withModel(for: key) { loaded in
+            let result = await loaded.transcribe(s, options: o)
+            return result.text
         }
+    }
+
+    private static func cacheKey(_ c: ModelChoice, _ root: URL) -> WhisperModelCacheKey {
+        WhisperModelCacheKey(identifier: c.identifier, folderPath: folder(c, root).path)
     }
 }
 private actor FIFOAsyncMutex {

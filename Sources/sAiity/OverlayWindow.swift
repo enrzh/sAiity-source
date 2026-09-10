@@ -123,7 +123,6 @@ final class AccessibleIconButton: NSImageView {
 final class BubbleContentView: NSView {
     var onCopy: (() -> Void)?
     var onSaveTranscript: (() -> Void)?
-    var onOpenWindow: (() -> Void)?
     var onClear: (() -> Void)?
 
     private let controlStripHeight: CGFloat = 38
@@ -142,11 +141,6 @@ final class BubbleContentView: NSView {
     var clickThroughText: Bool { UserDefaults.standard.bool(forKey: "captionClickThrough") }
 
     private var tracking: NSTrackingArea?
-    /// The dot's two homes: the settings icon's spot while the controls are
-    /// hidden, and just right of the icon once it fades in.
-    private var dotAtIconSpot: NSLayoutConstraint!
-    private var dotBesideIcon: NSLayoutConstraint!
-    private let menuButton = AccessibleIconButton()
     private let copyButton = AccessibleIconButton()
     private let saveButton = AccessibleIconButton()
     private let clearButton = AccessibleIconButton()
@@ -165,16 +159,6 @@ final class BubbleContentView: NSView {
 
     private func setupControls() {
         let cfg = NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
-        // Was a bare drag-handle glyph, which looked like a button and did
-        // nothing when clicked. Now it opens the main window — the bubble is
-        // often the only part of sAiity on screen.
-        menuButton.image = NSImage(systemSymbolName: "slider.horizontal.3",
-                                   accessibilityDescription: nil)?
-            .withSymbolConfiguration(cfg)
-        menuButton.contentTintColor = NSColor.white.withAlphaComponent(0.75)
-        menuButton.alphaValue = 0
-        menuButton.toolTip = String(localized: "Open sAiity")
-
         copyButton.image = NSImage(systemSymbolName: "doc.on.doc",
                                    accessibilityDescription: nil)?
             .withSymbolConfiguration(cfg)
@@ -209,8 +193,6 @@ final class BubbleContentView: NSView {
         // The bubble was a VoiceOver dead zone: image views and a bare NSView,
         // no roles, no labels — a subtitle app whose own subtitles and controls
         // a screen reader could not see.
-        menuButton.setAccessibilityRole(.button)
-        menuButton.setAccessibilityLabel(String(localized: "Open sAiity settings"))
         copyButton.setAccessibilityRole(.button)
         copyButton.setAccessibilityLabel(String(localized: "Copy this caption"))
         saveButton.setAccessibilityRole(.button)
@@ -222,18 +204,17 @@ final class BubbleContentView: NSView {
 
         // The AX press and the mouse click share the same handlers, so the
         // two input paths cannot drift apart.
-        menuButton.onPress = { [weak self] in self?.onOpenWindow?() }
         copyButton.onPress = { [weak self] in
             self?.onCopy?()
             self?.flashCopied()
         }
         saveButton.onPress = { [weak self] in self?.onSaveTranscript?() }
         clearButton.onPress = { [weak self] in self?.onClear?() }
-        for b in [menuButton, copyButton, saveButton, clearButton] {
+        for b in [copyButton, saveButton, clearButton] {
             b.onAccessibilityFocus = { [weak self] in self?.setControls(visible: true) }
         }
 
-        for v in [menuButton, copyButton, saveButton, clearButton, recordDot] {
+        for v in [copyButton, saveButton, clearButton, recordDot] {
             v.translatesAutoresizingMaskIntoConstraints = false
             addSubview(v)
         }
@@ -244,34 +225,23 @@ final class BubbleContentView: NSView {
         // straight part of the edge rather than crowding the curve.
         let inset = Self.cornerRadius
         NSLayoutConstraint.activate([
-            menuButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
-            menuButton.centerYAnchor.constraint(equalTo: topAnchor, constant: controlStripHeight / 2),
-
             recordDot.widthAnchor.constraint(equalToConstant: 8),
             recordDot.heightAnchor.constraint(equalToConstant: 8),
-            recordDot.centerYAnchor.constraint(equalTo: menuButton.centerYAnchor),
+            recordDot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset + 2),
+            recordDot.centerYAnchor.constraint(equalTo: topAnchor, constant: controlStripHeight / 2),
 
             saveButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
-            saveButton.centerYAnchor.constraint(equalTo: menuButton.centerYAnchor),
+            saveButton.centerYAnchor.constraint(equalTo: recordDot.centerYAnchor),
 
             copyButton.trailingAnchor.constraint(equalTo: saveButton.leadingAnchor,
                                                   constant: -14),
-            copyButton.centerYAnchor.constraint(equalTo: menuButton.centerYAnchor),
+            copyButton.centerYAnchor.constraint(equalTo: recordDot.centerYAnchor),
 
             // Immediately left of Copy, in the same right-hand action cluster.
             clearButton.trailingAnchor.constraint(equalTo: copyButton.leadingAnchor,
                                                   constant: -14),
-            clearButton.centerYAnchor.constraint(equalTo: menuButton.centerYAnchor),
+            clearButton.centerYAnchor.constraint(equalTo: recordDot.centerYAnchor),
         ])
-
-        // While the controls are hidden the dot takes the settings icon's place
-        // — centred on it, so it reads as "this is the status here" rather than
-        // floating in empty space next to an invisible button. On hover the icon
-        // fades in and the dot slides right to make room.
-        dotAtIconSpot = recordDot.centerXAnchor.constraint(equalTo: menuButton.centerXAnchor)
-        dotBesideIcon = recordDot.leadingAnchor.constraint(equalTo: menuButton.trailingAnchor,
-                                                          constant: 9)
-        dotAtIconSpot.isActive = true
     }
 
     // MARK: - Hit regions
@@ -288,7 +258,6 @@ final class BubbleContentView: NSView {
 
     private var copyRect: NSRect { copyButton.frame.insetBy(dx: -10, dy: -10) }
     private var saveRect: NSRect { saveButton.frame.insetBy(dx: -10, dy: -10) }
-    private var menuRect: NSRect { menuButton.frame.insetBy(dx: -10, dy: -10) }
     private var clearRect: NSRect { clearButton.frame.insetBy(dx: -10, dy: -10) }
 
     // MARK: - Tracking
@@ -333,7 +302,7 @@ final class BubbleContentView: NSView {
         guard interactive else { return }
         if let resize = resizeCursor(at: p) {
             resize.set()
-        } else if copyRect.contains(p) || saveRect.contains(p) || menuRect.contains(p) || clearRect.contains(p) {
+        } else if copyRect.contains(p) || saveRect.contains(p) || clearRect.contains(p) {
             NSCursor.arrow.set()
         } else {
             NSCursor.openHand.set()
@@ -382,19 +351,13 @@ final class BubbleContentView: NSView {
     }
 
     private func setControls(visible: Bool) {
-        // Swap the dot's constraint inside the same animation group as the fade,
-        // so the icon appearing and the dot moving aside read as one gesture.
-        dotAtIconSpot.isActive = !visible
-        dotBesideIcon.isActive = visible
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.14
             ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             ctx.allowsImplicitAnimation = true
-            menuButton.animator().alphaValue = visible ? 1 : 0
             copyButton.animator().alphaValue = visible ? 1 : 0
             saveButton.animator().alphaValue = visible ? 1 : 0
             clearButton.animator().alphaValue = visible ? 1 : 0
-            layoutSubtreeIfNeeded()
         }
     }
 
@@ -413,10 +376,6 @@ final class BubbleContentView: NSView {
         }
         if clearRect.contains(p) {
             clearButton.onPress?()
-            return
-        }
-        if menuRect.contains(p) {
-            menuButton.onPress?()
             return
         }
         // Edges first, and regardless of the drag region: the system's resize
@@ -462,35 +421,27 @@ final class BubbleContentView: NSView {
 private final class CaptionRowView: NSView {
     let original = NSTextField(labelWithString: "")
     let translation = NSTextField(labelWithString: "")
-    private let stack = NSStackView()
+    private var style = CaptionStyle()
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        translatesAutoresizingMaskIntoConstraints = false
-        stack.orientation = .vertical
-        stack.alignment = .centerX
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-            stack.topAnchor.constraint(equalTo: topAnchor),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
-
+        // The row is frame-managed by OverlayWindow. Keeping this small view
+        // free of Auto Layout also removes a second re-entry point while the
+        // scroll document is first being displayed on macOS 27.
+        translatesAutoresizingMaskIntoConstraints = true
+        addSubview(original)
+        addSubview(translation)
         for text in [original, translation] {
             text.alignment = .center
             text.lineBreakMode = .byWordWrapping
             text.cell?.wraps = true
-            text.translatesAutoresizingMaskIntoConstraints = false
+            text.translatesAutoresizingMaskIntoConstraints = true
             text.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         }
         original.setAccessibilityRole(.staticText)
         original.setAccessibilityLabel(String(localized: "Live caption"))
         translation.setAccessibilityRole(.staticText)
         translation.setAccessibilityLabel(String(localized: "Translation"))
-        stack.addArrangedSubview(original)
-        stack.addArrangedSubview(translation)
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -498,11 +449,41 @@ private final class CaptionRowView: NSView {
     override func layout() {
         super.layout()
         let width = max(1, bounds.width)
-        original.preferredMaxLayoutWidth = width
-        translation.preferredMaxLayoutWidth = width
+        let originalHeight = Self.textHeight(original.stringValue,
+                                              font: style.original.font,
+                                              width: width,
+                                              maxLines: style.original.maxLines)
+        var top = bounds.height
+        original.frame = NSRect(x: 0,
+                                y: max(0, top - originalHeight),
+                                width: width,
+                                height: originalHeight)
+        if abs(original.preferredMaxLayoutWidth - width) > 0.5 {
+            original.preferredMaxLayoutWidth = width
+        }
+        top -= originalHeight
+
+        if !translation.isHidden {
+            top -= CGFloat(style.lineGap)
+            let translationHeight = Self.textHeight(
+                translation.stringValue.isEmpty ? " " : translation.stringValue,
+                font: style.translation.font,
+                width: width,
+                maxLines: style.translation.maxLines)
+            translation.frame = NSRect(x: 0,
+                                       y: max(0, top - translationHeight),
+                                       width: width,
+                                       height: translationHeight)
+            if abs(translation.preferredMaxLayoutWidth - width) > 0.5 {
+                translation.preferredMaxLayoutWidth = width
+            }
+        } else {
+            translation.frame = .zero
+        }
     }
 
     func apply(style: CaptionStyle, staleDim: CGFloat, reserveTranslation: Bool) {
+        self.style = style
         original.font = style.original.font
         original.textColor = style.original.color
         original.alphaValue = style.original.opacity
@@ -511,9 +492,9 @@ private final class CaptionRowView: NSView {
         translation.textColor = style.translation.color
         translation.alphaValue = style.translation.opacity * staleDim
         translation.maximumNumberOfLines = style.translation.maxLines
-        stack.spacing = CGFloat(style.lineGap)
         translation.isHidden = !style.showTranslation
             || (translation.stringValue.isEmpty && !reserveTranslation)
+        needsLayout = true
     }
 
     func set(entry: CaptionHistoryEntry, style: CaptionStyle, staleDim: CGFloat,
@@ -570,8 +551,16 @@ private final class CaptionRowView: NSView {
 ///     full-screen video instead of vanishing.
 final class OverlayWindow: NSPanel {
     private let scrollView = NSScrollView()
-    private let historyStack = NSStackView()
-    private let glass = NSGlassEffectView()
+    /// A plain document view is deliberate. NSStackView asks AppKit to infer
+    /// the document height while rows are being inserted, which can re-enter
+    /// layout during the first presentation on macOS 27. Rows are positioned
+    /// explicitly instead, so the scroll view always has a real frame to draw.
+    private let historyStack = NSView()
+    // NSGlassEffectView is still changing across macOS 26/27 and can tear
+    // down its hosted hierarchy while a caption row is being inserted. The
+    // AppKit visual-effect view gives the same translucent surface with a
+    // stable lifetime and layout contract.
+    private let glass = NSVisualEffectView()
     private let host = BubbleContentView()
     private var history = CaptionHistory()
     private var rowViews: [Int: CaptionRowView] = [:]
@@ -589,11 +578,6 @@ final class OverlayWindow: NSPanel {
     var onSaveTranscript: (() -> Void)? {
         get { host.onSaveTranscript }
         set { host.onSaveTranscript = newValue }
-    }
-
-    var onOpenWindow: (() -> Void)? {
-        get { host.onOpenWindow }
-        set { host.onOpenWindow = newValue }
     }
 
     var onClear: (() -> Void)? {
@@ -626,15 +610,15 @@ final class OverlayWindow: NSPanel {
         hidesOnDeactivate = false
         acceptsMouseMovedEvents = true
 
-        glass.cornerRadius = BubbleContentView.cornerRadius
-        // Plain .regular glass measured darkest and most legible of the styles;
-        // no tintColor, which washes the text out.
-        glass.style = .regular
+        glass.material = .hudWindow
+        glass.blendingMode = .behindWindow
+        glass.state = .active
+        glass.wantsLayer = true
+        glass.layer?.cornerRadius = BubbleContentView.cornerRadius
+        glass.layer?.masksToBounds = true
 
-        historyStack.orientation = .vertical
-        historyStack.alignment = .leading
-        historyStack.spacing = 10
-        historyStack.translatesAutoresizingMaskIntoConstraints = false
+        historyStack.frame = NSRect(x: 0, y: 0, width: 1, height: 1)
+        historyStack.autoresizingMask = [.width]
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
@@ -643,7 +627,6 @@ final class OverlayWindow: NSPanel {
         scrollView.scrollerStyle = .overlay
         scrollView.verticalScrollElasticity = .automatic
         scrollView.documentView = historyStack
-        historyStack.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor).isActive = true
 
         host.translatesAutoresizingMaskIntoConstraints = false
         host.addSubview(scrollView)
@@ -655,9 +638,16 @@ final class OverlayWindow: NSPanel {
             scrollView.bottomAnchor.constraint(equalTo: host.bottomAnchor, constant: -14),
         ])
 
-        // Content must go through `contentView`, not addSubview: only the
-        // contentView is clipped by cornerRadius and placed inside the effect.
-        glass.contentView = host
+        // Keep the hosted hierarchy explicit. Unlike NSGlassEffectView,
+        // NSVisualEffectView has no contentView slot and cannot silently
+        // replace the view that owns these constraints.
+        glass.addSubview(host)
+        NSLayoutConstraint.activate([
+            host.leadingAnchor.constraint(equalTo: glass.leadingAnchor),
+            host.trailingAnchor.constraint(equalTo: glass.trailingAnchor),
+            host.topAnchor.constraint(equalTo: glass.topAnchor),
+            host.bottomAnchor.constraint(equalTo: glass.bottomAnchor),
+        ])
         contentView = glass
 
         contentMinSize = NSSize(width: 280, height: 110)
@@ -669,7 +659,7 @@ final class OverlayWindow: NSPanel {
         NotificationCenter.default.addObserver(
             forName: NSWindow.didEndLiveResizeNotification, object: self,
             queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated {
+                Task { @MainActor [weak self] in
                     guard let self else { return }
                     // Cap what we remember, not just what we draw: an
                     // un-capped width restored later on a smaller display is
@@ -689,18 +679,18 @@ final class OverlayWindow: NSPanel {
 
         NotificationCenter.default.addObserver(
             forName: .saiityCaptionStyleChanged, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.applyStyle(CaptionStyle.current) }
+                Task { @MainActor [weak self] in self?.applyStyle(CaptionStyle.current) }
             }
         // Reduce Transparency / Increase Contrast changing mid-session must
         // take effect immediately, like every other style change.
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
             object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.applyStyle(CaptionStyle.current) }
+                Task { @MainActor [weak self] in self?.applyStyle(CaptionStyle.current) }
             }
         NotificationCenter.default.addObserver(
             forName: .saiityCaptionPreview, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.showPreview() }
+                Task { @MainActor [weak self] in self?.showPreview() }
             }
 
         NotificationCenter.default.addObserver(
@@ -811,6 +801,7 @@ final class OverlayWindow: NSPanel {
     private static let hPadding: CGFloat = 24      // each side
     private static let topPadding: CGFloat = 34    // control strip
     private static let bottomPadding: CGFloat = 14
+    private static let historyRowGap: CGFloat = 10
     /// Wide enough that the corner controls never collide with the text.
     private static var minWidth: CGFloat { BubbleGeometry.minWidth }
 
@@ -887,7 +878,7 @@ final class OverlayWindow: NSPanel {
                                               translationFont: translationFont,
                                               width: contentW,
                                               reserveTranslation: reserve)
-            if index > 0 { contentH += historyStack.spacing }
+            if index > 0 { contentH += Self.historyRowGap }
         }
         let configuredMax = max(110, CGFloat(st.maxHeight))
         let targetH = min(max(110, contentH + Self.topPadding + Self.bottomPadding),
@@ -939,7 +930,10 @@ final class OverlayWindow: NSPanel {
         guard abs(final.width - frame.width) > 0.5
                 || abs(final.height - frame.height) > 0.5
                 || abs(final.origin.x - frame.origin.x) > 0.5
-                || abs(final.origin.y - frame.origin.y) > 0.5 else { return }
+                || abs(final.origin.y - frame.origin.y) > 0.5 else {
+            layoutHistory()
+            return
+        }
 
         if TestHooks.verboseLogging {
             // The bubble's stillness cannot be seen from a script, so it is
@@ -948,6 +942,7 @@ final class OverlayWindow: NSPanel {
                          final.origin.x, final.origin.y, final.width, final.height, v.width))
         }
         setFrameInternal(final)
+        layoutHistory()
     }
 
     /// Force the bubble back inside its screen, whatever put it outside.
@@ -1023,18 +1018,20 @@ final class OverlayWindow: NSPanel {
                     && entry.sentenceID == history.entries.last?.sentenceID)
         }
 
-        glass.cornerRadius = st.cornerRadius
+        glass.layer?.cornerRadius = st.cornerRadius
         switch st.glassStyle {
-        case 1: glass.style = .clear
-        default: glass.style = .regular
+        case 1: glass.material = .underWindowBackground
+        default: glass.material = .hudWindow
         }
+        glass.blendingMode = .behindWindow
+        glass.state = .active
+        glass.layer?.masksToBounds = true
         // "Solid" is the legibility answer for bright video, where even regular
-        // glass leaves white-on-white at roughly 2:1 contrast. NSGlassEffectView
-        // has no opaque mode, so it is a near-black layer behind the content.
+        // glass leaves white-on-white at roughly 2:1 contrast.
         if st.glassStyle == 2 {
-            glass.tintColor = st.tintColor ?? NSColor(white: 0.06, alpha: 1)
+            glass.layer?.backgroundColor = (st.tintColor ?? NSColor(white: 0.06, alpha: 1)).cgColor
         } else {
-            glass.tintColor = st.tintColor
+            glass.layer?.backgroundColor = NSColor.clear.cgColor
         }
         // Both directions. Only the hide half existed, so un-hiding — which
         // now has its own global hot key — did nothing visible until the next
@@ -1042,10 +1039,33 @@ final class OverlayWindow: NSPanel {
         // reads as a broken shortcut.
         if st.hidden {
             orderOut(nil)
-        } else if !history.entries.isEmpty, !isVisible {
-            orderFrontRegardless()
+        } else if !history.entries.isEmpty {
+            presentIfNeeded()
         }
         sizeToFit(immediateShrink: true)
+    }
+
+    /// Present the bubble from one place. A panel can retain a logically valid
+    /// but unusable frame after launch, display changes, or a saved frame from
+    /// another monitor. Ordering that frame front does not make the bubble
+    /// visible; repair it first, then raise the panel explicitly.
+    private func presentIfNeeded() {
+        guard !CaptionStyle.current.hidden, !history.entries.isEmpty else {
+            orderOut(nil)
+            return
+        }
+        guard let screen = FrameStore.bestScreen(for: frame) ?? NSScreen.main else { return }
+        let visible = screen.visibleFrame
+        if frame.width <= 1 || frame.height <= 1 {
+            setFrameInternal(defaultFrame(on: screen), display: false)
+        }
+        let repaired = BubbleGeometry.clamp(frame,
+                                            into: visible,
+                                            margin: CGFloat(CaptionStyle.current.screenMargin),
+                                            respectMargin: userWidth == nil)
+        if repaired != frame { setFrameInternal(repaired, display: false) }
+        alphaValue = 1
+        orderFrontRegardless()
     }
 
     /// Show sample text so legibility can be judged without waiting for someone
@@ -1056,7 +1076,7 @@ final class OverlayWindow: NSPanel {
         show(text: CaptionStyle.sampleOriginal, isFinal: true, sentenceID: -1)
         showTranslation(st.showTranslation ? CaptionStyle.sampleTranslation : "",
                         forSentenceID: -1)
-        orderFrontRegardless()
+        presentIfNeeded()
     }
 
     /// Forget a dragged position and return to the default spot. Clearing the
@@ -1097,7 +1117,7 @@ final class OverlayWindow: NSPanel {
         rowViews[id]?.original.alphaValue = isFinal
             ? st.original.opacity : st.original.volatileOpacity
         guard !st.hidden else { orderOut(nil); return }
-        if !history.entries.isEmpty, !isVisible { orderFrontRegardless() }
+        presentIfNeeded()
     }
 
     /// Shown under the original line.
@@ -1157,8 +1177,7 @@ final class OverlayWindow: NSPanel {
     func showHistory(_ entries: [CaptionHistoryEntry]) {
         history.replace(with: entries)
         renderHistory()
-        guard !history.entries.isEmpty, !CaptionStyle.current.hidden else { return }
-        orderFrontRegardless()
+        presentIfNeeded()
     }
 
     func clearHistory() {
@@ -1169,17 +1188,50 @@ final class OverlayWindow: NSPanel {
 
     func clear() { clearHistory() }
 
+    /// Give the document view and every row concrete frames before AppKit is
+    /// asked to display the panel. This avoids relying on an NSStackView to
+    /// discover a scroll document's height during the same event that created
+    /// the first subtitle bubble.
+    private func layoutHistory() {
+        let width = max(1, frame.width - Self.hPadding * 2)
+        let st = effectiveStyle
+        var y: CGFloat = 0
+
+        for (index, entry) in history.entries.enumerated() {
+            guard let row = rowViews[entry.sentenceID] else { continue }
+            let reserve = reservesTranslationRow
+                && entry.sentenceID == history.entries.last?.sentenceID
+            let height = CaptionRowView.height(for: entry, style: st,
+                                               originalFont: st.original.font,
+                                               translationFont: st.translation.font,
+                                               width: width,
+                                               reserveTranslation: reserve)
+            row.frame = NSRect(x: 0, y: y, width: width, height: max(1, height))
+            y += height
+            if index < history.entries.count - 1 { y += Self.historyRowGap }
+        }
+
+        historyStack.setFrameSize(NSSize(width: width, height: max(1, y)))
+        historyStack.needsLayout = true
+    }
+
+    private func scrollToLatest() {
+        let maxY = max(0, historyStack.bounds.height
+            - scrollView.contentView.bounds.height)
+        scrollView.contentView.scroll(to: NSPoint(x: 0, y: maxY))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+
     private func renderHistory(changedSentenceID: Int? = nil) {
         let visibleIDs = Set(history.entries.map(\.sentenceID))
         let staleRows = rowViews.filter { !visibleIDs.contains($0.key) }
         for (id, row) in staleRows {
-            historyStack.removeArrangedSubview(row)
             row.removeFromSuperview()
             rowViews.removeValue(forKey: id)
         }
 
         let st = effectiveStyle
-        for (index, entry) in history.entries.enumerated() {
+        for entry in history.entries {
             let row: CaptionRowView
             let isNew: Bool
             if let existing = rowViews[entry.sentenceID] {
@@ -1187,7 +1239,7 @@ final class OverlayWindow: NSPanel {
                 isNew = false
             } else {
                 row = CaptionRowView()
-                row.widthAnchor.constraint(equalTo: historyStack.widthAnchor).isActive = true
+                historyStack.addSubview(row)
                 rowViews[entry.sentenceID] = row
                 isNew = true
             }
@@ -1197,20 +1249,20 @@ final class OverlayWindow: NSPanel {
                             && entry.sentenceID == history.entries.last?.sentenceID)
             }
 
-            let current = index < historyStack.arrangedSubviews.count
-                ? historyStack.arrangedSubviews[index] : nil
-            if current !== row {
-                if row.superview === historyStack {
-                    historyStack.removeArrangedSubview(row)
-                }
-                historyStack.insertArrangedSubview(row, at: index)
-            }
         }
+        // Every row is frame-managed, so this is a cheap invalidation rather
+        // than an AppKit stack-layout pass that can re-enter on macOS 27.
         historyStack.needsLayout = true
-        historyStack.layoutSubtreeIfNeeded()
         scrollView.needsLayout = true
-        scrollView.layoutSubtreeIfNeeded()
         sizeToFit()
+        layoutHistory()
+        // Let AppKit finish the stack/document layout outside the caption
+        // callback. Explicit layout calls can recurse on macOS 27 while the
+        // window server is already laying out.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.scrollToLatest()
+        }
         // New captions should keep the newest row in view. The dispatch also
         // runs after AppKit has updated the document height.
         guard !scrollToLatestPending else { return }
@@ -1218,10 +1270,7 @@ final class OverlayWindow: NSPanel {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.scrollToLatestPending = false
-            let maxY = max(0, self.historyStack.bounds.height
-                - self.scrollView.contentView.bounds.height)
-            self.scrollView.contentView.scroll(to: NSPoint(x: 0, y: maxY))
-            self.scrollView.reflectScrolledClipView(self.scrollView.contentView)
+            self.scrollToLatest()
         }
     }
 }

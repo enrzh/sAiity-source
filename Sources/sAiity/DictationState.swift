@@ -33,6 +33,13 @@ enum TranslationMenuScope: Equatable, Sendable {
     case dictation
 }
 
+/// Which settings surface owns a translator choice. The implementations are
+/// shared, but the user preferences must remain independently selectable.
+enum TranslationEngineScope: String, Hashable, Sendable {
+    case captions
+    case dictation
+}
+
 struct TranslationMenuSelection: Equatable, Sendable {
     let scope: TranslationMenuScope
     let code: String?

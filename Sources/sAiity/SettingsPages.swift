@@ -6,6 +6,39 @@ import SwiftUI
 
 // MARK: - Models
 
+enum LibraryTab: String, CaseIterable, Hashable {
+    case models, transcripts
+
+    var title: LocalizedStringKey {
+        switch self {
+        case .models: "Models"
+        case .transcripts: "Transcripts"
+        }
+    }
+}
+
+struct LibraryView: View {
+    @Bindable var state: AppState
+    @Binding var tab: LibraryTab
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("Library", selection: $tab) {
+                ForEach(LibraryTab.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 30)
+            .padding(.top, 12)
+            .padding(.bottom, 4)
+
+            switch tab {
+            case .models: ModelsView(state: state)
+            case .transcripts: TranscriptsView(state: state)
+            }
+        }
+    }
+}
+
 /// Everything this app has put on disk, in one place.
 ///
 /// Every row is the same shape and comes from the same registry, so an asset
@@ -36,57 +69,58 @@ struct ModelsView: View {
     }
 
     var body: some View {
-        Form {
-            Section("Recognition") {
-                ForEach(assets(.recognition)) { assetRow($0) }
-            }
-
-            Section {
-                ForEach(assets(.translation, advanced: false)) { assetRow($0) }
-            } header: {
-                Text("Translation")
-            } footer: {
-                Text("MADLAD is the recommended local translator.")
-                    .font(.caption)
-            }
-
-            DisclosureGroup(isExpanded: $showAdvancedTranslation) {
-                ForEach(assets(.translation, advanced: true)) { assetRow($0) }
-                Text("Optional specialist and local LLM models.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } label: {
-                Text("Advanced translation")
-            }
-
-            Section {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Downloaded models: \(state.ownedTotal)")
-                            .font(.callout)
-                        if let stray = state.strayTotal {
-                            Text("Other files: \(stray) — caches and leftovers from interrupted downloads.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                    Spacer()
-                    Button("Remove All…", role: .destructive) { confirmRemoveAll() }
-                        .controlSize(.small)
-                        .disabled(state.ownedBytes == 0)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                SettingsSection(title: "Recognition",
+                                subtitle: "Keep the local recognition models you use for captions and dictation.") {
+                    ForEach(assets(.recognition)) { assetRow($0) }
                 }
-            } header: {
-                Text("Storage")
-            } footer: {
-                Text("Models stay on this Mac. Remove them to reclaim space.")
-                    .font(.caption)
-            }
 
-            if let e = state.modelError {
-                Section { Text(e).font(.caption).foregroundStyle(.red) }
+                SettingsSection(title: "Translation",
+                                subtitle: "MADLAD is the recommended local translator.") {
+                    ForEach(assets(.translation, advanced: false)) { assetRow($0) }
+                }
+
+                SettingsSection(title: "Advanced translation",
+                                subtitle: "Optional specialist and local language models.") {
+                    DisclosureGroup(isExpanded: $showAdvancedTranslation) {
+                        ForEach(assets(.translation, advanced: true)) { assetRow($0) }
+                    } label: {
+                        Label("Show advanced models", systemImage: "chevron.right")
+                    }
+                }
+
+                SettingsSection(title: "Storage",
+                                subtitle: "Models stay on this Mac. Remove them to reclaim space.") {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Downloaded models: \(state.ownedTotal)")
+                                .font(.callout.weight(.medium))
+                            if let stray = state.strayTotal {
+                                Text("Other files: \(stray) — caches and leftovers from interrupted downloads.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        Button("Remove All…", role: .destructive) { confirmRemoveAll() }
+                            .controlSize(.small)
+                            .disabled(state.ownedBytes == 0)
+                    }
+                }
+
+                if let e = state.modelError {
+                    SettingsSection(title: "Model issue",
+                                    subtitle: "The last model operation needs attention.") {
+                        Label(e, systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
             }
+            .padding(.horizontal, 30)
+            .padding(.vertical, 8)
+            .frame(maxWidth: 780, alignment: .leading)
         }
-        .scrollContentBackground(.hidden)
-        .formStyle(.grouped)
         .task { state.refreshModels() }
     }
 
@@ -176,6 +210,7 @@ struct DictationView: View {
     @Bindable var state: AppState
     @State private var inputMonitoringGranted = CGPreflightListenEventAccess()
     @State private var accessibilityGranted = AXIsProcessTrusted()
+    @State private var showAdvancedTranslation = false
 
     internal static func cleanupAssets(from assets: [AssetStatus]) -> [AssetStatus] {
         let selectedFile = LocalModel.selected?.file
@@ -206,144 +241,176 @@ struct DictationView: View {
     internal static func notReadyAction(selectModels: () -> Void) { selectModels() }
 
     var body: some View {
-        Form {
-            Section {
-                Toggle("Press-to-talk dictation", isOn: $state.dictationEnabled)
-                Text("Hold your shortcut while speaking. Release it to transcribe on this Mac, then paste into the focused text field or copy the result to the clipboard.")
-                    .font(.caption).foregroundStyle(.secondary)
-                LabeledToggle("Translate dictated text",
-                              "Uses the shared local translation model with dictation's own target.",
-                              isOn: $state.translateDictation)
-                LabeledContent("Language") {
-                    Button {
-                        state.showDictationTranslationPicker = true
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(state.dictationTranslateTo.map { AppLanguage(code: $0).displayName }
-                                 ?? String(localized: "Off"))
-                            Image(systemName: "chevron.up.chevron.down")
-                                .font(.caption2).foregroundStyle(.secondary)
-                        }
-                    }
-                    .disabled(!state.translateDictation)
-                }
-                if state.translateDictation && state.dictationTranslateTo == nil {
-                    Text("Choose a dictation translation target before speaking.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            } header: {
-                Text("Dictation")
-            }
-
-            Section("Whisper dictation") {
-                Picker("Engine", selection: $state.dictationRecognizer) {
-                    Text("Dictation").tag(DictationRecognizer.streaming)
-                    Text("Whisper dictation").tag(DictationRecognizer.whisper)
-                }
-                .pickerStyle(.segmented)
-                Picker("Whisper model", selection: Binding(get: { WhisperDictationBackend.model }, set: { WhisperDictationBackend.model = $0 })) {
-                    ForEach(WhisperDictationBackend.ModelChoice.allCases, id: \.self) { choice in
-                        Text(choice.description.capitalized).tag(choice)
-                    }
-                }
-                .pickerStyle(.segmented)
-                Picker("Recognition", selection: Binding(get: { ASREngine(rawValue: UserDefaults.standard.string(forKey: "dictationStreamingEngine") ?? "nemotron") ?? .nemotron }, set: {
-                    UserDefaults.standard.set($0.rawValue, forKey: "dictationStreamingEngine")
-                    SettingsWindowController.refreshDictationRuntime()
-                })) {
-                    ForEach(ASREngine.allCases, id: \.self) { Text($0.displayName).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                Picker("Language", selection: Binding(get: { WhisperDictationBackend.locale }, set: { WhisperDictationBackend.locale = $0 })) {
-                    Text(String(localized: "Automatic")).tag("auto")
-                    ForEach(LanguageCatalog.all, id: \.code) { language in
-                        Text(language.displayName).tag(language.code)
-                    }
-                }
-                HStack {
-                    let choice = WhisperDictationBackend.model
-                    let ready = WhisperDictationBackend.isReady(choice)
-                    Label(ready ? "Ready" : "Not ready", systemImage: ready ? "checkmark.circle" : "arrow.down.circle")
-                    Spacer()
-                    Button("Download") { prepareWhisper(choice) }
-                    Button("Retry") { retryWhisper(choice) }
-                    Button("Remove") {
-                        Task {
-                            try? await removeWhisper(choice)
-                        }
-                    }
-                }
-                Button("Models") { SettingsWindowController.selectModelsPane() }
-            }
-
-            Section("Dictation cleanup") {
-                Text("Choose a local model to clean up dictated text.")
-                    .font(.caption).foregroundStyle(.secondary)
-                ForEach(Self.cleanupAssets(from: state.assets)) { status in
-                    cleanupModelRow(status)
-                }
-                Toggle("Clean up dictated text", isOn: $state.dictationCleanupEnabled)
-                    .disabled(!LocalModel.isCleanupCompatible(state.llmModel))
-            }
-
-            Section {
-                LabeledContent("Gesture") {
-                    DictationShortcutRecorder(state: state)
-                }
-                LabeledContent("Microphone") {
-                    Text("Opened only while dictating")
-                        .foregroundStyle(.secondary)
-                }
-                LabeledContent("Processing") {
-                    Text("On this Mac")
-                        .foregroundStyle(.secondary)
-                }
-            } header: {
-                Text("Privacy")
-            } footer: {
-                Text("Dictation is separate from live captions. It never starts the caption service and is not saved as a meeting transcript.")
-                    .font(.caption)
-            }
-
-            Section {
-                permissionRow(title: "Input Monitoring",
-                              granted: inputMonitoringGranted,
-                              explanation: "Required to detect your dictation shortcut in other apps.") {
-                    _ = CGRequestListenEventAccess()
-                    Self.permissionRecoveryAction("Privacy_ListenEvent", open: openPrivacySettings)
-                }
-                if !inputMonitoringGranted {
-                    Text("After granting access, quit and reopen sAiity.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                permissionRow(title: "Accessibility",
-                              granted: accessibilityGranted,
-                              explanation: "Required to paste dictation into the focused text field.") {
-                    Self.permissionRecoveryAction("Privacy_Accessibility", open: openPrivacySettings)
-                }
-            } header: {
-                Text("Permissions")
-            }
-
-            Section {
-                HStack(spacing: 12) {
-                    Image(systemName: "rectangle.and.pencil.and.ellipsis")
-                        .font(.title2).foregroundStyle(.tint)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("A small toast confirms each step")
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                SettingsSection(title: "Press to talk",
+                                subtitle: "Hold the shortcut, speak naturally, and release to insert the result.") {
+                    HStack {
+                        Label("Dictation", systemImage: state.dictationEnabled ? "mic.fill" : "mic.slash")
                             .font(.body.weight(.medium))
-                        Text("A short overlay shows dictating, transcribing, and the output above the bottom edge of the screen.")
-                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Toggle("Enabled", isOn: $state.dictationEnabled)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                    }
+                    HStack {
+                        Label("Shortcut", systemImage: "command")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        DictationShortcutRecorder(state: state)
+                            .frame(width: 220, height: 30)
                     }
                 }
-            } header: {
-                Text("Feedback")
+
+                SettingsSection(title: "Output",
+                                subtitle: "Results are processed locally and pasted when a focused text field is available.") {
+                    Toggle("Translate dictated text", isOn: $state.translateDictation)
+                    HStack {
+                        Label("Target language", systemImage: "character.book.closed")
+                        Spacer()
+                        Button {
+                            state.showDictationTranslationPicker = true
+                        } label: {
+                            HStack(spacing: 5) {
+                                Text(state.dictationTranslateTo.map { AppLanguage(code: $0).displayName }
+                                     ?? String(localized: "Off"))
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.caption2)
+                            }
+                        }
+                        .disabled(!state.translateDictation)
+                    }
+                    if state.translateDictation && state.dictationTranslateTo == nil {
+                        Label("Choose a target before speaking.", systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                    // Keep the engine choice visible even while translation is
+                    // off, so it can be configured before the first press. The
+                    // recommended engine is also a real runtime fallback; a
+                    // picker that displays MADLAD while the backend treats it as
+                    // "no engine" makes the first translated dictation fail
+                    // without a useful explanation.
+                    Picker("Translation engine", selection: Binding(
+                        get: { state.dictationTranslationEngine ?? TranslationEngine.dictationEffective },
+                        set: { state.dictationTranslationEngine = $0 })) {
+                        ForEach(TranslationEngine.primaryCases, id: \.self) { engine in
+                            Text("\(engine.displayName) · recommended").tag(engine)
+                        }
+                        if showAdvancedTranslation || state.dictationTranslationEngine?.isAdvanced == true {
+                            ForEach(TranslationEngine.advancedCases, id: \.self) { engine in
+                                Text("\(engine.displayName) · experimental").tag(engine)
+                            }
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    if !showAdvancedTranslation && state.dictationTranslationEngine?.isAdvanced != true {
+                        Button("Show advanced engines…") { showAdvancedTranslation = true }
+                            .controlSize(.small)
+                    }
+                    let engine = state.dictationTranslationEngine ?? TranslationEngine.dictationEffective
+                    Text(engine.summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if engine == .qwen {
+                        HStack {
+                            Button("Choose experimental model…") {
+                                SettingsWindowController.selectModelsPane()
+                            }
+                            .controlSize(.small)
+                            if let model = state.llmModel {
+                                Text(model.isDownloaded
+                                     ? "\(model.label) · \(model.sizeText)"
+                                     : "\(model.label) · \(model.sizeText) — not downloaded yet")
+                                    .font(.caption)
+                                    .foregroundStyle(model.isDownloaded ? Color.secondary : Color.orange)
+                            }
+                        }
+                    }
+                }
+
+                SettingsSection(title: "Recognition",
+                                subtitle: "Choose the fastest local path or Whisper Auto for code-switched dictation.") {
+                    Picker("Dictation engine", selection: $state.dictationRecognizer) {
+                        Text("Streaming").tag(DictationRecognizer.streaming)
+                        Text("Whisper Auto").tag(DictationRecognizer.whisper)
+                    }
+                    .pickerStyle(.segmented)
+
+                    if state.dictationRecognizer == .whisper {
+                        Picker("Whisper model", selection: Binding(get: { WhisperDictationBackend.model }, set: { WhisperDictationBackend.model = $0 })) {
+                            ForEach(WhisperDictationBackend.ModelChoice.allCases, id: \.self) { choice in
+                                Text(choice.description.capitalized).tag(choice)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        Picker("Language", selection: Binding(get: { WhisperDictationBackend.locale }, set: { WhisperDictationBackend.locale = $0 })) {
+                            Text("Automatic").tag("auto")
+                            ForEach(LanguageCatalog.all, id: \.code) { language in
+                                Text(language.displayName).tag(language.code)
+                            }
+                        }
+                        whisperStatus
+                    } else {
+                        Picker("Streaming model", selection: Binding(get: { ASREngine(rawValue: UserDefaults.standard.string(forKey: "dictationStreamingEngine") ?? "nemotron") ?? .nemotron }, set: {
+                            UserDefaults.standard.set($0.rawValue, forKey: "dictationStreamingEngine")
+                            SettingsWindowController.refreshDictationRuntime()
+                        })) {
+                            ForEach(ASREngine.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                }
+
+                SettingsSection(title: "Cleanup",
+                                subtitle: "Remove fillers, repetitions, false starts, and spoken formatting locally.") {
+                    Toggle("Clean up dictated text", isOn: $state.dictationCleanupEnabled)
+                        .disabled(!LocalModel.isCleanupCompatible(state.llmModel))
+                    HStack {
+                        Label(LocalModel.isCleanupCompatible(state.llmModel)
+                              ? "Cleanup model ready" : "Cleanup model needed",
+                              systemImage: LocalModel.isCleanupCompatible(state.llmModel)
+                                  ? "checkmark.circle" : "arrow.down.circle")
+                            .font(.caption)
+                            .foregroundStyle(LocalModel.isCleanupCompatible(state.llmModel)
+                                             ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.orange))
+                        Spacer()
+                        Button("Manage") { SettingsWindowController.selectModelsPane() }
+                            .controlSize(.small)
+                    }
+                }
+
+                SettingsSection(title: "Permissions",
+                                subtitle: "Needed only for the global shortcut and text insertion.") {
+                    permissionRow(title: "Input Monitoring",
+                                  granted: inputMonitoringGranted,
+                                  explanation: "Required to detect the shortcut in other apps.") {
+                        _ = CGRequestListenEventAccess()
+                        Self.permissionRecoveryAction("Privacy_ListenEvent", open: openPrivacySettings)
+                    }
+                    permissionRow(title: "Accessibility",
+                                  granted: accessibilityGranted,
+                                  explanation: "Required to paste into the focused text field.") {
+                        Self.permissionRecoveryAction("Privacy_Accessibility", open: openPrivacySettings)
+                    }
+                    HStack {
+                        Label("Microphone", systemImage: "mic")
+                        Spacer()
+                        Text("Only while dictating")
+                            .foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        Label("Processing", systemImage: "lock.shield")
+                        Spacer()
+                        Text("On this Mac")
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
+            .padding(.horizontal, 30)
+            .padding(.vertical, 8)
+            .frame(maxWidth: 780, alignment: .leading)
         }
-        .scrollContentBackground(.hidden)
-        .formStyle(.grouped)
         .task { state.refreshModels() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshPermissions()
@@ -351,7 +418,33 @@ struct DictationView: View {
         .sheet(isPresented: $state.showDictationTranslationPicker) {
             TranslationTargetPicker(state: state,
                                     target: $state.dictationTranslateTo,
-                                    title: "Translate dictation to")
+                                    title: "Translate dictation to",
+                                    scope: .dictation)
+        }
+    }
+
+    @ViewBuilder
+    private var whisperStatus: some View {
+        let choice = WhisperDictationBackend.model
+        let ready = WhisperDictationBackend.isReady(choice)
+        HStack(spacing: 10) {
+            Label(ready ? "Ready" : "Model needed",
+                  systemImage: ready ? "checkmark.circle.fill" : "arrow.down.circle")
+                .foregroundStyle(ready ? .green : .orange)
+            Spacer()
+            if ready {
+                Button("Remove") {
+                    Task { try? await removeWhisper(choice) }
+                }
+                .controlSize(.small)
+            } else {
+                Button("Download") { prepareWhisper(choice) }
+                    .controlSize(.small)
+                Button("Retry") { retryWhisper(choice) }
+                    .controlSize(.small)
+            }
+            Button("Models") { SettingsWindowController.selectModelsPane() }
+                .controlSize(.small)
         }
     }
 
@@ -382,34 +475,6 @@ struct DictationView: View {
     private func refreshPermissions() {
         inputMonitoringGranted = CGPreflightListenEventAccess()
         accessibilityGranted = AXIsProcessTrusted()
-    }
-
-    @ViewBuilder
-    private func cleanupModelRow(_ status: AssetStatus) -> some View {
-        if let model = LocalModel.all.first(where: { AssetID.llm(file: $0.file) == status.asset.id }) {
-            HStack(alignment: .top, spacing: 8) {
-                Button { state.llmModel = model } label: {
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: model == state.llmModel
-                              ? "largecircle.fill.circle" : "circle")
-                            .foregroundStyle(model == state.llmModel ? Color.accentColor : Color.secondary)
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack(spacing: 6) {
-                                Text(model.label).font(.body.weight(.medium))
-                                if model.recommended { Text("recommended").font(.caption2) }
-                            }
-                            Text(model.sizeText).font(.caption2).foregroundStyle(.tertiary)
-                        }
-                    }
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Use \(model.label)")
-                .accessibilityAddTraits(model == state.llmModel ? .isSelected : [])
-                Spacer(minLength: 12)
-                AssetControl(state: state, status: status)
-            }
-            .padding(.vertical, 2)
-        }
     }
 
     private func prepareWhisper(_ choice: WhisperDictationBackend.ModelChoice) {
@@ -571,8 +636,10 @@ struct CaptionsView: View {
     @State private var showAdvancedTranslation = false
 
     var body: some View {
-        Form {
-            Section("Engine") {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+            SettingsSection(title: "Engine",
+                            subtitle: "Choose the local recognizer and its latency.") {
                 Picker("Recognition", selection: $state.engine) {
                     // Optional tags, so "nothing chosen" is a state the control
                     // can express. A segmented picker always paints one segment,
@@ -608,10 +675,6 @@ struct CaptionsView: View {
                         Text("Fast").tag(1120)
                     }
                     .pickerStyle(.segmented)
-                    Text(state.nemotronTier == 1120
-                         ? "Captions roughly twice as often, for about double the recognition work per second of audio — noticeable on battery."
-                         : "The default. Captions arrive about every 2 seconds at the lowest recognition cost.")
-                        .font(.caption).foregroundStyle(.secondary)
                     if !NemotronEngine.isDownloaded(chunkMs: state.nemotronTier) {
                         Label("This tier is its own ~640 MB download — each latency has the chunk size baked into its model. Fetch it under Models.",
                               systemImage: "arrow.down.circle")
@@ -624,7 +687,8 @@ struct CaptionsView: View {
                 }
             }
 
-            Section {
+            SettingsSection(title: "Capture",
+                            subtitle: "Choose which audio reaches the caption engine.") {
                 Picker("Capture audio from", selection: $state.captureApp) {
                     Text("Everything the Mac plays").tag(String?.none)
                     ForEach(state.runningApps, id: \.bundleID) { app in
@@ -634,19 +698,10 @@ struct CaptionsView: View {
                 LabeledToggle("Include my microphone",
                               "Off by default. System audio on a call carries only the other participants — your own voice never enters the mix, so a saved transcript is missing your half of the conversation. On, sAiity also opens the microphone (macOS asks once) and mixes it into recognition. Audio still never leaves this Mac. Takes effect immediately, including mid-session: switching it off releases the microphone straight away.",
                               isOn: $state.includeMic)
-            } header: {
-                Text("Capture")
-            } footer: {
-                // A footer, not a caption row: the explanation describes the
-                // whole section, and the footer is where the OS's own settings
-                // put exactly this kind of text.
-                Text(state.captureApp == nil
-                     ? "The whole system mix — notification sounds and every other app land in the captions too. Scope to one app to caption a meeting or a film without interference."
-                     : "Only this app's audio reaches the captions; notification sounds, other videos and games stay out. Takes effect when captions next start, and Start will say so if the app is not running.")
-                    .font(.caption)
             }
 
-            Section {
+            SettingsSection(title: "Sentences",
+                            subtitle: "Use pauses to decide when a translated sentence is complete.") {
                 LabeledToggle("End a sentence on a pause",
                               "Most of what the multilingual engine emits carries no punctuation, so a pause is what tells the app a thought has finished — and a finished sentence is what gets translated. Off, sentences close only on real punctuation and on the length cap, which suits a speaker who pauses mid-thought.",
                               isOn: $state.speechGapEnabled)
@@ -654,28 +709,8 @@ struct CaptionsView: View {
                     slider("Pause length", $state.speechGapHoldMs,
                            Double(SpeechGap.range.lowerBound)...Double(SpeechGap.range.upperBound),
                            "%.0f ms")
-                    Text("The default is \(SpeechGap.defaultHoldMs) ms. Shorter values split on breaths; longer values delay translation.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    // The slider applies live to the running session; this is
-                    // the feedback loop it never had. Tuning used to mean
-                    // dragging blind and watching captions for a minute.
-                    if let r = state.gapReadout {
-                        Label("Live: quietest \(Int(r.floorDb)) dBFS in the last 5 s · pause threshold \(Int(r.thresholdDb)) dBFS",
-                              systemImage: r.fires > 0 ? "checkmark.circle" : "waveform")
-                            .font(.caption).foregroundStyle(.secondary)
-                        if r.fires > 0 {
-                            Text("\(r.fires) sentences ended on a pause this session.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        } else if r.floorDb > r.thresholdDb {
-                            Label("This audio has not dropped below the threshold yet — sentences will close on the length cap instead. A longer pause length will not help; scoping capture to one app might.",
-                                  systemImage: "exclamationmark.triangle")
-                                .font(.caption).foregroundStyle(.orange)
-                        }
-                    }
                 }
-            } header: {
                 HStack {
-                    Text("Sentences")
                     Spacer()
                     ResetButton {
                         state.speechGapEnabled = true
@@ -684,7 +719,8 @@ struct CaptionsView: View {
                 }
             }
 
-            Section("Translation") {
+            SettingsSection(title: "Translation",
+                            subtitle: "Translate locally when a caption sentence closes.") {
                 LabeledContent("Translate to") {
                     Button {
                         state.showTranslationPicker = true
@@ -705,7 +741,7 @@ struct CaptionsView: View {
                             Text("\(e.displayName) · recommended").tag(e)
                         }
                         if showAdvancedTranslation || state.translationEngine?.isAdvanced == true {
-                            Section("Advanced") {
+                            Group {
                                 ForEach(TranslationEngine.advancedCases, id: \.self) { e in
                                     Text("\(e.displayName) · experimental").tag(e)
                                 }
@@ -717,14 +753,6 @@ struct CaptionsView: View {
                         Button("Show advanced engines…") { showAdvancedTranslation = true }
                             .controlSize(.small)
                     }
-                    if let te = state.translationEngine {
-                        Text(te.summary).font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        Label("MADLAD is the recommended local translator. Download it under Models.",
-                              systemImage: "sparkles")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-
                     // Any engine can be asked for a language it cannot do, not
                     // just Whisper — and a stored target survives an engine
                     // change, so this has to be checked rather than assumed.
@@ -755,20 +783,13 @@ struct CaptionsView: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                    Text(state.translationTiming == .live
-                         ? "Shows a rough translation while the sentence grows. Uses more model work."
-                         : "Translates once when the sentence closes. Best quality with the least work.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    if let te = state.translationEngine {
-                        Text("Licence: \(te.licence)")
-                            .font(.caption2).foregroundStyle(.tertiary)
-                    }
                 }
             }
 
             appearanceSections
 
-            Section("Shortcuts") {
+            SettingsSection(title: "Shortcuts",
+                            subtitle: "Global controls for starting and stopping captions.") {
                 ForEach(HotKeyCenter.Action.allCases, id: \.self) { action in
                     HStack {
                         Text(action.title)
@@ -776,15 +797,15 @@ struct CaptionsView: View {
                         ShortcutRecorder(action: action, state: state)
                     }
                 }
-                Text("System-wide. Click a field and press the combination; ⌫ clears. Needs ⌃, ⌥ or ⌘.")
-                    .font(.caption).foregroundStyle(.secondary)
                 if let e = state.shortcutError {
                     Text(e).font(.caption).foregroundStyle(.orange)
                 }
             }
+            }
+            .padding(.horizontal, 0)
+            .padding(.vertical, 8)
+            .frame(maxWidth: 780, alignment: .leading)
         }
-        .scrollContentBackground(.hidden)
-        .formStyle(.grouped)
         .task(id: "\(state.translateTo ?? "")|\(state.translationEngine?.rawValue ?? "none")") {
             await state.refreshTargetSupport()
         }
@@ -798,37 +819,9 @@ struct CaptionsView: View {
 
     @ViewBuilder
     private var appearanceSections: some View {
-        Section {
-            LabeledToggle("Show the caption bubble",
-                          "Hides the subtitles without stopping recognition, so you can keep a transcript running with nothing on screen.",
-                          isOn: Binding(get: { !state.style.hidden },
-                                        set: { state.style.hidden = !$0 }))
-            LabeledToggle("Let clicks pass through the bubble",
-                          "On, only the bubble's top strip can be grabbed and everything else clicks straight through to the video underneath — which matters, because the bubble sits over the scrubber. Off, you can drag it by any part of it.",
-                          isOn: $state.captionClickThrough)
-            LabeledToggle("Announce captions to VoiceOver",
-                          "Off by default. Each finished sentence is posted as a VoiceOver announcement, which also reaches a connected braille display. In-progress text is never announced — it would arrive faster than speech or braille can render it.",
-                          isOn: $state.announceCaptions)
-            Picker("Background", selection: $state.style.glassStyle) {
-                Text("Glass").tag(0); Text("Clear").tag(1); Text("Solid").tag(2)
-            }
-            .pickerStyle(.segmented)
-            Text("Solid is the readable choice over bright video — glass leaves white text on a white scene at roughly 2:1 contrast.")
-                .font(.caption).foregroundStyle(.secondary)
-            ColorPicker("Background tint", selection: Binding(
-                get: { Color(nsColor: state.style.tintColor ?? .black) },
-                set: { state.style.tintHex = CaptionStyle.hex(from: NSColor($0)) }))
-            slider("Corner radius", $state.style.cornerRadius, 0...40, "%.0f")
-            slider("Width", $state.style.widthFraction, 0.3...1.0, "%.0f%%", scale: 100)
-            slider("Gap to screen edge", $state.style.screenMargin, 0...160, "%.0f")
-            slider("Maximum height", $state.style.maxHeight, 120...720, "%.0f")
-            Text("Older subtitle rows stay inside the bubble and scroll when this limit is reached.")
-                .font(.caption).foregroundStyle(.secondary)
-            Text("Width is a setting rather than something measured from the text — that is what stops the bubble resizing and re-centring on every line. Drag an edge to override it; a dragged width may go right to the screen edge.")
-                .font(.caption).foregroundStyle(.secondary)
-        } header: {
+        SettingsSection(title: "Bubble",
+                        subtitle: "Control the subtitle surface, its size, and its live appearance.") {
             HStack {
-                Text("Bubble")
                 Spacer()
                 ResetButton {
                     let d = CaptionStyle()
@@ -843,29 +836,50 @@ struct CaptionsView: View {
                     NotificationCenter.default.post(name: .saiityResetBubble, object: nil)
                 }
             }
-        }
+            LabeledToggle("Show the caption bubble",
+                          "Hides the subtitles without stopping recognition, so you can keep a transcript running with nothing on screen.",
+                          isOn: Binding(get: { !state.style.hidden },
+                                        set: { state.style.hidden = !$0 }))
+            LabeledToggle("Let clicks pass through the bubble",
+                          "On, only the bubble's top strip can be grabbed and everything else clicks straight through to the video underneath — which matters, because the bubble sits over the scrubber. Off, you can drag it by any part of it.",
+                          isOn: $state.captionClickThrough)
+            LabeledToggle("Announce captions to VoiceOver",
+                          "Off by default. Each finished sentence is posted as a VoiceOver announcement, which also reaches a connected braille display. In-progress text is never announced — it would arrive faster than speech or braille can render it.",
+                          isOn: $state.announceCaptions)
+            Picker("Background", selection: $state.style.glassStyle) {
+                Text("Glass").tag(0); Text("Clear").tag(1); Text("Solid").tag(2)
+            }
+            .pickerStyle(.segmented)
+                    ColorPicker("Background tint", selection: Binding(
+                get: { Color(nsColor: state.style.tintColor ?? .black) },
+                set: { state.style.tintHex = CaptionStyle.hex(from: NSColor($0)) }))
+            slider("Corner radius", $state.style.cornerRadius, 0...40, "%.0f")
+            slider("Width", $state.style.widthFraction, 0.3...1.0, "%.0f%%", scale: 100)
+            slider("Gap to screen edge", $state.style.screenMargin, 0...160, "%.0f")
+            slider("Maximum height", $state.style.maxHeight, 120...720, "%.0f")
+                }
 
         textStyleSection("Original text", $state.style.original,
                          note: "The recognised speech. It is dimmed while the engine may still revise it — that is the second opacity below.",
                          volatile: true,
                          reset: { state.style.original = .original })
 
-        Section {
+            SettingsSection(title: "Translated text",
+                            subtitle: "Control the optional translation line below each caption.") {
+                HStack {
+                    Spacer()
+                    ResetButton {
+                        state.style.translation = .translation
+                        state.style.showTranslation = true
+                    }
+                }
             LabeledToggle("Show the translation line",
                           "The second line under each caption. Turning this off keeps translation running for the transcript but hides it on screen.",
                           isOn: $state.style.showTranslation)
-        } header: {
-            HStack {
-                Text("Translated text")
-                Spacer()
-                ResetButton {
-                    state.style.translation = .translation
-                    state.style.showTranslation = true
-                }
+                textStyleControls($state.style.translation, volatile: false)
             }
-        }
-        textStyleControls($state.style.translation, volatile: false)
-        Section {
+        SettingsSection(title: "Preview and spacing",
+                        subtitle: "Changes apply live to the real caption bubble.") {
             slider("Gap between the lines", $state.style.lineGap, 0...24, "%.0f")
             HStack {
                 Button("Preview") {
@@ -877,8 +891,6 @@ struct CaptionsView: View {
                 ResetButton("Reset everything") { state.style = CaptionStyle() }
             }
             .controlSize(.small)
-            Text("Changes apply live. Preview puts sample text in the real bubble.")
-                .font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -887,16 +899,12 @@ struct CaptionsView: View {
     private func textStyleSection(_ title: LocalizedStringKey, _ style: Binding<TextStyle>,
                                   note: LocalizedStringKey, volatile: Bool,
                                   reset: @escaping () -> Void) -> some View {
-        Section {
-            textStyleControls(style, volatile: volatile)
-        } header: {
+        SettingsSection(title: title, subtitle: note) {
             HStack {
-                Text(title)
                 Spacer()
                 ResetButton(action: reset)
             }
-        } footer: {
-            Text(note).font(.caption)
+            textStyleControls(style, volatile: volatile)
         }
     }
 
@@ -955,17 +963,17 @@ struct ResetButton: View {
     }
 
     var body: some View {
-        Button(title, action: action)
+        Button(action: action) {
+            Image(systemName: "arrow.counterclockwise")
+        }
+        .buttonStyle(.borderless)
             .controlSize(.small)
-            .help("Put this section back to its defaults.")
+            .help(title)
+            .accessibilityLabel(title)
     }
 }
 
-/// A toggle with the explanation directly under it.
-///
-/// Every switch in this app now carries one: a bare label leaves the user to
-/// guess what turning it off costs, and several of these have real consequences
-/// (a durable transcript, clicks reaching the video behind).
+/// A compact toggle that keeps its explanation available as hover help.
 struct LabeledToggle: View {
     // Both are LocalizedStringKey. As String they would reach Text's verbatim
     // overload, which is how every one of these explanations stayed English
@@ -981,10 +989,8 @@ struct LabeledToggle: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Toggle(title, isOn: $isOn)
-            Text(note).font(.caption).foregroundStyle(.secondary)
-        }
+        Toggle(title, isOn: $isOn)
+            .help(note)
     }
 }
 
@@ -1146,8 +1152,10 @@ struct TranscriptsView: View {
     @State private var retranslating: SessionRef?
 
     var body: some View {
-        Form {
-            Section {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+            SettingsSection(title: "Recording",
+                            subtitle: "Keep local transcripts only when you explicitly enable saving.") {
                 Toggle("Save transcripts of sessions", isOn: $state.saveTranscript)
                 Picker("Keep transcripts", selection: $retentionDays) {
                     ForEach(TranscriptRetention.choices, id: \.self) { d in
@@ -1181,14 +1189,10 @@ struct TranscriptsView: View {
                     retranslateNote = "✓ " + String(localized: "Deleted \(n) transcripts.")
                     Task { await state.refresh() }
                 }
-            } header: {
-                Text("Recording")
-            } footer: {
-                Text("Off by default. A transcript is a durable record of a conversation other people were part of, and system audio captures everyone on the call. Nothing is ever deleted unless you choose an age above.")
-                    .font(.caption)
             }
 
-            Section("Saved sessions") {
+            SettingsSection(title: "Saved sessions",
+                            subtitle: "Search, read, export, or translate your local transcript library.") {
                 if state.sessions.isEmpty {
                     ContentUnavailableView(
                         "Nothing saved yet",
@@ -1304,8 +1308,6 @@ struct TranscriptsView: View {
                         }
                         .controlSize(.small)
                         .fixedSize()
-                        Text("Writes every saved session into one folder.")
-                            .font(.caption).foregroundStyle(.secondary)
                     }
                     Button("Delete all…", role: .destructive) {
                         let a = NSAlert()
@@ -1324,9 +1326,10 @@ struct TranscriptsView: View {
                 }
             }
 
+            }
+            .padding(.vertical, 8)
+            .frame(maxWidth: 780, alignment: .leading)
         }
-        .scrollContentBackground(.hidden)
-        .formStyle(.grouped)
         .sheet(item: $viewing) { TranscriptViewerSheet(session: $0) }
     }
 
@@ -1425,21 +1428,21 @@ struct GeneralView: View {
     @Bindable var state: AppState
 
     var body: some View {
-        Form {
-            Section {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+            SettingsSection(title: "Status",
+                            subtitle: "A quick check of recognition and permissions on this Mac.") {
                 LabeledContent("Engine", value: state.engine?.displayName ?? String(localized: "None chosen"))
                 LabeledContent("Screen Recording",
                                value: CGPreflightScreenCaptureAccess()
                                    ? String(localized: "Granted")
                                    : String(localized: "Not granted"))
-            } header: {
-                Text("Status")
-            } footer: {
                 Text("System-audio capture is gated behind Screen Recording — macOS has no audio-only permission.")
                     .font(.caption)
             }
 
-            Section("Startup") {
+            SettingsSection(title: "Startup",
+                            subtitle: "Choose whether sAiity is available after you log in.") {
                 LabeledToggle("Start sAiity when you log in",
                               "Registers the app as a login item so captions are one keypress away after a restart. Off by default — this app can capture system audio, so being running should be your choice.",
                               isOn: Binding(get: { state.launchAtLogin },
@@ -1449,7 +1452,8 @@ struct GeneralView: View {
                 }
             }
 
-            Section("Troubleshooting") {
+            SettingsSection(title: "Troubleshooting",
+                            subtitle: "Repair permissions, save diagnostics, or review app information.") {
                 HStack {
                     Button("Run setup again…") {
                         Onboarding.reset()
@@ -1478,15 +1482,17 @@ struct GeneralView: View {
                 }
             }
 
-            Section("Privacy") {
+            SettingsSection(title: "Privacy",
+                            subtitle: "Recognition, translation, and transcripts stay on this Mac.") {
                 Text("Audio never leaves this Mac. Recognition, translation and transcripts are all processed and stored locally — no account, no API key.")
                     .font(.caption)
                 Text("Model files are downloaded once from huggingface.co. Nothing you say is ever uploaded.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            }
+            .padding(.vertical, 8)
+            .frame(maxWidth: 780, alignment: .leading)
         }
-        .scrollContentBackground(.hidden)
-        .formStyle(.grouped)
         .task { await state.refresh() }
     }
 }

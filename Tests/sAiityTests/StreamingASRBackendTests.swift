@@ -37,6 +37,50 @@ import Testing
         func detectedLanguage() async -> String? { "en" }
     }
 
+    final class SegmentedEngine: FluidStreamingEngine, @unchecked Sendable {
+        let sampleRate = 16_000.0
+        var events: [String] = []
+        var finishResults: [String?] = []
+        var languages: [String?] = []
+        var finishIndex = 0
+        var waitsForCancellation = false
+        var processStarted = false
+
+        func load(progress: @escaping @Sendable (String) -> Void) async throws {
+            events.append("load")
+        }
+
+        func reset() async {
+            events.append("reset")
+        }
+
+        func setPartial(_ callback: @escaping @Sendable (String) -> Void) async {
+            events.append("partial")
+        }
+
+        func process(_ samples: [Float]) async throws {
+            processStarted = true
+            events.append("process-\(samples.first ?? -1)")
+            if waitsForCancellation {
+                try await Task.sleep(nanoseconds: 60_000_000_000)
+            }
+        }
+
+        func finishSession() async -> String? {
+            defer { finishIndex += 1 }
+            events.append("finish")
+            return finishResults[finishIndex]
+        }
+
+        func teardown() async {
+            events.append("teardown")
+        }
+
+        func detectedLanguage() async -> String? {
+            languages[max(0, finishIndex - 1)]
+        }
+    }
+
     final class ChunkLog: @unchecked Sendable {
         private let lock = NSLock()
         private var storage: [TranscriptChunk] = []
@@ -114,6 +158,53 @@ import Testing
         #expect(engine.finishCalls == 1)
         #expect(emitted.values.map(\.text) == ["tail"])
         #expect(emitted.values.allSatisfy { $0.isFinal })
+        await backend.release()
+    }
+
+    @Test("segmented dictation resets the recognizer and processes regions sequentially")
+    func segmentedDictationResetsBetweenRegions() async throws {
+        let engine = SegmentedEngine()
+        engine.finishResults = ["Hallo", "world"]
+        engine.languages = ["de", "en"]
+        let backend = StreamingASRBackend(name: "Test", engine: engine)
+        try await backend.prepare(locale: Locale(identifier: "auto")) { _ in }
+        let regions = [
+            DictationSpeechRegion(audioRange: 0..<2, coveredRange: 0..<2),
+            DictationSpeechRegion(audioRange: 2..<4, coveredRange: 2..<4),
+        ]
+
+        let result = try await backend.transcribeDictation(samples: [1, 2, 3, 4], regions: regions)
+
+        #expect(result.text == "Hallo world")
+        #expect(result.languageMetadata.regionLanguages == ["de", "en"])
+        #expect(result.languageMetadata.containsMultipleLanguages)
+        #expect(engine.events.filter { $0 == "reset" }.count == 4)
+        #expect(engine.events.filter { $0 == "process-1.0" } == ["process-1.0"])
+        #expect(engine.events.filter { $0 == "process-3.0" } == ["process-3.0"])
+        #expect(engine.events.firstIndex(of: "process-1.0")! < engine.events.firstIndex(of: "process-3.0")!)
+        await backend.release()
+    }
+
+    @Test("cancellation during segmented dictation resets the engine")
+    func segmentedDictationCancellation() async throws {
+        let engine = SegmentedEngine()
+        engine.waitsForCancellation = true
+        let backend = StreamingASRBackend(name: "Test", engine: engine)
+        try await backend.prepare(locale: Locale(identifier: "auto")) { _ in }
+        let region = DictationSpeechRegion(audioRange: 0..<2, coveredRange: 0..<2)
+        let task = Task {
+            try await backend.transcribeDictation(samples: [1, 2], regions: [region])
+        }
+        for _ in 0..<100 where !engine.processStarted { await Task.yield() }
+        task.cancel()
+
+        do {
+            _ = try await task.value
+            #expect(Bool(false))
+        } catch {
+            #expect(error is CancellationError)
+        }
+        #expect(engine.events.filter { $0 == "reset" }.count >= 2)
         await backend.release()
     }
 }

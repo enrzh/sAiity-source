@@ -174,7 +174,7 @@ final class HotKeyCenter {
                               EventParamType(typeEventHotKeyID), nil,
                               MemoryLayout<EventHotKeyID>.size, nil, &id)
             let idx = Int(id.id)
-            MainActor.assumeIsolated {
+            Task { @MainActor in
                 guard idx < HotKeyCenter.Action.allCases.count else { return }
                 let action = HotKeyCenter.Action.allCases[idx]
                 NSLog("sAiity hotkey fired: \(action.rawValue)")

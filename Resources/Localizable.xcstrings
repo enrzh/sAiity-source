@@ -1,6 +1,204 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Setup": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Einrichtung"}},
+        "es": {"stringUnit": {"state": "translated", "value": "Configuración"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Configuration"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "設定"}}
+      }
+    },
+    "Choose a recognition model": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Erkennungsmodell auswählen"}},
+        "es": {"stringUnit": {"state": "translated", "value": "Elige un modelo de reconocimiento"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Choisissez un modèle de reconnaissance"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "認識モデルを選択"}}
+      }
+    },
+    "Manage": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Verwalten"}},
+        "es": {"stringUnit": {"state": "translated", "value": "Gestionar"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Gérer"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "管理"}}
+      }
+    },
+    "Settings": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Einstellungen"}},
+        "es": {"stringUnit": {"state": "translated", "value": "Ajustes"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Réglages"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "設定"}}
+      }
+    },
+    "About & Support": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Über & Support"}},
+        "es": {"stringUnit": {"state": "translated", "value": "Acerca de y soporte"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "À propos et assistance"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "情報とサポート"}}
+      }
+    },
+    "Experience": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Erlebnis"}},
+        "es": {"stringUnit": {"state": "translated", "value": "Experiencia"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Expérience"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "体験"}}
+      }
+    },
+    "System": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "System"}},
+        "es": {"stringUnit": {"state": "translated", "value": "Sistema"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Système"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "システム"}}
+      }
+    },
+    "On-device": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Auf diesem Mac"}},
+        "es": {"stringUnit": {"state": "translated", "value": "En el dispositivo"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Sur l’appareil"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "デバイス上"}}
+      }
+    },
+    "Show sidebar": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Seitenleiste anzeigen"}},
+        "es": {"stringUnit": {"state": "translated", "value": "Mostrar barra lateral"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Afficher la barre latérale"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "サイドバーを表示"}}
+      }
+    },
+    "Hide sidebar": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Seitenleiste ausblenden"}},
+        "es": {"stringUnit": {"state": "translated", "value": "Ocultar barra lateral"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Masquer la barre latérale"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "サイドバーを隠す"}}
+      }
+    },
+    "Enabled": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Aktiviert"}},
+        "es": {"stringUnit": {"state": "translated", "value": "Activado"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Activé"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "有効"}}
+      }
+    },
+    "Shortcut": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Tastenkürzel"}},
+        "es": {"stringUnit": {"state": "translated", "value": "Atajo"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Raccourci"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "ショートカット"}}
+      }
+    },
+    "Target language": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Zielsprache"}},
+        "es": {"stringUnit": {"state": "translated", "value": "Idioma de destino"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Langue cible"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "翻訳先の言語"}}
+      }
+    },
+    "Choose a target before speaking.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Wähle vor dem Sprechen ein Ziel."}},
+        "es": {"stringUnit": {"state": "translated", "value": "Elige un destino antes de hablar."}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Choisissez une cible avant de parler."}},
+        "ja": {"stringUnit": {"state": "translated", "value": "話す前に翻訳先を選択してください。"}}
+      }
+    },
+    "Choose a translation engine before speaking.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Wähle vor dem Sprechen eine Übersetzungs-Engine."}},
+        "es": {"stringUnit": {"state": "translated", "value": "Elige un motor de traducción antes de hablar."}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Choisissez un moteur de traduction avant de parler."}},
+        "ja": {"stringUnit": {"state": "translated", "value": "話す前に翻訳エンジンを選択してください。"}}
+      }
+    },
+    "Download a compatible local cleanup model under Models.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Lade unter Modelle ein kompatibles lokales Bereinigungsmodell herunter."}},
+        "es": {"stringUnit": {"state": "translated", "value": "Descarga un modelo local de limpieza compatible en Modelos."}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Téléchargez un modèle local de nettoyage compatible dans Modèles."}},
+        "ja": {"stringUnit": {"state": "translated", "value": "モデルから対応するローカルクリーンアップモデルをダウンロードしてください。"}}
+      }
+    },
+    "Dictation engine": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Diktier-Engine"}},
+        "es": {"stringUnit": {"state": "translated", "value": "Motor de dictado"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Moteur de dictée"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "音声入力エンジン"}}
+      }
+    },
+    "Streaming model": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Streaming-Modell"}},
+        "es": {"stringUnit": {"state": "translated", "value": "Modelo de streaming"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Modèle de streaming"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "ストリーミングモデル"}}
+      }
+    },
+    "Streaming": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Streaming"}},
+        "es": {"stringUnit": {"state": "translated", "value": "Streaming"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Streaming"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "ストリーミング"}}
+      }
+    },
+    "Whisper Auto": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Whisper automatisch"}},
+        "es": {"stringUnit": {"state": "translated", "value": "Whisper automático"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Whisper automatique"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "Whisper自動"}}
+      }
+    },
+    "Only while dictating": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Nur beim Diktieren"}},
+        "es": {"stringUnit": {"state": "translated", "value": "Solo al dictar"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Pendant la dictée uniquement"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "音声入力中のみ"}}
+      }
+    },
+    "Show advanced models": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Erweiterte Modelle anzeigen"}},
+        "es": {"stringUnit": {"state": "translated", "value": "Mostrar modelos avanzados"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Afficher les modèles avancés"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "高度なモデルを表示"}}
+      }
+    },
     "Automatic": {
       "extractionState": "manual",
       "localizations": {
@@ -6824,6 +7022,15 @@
             "value": "翻訳エンジンが未選択です — 「設定」→「字幕」で選択してください"
           }
         }
+      }
+    },
+    "No translator chosen — pick one in Settings": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Kein Übersetzer gewählt – wähle einen unter Einstellungen."}},
+        "es": {"stringUnit": {"state": "translated", "value": "Ningún traductor elegido — elige uno en Ajustes."}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Aucun traducteur choisi — choisissez-en un dans Réglages."}},
+        "ja": {"stringUnit": {"state": "translated", "value": "翻訳エンジンが未選択です — 「設定」で選択してください"}}
       }
     },
     "No translator chosen. Pick one under Settings → Captions.": {

@@ -256,6 +256,9 @@ import Testing
         let window = makeWindow()
         window.show(phase: .dictating)
         #expect(window.waveformVisibleForTests)
+        #expect(window.frame.width == 224)
+        #expect(window.waveformFrameForTests.width >= 172)
+        #expect(window.waveformFrameForTests.height >= 34)
         window.show(phase: .transcribing)
         #expect(!window.waveformVisibleForTests)
         window.dismiss()
@@ -264,7 +267,10 @@ import Testing
     @Test("phase updates do not reposition the toast")
     func phaseUpdatesPreserveFrame() {
         let window = makeWindow()
-        window.setFrameOrigin(NSPoint(x: 321, y: 222))
+        // A zero-sized newly created panel is intentionally placed on first
+        // show. Exercise the phase-update invariant with the toast's actual
+        // stable footprint instead of the pre-layout placeholder.
+        window.setFrame(NSRect(x: 321, y: 222, width: 224, height: 54), display: false)
         let frame = window.frame
         window.show(phase: .transcribing)
         #expect(window.frame == frame)

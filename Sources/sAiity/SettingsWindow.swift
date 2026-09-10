@@ -19,6 +19,7 @@ extension Notification.Name {
     static let saiityMicSettingChanged = Notification.Name("sAiityMicSettingChanged")
     static let saiityDictationSettingChanged = Notification.Name("sAiityDictationSettingChanged")
     static let saiityDictationShortcutRecordingChanged = Notification.Name("sAiityDictationShortcutRecordingChanged")
+    static let saiitySelectSettingsPane = Notification.Name("sAiitySelectSettingsPane")
 }
 
 /// Shared so non-UI types can report disk usage honestly.
@@ -136,7 +137,7 @@ final class AppState {
     init() {
         loadHealthObserver = NotificationCenter.default.addObserver(
             forName: LoadHealth.changed, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.loadFailures = LoadHealth.all }
+            Task { @MainActor [weak self] in self?.loadFailures = LoadHealth.all }
         }
         // The menu bar writes the same translate-target preference while the
         // Settings window is open, so follow it live rather than only on
@@ -146,7 +147,7 @@ final class AppState {
             forName: .saiityTranslateTargetChanged, object: nil,
             queue: .main) { [weak self] note in
             let t = note.userInfo?["target"] as? String
-            MainActor.assumeIsolated {
+            Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.adoptTarget(t)
                 Task { await self.refreshTargetSupport() }
@@ -155,17 +156,18 @@ final class AppState {
         gapObserver = NotificationCenter.default.addObserver(
             forName: SystemAudioCapture.gapDiagnostics, object: nil,
             queue: .main) { [weak self] note in
-            MainActor.assumeIsolated {
-                guard let floor = note.userInfo?["floor"] as? Float,
-                      let th = note.userInfo?["threshold"] as? Float else {
+            let floor = note.userInfo?["floor"] as? Float
+            let threshold = note.userInfo?["threshold"] as? Float
+            let fires = note.userInfo?["fires"] as? Int ?? 0
+            Task { @MainActor [weak self] in
+                guard let floor, let threshold else {
                     self?.gapReadout = nil
                     return
                 }
-                let fires = note.userInfo?["fires"] as? Int ?? 0
                 // Digital silence is RMS 0; clamp so the dB stays displayable.
                 self?.gapReadout = GapReadout(
                     floorDb: Double(20 * log10(max(floor, 1e-8))),
-                    thresholdDb: Double(20 * log10(max(th, 1e-8))),
+                    thresholdDb: Double(20 * log10(max(threshold, 1e-8))),
                     fires: fires)
             }
         }
@@ -241,6 +243,15 @@ final class AppState {
         didSet {
             guard dictationRecognizer != oldValue else { return }
             DictationRecognizer.selected = dictationRecognizer
+            NotificationCenter.default.post(name: .saiityDictationSettingChanged, object: nil)
+        }
+    }
+    /// Optional dedicated engine for press-to-talk translation. When unset,
+    /// dictation follows the existing Captions engine for compatibility.
+    var dictationTranslationEngine: TranslationEngine? = TranslationEngine.dictationSelected {
+        didSet {
+            guard dictationTranslationEngine != oldValue else { return }
+            TranslationEngine.dictationSelected = dictationTranslationEngine
             NotificationCenter.default.post(name: .saiityDictationSettingChanged, object: nil)
         }
     }
@@ -508,6 +519,7 @@ final class AppState {
         // is one of the ways "selecting a model appears to do nothing".
         engine = ASREngine.selected
         translationEngine = TranslationEngine.selected
+        dictationTranslationEngine = TranslationEngine.dictationSelected
         llmModel = LocalModel.selected
         // Was missing, so a target picked from the menu bar never appeared here.
         adoptTarget(UserDefaults.standard.string(forKey: "translateTo"))
@@ -643,92 +655,12 @@ extension NSWindow {
     }
 }
 
-/// The macOS 26 toolbar is rendered as Liquid Glass over the desktop. That is
-/// a poor background for a preferences window whose content is intentionally
-/// opaque and dark: inactive labels disappear on a light desktop. AppKit does
-/// not expose a toolbar-background color, so this view supplies the one solid
-/// surface behind the native toolbar items while still following light/dark
-/// appearance changes.
-final class SettingsWindowToolbarBackdrop: NSView {
-    override var isOpaque: Bool { true }
-
-    // This view only supplies pixels. Let AppKit's native titlebar receive
-    // clicks and drags instead of swallowing window movement.
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-        autoresizingMask = [.width, .height]
-        updateBackgroundColor()
-    }
-
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        wantsLayer = true
-        autoresizingMask = [.width, .height]
-        updateBackgroundColor()
-    }
-
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        updateBackgroundColor()
-    }
-
-    private func updateBackgroundColor() {
-        let appearance = window?.effectiveAppearance ?? effectiveAppearance
-        appearance.performAsCurrentDrawingAppearance {
-            layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-        }
-    }
-}
-
-/// Puts the selected pane's name in the title bar, the way every Apple
-/// preferences window does.
-///
-/// `NSTabViewController` does NOT do this on its own — verified, not assumed:
-/// a window whose contentViewController is a toolbar-style tab controller
-/// keeps whatever title it had (empty, if never set) no matter which child
-/// carries a `title`. Only the window's own contentViewController title is
-/// tracked, and that is the tab controller's.
-private final class PaneTitlingTabViewController: NSTabViewController {
-    override func tabView(_ tabView: NSTabView, didSelect item: NSTabViewItem?) {
-        super.tabView(tabView, didSelect: item)
-        if let label = item?.label { view.window?.title = label }
-    }
-}
-
 @MainActor
 enum SettingsWindowController {
     private static var window: NSWindow?
     /// Shared, so the menu bar can raise a specific sheet in this window.
     static let state = AppState()
-
-    private static func installToolbarBackdrop(in window: NSWindow) {
-        guard let root = window.contentView?.superview else { return }
-
-        func firstDescendant(of view: NSView, matching name: String) -> NSView? {
-            for child in view.subviews {
-                if String(describing: type(of: child)) == name { return child }
-                if let match = firstDescendant(of: child, matching: name) { return match }
-            }
-            return nil
-        }
-
-        // This is feature detection for AppKit's titlebar host, not a
-        // dependency on its private implementation type: when the host is
-        // absent on an older/newer OS, the native toolbar remains untouched.
-        guard let titlebar = firstDescendant(of: root, matching: "NSTitlebarView"),
-              !titlebar.subviews.contains(where: { $0 is SettingsWindowToolbarBackdrop }) else {
-            return
-        }
-        let backdrop = SettingsWindowToolbarBackdrop(frame: titlebar.bounds)
-        if let first = titlebar.subviews.first {
-            titlebar.addSubview(backdrop, positioned: .below, relativeTo: first)
-        } else {
-            titlebar.addSubview(backdrop)
-        }
-    }
+    static var selectedPane: SettingsPane = .captions
 
     static func show() {
         if let w = window {
@@ -738,73 +670,31 @@ enum SettingsWindowController {
             return
         }
         let w = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 760, height: 540),
+            contentRect: NSRect(x: 0, y: 0, width: 980, height: 680),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered, defer: false)
         w.isReleasedWhenClosed = false
-        // NSTabViewController's toolbar style, not SwiftUI's TabView: this is
-        // what every Apple preferences window is made of — toolbar items as
-        // panes, the window title following the selected pane. TabView drew a
-        // centred segmented control, which is a content control, not window
-        // chrome.
-        let tabs = PaneTitlingTabViewController()
-        tabs.tabStyle = .toolbar
-        let pages: [(String, String, AnyView)] = [
-            (String(localized: "Captions"), "captions.bubble",
-             AnyView(CaptionsView(state: state))),
-            (String(localized: "Dictation"), "mic",
-             AnyView(DictationView(state: state))),
-            (String(localized: "Models"), "shippingbox",
-             AnyView(ModelsView(state: state))),
-            (String(localized: "Transcripts"), "text.document",
-             AnyView(TranscriptsView(state: state))),
-            (String(localized: "General"), "gearshape",
-             AnyView(GeneralView(state: state))),
-        ]
-        for (title, symbol, view) in pages {
-            let host = NSHostingController(
-                rootView: view
-                    .frame(minWidth: 700, minHeight: 480)
-                    .background(VibrantBackground()))
-            // The hosting view is opaque by default and would sit on top of
-            // the material like a sheet of paper.
-            host.view.wantsLayer = true
-            host.view.layer?.backgroundColor = .clear
-            host.title = title
-            let item = NSTabViewItem(viewController: host)
-            item.label = title
-            item.image = NSImage(systemSymbolName: symbol,
-                                 accessibilityDescription: title)
-            tabs.addTabViewItem(item)
-        }
-        w.contentViewController = tabs
-        // `NSTabViewController` installs its toolbar when it becomes the
-        // window's content controller. A clear window background otherwise
-        // leaves the toolbar sampling the desktop, so a light desktop can
-        // erase the inactive labels. Preference chrome gives the toolbar its
-        // own readable surface, and the labels are part of the navigation —
-        // they must not disappear through a user display-mode change.
-        w.toolbarStyle = .preference
+        let host = NSHostingController(
+            rootView: SettingsRootView(state: state,
+                                        initialPane: selectedPane)
+                .frame(minWidth: 900, minHeight: 600)
+                .background(VibrantBackground()))
+        host.view.wantsLayer = true
+        host.view.layer?.backgroundColor = .clear
+        w.contentViewController = host
+        w.title = "sAiity"
         w.titlebarAppearsTransparent = false
-        w.toolbar?.displayMode = .iconAndLabel
-        w.toolbar?.allowsDisplayModeCustomization = false
-        // AFTER the assignment, and not optional: setting a tab controller as
-        // contentViewController resizes the window to that controller's own
-        // fitting size — measured at 500×500 here, which clipped ~200 pt off
-        // every 700 pt-wide pane. The requested size has to be restated, and
-        // a minimum enforced so a drag cannot reproduce the clipping.
-        w.setContentSize(NSSize(width: 760, height: 540))
-        w.contentMinSize = NSSize(width: 720, height: 480)
-        w.title = tabs.tabViewItems.first?.label ?? "sAiity"
-        w.makeVibrant()
-        installToolbarBackdrop(in: w)
+        // The settings surface owns its navigation. A system toolbar or the
+        // automatic NavigationSplitView toggle can move when macOS changes the
+        // titlebar metrics, and can paint over the page header on macOS 27.
+        w.toolbar = nil
+        w.titleVisibility = .visible
+        w.setContentSize(NSSize(width: 980, height: 680))
+        w.contentMinSize = NSSize(width: 900, height: 600)
         w.center()
         window = w
-        // Deliberate: this is the one window the user explicitly asked for, so
-        // unlike the caption bubble it may take focus.
         NSApp.activate(ignoringOtherApps: true)
         w.makeKeyAndOrderFront(nil)
-        installToolbarBackdrop(in: w)
         Task { await state.refresh() }
     }
 
@@ -812,19 +702,18 @@ enum SettingsWindowController {
     /// commands can arrive while another settings pane is selected, so
     /// presenting the shared sheet state alone is not enough.
     static func showDictationTranslationPicker() {
+        selectedPane = .dictation
         show()
-        guard let tabs = window?.contentViewController as? NSTabViewController,
-              let index = tabs.tabViewItems.firstIndex(where: {
-                  $0.label == String(localized: "Dictation")
-              }) else { return }
-        tabs.selectedTabViewItemIndex = index
+        NotificationCenter.default.post(name: .saiitySelectSettingsPane,
+                                        object: SettingsPane.dictation.rawValue)
         state.showDictationTranslationPicker = true
     }
 
     static func selectModelsPane() {
+        selectedPane = .models
         show()
-        guard let tabs = window?.contentViewController as? NSTabViewController else { return }
-        tabs.selectedTabViewItemIndex = tabs.tabViewItems.firstIndex { $0.label == String(localized: "Models") } ?? 0
+        NotificationCenter.default.post(name: .saiitySelectSettingsPane,
+                                        object: SettingsPane.models.rawValue)
     }
 
     static func refreshDictationRuntime() {
@@ -834,10 +723,225 @@ enum SettingsWindowController {
 
 // MARK: - Views
 
-// There is deliberately no custom window chrome anywhere in Settings. It used
-// to share an accent-tinted gradient wash ("SettingsBackground") with the
-// setup wizard, with every Form's own background suppressed so it showed
-// through — which read as a web page wearing a Mac costume. Native grouped
-// Forms inside a toolbar-tabbed preferences window are what Apple's own apps
-// do; this app's personality lives in its words and the caption bubble, not
-// in tinted air.
+enum SettingsPane: String, CaseIterable, Hashable, Identifiable {
+    case captions, dictation, library
+
+    // Legacy destinations remain valid for menu notifications and older tests,
+    // but are deliberately not presented as top-level navigation items.
+    case models, transcripts, general
+
+    static var allCases: [SettingsPane] { [.captions, .dictation, .library] }
+
+    var id: String { rawValue }
+    var title: LocalizedStringKey {
+        switch self {
+        case .captions: "Captions"
+        case .dictation: "Dictation"
+        case .library: "Library"
+        case .models: "Models"
+        case .transcripts: "Transcripts"
+        case .general: "General"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .captions: "captions.bubble"
+        case .dictation: "mic"
+        case .library: "books.vertical"
+        case .models: "shippingbox"
+        case .transcripts: "text.document"
+        case .general: "gearshape"
+        }
+    }
+}
+
+/// The settings window is a work surface, not a collection of unrelated tabs.
+/// Keep navigation visible so a user can see where model, caption, and
+/// dictation decisions live without opening and closing panes repeatedly.
+struct SettingsRootView: View {
+    @Bindable var state: AppState
+    @State private var selection: SettingsPane
+    @State private var libraryTab: LibraryTab = .models
+    @State private var sidebarVisible = true
+    @State private var showSupport = false
+
+    private let sidebarWidth: CGFloat = 190
+
+    init(state: AppState, initialPane: SettingsPane = .captions) {
+        self.state = state
+        _selection = State(initialValue: Self.primaryPane(for: initialPane))
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            if sidebarVisible {
+                VStack(spacing: 0) {
+                    HStack {
+                        Text("Settings")
+                            .font(.headline)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+                    .padding(.bottom, 8)
+
+                    List(selection: $selection) {
+                        navigationRow(.captions)
+                        navigationRow(.dictation)
+                        navigationRow(.library)
+                    }
+                    .listStyle(.sidebar)
+
+                    Button {
+                        showSupport = true
+                    } label: {
+                        Label("About & Support", systemImage: "info.circle")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                }
+                .frame(width: sidebarWidth)
+                .background(Color(nsColor: .underPageBackgroundColor))
+            }
+
+            Divider()
+
+            detailView(for: selection)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+        .onChange(of: selection) { _, value in
+            SettingsWindowController.selectedPane = value
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .saiitySelectSettingsPane)) { note in
+            guard let raw = note.object as? String,
+                  let pane = SettingsPane(rawValue: raw) else { return }
+            if pane == .general {
+                showSupport = true
+            } else {
+                if pane == .models { libraryTab = .models }
+                if pane == .transcripts { libraryTab = .transcripts }
+                selection = Self.primaryPane(for: pane)
+            }
+        }
+        .sheet(isPresented: $showSupport) {
+            GeneralView(state: state)
+                .frame(width: 620, height: 460)
+        }
+    }
+
+    private func navigationRow(_ pane: SettingsPane) -> some View {
+        Label(pane.title, systemImage: pane.symbol)
+        .tag(pane)
+    }
+
+    private static func primaryPane(for pane: SettingsPane) -> SettingsPane {
+        switch pane {
+        case .models, .transcripts, .general: .library
+        default: pane
+        }
+    }
+
+    @ViewBuilder
+    private func detailView(for pane: SettingsPane) -> some View {
+        switch pane {
+        case .captions:
+            SettingsPage(title: pane.title, sidebarVisible: sidebarVisible,
+                         onToggleSidebar: { sidebarVisible.toggle() }) {
+                CaptionsView(state: state)
+            }
+        case .dictation:
+            SettingsPage(title: pane.title, sidebarVisible: sidebarVisible,
+                         onToggleSidebar: { sidebarVisible.toggle() }) {
+                DictationView(state: state)
+            }
+        case .library:
+            SettingsPage(title: pane.title, sidebarVisible: sidebarVisible,
+                         onToggleSidebar: { sidebarVisible.toggle() }) {
+                LibraryView(state: state, tab: $libraryTab)
+            }
+        case .models, .transcripts, .general:
+            EmptyView()
+        }
+    }
+}
+
+struct SettingsPage<Content: View>: View {
+    let title: LocalizedStringKey
+    let sidebarVisible: Bool
+    let onToggleSidebar: () -> Void
+    let content: Content
+
+    init(title: LocalizedStringKey,
+         sidebarVisible: Bool = true,
+         onToggleSidebar: @escaping () -> Void = {},
+         @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.sidebarVisible = sidebarVisible
+        self.onToggleSidebar = onToggleSidebar
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: 14) {
+                Text(title)
+                    .font(.title2.weight(.semibold))
+                Spacer(minLength: 12)
+                Button(action: onToggleSidebar) {
+                    Image(systemName: "sidebar.left")
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.borderless)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+                .help(sidebarVisible ? "Hide sidebar" : "Show sidebar")
+                .accessibilityLabel(sidebarVisible ? "Hide sidebar" : "Show sidebar")
+            }
+            .padding(.horizontal, 30)
+            .padding(.top, 26)
+            .padding(.bottom, 18)
+            Divider()
+            content
+                .frame(maxWidth: 780, maxHeight: .infinity, alignment: .top)
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+        // Leave a small explicit buffer below the native titlebar/toolbar safe
+        // area. This prevents the macOS 27 unified-titlebar overlap while
+        // keeping the page header visually attached to its content.
+        .safeAreaPadding(.top, 12)
+    }
+}
+
+/// A consistent full-width setting band used by the settings pages. The
+/// divider separates decisions without turning every group into a nested card.
+struct SettingsSection<Content: View>: View {
+    let title: LocalizedStringKey
+    let subtitle: LocalizedStringKey
+    let content: Content
+
+    init(title: LocalizedStringKey,
+         subtitle: LocalizedStringKey,
+         @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.subtitle = subtitle
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.headline)
+            content
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 30)
+        .padding(.vertical, 16)
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+    }
+}

@@ -49,14 +49,21 @@ enum Onboarding {
 }
 
 enum OnboardingStep: String, CaseIterable {
-    case welcome, permission, purpose, models, finish
+    case permission, setup, finish
+
+    // The old raw values remain decodable for an interrupted v1 wizard, but
+    // the new flow exposes only the three decisions that matter.
+    case welcome, purpose, models
+
+    static var allCases: [OnboardingStep] { [.permission, .setup, .finish] }
 
     var title: String {
         switch self {
         case .welcome: return String(localized: "Welcome")
         case .permission: return String(localized: "Permission")
-        case .purpose: return String(localized: "What for")
-        case .models: return String(localized: "Models")
+        case .setup: return String(localized: "Setup")
+        case .purpose: return String(localized: "Setup")
+        case .models: return String(localized: "Setup")
         case .finish: return String(localized: "Ready")
         }
     }

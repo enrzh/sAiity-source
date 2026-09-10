@@ -28,6 +28,9 @@ enum TestHooks {
     /// driven to it from a script.
     static var openSettings: Bool { flag("SAIITY_OPEN_SETTINGS") }
 
+    /// Render the real caption bubble with sample content without starting ASR.
+    static var preview: Bool { flag("SAIITY_PREVIEW") }
+
     /// Re-run the first-run wizard without clearing real preferences.
     static var forceOnboarding: Bool { flag("SAIITY_ONBOARDING", equals: "force") }
 

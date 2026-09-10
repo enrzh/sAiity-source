@@ -31,9 +31,12 @@ final class DictationController {
     typealias BackendFactory = () -> TranscriptionBackend
     typealias TranslationConfigurationProvider = () -> DictationTranslationConfiguration
     typealias TranslationHandler = (String, String, String) async -> String?
+    typealias DetailedTranslationHandler = (String, DictationTranscriptionResult, String) async -> String?
     typealias CleanupHandler = (String, String) async -> String?
+    typealias DetailedCleanupHandler = (DictationTranscriptionResult) async -> DictationTranscriptionResult?
     typealias WaveformHandler = @Sendable ([Float]) -> Void
     typealias WhisperTranscriptionHandler = ([[Float]], Locale) async throws -> String?
+    typealias WhisperSegmentTranscriptionHandler = ([Float], [DictationSpeechRegion], Locale) async throws -> DictationTranscriptionResult
     typealias AudioFormatFactory = () -> AVAudioFormat?
     typealias WhisperReadinessProvider = () -> Bool
 
@@ -43,14 +46,18 @@ final class DictationController {
     private let captionsActive: () -> Bool
     private let translationConfiguration: TranslationConfigurationProvider
     private let translate: TranslationHandler
+    private let detailedTranslate: DetailedTranslationHandler?
     private let onPhaseChanged: (DictationPhase) -> Void
     private let cleanupConfiguration: () -> DictationCleanupConfiguration
     private let cleanup: CleanupHandler
+    private let detailedCleanup: DetailedCleanupHandler?
     private let onWaveform: WaveformHandler
     private let dictationUsesWhisper: () -> Bool
     private let transcribeWhisper: WhisperTranscriptionHandler
+    private let transcribeWhisperSegments: WhisperSegmentTranscriptionHandler?
     private let audioFormatFactory: AudioFormatFactory
     private let whisperIsReady: WhisperReadinessProvider
+    private let segmenter: SpeechRegionSegmenter
 
     private var state = DictationSessionState()
     private var generation = 0
@@ -63,6 +70,7 @@ final class DictationController {
     private var cleanupTask: Task<Void, Never>?
     private var sessionUsesWhisper = false
     private var sessionLocale = Locale.current
+    private var sessionSampleRate = 16_000.0
     private var captureDrained = true
     private(set) var phase: DictationPhase = .idle {
         didSet {
@@ -90,14 +98,18 @@ final class DictationController {
          inserter: any DictationTextInsertion,
          captionsActive: @escaping () -> Bool,
          translationConfiguration: @escaping TranslationConfigurationProvider = { .disabled },
-        translate: @escaping TranslationHandler = { _, _, _ in nil },
+         translate: @escaping TranslationHandler = { _, _, _ in nil },
+         detailedTranslate: DetailedTranslationHandler? = nil,
          cleanupConfiguration: @escaping () -> DictationCleanupConfiguration = { .disabled },
          cleanup: @escaping CleanupHandler = { _, _ in nil },
+         detailedCleanup: DetailedCleanupHandler? = nil,
          onWaveform: @escaping WaveformHandler = { _ in },
          dictationUsesWhisper: @escaping () -> Bool = { false },
          transcribeWhisper: @escaping WhisperTranscriptionHandler = { _, _ in nil },
+         transcribeWhisperSegments: WhisperSegmentTranscriptionHandler? = nil,
          audioFormatFactory: @escaping AudioFormatFactory = { AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1) },
          whisperIsReady: @escaping WhisperReadinessProvider = { true },
+         segmenter: SpeechRegionSegmenter = .default,
          onPhaseChanged: @escaping (DictationPhase) -> Void = { _ in }) {
         self.backendProvider = SingleBackendProvider(makeBackend: makeBackend)
         self.capture = capture
@@ -105,13 +117,17 @@ final class DictationController {
         self.captionsActive = captionsActive
         self.translationConfiguration = translationConfiguration
         self.translate = translate
+        self.detailedTranslate = detailedTranslate
         self.cleanupConfiguration = cleanupConfiguration
         self.cleanup = cleanup
+        self.detailedCleanup = detailedCleanup
         self.onWaveform = onWaveform
         self.dictationUsesWhisper = dictationUsesWhisper
         self.transcribeWhisper = transcribeWhisper
+        self.transcribeWhisperSegments = transcribeWhisperSegments
         self.audioFormatFactory = audioFormatFactory
         self.whisperIsReady = whisperIsReady
+        self.segmenter = segmenter
         self.onPhaseChanged = onPhaseChanged
     }
 
@@ -120,14 +136,18 @@ final class DictationController {
          inserter: any DictationTextInsertion,
          captionsActive: @escaping () -> Bool,
          translationConfiguration: @escaping TranslationConfigurationProvider = { .disabled },
-        translate: @escaping TranslationHandler = { _, _, _ in nil },
+         translate: @escaping TranslationHandler = { _, _, _ in nil },
+         detailedTranslate: DetailedTranslationHandler? = nil,
          cleanupConfiguration: @escaping () -> DictationCleanupConfiguration = { .disabled },
          cleanup: @escaping CleanupHandler = { _, _ in nil },
+         detailedCleanup: DetailedCleanupHandler? = nil,
          onWaveform: @escaping WaveformHandler = { _ in },
          dictationUsesWhisper: @escaping () -> Bool = { false },
          transcribeWhisper: @escaping WhisperTranscriptionHandler = { _, _ in nil },
+         transcribeWhisperSegments: WhisperSegmentTranscriptionHandler? = nil,
          audioFormatFactory: @escaping AudioFormatFactory = { AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1) },
          whisperIsReady: @escaping WhisperReadinessProvider = { true },
+         segmenter: SpeechRegionSegmenter = .default,
          onPhaseChanged: @escaping (DictationPhase) -> Void = { _ in }) {
         self.backendProvider = backendProvider
         self.capture = capture
@@ -135,13 +155,17 @@ final class DictationController {
         self.captionsActive = captionsActive
         self.translationConfiguration = translationConfiguration
         self.translate = translate
+        self.detailedTranslate = detailedTranslate
         self.cleanupConfiguration = cleanupConfiguration
         self.cleanup = cleanup
+        self.detailedCleanup = detailedCleanup
         self.onWaveform = onWaveform
         self.dictationUsesWhisper = dictationUsesWhisper
         self.transcribeWhisper = transcribeWhisper
+        self.transcribeWhisperSegments = transcribeWhisperSegments
         self.audioFormatFactory = audioFormatFactory
         self.whisperIsReady = whisperIsReady
+        self.segmenter = segmenter
         self.onPhaseChanged = onPhaseChanged
     }
 
@@ -326,6 +350,7 @@ final class DictationController {
                 guard let format = audioFormatFactory() else {
                     throw BackendError.notPrepared
                 }
+                sessionSampleRate = format.sampleRate
                 capture.setLimitHandler { [weak self] in
                     Task { @MainActor in self?.limit(session: session) }
                 }
@@ -348,14 +373,19 @@ final class DictationController {
             guard let format = await acquired.inputFormat else {
                 throw BackendError.notPrepared
             }
-            try await acquired.start { _ in }
-            try Task.checkCancellation()
+            sessionSampleRate = format.sampleRate
+            let deferred = acquired is any DictationSegmentTranscriber
+            if !deferred {
+                try await acquired.start { _ in }
+                try Task.checkCancellation()
+            }
             guard session == generation else { return }
             capture.setLimitHandler { [weak self] in
                 Task { @MainActor in self?.limit(session: session) }
             }
             capture.setWaveformHandler(onWaveform)
             try capture.start(targetFormat: format) { [weak acquired] buffer in
+                guard !deferred else { return }
                 acquired?.feed(buffer)
             }
             guard session == generation else {
@@ -381,6 +411,19 @@ final class DictationController {
         let samples = drainCapture()
         if sessionUsesWhisper {
             do {
+                if let transcribeWhisperSegments,
+                   sessionLocale.identifier == "auto" {
+                    let regions = segmenter.segment(samples, sampleRate: sessionSampleRate)
+                    guard session == generation, !Task.isCancelled else { return }
+                    let transcription = try await transcribeWhisperSegments(samples,
+                                                                              regions,
+                                                                              sessionLocale)
+                    guard session == generation else { return }
+                    await finish(transcription: transcription,
+                                 session: session,
+                                 fallbackSourceLanguage: Locale.current.identifier(.bcp47))
+                    return
+                }
                 let whisperSamples = samples.isEmpty ? [] : [samples]
                 guard session == generation, !Task.isCancelled else { return }
                 let authoritative = try await transcribeWhisper(whisperSamples, sessionLocale)
@@ -398,6 +441,28 @@ final class DictationController {
             if phase == .transcribing { phase = .idle }
             return
         }
+        if let segmented = backend as? any DictationSegmentTranscriber {
+            do {
+                let regions = segmenter.segment(samples, sampleRate: sessionSampleRate)
+                guard session == generation, !Task.isCancelled else { return }
+                let transcription = try await segmented.transcribeDictation(samples: samples,
+                                                                              regions: regions)
+                await backendProvider.release(backend, discard: false)
+                self.backend = nil
+                guard session == generation else { return }
+                await finish(transcription: transcription,
+                             session: session,
+                             fallbackSourceLanguage: Locale.current.identifier(.bcp47))
+            } catch is CancellationError {
+                await backendProvider.release(backend, discard: true)
+            } catch {
+                await backendProvider.release(backend, discard: true)
+                self.backend = nil
+                guard session == generation else { return }
+                phase = .failure(error.localizedDescription)
+            }
+            return
+        }
         let sourceLanguage = await backend.detectedLanguage()
             ?? Locale.current.identifier(.bcp47)
         let authoritative = await backend.finishDictation()
@@ -409,23 +474,53 @@ final class DictationController {
     }
 
     private func finish(authoritative: String?, session: Int, sourceLanguage: String) async {
+        let transcription = DictationTranscriptionResult(text: authoritative ?? "",
+                                                          language: sourceLanguage)
+        await finish(transcription: transcription,
+                     session: session,
+                     fallbackSourceLanguage: sourceLanguage)
+    }
+
+    private func finish(transcription: DictationTranscriptionResult,
+                        session: Int,
+                        fallbackSourceLanguage: String) async {
         guard session == generation else { return }
-        let authoritativeText = authoritative?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let text = authoritativeText.flatMap({ $0.isEmpty ? nil : $0 }) else {
+        let authoritativeText = transcription.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !authoritativeText.isEmpty else {
             phase = .result(String(localized: "No speech detected"))
             return
         }
+        let text = authoritativeText
         let configuration = translationConfiguration()
+        let metadata = transcription.languageMetadata
+        let sourceLanguage = metadata.dominantLanguage ?? fallbackSourceLanguage
         var output = text
+        var transcriptionForTranslation = transcription
         var cleaned = false
         var translated = false
         var translationFailed = false
         if cleanupConfiguration().enabled {
             phase = .cleaning
-            if let value = await cleanup(text, sourceLanguage),
+            let value: String?
+            if let detailedCleanup {
+                if let candidate = await detailedCleanup(transcription),
+                   let valid = DictationCleanupValidator.validate(candidate.text,
+                                                                  preserving: text,
+                                                                  sourceLanguage: sourceLanguage,
+                                                                  languageMetadata: metadata) {
+                    output = valid
+                    transcriptionForTranslation = candidate
+                    cleaned = true
+                }
+                value = nil
+            } else {
+                value = await cleanup(text, sourceLanguage)
+            }
+            if !cleaned, let value,
                let valid = DictationCleanupValidator.validate(value,
                                                               preserving: text,
-                                                              sourceLanguage: sourceLanguage) {
+                                                              sourceLanguage: sourceLanguage,
+                                                              languageMetadata: metadata) {
                 output = valid
                 cleaned = true
             }
@@ -434,7 +529,13 @@ final class DictationController {
            let target = configuration.target?.trimmingCharacters(in: .whitespacesAndNewlines),
            !target.isEmpty {
             phase = .translating
-            if let value = await translate(output, sourceLanguage, target) {
+            let value: String?
+            if let detailedTranslate {
+                value = await detailedTranslate(output, transcriptionForTranslation, target)
+            } else {
+                value = await translate(output, sourceLanguage, target)
+            }
+            if let value {
                 let translatedText = value.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !translatedText.isEmpty {
                     output = translatedText

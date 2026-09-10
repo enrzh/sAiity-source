@@ -116,6 +116,15 @@ protocol TranscriptionBackend: AnyObject, Sendable {
     func detectedLanguage() async -> String?
 }
 
+/// Optional capability for deferred press-to-talk decoding. Live caption
+/// backends do not need to implement this; dictation uses it when available so
+/// the complete recording can be segmented and each region can start with
+/// clean recogniser state.
+protocol DictationSegmentTranscriber: AnyObject, Sendable {
+    func transcribeDictation(samples: [Float],
+                             regions: [DictationSpeechRegion]) async throws -> DictationTranscriptionResult
+}
+
 extension TranscriptionBackend {
     func flushPending() async {}
     func finishDictation() async -> String? {

@@ -17,6 +17,7 @@ struct TranslationTargetPicker: View {
     @Bindable var state: AppState
     @Binding var target: String?
     let title: LocalizedStringKey
+    let scope: TranslationEngineScope
     @Environment(\.dismiss) private var dismiss
 
     @State private var query = ""
@@ -40,19 +41,32 @@ struct TranslationTargetPicker: View {
     /// With no translator chosen the sheet still has to list something, so it
     /// previews the recommended one and says so in the subtitle — an empty list
     /// would leave the user with no way to understand why.
-    private var engine: TranslationEngine { state.translationEngine ?? .recommended }
+    private var configuredEngine: TranslationEngine? {
+        switch scope {
+        case .captions: return state.translationEngine
+        case .dictation: return state.dictationTranslationEngine
+        }
+    }
+    private var engine: TranslationEngine {
+        configuredEngine
+            ?? (scope == .dictation ? TranslationEngine.selected : nil)
+            ?? .recommended
+    }
 
     init(state: AppState,
          target: Binding<String?>,
-         title: LocalizedStringKey = "Translate captions to") {
+         title: LocalizedStringKey = "Translate captions to",
+         scope: TranslationEngineScope = .captions) {
         self.state = state
         self._target = target
         self.title = title
+        self.scope = scope
     }
 
     var body: some View {
         SheetShell(title: title,
-                   subtitle: state.translationEngine == nil
+                   subtitle: configuredEngine == nil
+                       && !(scope == .dictation && TranslationEngine.selected != nil)
                        ? "\(engine.displayName) — recommended, not chosen yet"
                        : "Using \(engine.displayName)",
                    width: 500, height: 560,
@@ -87,7 +101,7 @@ struct TranslationTargetPicker: View {
         }
         // The task identity cancels stale work when the engine changes. The
         // capability lookup itself is synchronous static metadata.
-        .task(id: engine) { loadSupported() }
+        .task(id: "\(scope)|\(engine.rawValue)") { loadSupported() }
     }
 
     private var list: some View {
@@ -148,6 +162,7 @@ struct TranslationTargetPicker: View {
             Text(lang.displayName).foregroundStyle(.secondary)
             Spacer()
             AlternativeEngines(state: state, target: $target, language: lang,
+                               scope: scope,
                                dismiss: { dismiss() })
         }
         .padding(.vertical, 1)
@@ -200,9 +215,17 @@ private struct AlternativeEngines: View {
     @Bindable var state: AppState
     @Binding var target: String?
     let language: AppLanguage
+    let scope: TranslationEngineScope
     let dismiss: () -> Void
 
     @State private var engines: [TranslationEngine] = []
+
+    private var configuredEngine: TranslationEngine? {
+        switch scope {
+        case .captions: return state.translationEngine
+        case .dictation: return state.dictationTranslationEngine
+        }
+    }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -210,7 +233,10 @@ private struct AlternativeEngines: View {
                 Button("Use \(e.displayName)") {
                     // Set both at once: switching the engine and then hunting
                     // for the language again is the failure this replaces.
-                    state.translationEngine = e
+                    switch scope {
+                    case .captions: state.translationEngine = e
+                    case .dictation: state.dictationTranslationEngine = e
+                    }
                     target = language.code
                     dismiss()
                 }
@@ -219,7 +245,7 @@ private struct AlternativeEngines: View {
         }
         .task {
             engines = await LanguageCatalog.engines(supporting: language.code)
-                .filter { $0 != state.translationEngine }
+                .filter { $0 != configuredEngine }
         }
     }
 }

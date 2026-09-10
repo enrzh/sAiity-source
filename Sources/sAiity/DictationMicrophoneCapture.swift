@@ -73,7 +73,8 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
         self.converter = converter
         lock.withLock {
             sampleCount = 0
-            convertedSamples = []
+            convertedSamples.removeAll(keepingCapacity: true)
+            convertedSamples.reserveCapacity(DictationAudioSampleLimit.maximumSamples)
             didEmitLimit = false
             waveformFrameCounter = 0
         }
@@ -204,7 +205,7 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
     func takeCollectedSamples() -> [Float] {
         lock.withLock {
             let samples = convertedSamples
-            convertedSamples.removeAll(keepingCapacity: false)
+            convertedSamples.removeAll(keepingCapacity: true)
             return samples
         }
     }
@@ -214,7 +215,8 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
         lock.withLock {
             _ = lifecycle.start()
             sampleCount = 0
-            convertedSamples.removeAll()
+            convertedSamples.removeAll(keepingCapacity: true)
+            convertedSamples.reserveCapacity(DictationAudioSampleLimit.maximumSamples)
             didEmitLimit = false
             waveformFrameCounter = 0
         }

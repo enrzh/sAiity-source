@@ -10,7 +10,7 @@ import SwiftUI
 @MainActor
 @Observable
 final class OnboardingModel {
-    var step: OnboardingStep = .welcome
+    var step: OnboardingStep = .permission
     var permissionGranted = false
     var checkingPermission = false
     var askedOnce = false
@@ -42,9 +42,7 @@ final class OnboardingModel {
     }
 
     var purpose: Purpose = .anyLanguage
-    var wantsTranslation = false
     var wantsAutoUpdates = false
-    var target = "en"
 
     /// Which way the last step change went, so the transition can match it.
     var goingBack = false
@@ -57,7 +55,11 @@ final class OnboardingModel {
     init(state: AppState) {
         self.state = state
         if let resume = Onboarding.resumeStep {
-            step = resume
+            switch resume {
+            case .purpose, .models: step = .setup
+            case .welcome: step = .permission
+            default: step = resume
+            }
             Onboarding.resumeStep = nil
         }
     }
@@ -73,15 +75,6 @@ final class OnboardingModel {
     func apply() {
         ASREngine.selected = purpose.engine
         state.engine = purpose.engine
-        if wantsTranslation {
-            state.translateTo = target
-            // The wizard names MADLAD and offers its download, so it is also the
-            // thing that should record the choice — otherwise the user finishes
-            // setup with a translation target and no translator selected.
-            state.translationEngine = .recommended
-        } else {
-            state.translateTo = nil
-        }
     }
 
     /// The asset onboarding offers to download: the engine's currently-selected
@@ -97,18 +90,10 @@ final class OnboardingModel {
             ?? all[0]
     }
 
-    /// Everything this run should offer to download, in the order it is offered.
-    ///
-    /// The purpose step promises, in so many words, that the translation model
-    /// is "listed on the next screen alongside the recognition model" — and it
-    /// was not. The 1.86 GB then arrived mid-session on the first Start, after
-    /// the recognition download, with audio capture already live.
+    /// First-run keeps the download decision to recognition. Translation is an
+    /// optional follow-up in Settings, so setup stays quick and predictable.
     var assetsToOffer: [ModelAsset] {
-        var out = [recognitionAsset]
-        if wantsTranslation {
-            out += TranslationEngine.recommended.assetDescriptors
-        }
-        return out
+        [recognitionAsset]
     }
 }
 
@@ -165,42 +150,14 @@ struct OnboardingView: View {
     @ViewBuilder
     private var content: some View {
         switch model.step {
-        case .welcome: welcome
         case .permission: permission
-        case .purpose: purpose
-        case .models: models
+        case .setup: setup
+        case .welcome, .purpose, .models: setup
         case .finish: finish
         }
     }
 
     // MARK: - Steps
-
-    private var welcome: some View {
-        VStack(spacing: 20) {
-            // The real app icon, not a glyph: this is the first thing a new
-            // user sees, and it should look like the thing they installed.
-            // No added shadow — the icon carries its own depth, and painting
-            // more under it is exactly the decoration this window shed.
-            Image(nsImage: NSApp.applicationIconImage)
-                .resizable().frame(width: 100, height: 100)
-            VStack(spacing: 6) {
-                Text("sAiity").font(.system(size: 34, weight: .bold))
-                Text("Live subtitles for anything your Mac is playing.")
-                    .font(.title3).foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            // Plain bullets on the plain window — the way Apple's own
-            // feature panels do it. The material card with its hairline
-            // stroke was chrome describing nothing.
-            VStack(alignment: .leading, spacing: 14) {
-                bullet("microphone.slash", "It captures the audio your Mac plays — the microphone stays off unless you later opt in under Settings → Captions.")
-                bullet("lock", "Everything runs on this Mac. No audio ever leaves it.")
-                bullet("arrow.down.circle", "That means a one-time model download — you choose which.")
-            }
-            .frame(maxWidth: 440)
-            .padding(.top, 12)
-        }
-    }
 
     /// The setup-assistant header every step past the welcome shares: symbol
     /// over title over subtitle, centred — the grammar Apple's own assistants
@@ -284,11 +241,11 @@ struct OnboardingView: View {
         }
     }
 
-    private var purpose: some View {
+    private var setup: some View {
         VStack(alignment: .leading, spacing: 14) {
             header("waveform",
-                   "What will you caption?",
-                   "This only picks a starting model. You can change it any time in Settings.")
+                   "Choose a recognition model",
+                   "Pick the language coverage you need. You can change it later in Settings.")
 
             ForEach(OnboardingModel.Purpose.allCases, id: \.self) { p in
                 choice(title: p.title, detail: p.detail, selected: model.purpose == p) {
@@ -297,35 +254,6 @@ struct OnboardingView: View {
             }
 
             Divider().padding(.vertical, 4)
-            Toggle("Also show a translation under each caption", isOn: $model.wantsTranslation)
-            // Unconditional: with the description only visible when the toggle
-            // was on, the OFF state gave no hint of what saying yes would cost.
-            Text("A second line under the captions, in a language you choose. Runs on this Mac like everything else.")
-                .font(.caption).foregroundStyle(.secondary)
-            if model.wantsTranslation {
-                // Say the cost before they commit. Translation used to lean on
-                // macOS's built-in translator, which needed nothing from us;
-                // now every option is a model we download, so an unqualified
-                // "yes" here would be a 1.86 GB surprise on the next screen.
-                Text("Translation runs on this Mac too, so it needs a model of its own — MADLAD, 1.86 GB, covering about 450 languages. It is listed on the next screen alongside the recognition model.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-        }
-    }
-
-    private var models: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            // At most two: the recognition model, plus MADLAD when translation
-            // was asked for. Saying "one" while showing two was the small
-            // version of the same dishonesty as promising a row and not
-            // rendering it.
-            header("arrow.down.circle",
-                   model.assetsToOffer.count > 1
-                       ? "Two downloads and you are set"
-                       : "One download and you are set",
-                   "Recognition always needs a model on this Mac — that is the price of not sending your audio to a server.")
-
             ForEach(model.assetsToOffer) { asset in
                 let status = ModelRegistry.status(of: asset)
                 HStack(alignment: .top) {
@@ -335,23 +263,18 @@ struct OnboardingView: View {
                     }
                     Spacer(minLength: 12)
                     if status.isInstalled {
-                        // Onboarding says Ready rather than offering Delete — the
-                        // one place the shared control's installed state is wrong.
                         Label("Ready", systemImage: "checkmark.circle.fill")
                             .foregroundStyle(.green).font(.callout)
                     } else {
                         AssetControl(state: model.state, status: status, prominent: true)
                     }
                 }
-                .padding(12)
+                .padding(10)
                 .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
             }
-
             if let e = model.state.modelError {
                 Text(e).font(.caption).foregroundStyle(.red)
             }
-            Text("You can skip this and let it download the first time you start captions — it just means waiting then instead of now.")
-                .font(.caption).foregroundStyle(.secondary)
             Spacer()
         }
         .task { model.state.refreshModels() }
@@ -448,7 +371,7 @@ struct OnboardingView: View {
         let steps = OnboardingStep.allCases
         guard let i = steps.firstIndex(of: model.step) else { return }
         model.goingBack = false
-        if model.step == .purpose { model.apply() }
+        if model.step == .setup { model.apply() }
         if model.step == .finish {
             // Sparkle reads this defaults key itself; no updater API needed.
             UserDefaults.standard.set(model.wantsAutoUpdates, forKey: "SUEnableAutomaticChecks")

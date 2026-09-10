@@ -130,6 +130,31 @@ import Testing
         #expect(defaults.bool(forKey: "translateDictation") == false)
     }
 
+    @Test("dictation translation engine can be selected independently")
+    func dictationTranslationEngineIsIndependent() {
+        let defaults = UserDefaults.standard
+        let keys = ["translationEngine", "dictationTranslationEngine"]
+        let snapshot = keys.map { ($0, defaults.object(forKey: $0)) }
+        defer {
+            snapshot.forEach { key, value in
+                if let value { defaults.set(value, forKey: key) }
+                else { defaults.removeObject(forKey: key) }
+            }
+        }
+
+        defaults.set(TranslationEngine.madlad.rawValue, forKey: "translationEngine")
+        defaults.removeObject(forKey: "dictationTranslationEngine")
+        let state = AppState()
+        #expect(state.dictationTranslationEngine == nil)
+        #expect(TranslationEngine.dictationEffective == .madlad)
+
+        state.dictationTranslationEngine = .hyMT2
+        #expect(defaults.string(forKey: "dictationTranslationEngine") == TranslationEngine.hyMT2.rawValue)
+        state.translationEngine = .qwen
+        #expect(state.dictationTranslationEngine == .hyMT2)
+        #expect(TranslationEngine.dictationEffective == .hyMT2)
+    }
+
     @Test("first dictation target initialization inherits captions once, including Off")
     func dictationTargetMigratesOnce() {
         let defaults = UserDefaults.standard
@@ -193,20 +218,19 @@ import Testing
         SettingsWindowController.showDictationTranslationPicker()
         defer {
             NSApp.windows
-                .first(where: { $0.contentViewController is NSTabViewController })?
+                .first(where: { $0.title == "sAiity" })?
                 .close()
             SettingsWindowController.state.showDictationTranslationPicker = false
         }
 
-        guard let window = NSApp.windows.first(where: {
-            $0.contentViewController is NSTabViewController
-        }), let tabs = window.contentViewController as? NSTabViewController else {
+        guard let window = NSApp.windows.first(where: { $0.title == "sAiity" }) else {
             Issue.record("settings window was not created")
             return
         }
 
         #expect(SettingsWindowController.state.showDictationTranslationPicker)
-        #expect(tabs.selectedTabViewItemIndex == 1)
+        #expect(SettingsWindowController.selectedPane == .dictation)
+        #expect(window.contentViewController != nil)
     }
 
     @Test("recognition deletion releases dictation's fallback backend")
@@ -246,36 +270,24 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: directory.path))
     }
 
-    @Test("settings uses preference toolbar chrome with visible labels")
-    func toolbarUsesPreferenceChrome() {
+    @Test("settings uses the navigation shell")
+    func settingsUsesNavigationShell() {
         SettingsWindowController.show()
         defer {
             NSApp.windows
-                .first(where: { $0.contentViewController is NSTabViewController })?
+                .first(where: { $0.title == "sAiity" })?
                 .close()
         }
 
-        guard let window = NSApp.windows.first(where: {
-            $0.contentViewController is NSTabViewController
-        }) else {
+        guard let window = NSApp.windows.first(where: { $0.title == "sAiity" }) else {
             Issue.record("settings window was not created")
             return
         }
 
-        #expect(window.toolbarStyle == .preference)
+        #expect(SettingsWindowController.selectedPane == .dictation || SettingsWindowController.selectedPane == .captions)
         #expect(window.titlebarAppearsTransparent == false)
-        #expect(window.toolbar?.displayMode == .iconAndLabel)
-        #expect(window.toolbar?.allowsDisplayModeCustomization == false)
-
-        func descendants(of view: NSView) -> [NSView] {
-            view.subviews + view.subviews.flatMap(descendants)
-        }
-        let backdrop = window.contentView?.superview.map(descendants(of:))?
-            .compactMap { $0 as? SettingsWindowToolbarBackdrop }
-            .first
-        #expect(backdrop != nil)
-        #expect(backdrop?.isOpaque == true)
-        #expect(backdrop?.hitTest(NSPoint(x: 1, y: 1)) == nil)
-        #expect(backdrop?.layer?.backgroundColor != nil)
+        #expect(window.contentViewController != nil)
+        #expect(window.contentView?.bounds.width ?? 0 >= 900)
+        #expect(window.contentView?.bounds.height ?? 0 >= 600)
     }
 }

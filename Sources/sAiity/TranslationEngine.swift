@@ -16,6 +16,25 @@ protocol Translating: AnyObject, Sendable {
     func stop() async
 }
 
+/// Native MLX/llama calls are not safe to overlap, even when they belong to
+/// different Swift tasks. Keep one FIFO gate for every translation operation so
+/// a live caption cannot enter while dictation is loading or decoding.
+actor TranslationInferenceGate {
+    private var tail: Task<Void, Never>?
+
+    func run<T: Sendable>(_ operation: @escaping @Sendable () async throws -> T) async throws -> T {
+        let previous = tail
+        let current = Task { () throws -> T in
+            await previous?.value
+            return try await operation()
+        }
+        tail = Task {
+            _ = try? await current.value
+        }
+        return try await current.value
+    }
+}
+
 /// When translation happens.
 ///
 /// Whole sentences is the default and the quality choice: the translator is
@@ -60,6 +79,11 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
     /// never downloaded it and had translation switched off.
     @Defaults(optionalRawKey: "translationEngine") static var selected: TranslationEngine?
 
+    /// Dictation can use a different local model than captions. Keep this
+    /// optional so existing installations continue following their captions
+    /// choice until a dedicated dictation engine is selected.
+    @Defaults(optionalRawKey: "dictationTranslationEngine") static var dictationSelected: TranslationEngine?
+
     /// Suggested when nothing is chosen: the measured fast path and the broad
     /// coverage default. Specialist and generic alternatives stay opt-in.
     static let recommended: TranslationEngine = .madlad
@@ -67,6 +91,11 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
     /// The translator to build once one is needed. Guarded by `selected` at the
     /// point translation is switched on.
     static var effective: TranslationEngine { selected ?? recommended }
+
+    /// Preserve existing behavior when no dedicated dictation choice exists.
+    static var dictationEffective: TranslationEngine {
+        dictationSelected ?? selected ?? recommended
+    }
 
     var displayName: String {
         switch self {

@@ -230,7 +230,8 @@ enum DictationCleanupValidator {
 
     static func validate(_ value: String,
                          preserving input: String? = nil,
-                         sourceLanguage: String? = nil) -> String? {
+                         sourceLanguage: String? = nil,
+                         languageMetadata: DictationLanguageMetadata? = nil) -> String? {
         var text = value.trimmingCharacters(in: .whitespacesAndNewlines.union(.controlCharacters))
         guard !text.isEmpty, !text.contains("```") else { return nil }
         if let input, !isWrappedInQuotes(input), isWrappedInQuotes(text) {
@@ -257,7 +258,10 @@ enum DictationCleanupValidator {
             guard protectedTokens(in: input).allSatisfy({ text.range(of: $0, options: .caseInsensitive) != nil }) else {
                 return nil
             }
-            guard languageWasPreserved(input: input, output: text, sourceLanguage: sourceLanguage) else {
+            guard languageWasPreserved(input: input,
+                                       output: text,
+                                       sourceLanguage: sourceLanguage,
+                                       languageMetadata: languageMetadata) else {
                 return nil
             }
         }
@@ -271,7 +275,13 @@ enum DictationCleanupValidator {
     /// preserve languages outside NaturalLanguage's supported set too.
     private static func languageWasPreserved(input: String,
                                              output: String,
-                                             sourceLanguage: String?) -> Bool {
+                                             sourceLanguage: String?,
+                                             languageMetadata: DictationLanguageMetadata? = nil) -> Bool {
+        if let languageMetadata, languageMetadata.containsMultipleLanguages {
+            return mixedLanguageWasPreserved(input: input,
+                                             output: output,
+                                             metadata: languageMetadata)
+        }
         // ASR language metadata can be stale after a model has been reused for
         // several sessions. The transcript itself is the safer comparison;
         // metadata is intentionally not authoritative here.
@@ -296,6 +306,35 @@ enum DictationCleanupValidator {
         if let inputScript = scriptFamily(in: input),
            let outputScript = scriptFamily(in: output) {
             return inputScript == outputScript
+        }
+        return true
+    }
+
+    private static func mixedLanguageWasPreserved(input: String,
+                                                  output: String,
+                                                  metadata: DictationLanguageMetadata) -> Bool {
+        // A cleanup may remove a filler, but it must not erase every useful
+        // token from one of the intentionally spoken spans. This catches a
+        // translated German-English result even when both languages share the
+        // Latin script and NaturalLanguage reports only one dominant language.
+        for region in metadata.regionTexts {
+            let tokens = words(in: region).filter { $0.count >= 2 }
+            guard !tokens.isEmpty else { continue }
+            let retained = tokens.contains { token in
+                output.range(of: token,
+                             options: [.caseInsensitive, .diacriticInsensitive]) != nil
+            }
+            guard retained else { return false }
+        }
+
+        // Script changes are stronger evidence than a text classifier. Require
+        // every meaningful source script to remain represented in the result.
+        let inputScripts = metadata.regionTexts.reduce(into: Set<ScriptFamily>()) {
+            $0.formUnion(scriptFamilies(in: $1))
+        }
+        let outputScripts = scriptFamilies(in: output)
+        guard inputScripts.isEmpty || inputScripts.isSubset(of: outputScripts) else {
+            return false
         }
         return true
     }
@@ -338,6 +377,40 @@ enum DictationCleanupValidator {
             }
         }
         return nil
+    }
+
+    private static func scriptFamilies(in text: String) -> Set<ScriptFamily> {
+        var result = Set<ScriptFamily>()
+        for scalar in text.unicodeScalars {
+            let value = scalar.value
+            switch value {
+            case 0x0041...0x024F, 0x1E00...0x1EFF: result.insert(.latin)
+            case 0x0370...0x03FF, 0x1F00...0x1FFF: result.insert(.greek)
+            case 0x0400...0x052F: result.insert(.cyrillic)
+            case 0x0530...0x058F: result.insert(.armenian)
+            case 0x10A0...0x10FF, 0x2D00...0x2D2F: result.insert(.georgian)
+            case 0x0590...0x05FF: result.insert(.hebrew)
+            case 0x0600...0x06FF, 0x0750...0x077F, 0x08A0...0x08FF: result.insert(.arabic)
+            case 0x0900...0x097F: result.insert(.devanagari)
+            case 0x0980...0x09FF: result.insert(.bengali)
+            case 0x0A00...0x0A7F: result.insert(.gurmukhi)
+            case 0x0A80...0x0AFF: result.insert(.gujarati)
+            case 0x0B80...0x0BFF: result.insert(.tamil)
+            case 0x0C00...0x0C7F: result.insert(.telugu)
+            case 0x0C80...0x0CFF: result.insert(.kannada)
+            case 0x0D00...0x0D7F: result.insert(.malayalam)
+            case 0x0E00...0x0E7F: result.insert(.thai)
+            case 0x0E80...0x0EFF: result.insert(.lao)
+            case 0x1000...0x109F, 0xAA60...0xAA7F: result.insert(.myanmar)
+            case 0x1200...0x137F, 0x1380...0x139F: result.insert(.ethiopic)
+            case 0x1780...0x17FF: result.insert(.khmer)
+            case 0x1100...0x11FF, 0xAC00...0xD7AF: result.insert(.hangul)
+            case 0x3040...0x309F, 0x30A0...0x30FF, 0x31F0...0x31FF: result.insert(.japaneseKana)
+            case 0x3400...0x4DBF, 0x4E00...0x9FFF, 0xF900...0xFAFF: result.insert(.han)
+            default: continue
+            }
+        }
+        return result
     }
 
     private static func detectedLanguage(in text: String) -> String? {

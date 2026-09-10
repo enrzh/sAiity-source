@@ -112,6 +112,43 @@ import Testing
         func detectedLanguage() async -> String? { detectedLanguageResult }
     }
 
+    final class FakeSegmentedBackend: TranscriptionBackend, DictationSegmentTranscriber, @unchecked Sendable {
+        let log: EventLog
+        let format = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1)!
+        let name = "Segmented test backend"
+        var starts = 0
+        var prepares = 0
+        var receivedSamples: [Float] = []
+        var receivedRegions: [DictationSpeechRegion] = []
+        var result = DictationTranscriptionResult(regions: [])
+        var transcriptionStarted = false
+        var blockTranscription = false
+
+        init(log: EventLog) { self.log = log }
+
+        var inputFormat: AVAudioFormat? { get async { format } }
+        func prepare(locale: Locale, progress: @escaping @Sendable (String) -> Void) async throws {
+            prepares += 1
+        }
+        func start(onChunk: @escaping @Sendable (TranscriptChunk) -> Void) async throws {
+            starts += 1
+        }
+        func feed(_ buffer: AVAudioPCMBuffer) {}
+        func stop() async {}
+        func release() async {}
+        func transcribeDictation(samples: [Float],
+                                 regions: [DictationSpeechRegion]) async throws -> DictationTranscriptionResult {
+            receivedSamples = samples
+            receivedRegions = regions
+            transcriptionStarted = true
+            if blockTranscription {
+                try await Task.sleep(nanoseconds: 60_000_000_000)
+            }
+            return result
+        }
+        func detectedLanguage() async -> String? { nil }
+    }
+
     final class FakeInserter: DictationTextInsertion {
         var inserted: [String] = []
 
@@ -453,6 +490,92 @@ import Testing
         await controller.waitForWorkForTests()
 
         #expect(inserter.inserted == [input])
+    }
+
+    @Test("deferred segmented dictation keeps the backend idle until release")
+    func deferredSegmentedBackendTranscribesOnRelease() async {
+        let backend = FakeSegmentedBackend(log: EventLog())
+        backend.result = DictationTranscriptionResult(regions: [
+            DictationRegionTranscript(text: "Ich denke", language: "de"),
+            DictationRegionTranscript(text: "we should ship", language: "en"),
+        ])
+        let capture = FakeCapture(log: EventLog())
+        capture.samples = [0.4, 0.4, 0.4]
+        let inserter = FakeInserter()
+        let controller = DictationController(
+            makeBackend: { backend },
+            capture: capture,
+            inserter: inserter,
+            captionsActive: { false })
+
+        controller.press()
+        await controller.waitForWorkForTests()
+        #expect(backend.starts == 0)
+        #expect(backend.prepares == 1)
+
+        controller.release()
+        await controller.waitForWorkForTests()
+
+        #expect(backend.transcriptionStarted)
+        #expect(backend.receivedSamples == [0.4, 0.4, 0.4])
+        #expect(backend.receivedRegions.count == 1)
+        #expect(inserter.inserted == ["Ich denke we should ship"])
+    }
+
+    @Test("controller cancellation during segmented transcription drops the result")
+    func cancellationDuringControllerSegmentation() async {
+        let backend = FakeSegmentedBackend(log: EventLog())
+        backend.blockTranscription = true
+        let capture = FakeCapture(log: EventLog())
+        capture.samples = [0.4, 0.4]
+        let inserter = FakeInserter()
+        let controller = DictationController(
+            makeBackend: { backend },
+            capture: capture,
+            inserter: inserter,
+            captionsActive: { false })
+
+        controller.press()
+        await controller.waitForWorkForTests()
+        controller.release()
+        for _ in 0..<100 where !backend.transcriptionStarted { await Task.yield() }
+        controller.cancel()
+        await controller.waitForWorkForTests()
+
+        #expect(inserter.inserted.isEmpty)
+        #expect(!controller.isActive)
+    }
+
+    @Test("cleaned mixed regions are the source of independent translation")
+    func cleanedRegionsReachMixedTranslation() async {
+        let backend = FakeBackend(log: EventLog())
+        backend.authoritativeResult = "Ich denke we should ship"
+        let inserter = FakeInserter()
+        var translatedRegions: [[String]] = []
+        let cleaned = DictationTranscriptionResult(regions: [
+            DictationRegionTranscript(text: "Ich denke", language: "de"),
+            DictationRegionTranscript(text: "we should ship today", language: "en"),
+        ])
+        let controller = DictationController(
+            makeBackend: { backend },
+            capture: FakeCapture(log: EventLog()),
+            inserter: inserter,
+            captionsActive: { false },
+            translationConfiguration: { DictationTranslationConfiguration(enabled: true, target: "de") },
+            detailedTranslate: { _, transcription, _ in
+                translatedRegions.append(transcription.regions.map(\.text))
+                return "Ich denke wir sollten heute versenden"
+            },
+            cleanupConfiguration: { DictationCleanupConfiguration(enabled: true) },
+            detailedCleanup: { _ in cleaned })
+
+        controller.press()
+        await controller.waitForWorkForTests()
+        controller.release()
+        await controller.waitForWorkForTests()
+
+        #expect(translatedRegions == [["Ich denke", "we should ship today"]])
+        #expect(inserter.inserted == ["Ich denke wir sollten heute versenden"])
     }
 
     @Test("cancellation during translation cannot insert stale output")

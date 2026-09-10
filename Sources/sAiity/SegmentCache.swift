@@ -122,7 +122,7 @@ enum TranscriptRetention {
     static func startPeriodicSweep() {
         guard timer == nil else { return }
         let t = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { _ in
-            MainActor.assumeIsolated { _ = sweep() }
+            Task { @MainActor in _ = sweep() }
         }
         t.tolerance = 600      // let the OS coalesce it; nothing here is urgent
         timer = t

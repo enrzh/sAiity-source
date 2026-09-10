@@ -182,7 +182,7 @@ enum MemoryPolicy {
             let level: Pressure = event.contains(.critical) ? .critical
                                 : event.contains(.warning) ? .warning : .normal
             NSLog("sAiity memory: system pressure \(level) — \(describeFootprint())")
-            MainActor.assumeIsolated { handler(level) }
+            Task { @MainActor in handler(level) }
         }
         s.resume()
         source = s
