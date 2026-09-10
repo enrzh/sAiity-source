@@ -16,6 +16,28 @@ protocol Translating: AnyObject, Sendable {
     func stop() async
 }
 
+/// Compares language identity without treating a regional/script variant as a
+/// different translation pair. Translation engines should never be called for
+/// a region that already is in the requested target language: besides wasting
+/// time, some local engines can fail on that path when their Metal runtime is
+/// unavailable.
+enum TranslationLanguage {
+    static func baseCode(_ code: String) -> String {
+        code.replacingOccurrences(of: "_", with: "-")
+            .split(separator: "-")
+            .first?
+            .lowercased() ?? ""
+    }
+
+    static func isSame(_ source: String?, as target: String) -> Bool {
+        guard let source else { return false }
+        let sourceCode = baseCode(source)
+        let targetCode = baseCode(target)
+        guard !sourceCode.isEmpty, !targetCode.isEmpty else { return false }
+        return sourceCode != "auto" && sourceCode == targetCode
+    }
+}
+
 /// Native MLX/llama calls are not safe to overlap, even when they belong to
 /// different Swift tasks. Keep one FIFO gate for every translation operation so
 /// a live caption cannot enter while dictation is loading or decoding.

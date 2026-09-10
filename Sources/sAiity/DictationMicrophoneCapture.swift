@@ -35,7 +35,7 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
     // to allocate and flatten one array per audio callback.
     private var convertedSamples: [Float] = []
     private var didEmitLimit = false
-    private var waveformFrameCounter = 0
+    private var waveformHistory = Array(repeating: Float(0.06), count: 28)
     private var waveformHandler: (@Sendable ([Float]) -> Void)?
     var onLimit: (@Sendable () -> Void)?
 
@@ -76,7 +76,7 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
             convertedSamples.removeAll(keepingCapacity: true)
             convertedSamples.reserveCapacity(DictationAudioSampleLimit.maximumSamples)
             didEmitLimit = false
-            waveformFrameCounter = 0
+            waveformHistory = Array(repeating: 0.06, count: waveformHistory.count)
         }
 
         input.installTap(onBus: 0, bufferSize: 1024, format: sourceFormat) { [weak self] buffer, _ in
@@ -129,16 +129,15 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
         let accounting = storeConvertedFrame(rawSamples)
         guard accounting.acceptedFrameCount > 0 else { return }
         output.frameLength = AVAudioFrameCount(accounting.acceptedFrameCount)
-        let emitWaveform = lock.withLock {
-            waveformFrameCounter += 1
-            guard waveformFrameCounter >= 3 else { return false }
-            waveformFrameCounter = 0
-            return waveformHandler != nil
+        let level = Self.waveformLevel(rawSamples, count: accounting.acceptedFrameCount)
+        let waveformUpdate = lock.withLock { () -> (([Float]) -> Void, [Float])? in
+            guard let handler = waveformHandler else { return nil }
+            waveformHistory.removeFirst()
+            waveformHistory.append(level)
+            return (handler, waveformHistory)
         }
-        if emitWaveform {
-            let levels = Self.waveformLevels(rawSamples, count: accounting.acceptedFrameCount)
-            let handler = lock.withLock { waveformHandler }
-            handler?(levels)
+        if let waveformUpdate {
+            waveformUpdate.0(waveformUpdate.1)
         }
         // Feed the recognizer after sampling the level. A streaming backend is
         // allowed to do synchronous work here; letting it run first made the
@@ -164,6 +163,15 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
             // floats, so 8x gives ordinary speech enough range to move the bars.
             return min(1, max(0.06, sqrt(meanSquare) * 8.0))
         }
+    }
+
+    private static func waveformLevel(_ samples: UnsafeBufferPointer<Float>, count: Int) -> Float {
+        guard count > 0 else { return 0.06 }
+        let slice = samples.prefix(min(count, samples.count))
+        let meanSquare = slice.reduce(into: Float.zero) { sum, sample in
+            sum += sample * sample
+        } / Float(max(1, slice.count))
+        return min(1, max(0.06, sqrt(meanSquare) * 8.0))
     }
 
     /// Accounts one successfully converted buffer atomically. The returned
@@ -218,7 +226,7 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
             convertedSamples.removeAll(keepingCapacity: true)
             convertedSamples.reserveCapacity(DictationAudioSampleLimit.maximumSamples)
             didEmitLimit = false
-            waveformFrameCounter = 0
+            waveformHistory = Array(repeating: 0.06, count: waveformHistory.count)
         }
     }
 

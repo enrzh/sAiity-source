@@ -1,20 +1,66 @@
 import AppKit
 
 private final class DictationWaveformView: NSView {
-    private var levels = Array(repeating: CGFloat(0.08), count: 32)
+    private static let barCount = 28
+    private var levels = Array(repeating: CGFloat(0.06), count: barCount)
+    private var targetLevels = Array(repeating: CGFloat(0.06), count: barCount)
+    private var animationTimer: Timer?
 
     override var isFlipped: Bool { true }
 
     func setLevels(_ values: [Float]) {
         guard !values.isEmpty else { return }
-        levels = values.map { CGFloat(min(1, max(0.06, $0))) }
+        let next = values.map { CGFloat(min(1, max(0.06, $0))) }
+        if levels.count != next.count { levels = next }
+        targetLevels = next
+        startAnimating()
         needsDisplay = true
     }
 
     func reset() {
-        levels = Array(repeating: 0.08, count: 32)
+        stopAnimating()
+        levels = Array(repeating: 0.06, count: Self.barCount)
+        targetLevels = levels
         needsDisplay = true
     }
+
+    func stopAnimating() {
+        animationTimer?.invalidate()
+        animationTimer = nil
+    }
+
+    private func startAnimating() {
+        guard animationTimer == nil else { return }
+        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            self?.advanceAnimation()
+        }
+        animationTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func advanceAnimation() {
+        guard levels.count == targetLevels.count else {
+            levels = targetLevels
+            needsDisplay = true
+            stopAnimating()
+            return
+        }
+
+        var isMoving = false
+        for index in levels.indices {
+            let delta = targetLevels[index] - levels[index]
+            if abs(delta) < 0.01 {
+                levels[index] = targetLevels[index]
+            } else {
+                levels[index] += delta * 0.28
+                isMoving = true
+            }
+        }
+        needsDisplay = true
+        if !isMoving { stopAnimating() }
+    }
+
+    deinit { animationTimer?.invalidate() }
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
@@ -98,6 +144,7 @@ final class DictationToastWindow: NSPanel {
         label.textColor = .white
         label.alignment = .center
         label.lineBreakMode = .byTruncatingTail
+        label.usesSingleLineMode = true
         label.setAccessibilityRole(.staticText)
 
         waveform.setAccessibilityRole(.image)
@@ -135,7 +182,10 @@ final class DictationToastWindow: NSPanel {
             label.centerXAnchor.constraint(equalTo: host.centerXAnchor),
             label.centerYAnchor.constraint(equalTo: host.centerYAnchor),
             label.widthAnchor.constraint(equalToConstant: Self.centerContentWidth),
-            label.heightAnchor.constraint(equalToConstant: 34),
+            // A single-line NSTextField draws at the top of its bounds. Keep
+            // the bounds close to the font's line height so its baseline is
+            // visually centered in the toast instead of top-aligned.
+            label.heightAnchor.constraint(equalToConstant: 20),
             waveform.centerXAnchor.constraint(equalTo: host.centerXAnchor),
             waveform.centerYAnchor.constraint(equalTo: host.centerYAnchor),
             waveform.widthAnchor.constraint(equalToConstant: Self.centerContentWidth),
@@ -301,6 +351,8 @@ final class DictationToastWindow: NSPanel {
 #if SAIITY_TEST_HOOKS
     var resetButtonBoundsForTests: NSRect { resetButton.convert(resetButton.bounds, to: nil) }
     var labelMidXForTests: CGFloat { label.convert(label.bounds, to: contentView).midX }
+    var labelFrameForTests: NSRect { label.convert(label.bounds, to: contentView) }
+    var contentFrameForTests: NSRect { contentView?.bounds ?? .zero }
     var contentMidXForTests: CGFloat { contentView?.bounds.midX ?? 0 }
     var waveformFrameForTests: NSRect { waveform.convert(waveform.bounds, to: contentView) }
     var waveformVisibleForTests: Bool { !waveform.isHidden }
@@ -310,6 +362,7 @@ final class DictationToastWindow: NSPanel {
     func show(text: String, animated: Bool, autoDismissAfter: Duration? = nil) {
         cancelAutoDismiss()
         label.isHidden = false
+        waveform.stopAnimating()
         waveform.isHidden = true
         label.stringValue = text
         setAccessibilityValue(text)
@@ -405,6 +458,7 @@ final class DictationToastWindow: NSPanel {
 
     func dismiss() {
         cancelAutoDismiss()
+        waveform.stopAnimating()
         spinner.stopAnimation(nil)
         alphaValue = 1
         orderOut(nil)

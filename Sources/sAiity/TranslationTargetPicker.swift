@@ -69,14 +69,7 @@ struct TranslationTargetPicker: View {
                        && !(scope == .dictation && TranslationEngine.selected != nil)
                        ? "\(engine.displayName) — recommended, not chosen yet"
                        : "Using \(engine.displayName)",
-                   width: 500, height: 560,
-                   headerAccessory: {
-            Button("Off") {
-                target = nil
-                dismiss()
-            }
-            .controlSize(.small)
-        }) {
+                   width: 500, height: 560) {
             // A macOS .searchable installs into a toolbar, which a bare sheet
             // does not have — so the field is explicit.
             HStack(spacing: 6) {

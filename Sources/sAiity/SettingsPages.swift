@@ -721,15 +721,24 @@ struct CaptionsView: View {
 
             SettingsSection(title: "Translation",
                             subtitle: "Translate locally when a caption sentence closes.") {
+                LabeledToggle("Show the translation line",
+                              "The second line under each caption. Turning this off keeps translation running for the transcript but hides it on screen.",
+                              isOn: $state.style.showTranslation)
                 LabeledContent("Translate to") {
-                    Button {
-                        state.showTranslationPicker = true
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(state.translateTo.map { AppLanguage(code: $0).displayName }
-                                 ?? String(localized: "Off"))
-                            Image(systemName: "chevron.up.chevron.down")
-                                .font(.caption2).foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        Button {
+                            state.showTranslationPicker = true
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(state.translateTo.map { AppLanguage(code: $0).displayName }
+                                     ?? String(localized: "Off"))
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                        if state.translateTo != nil {
+                            Button("Off") { state.translateTo = nil }
+                                .controlSize(.small)
                         }
                     }
                 }
@@ -865,17 +874,13 @@ struct CaptionsView: View {
                          reset: { state.style.original = .original })
 
             SettingsSection(title: "Translated text",
-                            subtitle: "Control the optional translation line below each caption.") {
+                            subtitle: "Control the appearance of the optional translation line.") {
                 HStack {
                     Spacer()
                     ResetButton {
                         state.style.translation = .translation
-                        state.style.showTranslation = true
                     }
                 }
-            LabeledToggle("Show the translation line",
-                          "The second line under each caption. Turning this off keeps translation running for the transcript but hides it on screen.",
-                          isOn: $state.style.showTranslation)
                 textStyleControls($state.style.translation, volatile: false)
             }
         SettingsSection(title: "Preview and spacing",

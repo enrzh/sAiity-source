@@ -32,6 +32,7 @@ enum Diagnostics {
                    + " · nemotron tier \(NemotronEngine.selectedChunkMs) ms")
         out.append("translation: \(TranslationEngine.selected?.rawValue ?? "none selected")"
                    + " · llm model \(LocalModel.selected?.file ?? "—")")
+        out.append("mlx metallib: \(MADLADTranslator.hasBundledMetalLibrary ? "present" : "missing")")
         out.append("translate to: \(UserDefaults.standard.string(forKey: "translateTo") ?? "off")"
                    + " · timing \(TranslationTiming.current.rawValue)")
         out.append("speech gap: \(SpeechGap.enabled ? "on" : "off") · hold \(SpeechGap.holdMs) ms")

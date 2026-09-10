@@ -264,6 +264,15 @@ import Testing
         window.dismiss()
     }
 
+    @Test("single-line status text uses a visually centered label frame")
+    func statusTextFrameIsCentered() {
+        let window = makeWindow()
+        window.show(text: "Transcribing", animated: true)
+        #expect(window.labelFrameForTests.height == 20)
+        #expect(window.labelFrameForTests.midY == window.contentFrameForTests.midY)
+        window.dismiss()
+    }
+
     @Test("phase updates do not reposition the toast")
     func phaseUpdatesPreserveFrame() {
         let window = makeWindow()

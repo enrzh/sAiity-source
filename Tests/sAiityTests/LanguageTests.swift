@@ -63,6 +63,16 @@ struct LanguageTests {
         #expect(MADLADLanguageProvider.nativeCode(for: "tl") == "fil")
     }
 
+    @Test("same-language translation is skipped across regional spellings")
+    func sameLanguageIsRecognized() {
+        #expect(TranslationLanguage.isSame("zh", as: "zh-Hans"))
+        #expect(TranslationLanguage.isSame("de-DE", as: "de"))
+        #expect(TranslationLanguage.isSame("zh_Hant", as: "zh-TW"))
+        #expect(!TranslationLanguage.isSame("de", as: "en"))
+        #expect(!TranslationLanguage.isSame("auto", as: "en"))
+        #expect(!TranslationLanguage.isSame(nil, as: "en"))
+    }
+
     @Test("Every offered language has a name, not just a code")
     func displayNamesResolve() {
         // 450 rows of raw ISO codes is not a picker. Some obscure ISO 639-3

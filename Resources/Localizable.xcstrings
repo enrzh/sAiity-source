@@ -7320,6 +7320,35 @@
         }
       }
     },
+    "Translation is unavailable because the MLX Metal library is missing from this app build.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Übersetzung nicht verfügbar, weil die MLX-Metal-Bibliothek in diesem App-Build fehlt."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La traducción no está disponible porque falta la biblioteca Metal de MLX en esta compilación."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La traduction n’est pas disponible, car la bibliothèque Metal de MLX est absente de cette version de l’app."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このアプリビルドに MLX Metal ライブラリがないため、翻訳を利用できません。"
+          }
+        }
+      }
+    },
     "Off": {
       "localizations": {
         "de": {

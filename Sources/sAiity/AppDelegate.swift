@@ -549,6 +549,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func translateDictatedText(_ text: String,
                                        source: String,
                                        target: String) async -> String? {
+        // A same-language target is a no-op. In particular, do not prepare or
+        // enter MLX for zh -> zh: the transcript is already the requested
+        // output and native initialization is the most failure-prone part.
+        guard !TranslationLanguage.isSame(source, as: target) else { return text }
         translatorIdleEviction.cancel()
         // Dictation may use a different engine than captions. Switch through
         // the serialized lifecycle before entering native inference, and keep
@@ -599,6 +603,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return await translateDictatedText(text, source: source, target: target)
         }
 
+        let regionsNeedingTranslation = transcription.regions.filter { region in
+            let source = region.language
+                ?? transcription.languageMetadata.dominantLanguage
+                ?? "auto"
+            return !TranslationLanguage.isSame(source, as: target)
+        }
+        // Every region is already in the requested target language. Preserve
+        // the original mixed transcript and keep the translator cold.
+        guard !regionsNeedingTranslation.isEmpty else { return transcription.text }
+
         // A mixed transcript is translated region by region. Hold one use
         // lease and one gate operation for the complete run: the loaded native
         // model cannot be evicted or retargeted between regions, and no other
@@ -634,6 +648,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let source = region.language
                         ?? transcription.languageMetadata.dominantLanguage
                         ?? "auto"
+                    if TranslationLanguage.isSame(source, as: target) {
+                        translated.append(region.text)
+                        continue
+                    }
                     guard let value = await engine.translate(region.text,
                                                               from: source,
                                                               to: target) else {

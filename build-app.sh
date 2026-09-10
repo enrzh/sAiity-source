@@ -65,11 +65,31 @@ if [ "$NOTARIZE" = 1 ]; then
         exit 1
     fi
 fi
+
+MLX_PROJECT=".build/checkouts/mlx-swift/xcode/MLX.xcodeproj"
+MLX_DERIVED_DATA="build/MLXDerivedData"
+if [ ! -d "$MLX_PROJECT" ]; then
+    echo "FATAL: MLX Xcode project is missing at $MLX_PROJECT" >&2
+    exit 1
+fi
+if ! xcrun metal --version >/dev/null 2>&1; then
+    echo "FATAL: the Xcode Metal Toolchain is required to build MLX shaders." >&2
+    echo "       Install it with: xcodebuild -downloadComponent MetalToolchain" >&2
+    exit 1
+fi
+
 if [ "$NOTARIZE" = 1 ]; then
     swift build -c release
 else
     swift build -c release -Xswiftc -DSAIITY_TEST_HOOKS
 fi
+
+# SwiftPM builds the MLX C++ library but deliberately cannot compile its Metal
+# shaders. Build the Cmlx target with Xcode and retain the generated resource;
+# without this file MADLAD aborts in native MLX code on its first operation.
+xcodebuild -project "$MLX_PROJECT" -scheme Cmlx -configuration Release \
+    -sdk macosx -derivedDataPath "$MLX_DERIVED_DATA" build >/dev/null
+
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # The filename here MUST match CFBundleExecutable exactly, capital A included.
@@ -180,6 +200,31 @@ if compgen -G "$FW_SRC/*.bundle" >/dev/null; then
     for b in "$FW_SRC"/*.bundle; do
         ditto "$b" "$APP/Contents/Resources/$(basename "$b")"
     done
+fi
+
+# The Xcode Cmlx target emits the resource bundle that SwiftPM cannot produce.
+# Keep the bundle name expected by MLX under the app's signed Resources directory.
+MLX_METALLIB=$(find "$MLX_DERIVED_DATA/Build/Products/Release" -type f \
+    -name '*.metallib' -size +0c -print -quit 2>/dev/null || true)
+if [ -z "$MLX_METALLIB" ]; then
+    echo "FATAL: Xcode built Cmlx but emitted no Metal shader library." >&2
+    exit 1
+fi
+mkdir -p "$APP/Contents/Resources/mlx-swift_Cmlx.bundle"
+ditto "$MLX_METALLIB" "$APP/Contents/Resources/mlx-swift_Cmlx.bundle/default.metallib"
+ditto "$MLX_METALLIB" "$APP/Contents/Resources/default.metallib"
+MLX_INFO_PLIST="$MLX_DERIVED_DATA/Build/Products/Release/Cmlx.framework/Versions/A/Resources/Info.plist"
+if [ -f "$MLX_INFO_PLIST" ]; then
+    ditto "$MLX_INFO_PLIST" "$APP/Contents/Resources/mlx-swift_Cmlx.bundle/Info.plist"
+fi
+
+# Signing identity, best available first:
+# SwiftPM can succeed without compiling MLX's Metal shaders. Never sign or
+# publish such a bundle: the first real MLX operation aborts the process.
+if ! find "$APP/Contents" -type f -name '*.metallib' -size +0c | grep -q .; then
+    echo "FATAL: MLX Metal shader library is missing from $APP." >&2
+    echo "Compile and bundle the MLX shaders with Xcode before signing or releasing." >&2
+    exit 1
 fi
 
 # Signing identity, best available first:

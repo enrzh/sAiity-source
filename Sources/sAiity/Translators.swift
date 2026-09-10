@@ -58,6 +58,27 @@ final class MADLADTranslator: Translating, @unchecked Sendable {
 
     static var isAvailable: Bool { true }
 
+    /// MLX aborts from native code when its default shader library is absent;
+    /// that failure cannot be caught by Swift. A hand-built app bundle is the
+    /// common way to lose this resource, so fail before touching MLX and leave
+    /// the original caption visible instead of terminating the app.
+    static var hasBundledMetalLibrary: Bool {
+        guard let root = Bundle.main.resourceURL,
+              let enumerator = FileManager.default.enumerator(
+                  at: root,
+                  includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+                  options: [.skipsHiddenFiles]) else {
+            return false
+        }
+        for case let url as URL in enumerator where url.pathExtension == "metallib" {
+            guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+                  values.isRegularFile == true,
+                  (values.fileSize ?? 0) > 0 else { continue }
+            return true
+        }
+        return false
+    }
+
     func prepare(from source: String, to target: String,
                  progress: @escaping @Sendable (String) -> Void) async throws {
         // MADLAD wants its own spelling of the language, not BCP-47 — the
@@ -66,6 +87,10 @@ final class MADLADTranslator: Translating, @unchecked Sendable {
         guard let native = MADLADLanguageProvider.nativeCode(for: target) else {
             throw TranslationEngineError.notAvailable(
                 String(localized: "MADLAD cannot translate into \(AppLanguage(code: target).displayName)."))
+        }
+        guard Self.hasBundledMetalLibrary else {
+            throw TranslationEngineError.notAvailable(
+                String(localized: "Translation is unavailable because the MLX Metal library is missing from this app build."))
         }
 
         // Two defects in speech-swift's loader shape this, both verified against
