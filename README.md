@@ -99,10 +99,10 @@ included in the application bundle.
 
 ## Release
 
-The current signed and notarized release is [sAiity 2.3.6](https://github.com/enrzh/sAiity/releases/tag/v2.3.6).
+The current signed and notarized release is [sAiity 2.3.7](https://github.com/enrzh/sAiity/releases/tag/v2.3.7).
 
-- [Download the DMG](https://github.com/enrzh/sAiity/releases/download/v2.3.6/sAiity-2.3.6.dmg)
-- [Download the ZIP](https://github.com/enrzh/sAiity/releases/download/v2.3.6/sAiity-2.3.6.zip)
+- [Download the DMG](https://github.com/enrzh/sAiity/releases/download/v2.3.7/sAiity-2.3.7.dmg)
+- [Download the ZIP](https://github.com/enrzh/sAiity/releases/download/v2.3.7/sAiity-2.3.7.zip)
 - [Sparkle update feed](https://enrzh.github.io/sAiity/appcast.xml)
 
 This release adds live microphone waveforms to dictation, hardens dictation
@@ -110,8 +110,8 @@ translation, improves conservative cleanup and spoken formatting, simplifies
 translation model choices, and keeps subtitle history scrollable with transcript
 export.
 
-DMG SHA-256: `a6077b72d00832d9be9d41dae605b50c74de7aaa088a60893f18903f49225d9f`
+DMG SHA-256: `3542b4e51ac070e320475be2b49a02fa741487aaca5ac09084c85690304b0d39`
 
-ZIP SHA-256: `bf70a03090884f5d35c8e1b98010aed66544a9fb6f23f833cd4e847e9e9158dc`
+ZIP SHA-256: `708ce49a99012f4121ee07fe322267260141177613da06375de5289381638fa0`
 
 sAiity is part of the [aiity](https://aiity.de) family.
