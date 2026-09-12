@@ -125,7 +125,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         await waitForTranslatorUsersToFinish()
         beginTranslatorUse()
         defer { endTranslatorUse() }
-        let selected = LocalModel.selected
+        let selected = LocalModel.cleanupSelected
         let model = LocalModel.isCleanupCompatible(selected) ? selected : nil
         return await dictationCleanupSession.cleanup(transcription, modelKey: model?.file) { [self] in
             // The session owns the native gate here. Waiters/teardown must not

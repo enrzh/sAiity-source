@@ -31,7 +31,7 @@ enum Diagnostics {
         out.append("recognition: \(ASREngine.selected?.rawValue ?? "none selected")"
                    + " · nemotron tier \(NemotronEngine.selectedChunkMs) ms")
         out.append("translation: \(TranslationEngine.selected?.rawValue ?? "none selected")"
-                   + " · llm model \(LocalModel.selected?.file ?? "—")")
+                   + " · cleanup model \(LocalModel.cleanupSelected?.file ?? "—")")
         out.append("mlx metallib: \(MADLADTranslator.hasBundledMetalLibrary ? "present" : "missing")")
         out.append("translate to: \(UserDefaults.standard.string(forKey: "translateTo") ?? "off")"
                    + " · timing \(TranslationTiming.current.rawValue)")

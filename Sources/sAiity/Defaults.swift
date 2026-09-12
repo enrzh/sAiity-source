@@ -7,7 +7,7 @@ import Foundation
 /// settings kept re-inventing the pattern and one of them ended up posting a
 /// notification the others did not. Two deliberately keep custom accessors and
 /// say why: `CaptionStyle.current` posts a change notification so the live
-/// bubble follows the sliders, and `LocalModel.selected` resolves against a
+/// bubble follows the sliders, and `LocalModel.cleanupSelected` resolves against a
 /// catalogue rather than storing the value itself.
 @propertyWrapper
 struct Defaults<Value>: Sendable where Value: Sendable {

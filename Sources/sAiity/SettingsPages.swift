@@ -218,12 +218,55 @@ struct DictationView: View {
     @State private var showAdvancedTranslation = false
 
     internal static func cleanupAssets(from assets: [AssetStatus]) -> [AssetStatus] {
-        let selectedFile = LocalModel.selected?.file
+        let selectedFile = LocalModel.cleanupSelected?.file
         let candidateIDs = Set(LocalModel.all
             .filter { !$0.isLegacy || $0.file == selectedFile }
             .filter { $0.isCleanupCandidate() }
             .map { AssetID.llm(file: $0.file) })
         return assets.filter { candidateIDs.contains($0.asset.id) }
+    }
+
+    private var cleanupModels: [LocalModel] {
+        LocalModel.all.filter { !$0.isLegacy || $0 == state.llmModel }
+    }
+
+    private var cleanupModelSelection: Binding<String> {
+        Binding(
+            get: { state.llmModel?.file ?? "" },
+            set: { file in state.llmModel = cleanupModels.first { $0.file == file } })
+    }
+
+    @ViewBuilder
+    private var cleanupModelControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Picker("Dictation cleanup", selection: cleanupModelSelection) {
+                Text("Off").tag("")
+                ForEach(cleanupModels) { model in
+                    Text(model.label).tag(model.file)
+                }
+            }
+            .pickerStyle(.menu)
+
+            if let model = state.llmModel {
+                HStack(alignment: .top, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(model.note).font(.caption).foregroundStyle(.secondary)
+                        Text(model.sizeText).font(.caption2).foregroundStyle(.tertiary)
+                    }
+                    Spacer(minLength: 8)
+                    if let asset = state.assets.first(where: { $0.id == AssetID.llm(file: model.file) }) {
+                        AssetControl(state: state, status: asset)
+                    }
+                }
+            } else {
+                Label("Ready", systemImage: "checkmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Button("Manage") { state.showLocalModels = true }
+                .controlSize(.small)
+        }
     }
 
     internal static func downloadAction(_ choice: WhisperDictationBackend.ModelChoice, prepare: (WhisperDictationBackend.ModelChoice) async throws -> Void, refresh: () -> Void, setError: (Error) -> Void) async {
@@ -370,19 +413,7 @@ struct DictationView: View {
                 SettingsSection(title: "Cleanup",
                                 subtitle: "Remove fillers, repetitions, false starts, and spoken formatting locally.") {
                     Toggle("Clean up dictated text", isOn: $state.dictationCleanupEnabled)
-                        .disabled(!LocalModel.isCleanupCompatible(state.llmModel))
-                    HStack {
-                        Label(LocalModel.isCleanupCompatible(state.llmModel)
-                              ? "Cleanup model ready" : "Cleanup model needed",
-                              systemImage: LocalModel.isCleanupCompatible(state.llmModel)
-                                  ? "checkmark.circle" : "arrow.down.circle")
-                            .font(.caption)
-                            .foregroundStyle(LocalModel.isCleanupCompatible(state.llmModel)
-                                             ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.orange))
-                        Spacer()
-                        Button("Manage") { state.showLocalModels = true }
-                            .controlSize(.small)
-                    }
+                    cleanupModelControls
                 }
 
                 SettingsSection(title: "Permissions",

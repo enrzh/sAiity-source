@@ -217,7 +217,7 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
     private var preparedTarget: String?
 
     static var isAvailable: Bool { true }
-    static func isDownloaded() -> Bool { LocalModel.selected?.isDownloaded ?? false }
+    static func isDownloaded() -> Bool { LocalModel.cleanupSelected?.isDownloaded ?? false }
 
     static let cleanupSystemPrompt = """
     You are a conservative speech editor, not a chatbot and not a copywriter.
@@ -416,7 +416,7 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
 
     func prepare(from source: String, to target: String,
                  progress: @escaping @Sendable (String) -> Void) async throws {
-        try await prepare(model: LocalModel.selected, from: source, to: target, progress: progress)
+        try await prepare(model: LocalModel.cleanupSelected, from: source, to: target, progress: progress)
     }
 
     func prepare(model: LocalModel?, from source: String, to target: String,

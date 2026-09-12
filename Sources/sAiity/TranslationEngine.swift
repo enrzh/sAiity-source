@@ -185,7 +185,7 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
         switch self {
         case .madlad: return AssetID.madlad
         case .hyMT2: return AssetID.hyMT2
-        case .qwen: return LocalModel.selected.map { AssetID.llm(file: $0.file) }
+        case .qwen: return LocalModel.cleanupSelected.map { AssetID.llm(file: $0.file) }
         }
     }
 

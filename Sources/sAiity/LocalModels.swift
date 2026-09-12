@@ -62,6 +62,8 @@ struct LocalModel: Identifiable, Sendable, Equatable, Codable {
     // MARK: - Custom models
 
     private static let customKey = "customLLMModels"
+    private static let cleanupSelectionKey = "cleanupModelFile"
+    private static let legacySelectionKey = "qwenModelFile"
 
     /// Models the user added, persisted as JSON — same idiom as CaptionStyle.
     static var custom: [LocalModel] {
@@ -207,10 +209,11 @@ struct LocalModel: Identifiable, Sendable, Equatable, Codable {
     /// Forget a custom model and delete its file. Built-ins cannot be removed
     /// from the list, only their downloads deleted.
     static func removeCustom(_ m: LocalModel) {
+        let wasSelected = cleanupSelected?.file == m.file
         custom.removeAll { $0.file == m.file }
         try? FileManager.default.removeItem(at: m.localURL)
-        if UserDefaults.standard.string(forKey: "qwenModelFile") == m.file {
-            UserDefaults.standard.removeObject(forKey: "qwenModelFile")
+        if wasSelected {
+            cleanupSelected = nil
         }
     }
 
@@ -268,21 +271,36 @@ struct LocalModel: Identifiable, Sendable, Equatable, Codable {
     /// is where you both choose and download, so un-choosing a model the moment
     /// it is picked would make the list impossible to use. What is gone is the
     /// invented choice.
-    static var selected: LocalModel? {
+    static var cleanupSelected: LocalModel? {
         get {
-            // The key keeps its historical name; renaming it would silently
-            // reset every existing user's choice.
-            guard let f = UserDefaults.standard.string(forKey: "qwenModelFile"),
-                  !f.isEmpty else { return nil }
+            let defaults = UserDefaults.standard
+            let file = defaults.string(forKey: cleanupSelectionKey)
+                ?? defaults.string(forKey: legacySelectionKey)
+            guard let f = file, !f.isEmpty else { return nil }
             // A stored file that is no longer in the catalogue reads as nothing
             // rather than as a substitute — a silent swap to a different model
             // is worse than an empty selection the user can see and fix.
-            return all.first { $0.file == f }
+            guard let model = all.first(where: { $0.file == f }) else { return nil }
+            if defaults.string(forKey: cleanupSelectionKey) == nil {
+                defaults.set(f, forKey: cleanupSelectionKey)
+            }
+            return model
         }
         set {
-            if let newValue { UserDefaults.standard.set(newValue.file, forKey: "qwenModelFile") }
-            else { UserDefaults.standard.removeObject(forKey: "qwenModelFile") }
+            if let newValue {
+                UserDefaults.standard.set(newValue.file, forKey: cleanupSelectionKey)
+                UserDefaults.standard.removeObject(forKey: legacySelectionKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: cleanupSelectionKey)
+                UserDefaults.standard.removeObject(forKey: legacySelectionKey)
+            }
         }
+    }
+
+    /// Compatibility alias for existing local-LLM callers.
+    static var selected: LocalModel? {
+        get { cleanupSelected }
+        set { cleanupSelected = newValue }
     }
 
     /// What to suggest when nothing is chosen. A suggestion, never a selection.

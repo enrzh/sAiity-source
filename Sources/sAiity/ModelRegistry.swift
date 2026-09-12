@@ -79,9 +79,9 @@ enum AssetUse: Sendable {
         case .whenQwenVariant(let f):
             // `selected?.file == f`, never `selected!` and never `?? ""` — with
             // nothing chosen this has to be false, not "matches the empty name".
-            return TranslationEngine.selected == .qwen && LocalModel.selected?.file == f
+            return TranslationEngine.selected == .qwen && LocalModel.cleanupSelected?.file == f
         case .whenCleanupModel(let f):
-            return LocalModel.selected?.file == f
+            return LocalModel.cleanupSelected?.file == f
         }
     }
 }

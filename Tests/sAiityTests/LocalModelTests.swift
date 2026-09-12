@@ -63,9 +63,13 @@ struct LocalModelTests {
         #expect(LocalModel.all.contains { $0.file == m.file }, "not visible in the catalogue")
         #expect(m.downloadURL == nil, "an imported file has nothing to download")
 
+        let previous = LocalModel.cleanupSelected
+        LocalModel.cleanupSelected = m
         LocalModel.removeCustom(m)
         #expect(!FileManager.default.fileExists(atPath: m.localURL.path), "file survived removal")
         #expect(LocalModel.custom.count == before)
+        #expect(LocalModel.cleanupSelected == nil, "removed model remained selected")
+        LocalModel.cleanupSelected = previous
     }
 
     @Test("Importing a non-GGUF file fails before registration")
@@ -103,29 +107,41 @@ struct LocalModelTests {
     /// size beside it, on a Mac that had never downloaded it.
     @Test("Nothing is selected until the user selects something")
     func nothingIsPreselected() {
-        let saved = UserDefaults.standard.string(forKey: "qwenModelFile")
-        defer { UserDefaults.standard.set(saved, forKey: "qwenModelFile") }
+        let defaults = UserDefaults.standard
+        let savedLegacy = defaults.string(forKey: "qwenModelFile")
+        let savedCleanup = defaults.string(forKey: "cleanupModelFile")
+        defer {
+            savedLegacy.map { defaults.set($0, forKey: "qwenModelFile") }
+                ?? defaults.removeObject(forKey: "qwenModelFile")
+            savedCleanup.map { defaults.set($0, forKey: "cleanupModelFile") }
+                ?? defaults.removeObject(forKey: "cleanupModelFile")
+        }
 
-        UserDefaults.standard.removeObject(forKey: "qwenModelFile")
+        defaults.removeObject(forKey: "qwenModelFile")
+        defaults.removeObject(forKey: "cleanupModelFile")
         #expect(LocalModel.selected == nil, "a fresh install must have no model chosen")
 
-        UserDefaults.standard.set("", forKey: "qwenModelFile")
+        defaults.set("", forKey: "cleanupModelFile")
         #expect(LocalModel.selected == nil, "an empty stored name is not a choice")
 
         // A model that has left the catalogue reads as nothing, not as a silent
         // substitute — a swap the user never made is worse than an empty slot.
-        UserDefaults.standard.set("no-longer-exists.gguf", forKey: "qwenModelFile")
+        defaults.set("no-longer-exists.gguf", forKey: "cleanupModelFile")
         #expect(LocalModel.selected == nil)
 
-        // An explicit choice survives, downloaded or not: the sheet is where you
-        // both choose and download, so un-choosing on pick would be unusable.
         let real = LocalModel.builtIn[0]
-        UserDefaults.standard.set(real.file, forKey: "qwenModelFile")
-        #expect(LocalModel.selected?.file == real.file)
+        defaults.removeObject(forKey: "cleanupModelFile")
+        defaults.set(real.file, forKey: "qwenModelFile")
+        #expect(LocalModel.cleanupSelected?.file == real.file)
+        #expect(defaults.string(forKey: "cleanupModelFile") == real.file)
 
-        LocalModel.selected = nil
-        #expect(UserDefaults.standard.string(forKey: "qwenModelFile") == nil,
+        // An explicit choice survives before download, and clearing it removes
+        // both the new key and the legacy key.
+        LocalModel.cleanupSelected = real
+        LocalModel.cleanupSelected = nil
+        #expect(defaults.string(forKey: "cleanupModelFile") == nil,
                 "clearing the selection must remove the key, not store an empty one")
+        #expect(defaults.string(forKey: "qwenModelFile") == nil)
     }
 
     @Test("Engine selections start empty and round-trip through defaults")
@@ -163,12 +179,15 @@ struct LocalModelTests {
         let asr = UserDefaults.standard.string(forKey: "asrEngine")
         let mt = UserDefaults.standard.string(forKey: "translationEngine")
         let gguf = UserDefaults.standard.string(forKey: "qwenModelFile")
+        let cleanup = UserDefaults.standard.string(forKey: "cleanupModelFile")
         defer {
             UserDefaults.standard.set(asr, forKey: "asrEngine")
             UserDefaults.standard.set(mt, forKey: "translationEngine")
             UserDefaults.standard.set(gguf, forKey: "qwenModelFile")
+            cleanup.map { UserDefaults.standard.set($0, forKey: "cleanupModelFile") }
+                ?? UserDefaults.standard.removeObject(forKey: "cleanupModelFile")
         }
-        for k in ["asrEngine", "translationEngine", "qwenModelFile"] {
+        for k in ["asrEngine", "translationEngine", "qwenModelFile", "cleanupModelFile"] {
             UserDefaults.standard.removeObject(forKey: k)
         }
         // Every registry row, not a sample: the fresh-install lie was two rows

@@ -499,10 +499,10 @@ final class AppState {
         let asked = translationEngine ?? .recommended
         targetSupportedByEngine = LanguageCatalog.supportedCodes(for: asked).contains(t)
     }
-    var llmModel: LocalModel? = LocalModel.selected {
+    var llmModel: LocalModel? = LocalModel.cleanupSelected {
         didSet {
             guard llmModel != oldValue else { return }
-            LocalModel.selected = llmModel
+            LocalModel.cleanupSelected = llmModel
             // Writing the preference is not enough: the translator holds an LLM
             // built from the *old* file, so without this the app kept using —
             // and kept several gigabytes of — the model the user just switched
@@ -520,7 +520,7 @@ final class AppState {
         engine = ASREngine.selected
         translationEngine = TranslationEngine.visibleSelection(TranslationEngine.selected)
         dictationTranslationEngine = TranslationEngine.visibleSelection(TranslationEngine.dictationSelected)
-        llmModel = LocalModel.selected
+        llmModel = LocalModel.cleanupSelected
         // Was missing, so a target picked from the menu bar never appeared here.
         adoptTarget(UserDefaults.standard.string(forKey: "translateTo"))
         await refreshTargetSupport()
