@@ -2,6 +2,22 @@ import Foundation
 import NaturalLanguage
 
 enum DictationCleanupValidator {
+    static func needsModelCleanup(_ value: String, sourceLanguage: String? = nil) -> Bool {
+        let baseline = deterministicCleanup(value, sourceLanguage: sourceLanguage)
+        let language = baseLanguage(sourceLanguage) ?? detectedLanguage(in: value).flatMap(baseLanguage)
+        // ponytail: only short English/German spans qualify for this fast path.
+        // Expand the language/repair vocabulary only with matching quality fixtures.
+        guard ["en", "de"].contains(language ?? ""),
+              baseline.split(whereSeparator: \.isWhitespace).count <= 40,
+              baseline.last.map({ ".!?".contains($0) }) == true || baseline.contains("• "),
+              baseline.range(of: #"[^\p{Latin}\p{N}\p{P}\p{Z}\p{M}\s•]"#,
+                             options: .regularExpression) == nil else { return true }
+        // Inspect the remaining text, not whether the deterministic pass changed
+        // anything. Semantic corrections often leave that pass unchanged.
+        let repairs = #"(?i)\b(actually|rather|i mean|sorry|no wait|wait|instead|you know|like|well|ähm|äh|also|eigentlich|ich meine|nein|sondern|besser gesagt|warte|oder doch|new line|new paragraph|bullet point|neue zeile|neuer absatz)\b|[—–]|\.{3}"#
+        return baseline.range(of: repairs, options: .regularExpression) != nil
+    }
+
     /// Applies the speech repairs that should never depend on a small local
     /// model following an instruction. Keep this deliberately conservative:
     /// semantic rewrites still belong to the cleanup model.

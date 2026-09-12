@@ -111,91 +111,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 #endif
 
     private func cleanupDictatedText(_ text: String, sourceLanguage: String) async -> String? {
-        await cleanupDictatedText(text,
-                                  languageMetadata: DictationLanguageMetadata(language: sourceLanguage,
-                                                                               text: text))
+        await cleanupDictatedText(DictationTranscriptionResult(text: text, language: sourceLanguage))?.text
     }
 
-    private func cleanupDictatedText(_ text: String,
-                                     languageMetadata: DictationLanguageMetadata) async -> String? {
-        guard LocalModel.isCleanupCompatible(LocalModel.selected) else { return nil }
-        let translator = LocalLLMTranslator()
-        let sourceLanguage = languageMetadata.dominantLanguage ?? "auto"
-        return await Self.performDictationCleanup(
-            text,
-            prepare: {
-                try await translator.prepare(from: sourceLanguage, to: sourceLanguage) { message in
-                    NSLog("sAiity cleanup progress: \(message)")
-                }
-            },
-            cleanup: {
-                await translator.cleanup($0,
-                                         sourceLanguage: sourceLanguage,
-                                         languageMetadata: languageMetadata)
-            },
-            stop: { await translator.stop() })
-    }
+    private lazy var dictationCleanupSession = DictationCleanupSession(gate: translatorInferenceGate)
 
-    /// Cleans mixed dictation one recognised region at a time. This keeps the
-    /// cleanup model's conservative single-language contract local to a region
-    /// while preserving the original region metadata for translation. A
-    /// translated cleanup result is still rejected by the per-region validator
-    /// and by the final mixed-language validation below.
     private func cleanupDictatedText(_ transcription: DictationTranscriptionResult) async -> DictationTranscriptionResult? {
-        guard LocalModel.isCleanupCompatible(LocalModel.selected) else { return nil }
-        // Cleanup uses its own GGUF instance. Release a warm caption translator
-        // first so Dictation never doubles native model memory at the exact
-        // moment it starts another local inference operation.
-        await unloadTranslator(reason: "dictation cleanup")
-        let translator = LocalLLMTranslator()
-        let preparationLanguage = transcription.languageMetadata.dominantLanguage ?? "en"
-        do {
-            try await translatorInferenceGate.run {
-                try await translator.prepare(from: preparationLanguage,
-                                             to: preparationLanguage) { message in
-                    NSLog("sAiity cleanup progress: \(message)")
+        await translatorSwap?.value
+        await waitForTranslatorUsersToFinish()
+        beginTranslatorUse()
+        defer { endTranslatorUse() }
+        let selected = LocalModel.selected
+        let model = LocalModel.isCleanupCompatible(selected) ? selected : nil
+        return await dictationCleanupSession.cleanup(transcription, modelKey: model?.file) { [self] in
+            // The session owns the native gate here. Waiters/teardown must not
+            // recursively enter that gate. Dictation already excludes captions;
+            // a warm translator is released before loading the cleanup weights.
+            let outgoing = activeTranslator
+            activeTranslator = nil
+            activeTranslatorEngine = nil
+            translatorPreparedTarget = nil
+            translatorReady = false
+            await outgoing?.stop()
+            let translator = LocalLLMTranslator()
+            do {
+                try await translator.prepare(model: model, from: "auto", to: "auto") { message in
+                    NSLog("sAiity cleanup progress: %@", message)
                 }
+            } catch {
+                await translator.stop()
+                throw error
             }
-
-            var cleanedRegions: [DictationRegionTranscript] = []
-            for region in transcription.regions {
-                let source = region.language == "auto" ? nil : region.language
-                let metadata = DictationLanguageMetadata(regions: [region])
-                let candidate = try? await translatorInferenceGate.run {
-                    await translator.cleanup(region.text,
-                                             sourceLanguage: source,
-                                             languageMetadata: metadata)
-                }
-                let cleaned = candidate.flatMap {
-                    DictationCleanupValidator.validate($0,
-                                                       preserving: region.text,
-                                                       sourceLanguage: source,
-                                                       languageMetadata: metadata)
-                } ?? region.text
-                cleanedRegions.append(DictationRegionTranscript(text: cleaned,
-                                                                language: region.language))
-            }
-
-            let result = DictationTranscriptionResult(regions: cleanedRegions)
-            guard DictationCleanupValidator.validate(result.text,
-                                                     preserving: transcription.text,
-                                                     sourceLanguage: transcription.languageMetadata.dominantLanguage,
-                                                     languageMetadata: transcription.languageMetadata) != nil else {
-                await stopTranslator(translator)
-                return nil
-            }
-            await stopTranslator(translator)
-            return result
-        } catch {
-            await stopTranslator(translator)
-            NSLog("sAiity cleanup unavailable: \(error.localizedDescription)")
-            return nil
+            return DictationCleanupSession.Model(
+                cleanup: { text, source, metadata in
+                    await translator.cleanup(text, sourceLanguage: source, languageMetadata: metadata)
+                },
+                stop: { await translator.stop() })
         }
     }
-
-    /// Model destruction is a native operation too. It must sit behind the
-    /// same gate as prepare and inference, otherwise a queued dictation region
-    /// can enter llama/MLX while the previous model is being torn down.
+    /// Model destruction is serialized with native inference.
     private func stopTranslator(_ translator: Translating?) async {
         guard let translator else { return }
         _ = try? await translatorInferenceGate.run {
@@ -376,6 +330,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Pooled buffers only. Nothing the user can perceive.
             MemoryPolicy.releaseCaches()
         case .critical:
+            Task { @MainActor in await dictationCleanupSession.invalidate() }
             // Captions are the point of the app; translation is the expensive
             // extra. Shedding it keeps the session alive instead of losing it,
             // and it is said out loud rather than left to look like translation
@@ -496,9 +451,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let assetID = selectedEngine.activeAssetID
         do {
             try await translatorInferenceGate.run {
-                try await engine.prepare(from: src, to: target) { [weak self] msg in
+                await self.dictationCleanupSession.releaseModel()
+                try await engine.prepare(from: src, to: target) { msg in
                     NSLog("sAiity translator progress: \(msg)")
-                    Task { @MainActor in self?.setStatus(localized: msg) }
+                    Task { @MainActor in self.setStatus(localized: msg) }
                 }
             }
             // A settings change can replace the model while prepare() is
@@ -597,8 +553,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func translateDictatedText(_ text: String,
                                        transcription: DictationTranscriptionResult,
                                        target: String) async -> String? {
-        guard transcription.languageMetadata.containsMultipleLanguages,
-              transcription.regions.count > 1 else {
+        // A recognizer may expose no language tag (or only the first tag) even
+        // though the segmenter found several speech regions. Region count is
+        // therefore the conservative authority for translation granularity;
+        // never collapse an untagged segmented recording back to its first
+        // language and send the whole mixed message through one source code.
+        guard transcription.regions.count > 1 else {
             let source = transcription.languageMetadata.dominantLanguage ?? "auto"
             return await translateDictatedText(text, source: source, target: target)
         }
@@ -949,8 +909,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard aboutResignObserver == nil else { return }
         aboutResignObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { _ in
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
+                Task { @MainActor in
                     ForegroundActivation.end()
                     if let t = self.aboutResignObserver {
                         NotificationCenter.default.removeObserver(t)
@@ -2078,6 +2037,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         await dictationController.invalidatePreparedBackend()
         await asrBackendPool.replace(with: AppDelegate.makeActiveBackend())
         await unloadTranslator(reason: "model deletion")
+        await dictationCleanupSession.invalidate()
     }
 
     /// Silence is not the same as a broken pipeline, and the UI must not let the

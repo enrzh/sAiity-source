@@ -4,6 +4,16 @@ import Testing
 @testable import sAiity
 
 @Suite struct DictationCleanupValidatorTests {
+    @Test("clean dictation skips the cleanup model")
+    func cleanTextSkipsModel() {
+        #expect(!DictationCleanupValidator.needsModelCleanup("Please send the report today."))
+        #expect(!DictationCleanupValidator.needsModelCleanup("Um, please please send the report.", sourceLanguage: "en"))
+        #expect(DictationCleanupValidator.needsModelCleanup("Send the report, I mean the revised report."))
+        #expect(DictationCleanupValidator.needsModelCleanup("Morgen, nein, besser gesagt am Freitag.", sourceLanguage: "de"))
+        #expect(DictationCleanupValidator.needsModelCleanup("你好，send the report.", sourceLanguage: "en"))
+        #expect(DictationCleanupValidator.needsModelCleanup("Envoyez le rapport.", sourceLanguage: "fr"))
+    }
+
     @Test("cleanup validator applies only the documented plain-text rules")
     func documentedRules() {
         #expect(DictationCleanupValidator.validate(" \n hello \t\n") == "hello")

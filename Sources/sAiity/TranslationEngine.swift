@@ -48,12 +48,21 @@ actor TranslationInferenceGate {
         let previous = tail
         let current = Task { () throws -> T in
             await previous?.value
+            try Task.checkCancellation()
             return try await operation()
         }
         tail = Task {
             _ = try? await current.value
         }
-        return try await current.value
+        // Cancellation skips queued work, but never releases the gate before an
+        // already-running native operation drains safely.
+        return try await withTaskCancellationHandler {
+            let value = try await current.value
+            try Task.checkCancellation()
+            return value
+        } onCancel: {
+            current.cancel()
+        }
     }
 }
 

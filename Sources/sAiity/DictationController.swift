@@ -231,6 +231,7 @@ final class DictationController {
 
     func release() {
         guard state.release(), terminal.accept(.released) else { return }
+        releaseStarted = .now
         let session = generation
         phase = .transcribing
         releaseTask = Task { @MainActor [weak self] in
@@ -282,6 +283,7 @@ final class DictationController {
 
     private func limit(session: Int) {
         guard session == generation, terminal.accept(.limited) else { return }
+        releaseStarted = .now
         state.cancel()
         phase = .transcribing
         releaseTask = Task { @MainActor [weak self] in await self?.finish(session: session) }
@@ -406,6 +408,8 @@ final class DictationController {
         }
     }
 
+    private var releaseStarted: ContinuousClock.Instant?
+
     private func finish(session: Int) async {
         guard session == generation else { return }
         let samples = drainCapture()
@@ -503,6 +507,8 @@ final class DictationController {
         var translated = false
         var translationFailed = false
         if cleanupConfiguration().enabled {
+            let cleanupStarted = ContinuousClock.now
+            defer { logDuration("cleanup", since: cleanupStarted) }
             phase = .cleaning
             let value: String?
             if let detailedCleanup {
@@ -528,10 +534,13 @@ final class DictationController {
                 cleaned = true
             }
         }
+        guard session == generation, !Task.isCancelled else { return }
         if configuration.enabled,
            let target = configuration.target?.trimmingCharacters(in: .whitespacesAndNewlines),
            !target.isEmpty {
             phase = .translating
+            let translationStarted = ContinuousClock.now
+            defer { logDuration("translation", since: translationStarted) }
             let value: String?
             if let detailedTranslate {
                 value = await detailedTranslate(output, transcriptionForTranslation, target)
@@ -553,6 +562,7 @@ final class DictationController {
         guard session == generation else { return }
         phase = .inserting
         let result = inserter.insert(output)
+        if let releaseStarted { logDuration("release-to-insert", since: releaseStarted) }
         switch result.outcome {
         case .insertedAndCopied:
             if translated {
@@ -571,6 +581,12 @@ final class DictationController {
                 phase = .result(String(localized: "Copied to Clipboard"))
             }
         }
+    }
+
+    private func logDuration(_ phase: String, since start: ContinuousClock.Instant) {
+        let elapsed = start.duration(to: .now).components
+        NSLog("sAiity dictation timing: %@ %.3fs", phase,
+              Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18)
     }
 
     private func failStart(_ backend: TranscriptionBackend,

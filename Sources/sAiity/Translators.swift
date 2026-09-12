@@ -201,7 +201,7 @@ final class MADLADTranslator: Translating, @unchecked Sendable {
 /// meant to translate, no stop sequence was in effect, and generation ran to the
 /// token cap every time. Measured after the fix: ~0.5-0.7 s per sentence.
 final class LocalLLMTranslator: Translating, @unchecked Sendable {
-    let name = "Qwen (local LLM)"
+    let name = "Local LLM"
 
     /// Ghost-pepper's budget. A hung generation cannot be cancelled (the decode
     /// loop holds the LLMCore actor with no suspension point), so this is a
@@ -416,7 +416,12 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
 
     func prepare(from source: String, to target: String,
                  progress: @escaping @Sendable (String) -> Void) async throws {
-        guard let m = LocalModel.selected else {
+        try await prepare(model: LocalModel.selected, from: source, to: target, progress: progress)
+    }
+
+    func prepare(model: LocalModel?, from source: String, to target: String,
+                 progress: @escaping @Sendable (String) -> Void) async throws {
+        guard let m = model else {
             // Better than quietly translating with whatever the catalogue would
             // have picked: the user has not chosen a model, and saying so is the
             // only thing that leads anywhere.
@@ -582,12 +587,7 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
         }
     }
 
-    /// llama.cpp frees the model and its KV cache in `LLMCore.deinit`, so this
-    /// really does return the memory — with one caveat the caller cannot fix:
-    /// a generation that overran its timeout has already been abandoned (see
-    /// `generate`), and that decode loop keeps its own model alive until it
-    /// finishes on its own. Dropping our reference here is still correct; it
-    /// just means the release happens when the stranded loop ends.
+    /// The caller waits for generation to drain before releasing native state.
     func stop() async {
         llm = nil
         // llama.cpp keeps backend allocations in a process-wide cache. Drop
