@@ -36,12 +36,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                                        backing: .buffered,
                                                        defer: false)
     private let dictationCapture = DictationMicrophoneCapture()
+    private lazy var waveformDelivery = WaveformUpdateCoalescer { [weak self] levels in
+        self?.dictationToast.updateWaveform(levels)
+    }
     private var dictationHotkeyRetryTask: Task<Void, Never>?
     /// Captions and push-to-talk share this one prepared backend. The pool owns
     /// the warm model; callers hold only a temporary lease while feeding audio.
     private lazy var asrBackendPool = ASRBackendPool(makeBackend: AppDelegate.makeActiveBackend)
     private lazy var dictationBackendPool = ASRBackendPool(makeBackend: AppDelegate.makeDictationStreamingBackend)
-    private lazy var dictationController = DictationController(
+    private lazy var dictationController: DictationController = {
+        let waveformDelivery = self.waveformDelivery
+        return DictationController(
         backendProvider: dictationBackendPool,
         capture: dictationCapture,
         inserter: TextInserter(),
@@ -69,10 +74,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         detailedCleanup: { [weak self] transcription in
             await self?.cleanupDictatedText(transcription)
         },
-        onWaveform: { [weak self] levels in
-            Task { @MainActor [weak self] in
-                self?.dictationToast.updateWaveform(levels)
-            }
+        onWaveform: { levels in
+            waveformDelivery.submit(levels)
         },
         dictationUsesWhisper: { DictationRecognizer.selected == .whisper },
         transcribeWhisper: { samples, locale in
@@ -88,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.updateDictationToast(phase)
             self?.scheduleTranslatorEvictionIfIdle()
         })
+    }()
     private let dictationHotkeyMonitor = DictationHotkeyMonitor()
     private let capture = SystemAudioCapture()
     private var engine = ASREngine.effective

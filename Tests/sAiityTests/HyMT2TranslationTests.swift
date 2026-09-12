@@ -17,6 +17,9 @@ struct HyMT2TranslationTests {
         #expect(!TranslationEngine.madlad.isAdvanced)
         #expect(TranslationEngine.hyMT2.isAdvanced)
         #expect(TranslationEngine.qwen.isAdvanced)
+        #expect(TranslationEngine.visibleSelection(.qwen) == nil)
+        #expect(TranslationEngine.visibleSelection(.madlad) == .madlad)
+        #expect(TranslationEngine.visibleSelection(nil) == nil)
     }
 
     @Test("Hy-MT2 uses conservative first-pass and retry sampling")
