@@ -846,7 +846,10 @@ struct CaptionsView: View {
                           "Off by default. Each finished sentence is posted as a VoiceOver announcement, which also reaches a connected braille display. In-progress text is never announced — it would arrive faster than speech or braille can render it.",
                           isOn: $state.announceCaptions)
             Picker("Background", selection: $state.style.glassStyle) {
-                Text("Glass").tag(0); Text("Clear").tag(1); Text("Solid").tag(2)
+                Text("Glass").tag(CaptionStyle.regularGlass)
+                Text("Clear").tag(CaptionStyle.clearGlass)
+                Text("Solid").tag(CaptionStyle.solidGlass)
+                Text("Liquid Glass").tag(CaptionStyle.liquidGlass)
             }
             .pickerStyle(.segmented)
                     ColorPicker("Background tint", selection: Binding(

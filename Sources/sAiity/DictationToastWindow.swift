@@ -129,17 +129,6 @@ final class DictationToastWindow: NSPanel {
         setAccessibilityLabel("Dictation")
         setAccessibilityEnabled(true)
 
-        // NSGlassEffectView can tear down its hosted hierarchy while a phase
-        // update changes the label on macOS 27. Use the stable AppKit material
-        // view and keep the content hierarchy explicit.
-        let effect = NSVisualEffectView()
-        effect.material = .hudWindow
-        effect.blendingMode = .behindWindow
-        effect.state = .active
-        effect.wantsLayer = true
-        effect.layer?.cornerRadius = 18
-        effect.layer?.masksToBounds = true
-
         label.font = .systemFont(ofSize: 13, weight: .semibold)
         label.textColor = .white
         label.alignment = .center
@@ -191,16 +180,21 @@ final class DictationToastWindow: NSPanel {
             waveform.widthAnchor.constraint(equalToConstant: Self.centerContentWidth),
             waveform.heightAnchor.constraint(equalToConstant: 34),
         ])
-        effect.addSubview(host)
-        host.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            host.leadingAnchor.constraint(equalTo: effect.leadingAnchor),
-            host.trailingAnchor.constraint(equalTo: effect.trailingAnchor),
-            host.topAnchor.constraint(equalTo: effect.topAnchor),
-            host.bottomAnchor.constraint(equalTo: effect.bottomAnchor),
-        ])
-        contentView = effect
+        contentView = BubbleSurfaceView(contentView: host)
         applyAccessibilitySurface()
+        applyBubbleStyle()
+        NotificationCenter.default.addObserver(
+            forName: .saiityCaptionStyleChanged, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor [weak self] in self?.applyBubbleStyle() }
+            }
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.applyAccessibilitySurface()
+                    self?.applyBubbleStyle()
+                }
+            }
         if let saved = FrameStore.loadDictation(), let visible = injectedVisibleFrame(for: saved) {
             setFrame(FrameStore.clamp(saved, into: visible), display: false)
             hasPlacedToast = true
@@ -222,6 +216,13 @@ final class DictationToastWindow: NSPanel {
         } else {
             effectBorderColor = nil
         }
+    }
+
+    private func applyBubbleStyle() {
+        guard let surface = contentView as? BubbleSurfaceView else { return }
+        let (_, reduceTransparency, increaseContrast) = Self.accessibilityPreferences()
+        surface.apply(style: CaptionStyle.current,
+                      forceSolid: reduceTransparency || increaseContrast)
     }
 
     private var effectBorderColor: NSColor? {
@@ -349,6 +350,8 @@ final class DictationToastWindow: NSPanel {
     }
     func performResetButtonAction() { resetButton.performClick(nil) }
 #if SAIITY_TEST_HOOKS
+    var renderedBubbleStyleForTests: Int { (contentView as? BubbleSurfaceView)?.renderedStyle ?? -1 }
+    var usesLiquidGlassForTests: Bool { (contentView as? BubbleSurfaceView)?.usesLiquidGlassForTests ?? false }
     var resetButtonBoundsForTests: NSRect { resetButton.convert(resetButton.bounds, to: nil) }
     var labelMidXForTests: CGFloat { label.convert(label.bounds, to: contentView).midX }
     var labelFrameForTests: NSRect { label.convert(label.bounds, to: contentView) }

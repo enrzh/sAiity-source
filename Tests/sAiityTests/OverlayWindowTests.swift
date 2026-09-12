@@ -5,6 +5,24 @@ import Testing
 
 @MainActor
 @Suite struct OverlayWindowTests {
+    @Test("Liquid Glass is applied to the subtitle bubble")
+    func liquidGlassStyle() {
+        let defaults = UserDefaults.standard
+        let previous = defaults.data(forKey: CaptionStyle.key)
+        defer {
+            if let previous { defaults.set(previous, forKey: CaptionStyle.key) }
+            else { defaults.removeObject(forKey: CaptionStyle.key) }
+        }
+
+        var style = CaptionStyle.current
+        style.glassStyle = CaptionStyle.liquidGlass
+        CaptionStyle.current = style
+        let window = OverlayWindow()
+        #expect(window.renderedBubbleStyleForTests == CaptionStyle.liquidGlass)
+        #expect(window.usesLiquidGlassForTests)
+        window.orderOut(nil)
+    }
+
     @Test("explicitly revealing the subtitle bubble works before the first caption")
     func revealBeforeFirstCaption() {
         let defaults = UserDefaults.standard

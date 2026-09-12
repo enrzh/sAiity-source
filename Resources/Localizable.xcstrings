@@ -5029,6 +5029,15 @@
         }
       }
     },
+    "Liquid Glass": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Liquid Glass" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Cristal líquido" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Verre liquide" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "Liquid Glass" } }
+      }
+    },
     "Google's small model — noticeably better at translation per parameter than same-size Qwen, and fast. Worth trying if 2B feels slow.": {
       "extractionState": "manual",
       "localizations": {

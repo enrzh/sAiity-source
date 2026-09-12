@@ -560,12 +560,8 @@ final class OverlayWindow: NSPanel {
     /// layout during the first presentation on macOS 27. Rows are positioned
     /// explicitly instead, so the scroll view always has a real frame to draw.
     private let historyStack = FlippedDocumentView()
-    // NSGlassEffectView is still changing across macOS 26/27 and can tear
-    // down its hosted hierarchy while a caption row is being inserted. The
-    // AppKit visual-effect view gives the same translucent surface with a
-    // stable lifetime and layout contract.
-    private let glass = NSVisualEffectView()
     private let host = BubbleContentView()
+    private lazy var surface = BubbleSurfaceView(contentView: host)
     private var history = CaptionHistory()
     private var rowViews: [Int: CaptionRowView] = [:]
 
@@ -615,13 +611,6 @@ final class OverlayWindow: NSPanel {
         hidesOnDeactivate = false
         acceptsMouseMovedEvents = true
 
-        glass.material = .hudWindow
-        glass.blendingMode = .behindWindow
-        glass.state = .active
-        glass.wantsLayer = true
-        glass.layer?.cornerRadius = BubbleContentView.cornerRadius
-        glass.layer?.masksToBounds = true
-
         historyStack.frame = NSRect(x: 0, y: 0, width: 1, height: 1)
         historyStack.autoresizingMask = [.width]
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -643,17 +632,7 @@ final class OverlayWindow: NSPanel {
             scrollView.bottomAnchor.constraint(equalTo: host.bottomAnchor, constant: -14),
         ])
 
-        // Keep the hosted hierarchy explicit. Unlike NSGlassEffectView,
-        // NSVisualEffectView has no contentView slot and cannot silently
-        // replace the view that owns these constraints.
-        glass.addSubview(host)
-        NSLayoutConstraint.activate([
-            host.leadingAnchor.constraint(equalTo: glass.leadingAnchor),
-            host.trailingAnchor.constraint(equalTo: glass.trailingAnchor),
-            host.topAnchor.constraint(equalTo: glass.topAnchor),
-            host.bottomAnchor.constraint(equalTo: glass.bottomAnchor),
-        ])
-        contentView = glass
+        contentView = surface
 
         contentMinSize = NSSize(width: 280, height: 110)
         restoreFrame()
@@ -983,11 +962,12 @@ final class OverlayWindow: NSPanel {
     private var effectiveStyle: CaptionStyle {
         var st = CaptionStyle.current
         let a11y = NSWorkspace.shared
-        if a11y.accessibilityDisplayShouldReduceTransparency, st.glassStyle != 2 {
-            st.glassStyle = 2   // solid
+        if a11y.accessibilityDisplayShouldReduceTransparency,
+           st.glassStyle != CaptionStyle.solidGlass {
+            st.glassStyle = CaptionStyle.solidGlass   // solid
         }
         if a11y.accessibilityDisplayShouldIncreaseContrast {
-            st.glassStyle = 2
+            st.glassStyle = CaptionStyle.solidGlass
             st.original.weight = max(st.original.weight, 0.3)
             st.translation.weight = max(st.translation.weight, 0.3)
             st.original.opacity = 1.0
@@ -1023,21 +1003,7 @@ final class OverlayWindow: NSPanel {
                     && entry.sentenceID == history.entries.last?.sentenceID)
         }
 
-        glass.layer?.cornerRadius = st.cornerRadius
-        switch st.glassStyle {
-        case 1: glass.material = .underWindowBackground
-        default: glass.material = .hudWindow
-        }
-        glass.blendingMode = .behindWindow
-        glass.state = .active
-        glass.layer?.masksToBounds = true
-        // "Solid" is the legibility answer for bright video, where even regular
-        // glass leaves white-on-white at roughly 2:1 contrast.
-        if st.glassStyle == 2 {
-            glass.layer?.backgroundColor = (st.tintColor ?? NSColor(white: 0.06, alpha: 1)).cgColor
-        } else {
-            glass.layer?.backgroundColor = NSColor.clear.cgColor
-        }
+        surface.apply(style: st)
         // Both directions. Only the hide half existed, so un-hiding — which
         // now has its own global hot key — did nothing visible until the next
         // caption chunk happened to arrive, which during a pause in speech
@@ -1053,6 +1019,11 @@ final class OverlayWindow: NSPanel {
         }
         sizeToFit(immediateShrink: true)
     }
+
+#if SAIITY_TEST_HOOKS
+    var renderedBubbleStyleForTests: Int { surface.renderedStyle }
+    var usesLiquidGlassForTests: Bool { surface.usesLiquidGlassForTests }
+#endif
 
     /// Reveal an intentionally enabled bubble even before the first caption
     /// arrives. Keeping this separate from `presentIfNeeded` avoids showing an

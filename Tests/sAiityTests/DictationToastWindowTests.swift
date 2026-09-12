@@ -72,6 +72,46 @@ import Testing
         DictationToastWindow.accessibilityPreferences = DictationToastWindow.systemAccessibilityPreferences
     }
 
+    @Test("Liquid Glass is shared by the dictation bubble")
+    func liquidGlassStyle() {
+        let defaults = UserDefaults.standard
+        let previous = defaults.data(forKey: CaptionStyle.key)
+        DictationToastWindow.accessibilityPreferences = { (false, false, false) }
+        defer {
+            if let previous { defaults.set(previous, forKey: CaptionStyle.key) }
+            else { defaults.removeObject(forKey: CaptionStyle.key) }
+            DictationToastWindow.accessibilityPreferences = DictationToastWindow.systemAccessibilityPreferences
+        }
+
+        var style = CaptionStyle.current
+        style.glassStyle = CaptionStyle.liquidGlass
+        CaptionStyle.current = style
+        let window = makeWindow()
+        #expect(window.renderedBubbleStyleForTests == CaptionStyle.liquidGlass)
+        #expect(window.usesLiquidGlassForTests)
+        window.dismiss()
+    }
+
+    @Test("Liquid Glass falls back to solid for reduced transparency")
+    func liquidGlassAccessibilityFallback() {
+        let defaults = UserDefaults.standard
+        let previous = defaults.data(forKey: CaptionStyle.key)
+        DictationToastWindow.accessibilityPreferences = { (false, true, false) }
+        defer {
+            if let previous { defaults.set(previous, forKey: CaptionStyle.key) }
+            else { defaults.removeObject(forKey: CaptionStyle.key) }
+            DictationToastWindow.accessibilityPreferences = DictationToastWindow.systemAccessibilityPreferences
+        }
+
+        var style = CaptionStyle.current
+        style.glassStyle = CaptionStyle.liquidGlass
+        CaptionStyle.current = style
+        let window = makeWindow()
+        #expect(window.renderedBubbleStyleForTests == CaptionStyle.solidGlass)
+        #expect(!window.usesLiquidGlassForTests)
+        window.dismiss()
+    }
+
     @Test func increaseContrastOnOff() {
         DictationToastWindow.accessibilityPreferences = { (false, false, true) }
         let high = makeWindow(); high.show(text: "x", animated: false); #expect(high.contentView?.layer?.borderWidth == 1); high.dismiss()

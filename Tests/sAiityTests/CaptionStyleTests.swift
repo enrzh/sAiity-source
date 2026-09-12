@@ -32,7 +32,7 @@ struct CaptionStyleTests {
         ("translation.maxLines",      { $0.translation.maxLines = 6 }),
         ("lineGap",                   { $0.lineGap = 17 }),
         ("cornerRadius",              { $0.cornerRadius = 3 }),
-        ("glassStyle",                { $0.glassStyle = 2 }),
+        ("glassStyle",                { $0.glassStyle = CaptionStyle.liquidGlass }),
         ("tintHex",                   { $0.tintHex = "112233" }),
         ("widthFraction",             { $0.widthFraction = 0.9 }),
         ("screenMargin",              { $0.screenMargin = 77 }),

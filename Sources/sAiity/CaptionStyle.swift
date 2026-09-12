@@ -48,7 +48,11 @@ struct CaptionStyle: Equatable, Codable, Sendable {
 
     // MARK: The bubble
     var cornerRadius: Double = 22
-    var glassStyle: Int = 0            // 0 = regular, 1 = clear, 2 = solid
+    static let regularGlass = 0
+    static let clearGlass = 1
+    static let solidGlass = 2
+    static let liquidGlass = 3
+    var glassStyle: Int = regularGlass // regular, clear, solid, or Liquid Glass
     var tintHex: String = ""           // empty = untinted glass
 
     /// Width as a fraction of the screen's usable width.
