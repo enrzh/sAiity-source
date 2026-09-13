@@ -416,6 +416,22 @@ struct DictationView: View {
                     cleanupModelControls
                 }
 
+                SettingsSection(title: "Dictation bubble",
+                                subtitle: "Use the same surface styling for the press-to-talk result.") {
+                    BubbleSurfaceControls(state: state)
+                    HStack {
+                        Spacer()
+                        ResetButton {
+                            var style = state.style
+                            let defaults = CaptionStyle()
+                            style.glassStyle = defaults.glassStyle
+                            style.tintHex = defaults.tintHex
+                            style.cornerRadius = defaults.cornerRadius
+                            state.style = style
+                        }
+                    }
+                }
+
                 SettingsSection(title: "Permissions",
                                 subtitle: "Needed only for the global shortcut and text insertion.") {
                     permissionRow(title: "Input Monitoring",
@@ -876,20 +892,7 @@ struct CaptionsView: View {
             LabeledToggle("Announce captions to VoiceOver",
                           "Off by default. Each finished sentence is posted as a VoiceOver announcement, which also reaches a connected braille display. In-progress text is never announced — it would arrive faster than speech or braille can render it.",
                           isOn: $state.announceCaptions)
-            Picker("Background", selection: $state.style.glassStyle) {
-                Text("Glass").tag(CaptionStyle.regularGlass)
-                Text("Clear").tag(CaptionStyle.clearGlass)
-                Text("Solid").tag(CaptionStyle.solidGlass)
-                Text("Liquid Glass").tag(CaptionStyle.liquidGlass)
-            }
-            .pickerStyle(.segmented)
-                    ColorPicker("Background tint", selection: Binding(
-                get: { Color(nsColor: state.style.tintColor ?? .black) },
-                set: { state.style.tintHex = CaptionStyle.hex(from: NSColor($0)) }))
-            slider("Corner radius", $state.style.cornerRadius, 0...40, "%.0f")
-            slider("Width", $state.style.widthFraction, 0.3...1.0, "%.0f%%", scale: 100)
-            slider("Gap to screen edge", $state.style.screenMargin, 0...160, "%.0f")
-            slider("Maximum height", $state.style.maxHeight, 120...720, "%.0f")
+            BubbleSurfaceControls(state: state, includePositioning: true)
                 }
 
         textStyleSection("Original text", $state.style.original,
@@ -999,6 +1002,51 @@ struct ResetButton: View {
             .controlSize(.small)
             .help(title)
             .accessibilityLabel(title)
+    }
+}
+
+/// Surface-only controls shared by the caption and dictation bubbles. Text
+/// typography and caption placement stay on the Captions page because the
+/// dictation toast has a fixed, compact layout.
+struct BubbleSurfaceControls: View {
+    @Bindable var state: AppState
+    var includePositioning = false
+
+    var body: some View {
+        Group {
+            Picker("Background", selection: $state.style.glassStyle) {
+                Text("Glass").tag(CaptionStyle.regularGlass)
+                Text("Clear").tag(CaptionStyle.clearGlass)
+                Text("Solid").tag(CaptionStyle.solidGlass)
+                Text("Liquid Glass").tag(CaptionStyle.liquidGlass)
+            }
+            .pickerStyle(.segmented)
+            ColorPicker("Background tint", selection: Binding(
+                get: { Color(nsColor: state.style.tintColor ?? .black) },
+                set: { state.style.tintHex = CaptionStyle.hex(from: NSColor($0)) }))
+            surfaceSlider("Corner radius", $state.style.cornerRadius, 0...40, "%.0f")
+            if includePositioning {
+                surfaceSlider("Width", $state.style.widthFraction, 0.3...1.0,
+                              "%.0f%%", scale: 100)
+                surfaceSlider("Gap to screen edge", $state.style.screenMargin, 0...160, "%.0f")
+                surfaceSlider("Maximum height", $state.style.maxHeight, 120...720, "%.0f")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func surfaceSlider(_ title: LocalizedStringKey, _ value: Binding<Double>,
+                               _ range: ClosedRange<Double>, _ format: String,
+                               scale: Double = 1) -> some View {
+        LabeledContent(title) {
+            HStack {
+                Slider(value: value, in: range)
+                Text(String(format: format, value.wrappedValue * scale))
+                    .monospacedDigit()
+                    .fixedSize()
+                    .frame(width: 62, alignment: .trailing)
+            }
+        }
     }
 }
 
@@ -1456,6 +1504,19 @@ struct TranscriptsView: View {
 struct GeneralView: View {
     @Bindable var state: AppState
 
+    private var version: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+            ?? String(localized: "Development build")
+    }
+
+    private var credits: String {
+        guard let url = Bundle.main.url(forResource: "Credits", withExtension: "txt"),
+              let text = try? String(contentsOf: url, encoding: .utf8) else {
+            return String(localized: "Credits file missing from this build.")
+        }
+        return text
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
@@ -1498,17 +1559,6 @@ struct GeneralView: View {
                     Text("Writes one text file with the app's state and this run's log, for bug reports. Review it before sharing.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                // Moved off the menu bar, which had grown into a second copy
-                // of the app. It still has to live somewhere: this panel is
-                // where the third-party licences and credits are shown.
-                HStack {
-                    Button("About sAiity") {
-                        NotificationCenter.default.post(name: .saiityShowAbout, object: nil)
-                    }
-                    .controlSize(.small)
-                    Text("Version, licence, and the credits for the models and libraries this app is built on.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
             }
 
             SettingsSection(title: "Privacy",
@@ -1517,6 +1567,15 @@ struct GeneralView: View {
                     .font(.caption)
                 Text("Model files are downloaded once from huggingface.co. Nothing you say is ever uploaded.")
                     .font(.caption).foregroundStyle(.secondary)
+            }
+
+            SettingsSection(title: "About sAiity",
+                            subtitle: "Version, licence, and the credits for the models and libraries used here.") {
+                LabeledContent("Version", value: version)
+                Text(credits)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             }
             .padding(.vertical, 8)

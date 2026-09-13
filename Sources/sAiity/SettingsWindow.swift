@@ -12,9 +12,6 @@ extension Notification.Name {
     static let saiityEngineChanged = Notification.Name("sAiityEngineChanged")
     static let saiityTranslateTargetChanged = Notification.Name("sAiityTranslateTargetChanged")
     static let saiityResetBubble = Notification.Name("sAiityResetBubble")
-    /// Settings → General asks the delegate to raise the standard About panel;
-    /// the panel and its credits belong to AppKit, not to a SwiftUI page.
-    static let saiityShowAbout = Notification.Name("sAiityShowAbout")
     /// "Include my microphone" changed; a running capture must act on it now.
     static let saiityMicSettingChanged = Notification.Name("sAiityMicSettingChanged")
     static let saiityDictationSettingChanged = Notification.Name("sAiityDictationSettingChanged")
@@ -828,8 +825,11 @@ struct SettingsRootView: View {
             }
         }
         .sheet(isPresented: $showSupport) {
-            GeneralView(state: state)
-                .frame(width: 620, height: 460)
+            SheetShell(title: "About & Support",
+                       subtitle: "Permissions, diagnostics, privacy, and app information.",
+                       width: 620, height: 560) {
+                GeneralView(state: state)
+            }
         }
     }
 

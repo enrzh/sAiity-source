@@ -883,48 +883,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// feed the new engine buffers in the old engine's format.
     private var captureFormat: AVAudioFormat?
 
-    /// An LSUIElement app has no App menu, so this is the ONLY route to the
-    /// version string and to the third-party notices the licences require to
-    /// travel with the binary.
-    @objc private func showAbout() {
-        let credits: NSAttributedString
-        if let url = Bundle.main.url(forResource: "Credits", withExtension: "txt"),
-           let text = try? String(contentsOf: url, encoding: .utf8) {
-            credits = NSAttributedString(
-                string: text,
-                attributes: [.font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)])
-        } else {
-            credits = NSAttributedString(string: String(localized: "Credits file missing from this build."))
-        }
-        // Only take a Dock presence if we are not already holding one. begin()
-        // used to run on every invocation while end() ran once, so opening
-        // About twice left the agent app with a Dock icon for the rest of the
-        // run. The observer below is the single owner of that balance.
-        if aboutResignObserver == nil { ForegroundActivation.begin() }
-        NSApp.orderFrontStandardAboutPanel(options: [
-            .applicationName: "sAiity",
-            .credits: credits,
-            .init(rawValue: "Copyright"): String(localized: "On-device live subtitles."),
-        ])
-        // The standard About panel has no close callback, so give up the Dock
-        // presence when the app next loses focus. One-shot: the token has to be
-        // held to be removed, and re-registering on every About would leak an
-        // observer per invocation.
-        guard aboutResignObserver == nil else { return }
-        aboutResignObserver = NotificationCenter.default.addObserver(
-            forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { _ in
-                Task { @MainActor in
-                    ForegroundActivation.end()
-                    if let t = self.aboutResignObserver {
-                        NotificationCenter.default.removeObserver(t)
-                        self.aboutResignObserver = nil
-                    }
-                }
-            }
-    }
-
-    private var aboutResignObserver: NSObjectProtocol?
-
     func applicationDidFinishLaunching(_ note: Notification) {
         // First, before permissions or onboarding can be keyed to the wrong
         // path: an app running off the DMG or out of Downloads should move
@@ -1010,10 +968,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(forName: .saiityResetBubble, object: nil,
                                                queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in self?.overlay.resetPosition() }
-        }
-        NotificationCenter.default.addObserver(forName: .saiityShowAbout, object: nil,
-                                               queue: .main) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.showAbout() }
         }
         NotificationCenter.default.addObserver(forName: .saiityMicSettingChanged, object: nil,
                                                queue: .main) { [weak self] _ in

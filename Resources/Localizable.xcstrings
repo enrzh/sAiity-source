@@ -1452,6 +1452,60 @@
         }
       }
     },
+    "Development build": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Entwicklerversion"}},
+        "es": {"stringUnit": {"state": "translated", "value": "Compilación de desarrollo"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Version de développement"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "開発版"}}
+      }
+    },
+    "Version": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Version"}},
+        "es": {"stringUnit": {"state": "translated", "value": "Versión"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Version"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "バージョン"}}
+      }
+    },
+    "Dictation bubble": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Diktierblase"}},
+        "es": {"stringUnit": {"state": "translated", "value": "Burbuja de dictado"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Bulle de dictée"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "ディクテーションバブル"}}
+      }
+    },
+    "Use the same surface styling for the press-to-talk result.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Verwende dieselbe Oberflächenoptik für das Ergebnis der Push-to-Talk-Diktierung."}},
+        "es": {"stringUnit": {"state": "translated", "value": "Usa el mismo estilo de superficie para el resultado de pulsar para hablar."}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Utilisez le même style de surface pour le résultat de la dictée push-to-talk."}},
+        "ja": {"stringUnit": {"state": "translated", "value": "プッシュトゥトークの結果にも同じサーフェススタイルを使います。"}}
+      }
+    },
+    "Permissions, diagnostics, privacy, and app information.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Berechtigungen, Diagnose, Datenschutz und App-Informationen."}},
+        "es": {"stringUnit": {"state": "translated", "value": "Permisos, diagnósticos, privacidad e información de la app."}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Autorisations, diagnostics, confidentialité et informations sur l’app."}},
+        "ja": {"stringUnit": {"state": "translated", "value": "権限、診断、プライバシー、アプリ情報。"}}
+      }
+    },
+    "Version, licence, and the credits for the models and libraries used here.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Version, Lizenz und Credits der hier verwendeten Modelle und Bibliotheken."}},
+        "es": {"stringUnit": {"state": "translated", "value": "Versión, licencia y créditos de los modelos y bibliotecas usados aquí."}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Version, licence et crédits des modèles et bibliothèques utilisés ici."}},
+        "ja": {"stringUnit": {"state": "translated", "value": "ここで使用しているモデルとライブラリのバージョン、ライセンス、クレジット。"}}
+      }
+    },
     "Add": {
       "localizations": {
         "de": {

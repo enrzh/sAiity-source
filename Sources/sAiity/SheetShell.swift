@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The frame every picker sheet shares: title + subtitle, trailing buttons with
-/// Done last, a divider, the content.
+/// The frame every sheet shares: title + subtitle, a dismiss button, a divider,
+/// and the content.
 ///
 /// This skeleton was copy-pasted per sheet and had already drifted — Done
 /// buttons in different places, different paddings, one sheet with an extra
@@ -47,5 +47,6 @@ struct SheetShell<Content: View, HeaderAccessory: View>: View {
             content
         }
         .frame(width: width, height: height)
+        .onExitCommand { dismiss() }
     }
 }
