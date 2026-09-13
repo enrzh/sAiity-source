@@ -44,9 +44,19 @@ final class BubbleSurfaceView: NSView {
         visual.state = .active
 
         if next == CaptionStyle.liquidGlass {
-            content.removeFromSuperview()
             content.translatesAutoresizingMaskIntoConstraints = true
-            liquid.contentView = content
+            if liquid.contentView !== content {
+                // NSGlassEffectView owns the handoff between its content view
+                // and the previous superview. Removing the view first can
+                // leave the native glass hierarchy without drawable content
+                // until a later style change.
+                liquid.contentView = content
+            }
+            // AppKit does not guarantee a non-zero frame when a content view
+            // is first handed to NSGlassEffectView. Keep the host sized with
+            // the glass surface so its controls remain drawable immediately.
+            content.frame = liquid.bounds
+            content.autoresizingMask = [.width, .height]
             liquid.cornerRadius = style.cornerRadius
             liquid.style = .regular
             liquid.tintColor = style.tintColor
@@ -57,7 +67,6 @@ final class BubbleSurfaceView: NSView {
 
         liquid.contentView = nil
         if content.superview !== visual {
-            content.removeFromSuperview()
             content.translatesAutoresizingMaskIntoConstraints = true
             visual.addSubview(content)
             content.frame = visual.bounds
@@ -82,5 +91,15 @@ final class BubbleSurfaceView: NSView {
 
 #if SAIITY_TEST_HOOKS
     var usesLiquidGlassForTests: Bool { !liquid.isHidden }
+    var contentAttachedForTests: Bool {
+        guard content.frame.width > 0, content.frame.height > 0 else { return false }
+        var view: NSView? = content
+        while let current = view {
+            if current.isHidden { return false }
+            if current === self { return true }
+            view = current.superview
+        }
+        return false
+    }
 #endif
 }

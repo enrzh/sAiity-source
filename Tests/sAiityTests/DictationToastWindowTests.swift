@@ -112,6 +112,52 @@ import Testing
         window.dismiss()
     }
 
+    @Test("changing dictation bubble styles keeps its content attached")
+    func styleChangesPreserveDictationContent() async {
+        let defaults = UserDefaults.standard
+        let previous = defaults.data(forKey: CaptionStyle.key)
+        DictationToastWindow.accessibilityPreferences = { (false, false, false) }
+        defer {
+            if let previous { defaults.set(previous, forKey: CaptionStyle.key) }
+            else { defaults.removeObject(forKey: CaptionStyle.key) }
+            DictationToastWindow.accessibilityPreferences = DictationToastWindow.systemAccessibilityPreferences
+        }
+
+        var style = CaptionStyle.current
+        style.glassStyle = CaptionStyle.regularGlass
+        CaptionStyle.current = style
+        let window = makeWindow()
+        window.show(phase: .dictating)
+        #expect(window.bubbleContentAttachedForTests)
+        #expect(window.waveformVisibleForTests)
+        #expect(window.resetButtonVisibleForTests)
+
+        for glassStyle in [CaptionStyle.liquidGlass, CaptionStyle.regularGlass,
+                           CaptionStyle.clearGlass, CaptionStyle.solidGlass,
+                           CaptionStyle.liquidGlass, CaptionStyle.regularGlass] {
+            style.glassStyle = glassStyle
+            CaptionStyle.current = style
+            await Task.yield()
+            await Task.yield()
+            #expect(window.bubbleContentAttachedForTests,
+                    "style=\(glassStyle), rendered=\(window.renderedBubbleStyleForTests)")
+            #expect(window.waveformVisibleForTests)
+            #expect(window.resetButtonVisibleForTests)
+
+            window.show(text: "Ready", animated: false)
+            #expect(window.bubbleContentAttachedForTests)
+            #expect(window.labelVisibleForTests)
+            #expect(window.resetButtonVisibleForTests)
+            window.show(phase: .dictating)
+        }
+
+        window.show(text: "Ready", animated: false)
+        #expect(window.bubbleContentAttachedForTests)
+        #expect(window.labelVisibleForTests)
+        #expect(window.resetButtonVisibleForTests)
+        window.dismiss()
+    }
+
     @Test func increaseContrastOnOff() {
         DictationToastWindow.accessibilityPreferences = { (false, false, true) }
         let high = makeWindow(); high.show(text: "x", animated: false); #expect(high.contentView?.layer?.borderWidth == 1); high.dismiss()

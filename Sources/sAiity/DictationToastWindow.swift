@@ -352,6 +352,7 @@ final class DictationToastWindow: NSPanel {
 #if SAIITY_TEST_HOOKS
     var renderedBubbleStyleForTests: Int { (contentView as? BubbleSurfaceView)?.renderedStyle ?? -1 }
     var usesLiquidGlassForTests: Bool { (contentView as? BubbleSurfaceView)?.usesLiquidGlassForTests ?? false }
+    var bubbleContentAttachedForTests: Bool { (contentView as? BubbleSurfaceView)?.contentAttachedForTests ?? false }
     var resetButtonBoundsForTests: NSRect { resetButton.convert(resetButton.bounds, to: nil) }
     var labelMidXForTests: CGFloat { label.convert(label.bounds, to: contentView).midX }
     var labelFrameForTests: NSRect { label.convert(label.bounds, to: contentView) }
@@ -359,6 +360,8 @@ final class DictationToastWindow: NSPanel {
     var contentMidXForTests: CGFloat { contentView?.bounds.midX ?? 0 }
     var waveformFrameForTests: NSRect { waveform.convert(waveform.bounds, to: contentView) }
     var waveformVisibleForTests: Bool { !waveform.isHidden }
+    var labelVisibleForTests: Bool { !label.isHidden }
+    var resetButtonVisibleForTests: Bool { !resetButton.isHidden }
     private(set) var resetCallbackCountForTests = 0
 #endif
 
