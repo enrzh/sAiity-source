@@ -37,6 +37,7 @@ struct CaptionStyleTests {
         ("widthFraction",             { $0.widthFraction = 0.9 }),
         ("screenMargin",              { $0.screenMargin = 77 }),
         ("maxHeight",                  { $0.maxHeight = 480 }),
+        ("autoResize",                 { $0.autoResize.toggle() }),
         ("showTranslation",           { $0.showTranslation.toggle() }),
         ("hidden",                    { $0.hidden.toggle() }),
     ]
@@ -105,6 +106,7 @@ struct CaptionStyleTests {
         #expect(s.screenMargin > 0)
         #expect(s.widthFraction > 0 && s.widthFraction <= 1)
         #expect(s.maxHeight >= 110)
+        #expect(s.autoResize)
     }
 
     @Test("Styles from before the height setting keep their values")
@@ -116,5 +118,6 @@ struct CaptionStyleTests {
         #expect(style.original.fontSize == 42)
         #expect(style.showTranslation == false)
         #expect(style.maxHeight == 260)
+        #expect(style.autoResize)
     }
 }

@@ -877,6 +877,7 @@ struct CaptionsView: View {
                     state.style.widthFraction = d.widthFraction
                     state.style.screenMargin = d.screenMargin
                     state.style.maxHeight = d.maxHeight
+                    state.style.autoResize = d.autoResize
                     state.style.hidden = d.hidden
                     state.captionClickThrough = true
                     NotificationCenter.default.post(name: .saiityResetBubble, object: nil)
@@ -1026,8 +1027,20 @@ struct BubbleSurfaceControls: View {
                 set: { state.style.tintHex = CaptionStyle.hex(from: NSColor($0)) }))
             surfaceSlider("Corner radius", $state.style.cornerRadius, 0...40, "%.0f")
             if includePositioning {
-                surfaceSlider("Width", $state.style.widthFraction, 0.3...1.0,
-                              "%.0f%%", scale: 100)
+                Picker("Sizing", selection: $state.style.autoResize) {
+                    Text("Auto adjust").tag(true)
+                    Text("Drag to resize").tag(false)
+                }
+                .pickerStyle(.segmented)
+                if state.style.autoResize {
+                    Text("The bubble adapts to the display automatically.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Drag any bubble edge to choose its width.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 surfaceSlider("Gap to screen edge", $state.style.screenMargin, 0...160, "%.0f")
                 surfaceSlider("Maximum height", $state.style.maxHeight, 120...720, "%.0f")
             }

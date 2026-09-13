@@ -1561,7 +1561,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         clearedSentenceID = displaySentenceID
         recentFlashTask?.cancel()
         recentFlashTask = nil
-        overlay.clearHistory()
+        overlay.clearHistory(keepVisible: true)
         shownTranslationID = nil
     }
 

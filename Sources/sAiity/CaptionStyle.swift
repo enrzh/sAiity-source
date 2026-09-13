@@ -67,6 +67,8 @@ struct CaptionStyle: Equatable, Codable, Sendable {
     var screenMargin: Double = 24
     /// Maximum height of the bubble's scrollable subtitle history, in points.
     var maxHeight: Double = 260
+    /// When false, the subtitle bubble keeps the width chosen by dragging an edge.
+    var autoResize: Bool = true
 
     var showTranslation: Bool = true
     var hidden: Bool = false           // hide the bubble without stopping capture
@@ -75,7 +77,7 @@ struct CaptionStyle: Equatable, Codable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case original, translation, lineGap, cornerRadius, glassStyle, tintHex
-        case widthFraction, screenMargin, maxHeight, showTranslation, hidden
+        case widthFraction, screenMargin, maxHeight, autoResize, showTranslation, hidden
     }
 
     init() {
@@ -88,6 +90,7 @@ struct CaptionStyle: Equatable, Codable, Sendable {
         widthFraction = 0.62
         screenMargin = 24
         maxHeight = 260
+        autoResize = true
         showTranslation = true
         hidden = false
     }
@@ -105,6 +108,7 @@ struct CaptionStyle: Equatable, Codable, Sendable {
         widthFraction = try c.decodeIfPresent(Double.self, forKey: .widthFraction) ?? 0.62
         screenMargin = try c.decodeIfPresent(Double.self, forKey: .screenMargin) ?? 24
         maxHeight = try c.decodeIfPresent(Double.self, forKey: .maxHeight) ?? 260
+        autoResize = try c.decodeIfPresent(Bool.self, forKey: .autoResize) ?? true
         showTranslation = try c.decodeIfPresent(Bool.self, forKey: .showTranslation) ?? true
         hidden = try c.decodeIfPresent(Bool.self, forKey: .hidden) ?? false
     }

@@ -645,6 +645,14 @@ final class OverlayWindow: NSPanel {
             queue: .main) { [weak self] _ in
                 Task { @MainActor [weak self] in
                     guard let self else { return }
+                    // A deliberate edge drag is the opt-in manual sizing mode.
+                    // Keep the setting honest so the next launch restores the
+                    // width the user actually chose.
+                    if CaptionStyle.current.autoResize {
+                        var style = CaptionStyle.current
+                        style.autoResize = false
+                        CaptionStyle.current = style
+                    }
                     // Cap what we remember, not just what we draw: an
                     // un-capped width restored later on a smaller display is
                     // how the bubble ended up hanging off both edges.
@@ -724,15 +732,13 @@ final class OverlayWindow: NSPanel {
             return
         }
         hasCustomFrame = true
-        // Deliberately does NOT set userWidth. A saved frame means "this is
-        // where it was", not "the user chose this width" — conflating the two
-        // meant the automatic width and the screen margin were switched off from
-        // the second launch onwards, with no user action at all. The width is
-        // restored separately, and only if a real drag stored one.
-        userWidth = FrameStore.loadUserWidth().map { min($0, screen.visibleFrame.width) }
-
+        // A saved frame means "this is where it was", not "the user chose this
+        // width". Restore a stored drag width only in manual sizing mode, so an
+        // automatic bubble cannot inherit a stale width from an older session.
         let v = screen.visibleFrame
         let st = CaptionStyle.current
+        userWidth = st.autoResize ? nil
+                                  : FrameStore.loadUserWidth().map { min($0, screen.visibleFrame.width) }
         var f = FrameStore.clamp(saved, into: v)
         // A saved frame records WHERE the bubble was, never how wide it should
         // be. Without a stored user width the width is a setting, so a width
@@ -741,7 +747,7 @@ final class OverlayWindow: NSPanel {
         // restored onto a 1710pt screen whose setting asks for 1060, which left
         // 41pt of gap on one side and 149 on the other and honoured the 24pt
         // margin on neither.
-        if userWidth == nil {
+        if st.autoResize || userWidth == nil {
             f.size.width = BubbleGeometry.autoWidth(visible: v.width,
                                                     fraction: CGFloat(st.widthFraction),
                                                     margin: CGFloat(st.screenMargin))
@@ -751,7 +757,7 @@ final class OverlayWindow: NSPanel {
         // running the full width of the display with no margin at all.
         setFrameInternal(BubbleGeometry.clamp(f, into: v,
                                               margin: CGFloat(st.screenMargin),
-                                              respectMargin: userWidth == nil),
+                                              respectMargin: st.autoResize || userWidth == nil),
                          display: false)
     }
 
@@ -776,8 +782,9 @@ final class OverlayWindow: NSPanel {
         // A display was added, removed or resized. Whatever the bubble's width
         // was — a remembered drag from a wider monitor, most likely — it has to
         // fit the screen it is on now.
-        userWidth = userWidth.map { min($0, (FrameStore.bestScreen(for: frame)
-                                             ?? NSScreen.main)?.visibleFrame.width ?? $0) }
+        userWidth = CaptionStyle.current.autoResize ? nil : userWidth.map {
+            min($0, (FrameStore.bestScreen(for: frame) ?? NSScreen.main)?.visibleFrame.width ?? $0)
+        }
         keepOnScreen()
         sizeToFit(immediateShrink: true)
     }
@@ -799,7 +806,7 @@ final class OverlayWindow: NSPanel {
     /// calculation any more.
     private func targetWidth(in visible: NSRect) -> CGFloat {
         let st = CaptionStyle.current
-        if let uw = userWidth {
+        if !st.autoResize, let uw = userWidth {
             return BubbleGeometry.draggedWidth(uw, visible: visible.width)
         }
         return BubbleGeometry.autoWidth(visible: visible.width,
@@ -951,7 +958,7 @@ final class OverlayWindow: NSPanel {
     private func clampKeepingBottom(_ rect: NSRect, into visible: NSRect,
                                     margin: CGFloat) -> NSRect {
         BubbleGeometry.clamp(rect, into: visible, margin: margin,
-                             respectMargin: userWidth == nil)
+                             respectMargin: CaptionStyle.current.autoResize || userWidth == nil)
     }
 
     /// Push the persisted look onto the live window. Called on every change so
@@ -990,6 +997,10 @@ final class OverlayWindow: NSPanel {
 
     func applyStyle(_ ignored: CaptionStyle) {
         let st = effectiveStyle
+        if st.autoResize {
+            userWidth = nil
+            FrameStore.clearUserWidth()
+        }
         // Every visual property comes from the struct. Nothing is hardcoded
         // here any more: the original used to be fixed white/semibold and the
         // translation fixed teal/medium, so half the style fields were read but
@@ -1055,7 +1066,7 @@ final class OverlayWindow: NSPanel {
         let repaired = BubbleGeometry.clamp(frame,
                                             into: visible,
                                             margin: CGFloat(CaptionStyle.current.screenMargin),
-                                            respectMargin: userWidth == nil)
+                                            respectMargin: CaptionStyle.current.autoResize || userWidth == nil)
         if repaired != frame { setFrameInternal(repaired, display: false) }
         alphaValue = 1
         orderFrontRegardless()
@@ -1173,10 +1184,14 @@ final class OverlayWindow: NSPanel {
         presentIfNeeded()
     }
 
-    func clearHistory() {
+    func clearHistory(keepVisible: Bool = false) {
         history.clear()
         renderHistory()
-        orderOut(nil)
+        if keepVisible {
+            presentIfNeeded(allowEmpty: true)
+        } else {
+            orderOut(nil)
+        }
     }
 
     func clear() { clearHistory() }

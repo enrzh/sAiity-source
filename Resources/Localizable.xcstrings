@@ -208,6 +208,51 @@
         "ja": {"stringUnit": {"state": "translated", "value": "自動"}}
       }
     },
+    "Sizing": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Größenmodus"}},
+        "es": {"stringUnit": {"state": "translated", "value": "Tamaño"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Taille"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "サイズ"}}
+      }
+    },
+    "Auto adjust": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Automatisch anpassen"}},
+        "es": {"stringUnit": {"state": "translated", "value": "Ajuste automático"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Ajustement automatique"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "自動調整"}}
+      }
+    },
+    "Drag to resize": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Zum Ändern der Größe ziehen"}},
+        "es": {"stringUnit": {"state": "translated", "value": "Arrastra para cambiar el tamaño"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Faire glisser pour redimensionner"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "ドラッグしてサイズ変更"}}
+      }
+    },
+    "The bubble adapts to the display automatically.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Die Sprechblase passt sich automatisch an den Bildschirm an."}},
+        "es": {"stringUnit": {"state": "translated", "value": "La burbuja se adapta automáticamente a la pantalla."}},
+        "fr": {"stringUnit": {"state": "translated", "value": "La bulle s’adapte automatiquement à l’écran."}},
+        "ja": {"stringUnit": {"state": "translated", "value": "バブルは画面に合わせて自動調整されます。"}}
+      }
+    },
+    "Drag any bubble edge to choose its width.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Ziehe an einer Blasenkante, um ihre Breite festzulegen."}},
+        "es": {"stringUnit": {"state": "translated", "value": "Arrastra cualquier borde de la burbuja para elegir su anchura."}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Faites glisser un bord de la bulle pour choisir sa largeur."}},
+        "ja": {"stringUnit": {"state": "translated", "value": "バブルの端をドラッグして幅を設定します。"}}
+      }
+    },
     "Dictation cleanup": {
       "extractionState": "manual",
       "localizations": {

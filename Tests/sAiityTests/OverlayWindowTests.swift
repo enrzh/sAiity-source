@@ -77,7 +77,8 @@ import Testing
         #expect(window.frame.width >= BubbleGeometry.minWidth)
         #expect(window.frame.height >= 110)
 
-        window.clearHistory()
+        window.clearHistory(keepVisible: true)
+        #expect(window.isVisible)
         window.orderOut(nil)
     }
 }
