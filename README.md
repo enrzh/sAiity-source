@@ -121,4 +121,8 @@ polishes the native disclosure used to reveal detailed Dictation and Captions
 settings, with consistent iconography, compact typography, spacing, and
 localization.
 
+DMG SHA-256: `fe94b7e7b35592d6cefcbbc77e6b6efa96959cb77f8238f037e35ba6f25c4669`
+
+ZIP SHA-256: `7bf67527b8e7b6b1c5f84c2a0fee50d7f8adc9c55cff51936b3d4bb087120d54`
+
 sAiity is part of the [aiity](https://aiity.de) family.
