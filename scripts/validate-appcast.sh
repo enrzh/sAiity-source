@@ -16,7 +16,7 @@ xpath() { xmllint --xpath "string(($1)[1])" "$APPCAST"; }
 version=$(xpath '//*[local-name()="shortVersionString"]')
 length=$(xpath '//*[local-name()="enclosure"]/@length')
 url=$(xpath '//*[local-name()="enclosure"]/@url')
-signature=$(xpath '//*[local-name()="enclosure"]/@edSignature')
+signature=$(xpath '//*[local-name()="enclosure"]/@*[local-name()="edSignature"]')
 [ -n "$version" ] || { echo "FATAL: appcast version is missing." >&2; exit 1; }
 [ -z "$EXPECTED_VERSION" ] || [ "$version" = "$EXPECTED_VERSION" ] || {
     echo "FATAL: appcast version is $version, expected $EXPECTED_VERSION." >&2
