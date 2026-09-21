@@ -313,7 +313,7 @@ struct DictationView: View {
             VStack(alignment: .leading, spacing: 0) {
                 quickSettings
 
-                DisclosureGroup("Advanced settings", isExpanded: $showAdvancedSettings) {
+                DisclosureGroup(isExpanded: $showAdvancedSettings) {
                     VStack(alignment: .leading, spacing: 0) {
                 SettingsSection(title: "Press to talk",
                                 subtitle: "Hold the shortcut, speak naturally, and release to insert the result.") {
@@ -504,6 +504,11 @@ struct DictationView: View {
                 }
                     }
                     .padding(.top, 8)
+                } label: {
+                    Label("Advanced settings", systemImage: "slider.horizontal.3")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .padding(.vertical, 8)
                 }
             }
             .padding(.horizontal, 30)
@@ -603,13 +608,6 @@ struct DictationView: View {
             BubbleStylePresetControl(style: $state.dictationStyle, context: .dictation)
         }
 
-        HStack {
-            Spacer()
-            Button("Advanced settings…") { showAdvancedSettings = true }
-                .controlSize(.small)
-        }
-        .padding(.horizontal, 30)
-        .padding(.vertical, 12)
     }
 
     @ViewBuilder
@@ -831,7 +829,7 @@ struct CaptionsView: View {
             VStack(alignment: .leading, spacing: 0) {
             quickSettings
 
-            DisclosureGroup("Advanced settings", isExpanded: $showAdvancedSettings) {
+            DisclosureGroup(isExpanded: $showAdvancedSettings) {
                 VStack(alignment: .leading, spacing: 0) {
             SettingsSection(title: "Engine",
                             subtitle: "Choose the local recognizer and its latency.") {
@@ -996,6 +994,11 @@ struct CaptionsView: View {
             }
                 }
                 .padding(.top, 8)
+            } label: {
+                Label("Advanced settings", systemImage: "slider.horizontal.3")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .padding(.vertical, 8)
             }
             }
             .padding(.horizontal, 0)
@@ -1065,13 +1068,6 @@ struct CaptionsView: View {
             BubbleStylePresetControl(style: $state.style, context: .captions)
         }
 
-        HStack {
-            Spacer()
-            Button("Advanced settings…") { showAdvancedSettings = true }
-                .controlSize(.small)
-        }
-        .padding(.horizontal, 30)
-        .padding(.vertical, 12)
     }
 
     @ViewBuilder

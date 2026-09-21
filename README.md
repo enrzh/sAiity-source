@@ -110,19 +110,15 @@ included in the application bundle.
 
 ## Release
 
-The current signed and notarized release is [sAiity 2.5.0](https://github.com/enrzh/sAiity/releases/tag/v2.5.0).
+The current signed and notarized release is [sAiity 2.5.1](https://github.com/enrzh/sAiity/releases/tag/v2.5.1).
 
-- [Download the DMG](https://github.com/enrzh/sAiity/releases/download/v2.5.0/sAiity-2.5.0.dmg)
-- [Download the ZIP](https://github.com/enrzh/sAiity/releases/download/v2.5.0/sAiity-2.5.0.zip)
+- [Download the DMG](https://github.com/enrzh/sAiity/releases/download/v2.5.1/sAiity-2.5.1.dmg)
+- [Download the ZIP](https://github.com/enrzh/sAiity/releases/download/v2.5.1/sAiity-2.5.1.zip)
 - [Sparkle update feed](https://enrzh.github.io/sAiity/appcast.xml)
 
-This release adds silence-aware segmented dictation, automatic code-switching
-support, resident-model reuse, adaptive local ASR selection, safer mixed-language
-cleanup and translation, cancellation diagnostics, and more reliable caption and
-dictation bubble feedback.
-
-DMG SHA-256: `f4096b1f47176d2426281d0dd9647bd682e8d38026dc78019d92aef6cab658c5`
-
-ZIP SHA-256: `a582a5c7102e8f68a6388720624479bf7e78f2020598b7c3305b4c51fa6051a6`
+This maintenance release removes the duplicate advanced-settings action and
+polishes the native disclosure used to reveal detailed Dictation and Captions
+settings, with consistent iconography, compact typography, spacing, and
+localization.
 
 sAiity is part of the [aiity](https://aiity.de) family.

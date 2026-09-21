@@ -100,13 +100,13 @@
         "ja": {"stringUnit": {"state": "translated", "value": "結果バブルのシンプルな外観を選択します。"}}
       }
     },
-    "Advanced settings…": {
+    "Advanced settings": {
       "extractionState": "manual",
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Erweiterte Einstellungen …"}},
-        "es": {"stringUnit": {"state": "translated", "value": "Ajustes avanzados…"}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Réglages avancés…"}},
-        "ja": {"stringUnit": {"state": "translated", "value": "詳細設定…"}}
+        "de": {"stringUnit": {"state": "translated", "value": "Erweiterte Einstellungen"}},
+        "es": {"stringUnit": {"state": "translated", "value": "Ajustes avanzados"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Réglages avancés"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "詳細設定"}}
       }
     },
     "Finish setup…": {
