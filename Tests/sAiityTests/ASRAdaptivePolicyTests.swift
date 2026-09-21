@@ -39,4 +39,37 @@ import Testing
             installed: [1120],
             measuredRTF: [2240: 0.2]) == 1120)
     }
+
+    @Test("caption and dictation measurements remain independent")
+    func scopesDoNotBleedTogether() {
+        let defaults = UserDefaults.standard
+        let keys = ["captionsASRRTF.1120", "dictationASRRTF.1120"]
+        let previous = Dictionary(uniqueKeysWithValues: keys.map {
+            ($0, defaults.object(forKey: $0))
+        })
+        defer {
+            for key in keys {
+                if let value = previous[key] {
+                    defaults.set(value, forKey: key)
+                } else {
+                    defaults.removeObject(forKey: key)
+                }
+            }
+        }
+
+        defaults.set(0.4, forKey: "captionsASRRTF.1120")
+        defaults.set(1.2, forKey: "dictationASRRTF.1120")
+
+        let installed: Set<Int> = [1120, 2240]
+        #expect(ASRAdaptivePolicy.chooseRuntimeTier(
+            preferred: 2240,
+            available: [1120, 2240],
+            installed: installed,
+            scope: .captions) == 1120)
+        #expect(ASRAdaptivePolicy.chooseRuntimeTier(
+            preferred: 2240,
+            available: [1120, 2240],
+            installed: installed,
+            scope: .dictation) == 2240)
+    }
 }

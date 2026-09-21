@@ -4,9 +4,17 @@ import Foundation
 /// session's measured real-time factor. It only changes the next session and
 /// never starts a download to chase a faster tier.
 enum ASRAdaptivePolicy {
+    enum Scope: String {
+        case dictation
+        case captions
+    }
+
     static let fastRTFCeiling = 0.85
     static let balancedRTFFloor = 0.55
-    private static let metricPrefix = "dictationASRRTF."
+
+    private static func metricKey(_ tier: Int, scope: Scope) -> String {
+        "\(scope.rawValue)ASRRTF.\(tier)"
+    }
 
     static func choose(preferred: Int,
                        available: [Int],
@@ -35,20 +43,21 @@ enum ASRAdaptivePolicy {
 
     static func chooseRuntimeTier(preferred: Int,
                                   available: [Int],
-                                  installed: Set<Int>) -> Int {
+                                  installed: Set<Int>,
+                                  scope: Scope = .dictation) -> Int {
         choose(preferred: preferred,
                available: available,
                installed: installed,
                measuredRTF: Dictionary(uniqueKeysWithValues: available.compactMap { tier in
-                   guard let value = UserDefaults.standard.object(forKey: metricPrefix + String(tier)) as? Double else {
+                   guard let value = UserDefaults.standard.object(forKey: metricKey(tier, scope: scope)) as? Double else {
                        return nil
                    }
                    return (tier, value)
                }))
     }
 
-    static func record(realTimeFactor: Double, tier: Int) {
+    static func record(realTimeFactor: Double, tier: Int, scope: Scope = .dictation) {
         guard realTimeFactor.isFinite, realTimeFactor >= 0 else { return }
-        UserDefaults.standard.set(realTimeFactor, forKey: metricPrefix + String(tier))
+        UserDefaults.standard.set(realTimeFactor, forKey: metricKey(tier, scope: scope))
     }
 }

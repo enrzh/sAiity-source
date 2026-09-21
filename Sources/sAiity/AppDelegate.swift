@@ -249,7 +249,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// every session (its sliding window slid but its commit index never
     /// rebased), and it was slower than Nemotron plus a real translator anyway.
     static func makeActiveBackend() -> TranscriptionBackend {
-        ASREngine.effective.makeBackend()
+        let selected = ASREngine.effective
+        guard selected == .nemotron else { return selected.makeBackend() }
+
+        let preferredTier = NemotronEngine.selectedChunkMs
+        let installed = Set(NemotronEngine.availableChunkMs.filter {
+            NemotronEngine.isDownloaded(chunkMs: $0)
+        })
+        let tier = NemotronEngine.hasExplicitChunkSelection
+            ? preferredTier
+            : ASRAdaptivePolicy.chooseRuntimeTier(preferred: preferredTier,
+                                                   available: NemotronEngine.availableChunkMs,
+                                                   installed: installed,
+                                                   scope: .captions)
+        let name = String(localized: "NVIDIA Nemotron (streaming, on-device)")
+        return StreamingASRBackend(
+            name: name,
+            engine: NemotronEngine(chunkMs: tier),
+            onPerformance: { rtf, _ in
+                ASRAdaptivePolicy.record(realTimeFactor: rtf,
+                                         tier: tier,
+                                         scope: .captions)
+            })
     }
 
     static func makeDictationStreamingBackend() -> TranscriptionBackend {
@@ -269,7 +290,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: name,
             engine: NemotronEngine(chunkMs: tier),
             onPerformance: { rtf, _ in
-                ASRAdaptivePolicy.record(realTimeFactor: rtf, tier: tier)
+                ASRAdaptivePolicy.record(realTimeFactor: rtf,
+                                         tier: tier,
+                                         scope: .dictation)
             })
     }
 
@@ -899,6 +922,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var showedAnyCaption = false
     private var captionFirstTextLogged = false
     private var captionFirstFinalLogged = false
+    private var captionWarmStart = false
+    private var captionStartInstant: ContinuousClock.Instant?
+    private var captionCaptureStartedAt: ContinuousClock.Instant?
+    private var clearCaptionInstant: ContinuousClock.Instant?
 
     // Recording is deliberately separate from captioning and defaults to OFF:
     // captions are ephemeral, a transcript is a durable record of a conversation
@@ -925,9 +952,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// be dimmed rather than cleared, and cleared only once it is two sentences
     /// behind. Nil when the row is empty.
     private var shownTranslationID: Int?
-    /// The sentence the user cleared from the bubble, if any. Captions for it
-    /// stay suppressed; the next sentence renders normally.
-    private var clearedSentenceID: Int?
     /// Live-mode translation of the still-open sentence: single-flight with
     /// latest-wins, because neither translator can be cancelled mid-decode —
     /// queueing every clause would fall permanently behind, and what matters is
@@ -955,10 +979,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// subtitles for everything that is played on Mac", two different
     /// sentences stacked as if they were a pair. A translation is now only
     /// shown while its own original is still displayed.
-    private var displaySentenceID = 0
-    /// Set when a sentence is closed: the next content rendered belongs to the
-    /// next sentence, whether it arrives as a final clause or as volatile text.
-    private var sentenceClosed = false
+    private var displayLifecycle = CaptionDisplayLifecycle()
 
     /// Also the display cap: past this a sentence is closed rather than left to
     /// grow past what the bubble can show.
@@ -1710,7 +1731,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor in
             if state.isActive { await stopAsync() }
             await dictationController.invalidatePreparedBackend()
-            await asrBackendPool.replace(with: new.makeBackend())
+            await asrBackendPool.replace(with: Self.makeActiveBackend())
             setStatus("Engine: \(new.displayName)")
             if wasRunning, state == .idle { start() }
             rebuildMenu()
@@ -1783,10 +1804,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if live.isEmpty {
                 guard !self.lastFinalText.isEmpty else { return }
                 self.overlay.show(text: self.lastFinalText, isFinal: true,
-                                 sentenceID: self.displaySentenceID)
+                                 sentenceID: self.displayLifecycle.sentenceID)
             } else {
                 self.overlay.show(text: live, isFinal: self.lastVolatileText.isEmpty,
-                                 sentenceID: self.displaySentenceID)
+                                 sentenceID: self.displayLifecycle.sentenceID)
             }
         }
     }
@@ -1800,7 +1821,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// against the sentence ID means normal captions resume by themselves when
     /// the speaker starts the next one; there is no state to get stuck in.
     private func clearCaption() {
-        clearedSentenceID = displaySentenceID
+        // Commit the current display state before hiding it. Volatile text is
+        // cumulative, so it belongs after the settled parts and must not be
+        // redisplayed by the next ASR revision.
+        if !lastVolatileText.isEmpty {
+            sentenceParts.append(lastVolatileText)
+            lastVolatileText = ""
+        }
+        if !sentenceParts.isEmpty {
+            closeSentence()
+        }
+        displayLifecycle.clearCurrentSentence()
+        clearCaptionInstant = .now
         recentFlashTask?.cancel()
         recentFlashTask = nil
         overlay.clearHistory(keepVisible: true)
@@ -1904,6 +1936,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         showedAnyCaption = false
         captionFirstTextLogged = false
         captionFirstFinalLogged = false
+        captionWarmStart = asrBackendPool.isPrepared
+        captionStartInstant = .now
+        captionCaptureStartedAt = nil
+        clearCaptionInstant = nil
         overlay.reservesTranslationRow =
             translateTo != nil && CaptionStyle.current.showTranslation
         sessionLines.removeAll()
@@ -1912,7 +1948,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         subtitleSessionStartedAt = Date()
         pendingTranslations = 0
         shownTranslationID = nil
-        clearedSentenceID = nil
+        displayLifecycle = CaptionDisplayLifecycle()
         pendingLiveText = nil
         lastLiveTranslationRequest = nil
         // A recap flash from the previous session has nothing to restore into
@@ -1942,6 +1978,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             do {
                 let backend = asrBackendPool.currentBackend
                 NSLog("sAiity engine: preparing \(backend.name)")
+                let prepareStarted = self.captionStartInstant ?? .now
                 do {
                     let acquired = try await asrBackendPool.acquire(locale: locale) { [weak self] msg in
                         Task { @MainActor [weak self] in
@@ -1952,14 +1989,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                     captionBackend = acquired
                     captureSink.point(at: acquired)
+                    Diagnostics.recordTiming(operation: "captions.asr.prepare",
+                                             seconds: self.elapsedSeconds(since: prepareStarted),
+                                             cold: !self.captionWarmStart)
                     // Every await below is a place the user may have pressed
                     // Stop — prepare() alone can be a multi-gigabyte download.
                     // Bail before touching the microphone-equivalent, not after.
                     try Task.checkCancellation()
 
+                    let backendStart = ContinuousClock.now
                     try await acquired.start { [weak self] chunk in
                         Task { @MainActor [weak self] in self?.render(chunk) }
                     }
+                    Diagnostics.recordTiming(operation: "captions.backend.start",
+                                             seconds: self.elapsedSeconds(since: backendStart),
+                                             cold: !self.captionWarmStart)
                 } catch {
                     // The inner catch exists to scope damage-recording to the
                     // MODEL failing: everything after this point (capture,
@@ -2005,6 +2049,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 }
                 let shouldFeedSpeakerDiarization = useSpeakerDiarization
+                let captureStart = ContinuousClock.now
                 try await capture.start(
                     targetFormat: fmt,
                     // Capture the backend we are starting WITH, rather than
@@ -2021,6 +2066,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     onState: { audio in
                         Task { @MainActor [self] in self.captureStateChanged(audio) }
                     })
+                self.captionCaptureStartedAt = .now
+                Diagnostics.recordTiming(operation: "captions.capture.start",
+                                         seconds: self.elapsedSeconds(since: captureStart),
+                                         cold: !self.captionWarmStart)
                 // Commit on a pause, which is what makes a finished sentence
                 // translate when the speaker stops rather than when a 3.5 s
                 // budget runs out.
@@ -2031,6 +2080,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if saveTranscript { await beginRecording() }
                 state = .running
                 setStatus("Listening · \(Self.coverageNote())")
+                // ASR must be visible while the optional translator warms up.
+                overlay.show(text: String(localized: "listening…"), isFinal: false)
                 // The global hotkey gives no feedback a screen reader can
                 // perceive; a no-op unless one is listening.
                 announce(String(localized: "Captions started"))
@@ -2047,7 +2098,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 NSLog("sAiity engine: started; preparing translator")
                 await prepareTranslatorIfNeeded()
-                overlay.show(text: String(localized: "listening…"), isFinal: false)
+                // Translator preparation may finish after the first caption.
+                // Never paint the listening placeholder over that caption.
+                if state == .running, !showedAnyCaption {
+                    overlay.show(text: String(localized: "listening…"), isFinal: false)
+                }
             } catch is CancellationError {
                 // stopAsync() is awaiting us; it owns the teardown from here.
                 NSLog("sAiity engine: start cancelled before capture began")
@@ -2315,13 +2370,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // start of the next one; showing that would blank the bar to a dot.
         guard text.rangeOfCharacter(from: .alphanumerics) != nil else { return }
         if let startedAt = subtitleSessionStartedAt {
-            let elapsed = Date().timeIntervalSince(startedAt)
+            let elapsed = captionCaptureStartedAt.map { elapsedSeconds(since: $0) }
+                ?? Date().timeIntervalSince(startedAt)
             if !captionFirstTextLogged {
                 NSLog("sAiity caption timing: first-text %.3fs", elapsed)
+                Diagnostics.recordTiming(operation: "captions.first-text",
+                                         seconds: elapsed,
+                                         cold: captionWarmStart)
                 captionFirstTextLogged = true
             }
             if chunk.isFinal, !captionFirstFinalLogged {
                 NSLog("sAiity caption timing: first-final %.3fs", elapsed)
+                Diagnostics.recordTiming(operation: "captions.first-final",
+                                         seconds: elapsed,
+                                         cold: captionWarmStart)
                 captionFirstFinalLogged = true
             }
         }
@@ -2359,7 +2421,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // The user cleared this sentence off the screen. Keep tracking it —
         // the transcript still gets it — but do not paint it back.
-        let suppressed = clearedSentenceID == displaySentenceID
+        let suppressed = displayLifecycle.isCleared(displayLifecycle.sentenceID)
 
         guard chunk.isFinal else {
             // Still being revised: show it after the part of the sentence that
@@ -2367,8 +2429,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // replaced by its own tail.
             lastVolatileText = text
             if !suppressed {
+                if let clearedAt = clearCaptionInstant {
+                    Diagnostics.recordTiming(operation: "captions.clear-to-visible",
+                                             seconds: elapsedSeconds(since: clearedAt))
+                    clearCaptionInstant = nil
+                }
                 overlay.show(text: Self.trimmedForDisplay(sentenceParts + [text]),
-                             isFinal: false, sentenceID: displaySentenceID,
+                             isFinal: false, sentenceID: displayLifecycle.sentenceID,
                              speakerLabel: currentSpeakerLabel)
             }
             return
@@ -2393,8 +2460,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let speakerLabel = currentSpeakerLabel
         if !suppressed {
+            if let clearedAt = clearCaptionInstant {
+                Diagnostics.recordTiming(operation: "captions.clear-to-visible",
+                                         seconds: elapsedSeconds(since: clearedAt))
+                clearCaptionInstant = nil
+            }
             overlay.show(text: Self.trimmedForDisplay(sentenceParts), isFinal: true,
-                         sentenceID: displaySentenceID,
+                         sentenceID: displayLifecycle.sentenceID,
                          speakerLabel: speakerLabel)
         }
 
@@ -2408,7 +2480,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else if TranslationTiming.current == .live {
             // The sentence is still open; in live mode, translate what exists
             // of it so far. The close will produce the authoritative version.
-            kickLiveTranslation(of: lastFinalText, sentenceID: displaySentenceID)
+            kickLiveTranslation(of: lastFinalText,
+                                sentenceID: displayLifecycle.sentenceID)
         }
     }
 
@@ -2416,15 +2489,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// one place is important because speaker changes can close a row before
     /// punctuation or the pause boundary does.
     private func advanceToNextSentenceIfNeeded() {
-        guard sentenceClosed, sentenceParts.isEmpty else { return }
-        sentenceClosed = false
-        displaySentenceID += 1
+        guard displayLifecycle.sentenceClosed, sentenceParts.isEmpty,
+              displayLifecycle.advanceIfNeeded() else { return }
         currentSpeakerLabel = nil
-        // A new sentence is the natural end of a manual clear.
-        if let cleared = clearedSentenceID, cleared < displaySentenceID {
-            clearedSentenceID = nil
-        }
-        if let shown = shownTranslationID, displaySentenceID - shown >= 2 {
+        if let shown = shownTranslationID,
+           displayLifecycle.sentenceID - shown >= 2 {
             shownTranslationID = nil
         } else if let shown = shownTranslationID {
             overlay.markTranslationStale(forSentenceID: shown)
@@ -2440,11 +2509,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     private func kickLiveTranslation(of text: String, sentenceID: Int) {
         // `!sentenceClosed`: once the sentence closes, the authoritative
-        // translation from emitSentence owns the row. displaySentenceID does
-        // not bump until the NEXT sentence renders, so the ID check alone
+        // translation from emitSentence owns the row. The display ID does not
+        // bump until the NEXT sentence renders, so the ID check alone
         // leaves a window where a stale partial still passes.
-        guard sentenceID == displaySentenceID, !sentenceClosed,
-              clearedSentenceID != sentenceID,
+        guard sentenceID == displayLifecycle.sentenceID,
+              !displayLifecycle.sentenceClosed,
+              !displayLifecycle.isCleared(sentenceID),
               translateTo != nil, translatorReady,
               CaptionStyle.current.showTranslation else { return }
         // The close path skips lines already in the target language; making
@@ -2500,7 +2570,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // behind the translator's serial lock, and landing second it
             // rewrote the settled row with an older, shorter text.
             guard sessionGeneration == generation,
-                  displaySentenceID == sentenceID, !sentenceClosed,
+                  displayLifecycle.sentenceID == sentenceID,
+                  !displayLifecycle.sentenceClosed,
+                  !displayLifecycle.isCleared(sentenceID),
                   CaptionStyle.current.showTranslation else { return }
             if TestHooks.verboseLogging {
                 NSLog("sAiity live translated: chars=%d target=%@", out.count, target)
@@ -2522,7 +2594,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sentenceParts.removeAll()
         sentenceWords.removeAll()
         // Its original stays on screen until the next sentence starts rendering.
-        sentenceClosed = true
+        displayLifecycle.closeSentence()
+        lastVolatileText = ""
         // A live partial queued behind the busy slot is now superseded: the
         // close translates the full sentence anyway, so re-kicking the queued
         // partial would translate the same words twice and race the result.
@@ -2532,7 +2605,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if UserDefaults.standard.bool(forKey: "announceCaptions") {
             announce(text)
         }
-        emitSentence(text, chunk: chunk, sentenceID: displaySentenceID)
+        emitSentence(text, chunk: chunk,
+                     sentenceID: displayLifecycle.sentenceID)
     }
 
     /// True when the line already reads as the target language. Shared by the
@@ -2682,8 +2756,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // discarding produced. Older than that: drop, it helps nobody.
             // A sentence the user cleared does not get its translation painted
             // back under the empty line a moment later.
-            if CaptionStyle.current.showTranslation, self.clearedSentenceID != sentenceID {
-                let behind = self.displaySentenceID - sentenceID
+            if CaptionStyle.current.showTranslation,
+               !self.displayLifecycle.isCleared(sentenceID) {
+                let behind = self.displayLifecycle.sentenceID - sentenceID
                 if behind <= 0 {
                     self.overlay.showTranslation(out, forSentenceID: sentenceID)
                     self.shownTranslationID = sentenceID

@@ -110,16 +110,16 @@ included in the application bundle.
 
 ## Release
 
-The current signed and notarized release is [sAiity 2.5.1](https://github.com/enrzh/sAiity/releases/tag/v2.5.1).
+The current signed and notarized release is [sAiity 2.5.2](https://github.com/enrzh/sAiity/releases/tag/v2.5.2).
 
-- [Download the DMG](https://github.com/enrzh/sAiity/releases/download/v2.5.1/sAiity-2.5.1.dmg)
-- [Download the ZIP](https://github.com/enrzh/sAiity/releases/download/v2.5.1/sAiity-2.5.1.zip)
+- [Download the DMG](https://github.com/enrzh/sAiity/releases/download/v2.5.2/sAiity-2.5.2.dmg)
+- [Download the ZIP](https://github.com/enrzh/sAiity/releases/download/v2.5.2/sAiity-2.5.2.zip)
 - [Sparkle update feed](https://enrzh.github.io/sAiity/appcast.xml)
 
-This maintenance release removes the duplicate advanced-settings action and
-polishes the native disclosure used to reveal detailed Dictation and Captions
-settings, with consistent iconography, compact typography, spacing, and
-localization.
+This maintenance release makes live captions recover immediately after the
+bubble is cleared, shows the listening state before translator warm-up hides
+the first result, and learns separate installed ASR tiers for captions and
+dictation. It also adds focused lifecycle and adaptive-tier regression tests.
 
 DMG SHA-256: `fe94b7e7b35592d6cefcbbc77e6b6efa96959cb77f8238f037e35ba6f25c4669`
 
