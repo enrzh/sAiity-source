@@ -457,11 +457,20 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
             rmsFloor = .greatestFiniteMagnitude
             rmsWindowFrames = 0
         }
-        if gapDetector.process(rms: rms, frames: Int(pcm.frameLength),
-                               sampleRate: Float(Self.streamSampleRate)) {
-            if debug { NSLog("sAiity gap: FIRED (floor \(gapDetector.noiseFloor))") }
-            gapFires += 1
-            onSpeechGap?()
+        if let event = gapDetector.processEvent(rms: rms,
+                                                 frames: Int(pcm.frameLength),
+                                                 sampleRate: Float(Self.streamSampleRate)) {
+            switch event {
+            case .speechStarted(let range):
+                if debug { NSLog("sAiity speech: started samples=%@", "\(range)") }
+            case .gap(let range):
+                if debug {
+                    NSLog("sAiity gap: FIRED samples=%@ floor %.6f",
+                          "\(range)", gapDetector.noiseFloor)
+                }
+                gapFires += 1
+                onSpeechGap?()
+            }
         }
     }
 

@@ -44,16 +44,24 @@ struct FloatRingBuffer: Sendable {
 
     /// Copies the queue in order and resets it without changing capacity.
     mutating func drain(into output: inout [Float]) {
+        drain(upTo: count, into: &output)
+    }
+
+    /// Copies at most `limit` samples and keeps the remainder queued. Bounded
+    /// batches keep a slow model from turning one overdue call into a
+    /// multi-second head-of-line block while preserving FIFO sample order.
+    mutating func drain(upTo limit: Int, into output: inout [Float]) {
         output.removeAll(keepingCapacity: true)
-        guard count > 0 else { return }
-        output.reserveCapacity(count)
+        guard count > 0, limit > 0 else { return }
+        let amount = min(count, limit)
+        output.reserveCapacity(amount)
         let capacity = storage.count
-        let first = min(count, capacity - head)
+        let first = min(amount, capacity - head)
         output.append(contentsOf: storage[head..<(head + first)])
-        if first < count {
-            output.append(contentsOf: storage[0..<(count - first)])
+        if first < amount {
+            output.append(contentsOf: storage[0..<(amount - first)])
         }
-        removeAll(keepingCapacity: true)
+        dropFirst(amount)
     }
 
     mutating func removeAll(keepingCapacity: Bool) {

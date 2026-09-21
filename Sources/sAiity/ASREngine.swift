@@ -89,14 +89,19 @@ enum ASREngine: String, CaseIterable, Sendable {
         }
     }
 
-    func makeBackend() -> TranscriptionBackend {
+    func makeBackend(onPerformance: (@Sendable (Double, Double) -> Void)? = nil,
+                     onMetrics: (@Sendable (StreamingASRMetrics) -> Void)? = nil) -> TranscriptionBackend {
         switch self {
         case .nemotron:
             return StreamingASRBackend(name: String(localized: "NVIDIA Nemotron (streaming, on-device)"),
-                                       engine: NemotronEngine())
+                                       engine: NemotronEngine(),
+                                       onPerformance: onPerformance,
+                                       onMetrics: onMetrics)
         case .parakeetEou:
             return StreamingASRBackend(name: String(localized: "Parakeet EOU (streaming, on-device)"),
-                                       engine: ParakeetEouEngine())
+                                       engine: ParakeetEouEngine(),
+                                       onPerformance: onPerformance,
+                                       onMetrics: onMetrics)
         }
     }
 

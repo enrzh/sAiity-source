@@ -25,6 +25,13 @@ extension FluidStreamingEngine {
     func detectedLanguage() async -> String? { nil }
 }
 
+struct StreamingASRMetrics: Sendable {
+    let realTimeFactor: Double
+    let peakBacklogSeconds: Double
+    let droppedAudioSeconds: Double
+    let processedBatchCount: Int
+}
+
 /// Drives a `FluidStreamingEngine` for the caption pipeline.
 ///
 /// This class exists for one reason, and it is not tidiness:
@@ -62,23 +69,8 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
     private var emit: (@Sendable (TranscriptChunk) -> Void)?
     private var sessionStarted = false
 
-    /// The partial callback is CUMULATIVE for the session — the whole
-    /// transcript, every time, not a delta. Left alone that means nothing is
-    /// ever final, so the transcript store, translation and language detection
-    /// (all keyed off finals) would never fire.
     private let commitLock = NSLock()
-    private var committed = ""
-    /// The last cumulative text seen, so a silence flush can commit the rest.
-    private var lastSeen = ""
-    /// When the last final was emitted, for the rolling commit below.
-    private var lastCommitAt = Date()
-
-    /// How long an unpunctuated phrase may sit uncommitted before it is sent on
-    /// anyway, and how long it must be to be worth sending.
-    private static let maxVolatileSeconds: TimeInterval = 3.5
-    private static let minRollingChars = 28
-    /// A hard length ceiling, for speech that runs on without a pause.
-    private static let maxVolatileChars = 110
+    private var reconciler = CaptionTranscriptReconciler()
 
     /// Where to break an unpunctuated run, or nil to keep waiting.
     ///
@@ -86,30 +78,8 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
     /// fragment that is not a word in any language, and it will happily invent
     /// something from it.
     static func rollingCommitPoint(_ text: String, since: Date) -> String.Index? {
-        let n = text.count
-        guard n >= minRollingChars else { return nil }
-        let overdue = Date().timeIntervalSince(since) >= maxVolatileSeconds
-        guard overdue || n >= maxVolatileChars else { return nil }
-        // Leave the last few words volatile: the engine is still most likely to
-        // revise its most recent tokens, and committing them invites a visible
-        // correction after the fact.
-        let keepBack = text.index(text.endIndex, offsetBy: -min(12, n / 4))
-        let head = text[..<keepBack]
-        guard !head.isEmpty else { return nil }
-
-        // A clause break is the best cut — it exists in both writing systems.
-        if let p = head.lastIndex(where: { Self.clauseBreaks.contains($0) }) {
-            return text.index(after: p)
-        }
-        if let space = head.lastIndex(of: " ") { return text.index(after: space) }
-        // Japanese, Chinese and Thai are written without spaces. Requiring one
-        // meant this never fired for them, so nothing was committed — and so
-        // nothing was translated — until the speaker stopped talking entirely.
-        // Those scripts break acceptably at any character.
-        return keepBack
+        CaptionTranscriptReconciler.rollingCommitPoint(text, since: since)
     }
-
-    private static let clauseBreaks: Set<Character> = ["、", "，", ",", ";", "；", ":", "：", "…"]
 
     /// Session clock for subtitle timings. The engine's callback carries no
     /// timestamps (those came from Apple's engine, which is gone), so without
@@ -118,17 +88,23 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
     /// which is accurate enough for a subtitle file.
     private var sessionStart = Date()
     private var lastFinalEnd: Double = 0
+    private var audioClockEndSamples = 0
 
-    /// A final chunk stamped from the session clock.
+    /// A final chunk stamped from the processed-audio clock.
     ///
     /// The start is the LATER of "where the previous final ended" and "now minus
     /// roughly how long this text takes to say". Without the second bound, the
     /// first cue after any quiet stretch — including the model-loading minute at
-    /// session start — claimed the whole gap and showed on screen for it.
+    /// session start — claimed the whole gap and showed on screen for it. The
+    /// old wall-clock estimate also drifted when the model backlog changed.
     /// ~14 chars/second is unhurried speech; err long rather than short, since a
     /// subtitle that lingers reads better than one that flashes.
     private func stampedFinal(_ text: String) -> TranscriptChunk {
-        let now = Date().timeIntervalSince(sessionStart)
+        let wallNow = Date().timeIntervalSince(sessionStart)
+        let audioNow = pendingLock.withLock {
+            Double(audioClockEndSamples) / max(engine.sampleRate, 1)
+        }
+        let now = audioNow > 0 ? audioNow : wallNow
         let spokenFor = min(Double(text.count) / 14.0 + 0.4, 12.0)
         let start = min(max(lastFinalEnd, now - spokenFor), now)
         lastFinalEnd = now
@@ -144,10 +120,12 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
     private var processingWallSeconds = 0.0
     private var processedBatchCount = 0
     private var peakPendingSamples = 0
+    private var droppedPendingSamples = 0
     /// True while the backlog is over its cap, so the log records the onset
     /// rather than one line per audio callback, fifty times a second.
     private var overflowing = false
     private let onPerformance: (@Sendable (Double, Double) -> Void)?
+    private let onMetrics: (@Sendable (StreamingASRMetrics) -> Void)?
 
     /// How much un-processed audio may pile up before the oldest is dropped.
     ///
@@ -213,10 +191,12 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
 
     init(name: String,
          engine: any FluidStreamingEngine,
-         onPerformance: (@Sendable (Double, Double) -> Void)? = nil) {
+         onPerformance: (@Sendable (Double, Double) -> Void)? = nil,
+         onMetrics: (@Sendable (StreamingASRMetrics) -> Void)? = nil) {
         self.name = name
         self.engine = engine
         self.onPerformance = onPerformance
+        self.onMetrics = onMetrics
     }
 
     var inputFormat: AVAudioFormat? {
@@ -242,7 +222,7 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
         // covers both the first start and a start after an interrupted session.
         await engine.reset()
         emit = onChunk
-        commitLock.withLock { committed = ""; lastSeen = ""; lastCommitAt = Date() }
+        commitLock.withLock { reconciler.reset(now: Date()) }
         sessionStart = Date()
         lastFinalEnd = 0
         pendingLock.withLock {
@@ -252,48 +232,21 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
             processingWallSeconds = 0
             processedBatchCount = 0
             peakPendingSamples = 0
+            droppedPendingSamples = 0
+            audioClockEndSamples = 0
         }
 
         await engine.setPartial { [weak self] text in
             guard let self else { return }
-            self.commitLock.lock()
-            // A transducer commits tokens rather than revising them, so the
-            // cumulative text normally only grows. Guard the exception anyway.
-            if !text.hasPrefix(self.committed) { self.committed = "" }
-            self.lastSeen = text
-            let pendingText = String(text.dropFirst(self.committed.count))
-
-            // Commit whole sentences: a finished sentence is stable, translates
-            // well, and is the right unit for a transcript line.
-            var finalPart = ""
-            // Latin punctuation needs a following space or end-of-string, so a
-            // decimal point does not end a sentence. CJK full stops do not —
-            // Japanese and Chinese run straight on with no space, so requiring
-            // one meant a sentence boundary was NEVER found in those languages.
-            if let r = pendingText.range(of: "(?:[.!?](?:\\s|$))|[。！？…]",
-                                         options: [.regularExpression, .backwards]) {
-                finalPart = String(pendingText[..<r.upperBound])
-                self.committed += finalPart
-            } else if let cut = Self.rollingCommitPoint(pendingText, since: self.lastCommitAt) {
-                // Nothing translated until the audio stopped, because only
-                // punctuation or silence produced a final — and the multilingual
-                // Nemotron frequently emits no punctuation at all. Watching a
-                // film, that meant no translation until the film did.
-                //
-                // So commit a phrase on its own once one has been waiting long
-                // enough, at a word boundary. Slightly awkward units are the
-                // price of subtitles that keep up with continuous speech.
-                finalPart = String(pendingText[..<cut])
-                self.committed += finalPart
+            let output = self.commitLock.withLock {
+                self.reconciler.update(cumulativeText: text)
             }
-            if !finalPart.isEmpty { self.lastCommitAt = Date() }
-            let tail = String(pendingText.dropFirst(finalPart.count))
-            self.commitLock.unlock()
-
-            let f = finalPart.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !f.isEmpty { onChunk(self.stampedFinal(f)) }
-            let v = tail.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !v.isEmpty { onChunk(TranscriptChunk(text: v, isFinal: false)) }
+            if let finalText = output.finalText {
+                onChunk(self.stampedFinal(finalText))
+            }
+            if let volatileText = output.volatileText {
+                onChunk(TranscriptChunk(text: volatileText, isFinal: false))
+            }
         }
 
         // The single pump. See the type doc for why this is a correctness
@@ -310,11 +263,15 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
                     while !Task.isCancelled {
                         let hasBatch = self.pendingLock.withLock { () -> Bool in
                             guard !self.pending.isEmpty else { return false }
-                            self.pending.drain(into: &self.processing)
+                            self.pending.drain(upTo: self.maxProcessingBatchSamples,
+                                               into: &self.processing)
                             return !self.processing.isEmpty
                         }
                         guard hasBatch else { break }
                         let batchSamples = self.processing.count
+                        self.pendingLock.withLock {
+                            self.audioClockEndSamples = self.processedAudioSamples + batchSamples
+                        }
                         let started = ContinuousClock.now
                         try? await self.engine.process(self.processing)
                         let elapsed = started.duration(to: .now).components
@@ -351,7 +308,9 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
                 overflowing = false
                 return
             }
-            pending.dropFirst(pending.count - cap)
+            let dropped = pending.count - cap
+            pending.dropFirst(dropped)
+            droppedPendingSamples += dropped
             if !overflowing {
                 overflowing = true
                 NSLog("sAiity asr: \(name) backlog over \(Int(Self.maxPendingSeconds))s — dropping oldest audio")
@@ -361,24 +320,35 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
         wake?.yield(())
     }
 
+    private var maxProcessingBatchSamples: Int {
+        max(1, Int(engine.sampleRate * 0.16))
+    }
+
     private func logAndResetPerformance() {
-        let metrics = pendingLock.withLock { () -> (Int, Double, Int, Int) in
+        let metrics = pendingLock.withLock { () -> (Int, Double, Int, Int, Int) in
             defer {
                 processedAudioSamples = 0
                 processingWallSeconds = 0
                 processedBatchCount = 0
                 peakPendingSamples = 0
+                droppedPendingSamples = 0
             }
             return (processedAudioSamples, processingWallSeconds,
-                    processedBatchCount, peakPendingSamples)
+                    processedBatchCount, peakPendingSamples, droppedPendingSamples)
         }
-        guard metrics.2 > 0 else { return }
+        guard metrics.2 > 0 || metrics.4 > 0 else { return }
         let audioSeconds = Double(metrics.0) / engine.sampleRate
         let realTimeFactor = metrics.1 / max(audioSeconds, 0.001)
         let peakBacklogSeconds = Double(metrics.3) / engine.sampleRate
+        let droppedAudioSeconds = Double(metrics.4) / engine.sampleRate
         onPerformance?(realTimeFactor, peakBacklogSeconds)
-        NSLog("sAiity caption timing: backend=%@ audio=%.3fs compute=%.3fs rtf=%.3f batches=%d peak-backlog=%.3fs",
-              name, audioSeconds, metrics.1, realTimeFactor, metrics.2, peakBacklogSeconds)
+        onMetrics?(StreamingASRMetrics(realTimeFactor: realTimeFactor,
+                                       peakBacklogSeconds: peakBacklogSeconds,
+                                       droppedAudioSeconds: droppedAudioSeconds,
+                                       processedBatchCount: metrics.2))
+        NSLog("sAiity caption timing: backend=%@ audio=%.3fs compute=%.3fs rtf=%.3f batches=%d peak-backlog=%.3fs dropped=%.3fs",
+              name, audioSeconds, metrics.1, realTimeFactor, metrics.2,
+              peakBacklogSeconds, droppedAudioSeconds)
     }
 
     /// Audio went silent: whatever is still volatile is a finished utterance.
@@ -389,15 +359,8 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
         // unavailable from an async context and becomes a hard error under the
         // Swift 6 language mode. Scoping it also makes it impossible to acquire
         // the lock and then suspend while holding it.
-        let rest = commitLock.withLock { () -> String in
-            let r = lastSeen.hasPrefix(committed)
-                ? String(lastSeen.dropFirst(committed.count)) : lastSeen
-            committed = lastSeen
-            lastCommitAt = Date()
-            return r
-        }
-        let t = rest.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !t.isEmpty { emit?(stampedFinal(t)) }
+        let output = commitLock.withLock { reconciler.flush() }
+        if let text = output.finalText { emit?(stampedFinal(text)) }
     }
 
     /// Deferred, authoritative dictation path. The live caption pump never
@@ -458,13 +421,8 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
             // finish() returns the WHOLE session transcript; emit only what has
             // not already been committed, or the last line is duplicated.
             if let full = await engine.finishSession() {
-                let rest = commitLock.withLock { () -> String in
-                    let r = full.hasPrefix(committed) ? String(full.dropFirst(committed.count)) : full
-                    committed = full
-                    return r
-                }
-                let t = rest.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !t.isEmpty { emit?(stampedFinal(t)) }
+                let output = commitLock.withLock { reconciler.flush(cumulativeText: full) }
+                if let text = output.finalText { emit?(stampedFinal(text)) }
             }
         }
         await engine.reset()

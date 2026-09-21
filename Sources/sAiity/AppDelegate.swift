@@ -250,7 +250,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// rebased), and it was slower than Nemotron plus a real translator anyway.
     static func makeActiveBackend() -> TranscriptionBackend {
         let selected = ASREngine.effective
-        guard selected == .nemotron else { return selected.makeBackend() }
+        let metrics: @Sendable (StreamingASRMetrics) -> Void = { metrics in
+            Task { @MainActor in
+                Diagnostics.recordTiming(operation: "captions.asr.rtf",
+                                         seconds: metrics.realTimeFactor,
+                                         cold: false)
+                Diagnostics.recordTiming(operation: "captions.asr.backlog",
+                                         seconds: metrics.peakBacklogSeconds,
+                                         cold: false)
+                if metrics.droppedAudioSeconds > 0 {
+                    Diagnostics.recordFailure(
+                        operation: "captions.audio",
+                        reason: String(format: "dropped %.3fs of backlog audio",
+                                       metrics.droppedAudioSeconds))
+                }
+            }
+        }
+        guard selected == .nemotron else {
+            return selected.makeBackend(onMetrics: metrics)
+        }
 
         let preferredTier = NemotronEngine.selectedChunkMs
         let installed = Set(NemotronEngine.availableChunkMs.filter {
@@ -270,7 +288,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ASRAdaptivePolicy.record(realTimeFactor: rtf,
                                          tier: tier,
                                          scope: .captions)
-            })
+            },
+            onMetrics: metrics)
     }
 
     static func makeDictationStreamingBackend() -> TranscriptionBackend {
@@ -329,6 +348,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// is constructed, so the peak is one model rather than two.
     @MainActor
     private func swapTranslator(for scope: TranslationEngineScope = .captions) {
+        captionTranslationTasks.values.forEach { $0.cancel() }
+        captionTranslationTasks.removeAll()
         translatorIdleEviction.cancel()
         translatorGeneration += 1
         let generation = translatorGeneration
@@ -998,25 +1019,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// run on without spaces, and inserting one produces text a native reader
     /// sees as broken — and a translator sees as two words.
     static func joinClauses(_ parts: [String]) -> String {
-        parts.reduce(into: "") { out, part in
-            guard !out.isEmpty else { out = part; return }
-            let runOn = (out.last.map(isSpaceless) ?? false)
-                || (part.first.map(isSpaceless) ?? false)
-            out += runOn ? part : " " + part
-        }
-    }
-
-    private static func isSpaceless(_ c: Character) -> Bool {
-        guard let s = c.unicodeScalars.first else { return false }
-        switch s.value {
-        // CJK punctuation and kana, CJK ideographs, Thai. Korean is written
-        // WITH spaces despite being written in Hangul, so it is not here.
-        case 0x3000...0x30FF, 0x3400...0x4DBF, 0x4E00...0x9FFF,
-             0x0E00...0x0E7F, 0xFF00...0xFFEF:
-            return true
-        default:
-            return false
-        }
+        CaptionTextMerger.join(parts)
     }
 
     private static func trimmedForDisplay(_ parts: [String]) -> String {
@@ -1032,6 +1035,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// the previous, so the jsonl's line order matches the spoken order even
     /// when translations finish out of order.
     private var transcriptWriteChain: Task<Void, Never>?
+
+    private struct CaptionTranslationKey: Hashable {
+        let text: String
+        let source: String
+        let target: String
+        let engine: TranslationEngine
+    }
+
+    /// Stable caption translations are safe to reuse within one session. The
+    /// key excludes the segment index deliberately: repeated ASR boundaries
+    /// should not invoke the same native model twice.
+    private var captionTranslationCache: [CaptionTranslationKey: String] = [:]
+    private var captionTranslationTasks: [Int: Task<String?, Never>] = [:]
 
     /// How many caption lines may be waiting on the translator at once.
     ///
@@ -1943,6 +1959,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlay.reservesTranslationRow =
             translateTo != nil && CaptionStyle.current.showTranslation
         sessionLines.removeAll()
+        captionTranslationTasks.values.forEach { $0.cancel() }
+        captionTranslationTasks.removeAll()
+        captionTranslationCache.removeAll(keepingCapacity: true)
         speakerAttributor = SpeakerCaptionAttributor()
         currentSpeakerLabel = nil
         subtitleSessionStartedAt = Date()
@@ -2163,7 +2182,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// into the NEXT line. Waiting a beat lets the trailing chunk land first.
     private func commitAtSpeechGap() async {
         guard state == .running else { return }
-        try? await Task.sleep(nanoseconds: 350_000_000)
+        // The backend now drains bounded 160 ms windows, so waiting a full
+        // chunk-sized 350 ms only adds latency after the detector already held
+        // a confirmed gap.
+        try? await Task.sleep(nanoseconds: 120_000_000)
         guard state == .running else { return }
         guard let backend = captionBackend else { return }
         await backend.flushPending()
@@ -2172,7 +2194,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // in flight right here. Closing now strands it: measured, the final
         // "wird" of a sentence became the whole of the next one, alone on
         // screen. Let it land first.
-        try? await Task.sleep(nanoseconds: 80_000_000)
+        try? await Task.sleep(nanoseconds: 40_000_000)
         guard state == .running else { return }
 
         // A pause after a comma is a breath, not the end of a thought. Closing
@@ -2182,7 +2204,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // if more arrives, the gap that follows *it* will do the closing.
         if let last = lastFinalText.last, Self.clauseContinuations.contains(last) {
             let partsBefore = sentenceParts.count
-            try? await Task.sleep(nanoseconds: 700_000_000)
+            try? await Task.sleep(nanoseconds: 450_000_000)
             guard state == .running else { return }
             guard sentenceParts.count == partsBefore else { return }
         }
@@ -2684,6 +2706,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // target changed from the menu bar mid-flight could translate a line
         // into one language and record another.
         let target = translateTo
+        let translationEngine = activeTranslatorEngine ?? TranslationEngine.effective
+        let translationGeneration = translatorGeneration
 
         // Backpressure: see maxPendingTranslations. `translatorReady` is in the
         // test as well, so a line is not queued against a translator that has
@@ -2707,45 +2731,73 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // every line of a session whose translator failed to load claims a
         // translation that was never attempted. Session-level intent already
         // has a home in SessionMeta.translateTo.
+        let srcCode = captionSourceLanguage(for: text)
+        let translationKey = CaptionTranslationKey(text: text,
+                                                   source: srcCode,
+                                                   target: target ?? "",
+                                                   engine: translationEngine)
+        let cachedTranslation = translating ? captionTranslationCache[translationKey] : nil
         sessionLines.append(Segment(i: idx, t0: chunk.start, t1: chunk.end,
-                                    text: text, loc: locale.identifier(.bcp47),
+                                    text: text, loc: srcCode,
                                     tr: nil, trLoc: nil,
                                     words: chunk.words.isEmpty ? nil : chunk.words,
                                     turn: turn ? true : nil,
                                     speaker: speakerID))
 
         // Translate concurrently; the result is patched in by index.
-        let srcCode = captionSourceLanguage(for: text)
         let translation: Task<String?, Never> = Task { @MainActor in
             guard translating else { return nil }
             defer {
-                self.pendingTranslations -= 1
+                // A task from the previous session can finish after the next
+                // session has reset the counter and reused this index. Do not
+                // decrement the new session or remove its cancellation entry.
+                if self.sessionGeneration == generation {
+                    self.pendingTranslations -= 1
+                    self.captionTranslationTasks[idx] = nil
+                }
                 self.scheduleTranslatorEvictionIfIdle()
             }
-            self.beginTranslatorUse()
-            defer { self.endTranslatorUse() }
-            guard let target, let engine = activeTranslator else { return nil }
-            let engineKind = activeTranslatorEngine
-            // Empty counts as nothing translated. MADLAD returns "" for a short
-            // or noisy caption — it has no emptiness check, unlike the LLM path's
-            // sanitizer — and an empty string is non-nil, so it would otherwise
-            // record a translation that is not there.
-            guard let out = try? await translatorInferenceGate.run({
-                await engine.translate(text, from: srcCode, to: target)
-            }), !out.isEmpty else {
-                if let engineKind {
-                    self.retireFailedTranslator(engineKind, reason: "caption inference returned no output")
+            guard self.sessionGeneration == generation,
+                  self.translatorGeneration == translationGeneration,
+                  let target else { return nil }
+
+            let out: String
+            if let cachedTranslation {
+                // Cache hits still go through the same generation and overlay
+                // patch path as fresh inference. Returning early here used to
+                // save the translation on disk while leaving the live row stale.
+                out = cachedTranslation
+            } else {
+                self.beginTranslatorUse()
+                defer { self.endTranslatorUse() }
+                guard let engine = activeTranslator else { return nil }
+                let engineKind = activeTranslatorEngine
+                // Empty counts as nothing translated. MADLAD returns "" for a
+                // short or noisy caption — it has no emptiness check, unlike
+                // the LLM path's sanitizer — and an empty string is non-nil,
+                // so it would otherwise record a translation that is not there.
+                guard let translated = try? await translatorInferenceGate.run({
+                    await engine.translate(text, from: srcCode, to: target)
+                }), !translated.isEmpty else {
+                    if let engineKind {
+                        self.retireFailedTranslator(engineKind,
+                                                    reason: "caption inference returned no output")
+                    }
+                    return nil
                 }
-                return nil
+                out = translated
             }
-            if TestHooks.verboseLogging {
+
+            guard self.sessionGeneration == generation,
+                  self.translatorGeneration == translationGeneration else { return nil }
+            if cachedTranslation == nil {
+                self.captionTranslationCache[translationKey] = out
+            }
+            if TestHooks.verboseLogging, cachedTranslation == nil {
                 NSLog("sAiity translated engine=%@ chars=%d target=%@",
-                      engineKind?.rawValue ?? "unknown", out.count, target)
+                      activeTranslatorEngine?.rawValue ?? "unknown", out.count, target)
             }
-            // Guard the generation: Stop clears sessionLines, and a translation
-            // resolving across that boundary would patch a line of the NEXT
-            // session that happens to share the index.
-            if self.sessionGeneration == generation, idx < self.sessionLines.count {
+            if idx < self.sessionLines.count {
                 self.sessionLines[idx].tr = out
                 // Assigned beside `tr`, never before it.
                 self.sessionLines[idx].trLoc = target
@@ -2769,6 +2821,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return out
         }
+        if translating { captionTranslationTasks[idx] = translation }
 
         // The on-disk store is append-only, so ORDER at the write is what makes
         // exports correct. Chain the writes: each link awaits the previous one,

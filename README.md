@@ -108,21 +108,32 @@ included in the application bundle.
 | Sources/sAiity/OverlayWindow.swift | Caption bubble geometry and presentation |
 | Resources/Localizable.xcstrings | User-facing localization catalog |
 
+## What's new in 2.5.3
+
+- Live captions now use adaptive speech activity detection, so natural pauses
+  close captions without confusing healthy digital silence with a stalled stream.
+- Cumulative recognizer revisions are reconciled into stable text and a
+  revisable tail, reducing duplicated words and lost text around pauses.
+- Caption processing stays bounded with one in-flight ASR operation, protected
+  audio backlog limits, sample-clock timestamps, and diagnostics for latency and
+  dropped audio.
+- Script-aware joining keeps Latin spacing readable while preserving CJK and
+  other spaceless scripts; translation requests are cached and stale results
+  cannot repaint a newer session.
+
 ## Release
 
-The current signed and notarized release is [sAiity 2.5.2](https://github.com/enrzh/sAiity/releases/tag/v2.5.2).
+The current signed and notarized release is [sAiity 2.5.3](https://github.com/enrzh/sAiity/releases/tag/v2.5.3).
 
-- [Download the DMG](https://github.com/enrzh/sAiity/releases/download/v2.5.2/sAiity-2.5.2.dmg)
-- [Download the ZIP](https://github.com/enrzh/sAiity/releases/download/v2.5.2/sAiity-2.5.2.zip)
+- [Download the DMG](https://github.com/enrzh/sAiity/releases/download/v2.5.3/sAiity-2.5.3.dmg)
+- [Download the ZIP](https://github.com/enrzh/sAiity/releases/download/v2.5.3/sAiity-2.5.3.zip)
 - [Sparkle update feed](https://enrzh.github.io/sAiity/appcast.xml)
 
-This maintenance release makes live captions recover immediately after the
-bubble is cleared, shows the listening state before translator warm-up hides
-the first result, and learns separate installed ASR tiers for captions and
-dictation. It also adds focused lifecycle and adaptive-tier regression tests.
+This release focuses on faster, more reliable live captions while keeping all
+audio recognition and translation local to the Mac.
 
-DMG SHA-256: `b4725e508caa0307d79c938af063ca955307ee2384f78a5ed05539499f6c9141`
+DMG SHA-256: pending release artifact
 
-ZIP SHA-256: `5752171bb5bdd82c1b52356b114e73a0914edd96f401b595e05bcce70081988f`
+ZIP SHA-256: pending release artifact
 
 sAiity is part of the [aiity](https://aiity.de) family.
