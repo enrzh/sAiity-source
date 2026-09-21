@@ -121,8 +121,8 @@ bubble is cleared, shows the listening state before translator warm-up hides
 the first result, and learns separate installed ASR tiers for captions and
 dictation. It also adds focused lifecycle and adaptive-tier regression tests.
 
-DMG SHA-256: `fe94b7e7b35592d6cefcbbc77e6b6efa96959cb77f8238f037e35ba6f25c4669`
+DMG SHA-256: `b4725e508caa0307d79c938af063ca955307ee2384f78a5ed05539499f6c9141`
 
-ZIP SHA-256: `7bf67527b8e7b6b1c5f84c2a0fee50d7f8adc9c55cff51936b3d4bb087120d54`
+ZIP SHA-256: `5752171bb5bdd82c1b52356b114e73a0914edd96f401b595e05bcce70081988f`
 
 sAiity is part of the [aiity](https://aiity.de) family.
