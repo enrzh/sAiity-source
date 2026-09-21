@@ -132,8 +132,8 @@ The current signed and notarized release is [sAiity 2.5.3](https://github.com/en
 This release focuses on faster, more reliable live captions while keeping all
 audio recognition and translation local to the Mac.
 
-DMG SHA-256: pending release artifact
+DMG SHA-256: `a168c2f0e1fcb6c15bc2729872981f253fd7a9f9294c95acb4eeedba55b2a113`
 
-ZIP SHA-256: pending release artifact
+ZIP SHA-256: `dc0596902a1ac3fe28d9f04d43cc2ba0aff8b4af4211b10ed91c6937cbc1b035`
 
 sAiity is part of the [aiity](https://aiity.de) family.
