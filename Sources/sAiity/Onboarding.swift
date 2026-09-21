@@ -55,7 +55,7 @@ enum OnboardingStep: String, CaseIterable {
     // the new flow exposes only the three decisions that matter.
     case welcome, purpose, models
 
-    static var allCases: [OnboardingStep] { [.permission, .setup, .finish] }
+    static var allCases: [OnboardingStep] { [.setup, .permission, .finish] }
 
     var title: String {
         switch self {
@@ -127,6 +127,22 @@ enum ScreenRecordingPermission {
         cfg.createsNewApplicationInstance = true
         NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: cfg) { _, _ in
             DispatchQueue.main.async { NSApp.terminate(nil) }
+        }
+    }
+}
+
+/// Input Monitoring is only relevant when the user chooses press-to-talk
+/// dictation. Keep its request beside the other onboarding permission helpers
+/// so the wizard does not need to know any System Settings URL details.
+enum InputMonitoringPermission {
+    static var preflight: Bool { CGPreflightListenEventAccess() }
+
+    static func request() { _ = CGRequestListenEventAccess() }
+
+    static func openSettings() {
+        if let url = URL(string:
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") {
+            NSWorkspace.shared.open(url)
         }
     }
 }

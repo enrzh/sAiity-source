@@ -195,7 +195,7 @@ struct WhisperDictationBackend {
     typealias SegmentTranscription = @Sendable (String, URL, [Float], DecodingOptions) async throws -> DictationRegionTranscript
     private let root: URL; private let download: Download; private let prepare: Prepare; private let transcribeHook: Transcription; private let segmentTranscribeHook: SegmentTranscription?
     private static let mutexes = MutexRegistry()
-    private static let modelCache = WhisperModelCache<WhisperModelCacheKey, LoadedWhisperDictationModel>(idleDuration: .seconds(45)) { key in
+    private static let modelCache = WhisperModelCache<WhisperModelCacheKey, LoadedWhisperDictationModel>(idleDuration: .seconds(300)) { key in
         try await LoadedWhisperDictationModel(identifier: key.identifier,
                                               folder: URL(fileURLWithPath: key.folderPath))
     }

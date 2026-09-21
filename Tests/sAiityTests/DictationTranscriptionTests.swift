@@ -5,6 +5,12 @@ import WhisperKit
 @testable import sAiity
 
 @Suite struct DictationTranscriptionTests {
+    @Test("silence-only capture does not create an ASR region")
+    func silenceOnlyCaptureSkipsDecode() {
+        let samples = Array(repeating: Float.zero, count: 16_000 * 3)
+        #expect(SpeechRegionSegmenter.default.segment(samples, sampleRate: 16_000).isEmpty)
+    }
+
     @Test("speech regions prefer a long silence boundary")
     func silenceBoundary() {
         var configuration = SpeechRegionSegmenter.Configuration()
@@ -89,6 +95,46 @@ import WhisperKit
         #expect(transcription.languageMetadata.regionLanguages == ["de-DE", "en-US", "de-DE"])
         #expect(transcription.languageMetadata.dominantLanguage == "de-DE")
         #expect(transcription.languageMetadata.containsMultipleLanguages)
+    }
+
+    @Test("obvious mixed-script speech is refined without an extra audio pause")
+    func mixedScriptRegionIsRefined() {
+        let transcription = DictationTranscriptionResult(regions: [
+            .init(text: "你好, can you check das nochmal", language: "zh")
+        ])
+
+        #expect(transcription.regions.map(\.language) == ["zh", "en"])
+        #expect(transcription.text == "你好, can you check das nochmal")
+        #expect(transcription.languageMetadata.containsMultipleLanguages)
+    }
+
+    @Test("translation runs batch only adjacent regions with the same language")
+    func translationRunsPreserveSwitches() {
+        let transcription = DictationTranscriptionResult(regions: [
+            .init(text: "Ich denke", language: "de-DE"),
+            .init(text: "bitte", language: "de"),
+            .init(text: "we should ship", language: "en-US"),
+            .init(text: "today", language: "en"),
+            .init(text: "bitte", language: "de-DE"),
+        ])
+
+        #expect(transcription.translationRuns.map(\.text) == [
+            "Ich denke bitte",
+            "we should ship today",
+            "bitte",
+        ])
+        #expect(transcription.translationRuns.map(\.language) == ["de-DE", "en-US", "de-DE"])
+    }
+
+    @Test("unknown region language is not replaced by the dominant language")
+    func unknownRegionStaysUnknown() {
+        let transcription = DictationTranscriptionResult(regions: [
+            .init(text: "Ich denke", language: "de-DE"),
+            .init(text: "maybe", language: nil),
+            .init(text: "bitte", language: "de-DE"),
+        ])
+
+        #expect(transcription.translationRuns.map(\.language) == ["de-DE", nil, "de-DE"])
     }
 
     @Test("mixed cleanup preserves spans and rejects a translated collapse")

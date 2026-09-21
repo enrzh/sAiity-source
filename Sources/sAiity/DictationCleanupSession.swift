@@ -6,22 +6,37 @@ import Foundation
 final class DictationCleanupSession {
     struct Model {
         let cleanup: (String, String?, DictationLanguageMetadata) async -> String?
+        /// Optional one-call path for mixed language regions. The caller still
+        /// validates every returned region independently before accepting it.
+        let cleanupRegions: (([DictationRegionTranscript]) async -> [String]?)?
         let stop: () async -> Void
+
+        init(cleanup: @escaping (String, String?, DictationLanguageMetadata) async -> String?,
+             cleanupRegions: (([DictationRegionTranscript]) async -> [String]?)? = nil,
+             stop: @escaping () async -> Void) {
+            self.cleanup = cleanup
+            self.cleanupRegions = cleanupRegions
+            self.stop = stop
+        }
     }
 
     private let gate: TranslationInferenceGate
+    private let idleDelay: Duration
     private let idle = IdleEviction()
     private var model: Model?
     private var modelKey: String?
 
-    init(gate: TranslationInferenceGate) { self.gate = gate }
+    init(gate: TranslationInferenceGate, idleDelay: Duration = .seconds(300)) {
+        self.gate = gate
+        self.idleDelay = idleDelay
+    }
 
     func cleanup(_ input: DictationTranscriptionResult,
                  modelKey key: String?,
                  load: @escaping @MainActor () async throws -> Model) async -> DictationTranscriptionResult? {
         idle.cancel()
         defer {
-            idle.schedule(after: .seconds(45), shouldEvict: { [weak self] in
+            idle.schedule(after: idleDelay, shouldEvict: { [weak self] in
                 self?.model != nil
             }, evict: { [weak self] in await self?.invalidate() })
         }
@@ -62,14 +77,22 @@ final class DictationCleanupSession {
                   Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18)
         }
         if modelKey != key { await releaseModel() }
-        var regions: [DictationRegionTranscript] = []
-        for region in input.regions {
-            try Task.checkCancellation()
-            let source = region.language == "auto" ? nil : region.language
-            let metadata = DictationLanguageMetadata(regions: [region])
-            let baseline = DictationCleanupValidator.deterministicCleanup(region.text, sourceLanguage: source)
+
+        // A single-language recording may still be split into several audio
+        // regions for recognition. Cleaning the joined transcript once is both
+        // faster and more accurate for corrections that cross a region seam.
+        // Mixed-language input stays region-local so the model cannot flatten
+        // intentional code-switching.
+        if !input.languageMetadata.containsMultipleLanguages {
+            let source = input.languageMetadata.dominantLanguage
+                ?? input.regions.first?.language
+            let metadata = input.languageMetadata
+            let baseline = DictationCleanupValidator.deterministicCleanup(input.text,
+                                                                           sourceLanguage: source)
             var candidate = baseline
-            if key != nil && DictationCleanupValidator.needsModelCleanup(region.text, sourceLanguage: source) {
+            if key != nil,
+               DictationCleanupValidator.needsModelCleanup(input.text,
+                                                            sourceLanguage: source) {
                 if model == nil {
                     let loading = ContinuousClock.now
                     model = try await load()
@@ -78,10 +101,75 @@ final class DictationCleanupSession {
                     loadSeconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
                 }
                 try Task.checkCancellation()
+                modelCalls = 1
+                candidate = await model?.cleanup(input.text, source, metadata) ?? baseline
+                try Task.checkCancellation()
+            }
+            let cleaned = DictationCleanupValidator.validate(candidate,
+                preserving: input.text, sourceLanguage: source, languageMetadata: metadata)
+                ?? DictationCleanupValidator.validate(baseline,
+                    preserving: input.text, sourceLanguage: source, languageMetadata: metadata)
+                ?? input.text
+            let language = source ?? input.regions.first?.language
+            return DictationTranscriptionResult(regions: [
+                .init(text: cleaned, language: language)
+            ])
+        }
+
+        let modelIndexes = input.regions.indices.filter { index in
+            guard key != nil else { return false }
+            let region = input.regions[index]
+            return DictationCleanupValidator.needsModelCleanup(
+                region.text,
+                sourceLanguage: region.language == "auto" ? nil : region.language)
+        }
+        if !modelIndexes.isEmpty, model == nil {
+            let loading = ContinuousClock.now
+            model = try await load()
+            modelKey = key
+            let elapsed = loading.duration(to: .now).components
+            loadSeconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+        }
+
+        var batched: [Int: String] = [:]
+        if modelIndexes.count > 1, let cleanupRegions = model?.cleanupRegions {
+            try Task.checkCancellation()
+            modelCalls = 1
+            let requested = modelIndexes.map { input.regions[$0] }
+            if let values = await cleanupRegions(requested), values.count == requested.count {
+                var valid = true
+                for (offset, value) in values.enumerated() {
+                    let region = requested[offset]
+                    let source = region.language == "auto" ? nil : region.language
+                    let metadata = DictationLanguageMetadata(regions: [region])
+                    guard let cleaned = DictationCleanupValidator.validate(
+                        value,
+                        preserving: region.text,
+                        sourceLanguage: source,
+                        languageMetadata: metadata) else {
+                        valid = false
+                        break
+                    }
+                    batched[modelIndexes[offset]] = cleaned
+                }
+                if !valid { batched.removeAll(keepingCapacity: true) }
+            }
+            try Task.checkCancellation()
+        }
+
+        var regions: [DictationRegionTranscript] = []
+        regions.reserveCapacity(input.regions.count)
+        for (index, region) in input.regions.enumerated() {
+            try Task.checkCancellation()
+            let source = region.language == "auto" ? nil : region.language
+            let metadata = DictationLanguageMetadata(regions: [region])
+            let baseline = DictationCleanupValidator.deterministicCleanup(region.text, sourceLanguage: source)
+            var candidate = baseline
+            if let value = batched[index] {
+                candidate = value
+            } else if modelIndexes.contains(index) {
                 modelCalls += 1
                 candidate = await model?.cleanup(region.text, source, metadata) ?? baseline
-                // The native loop may not stop immediately. Wait for it above,
-                // then discard cancelled output before another region can run.
                 try Task.checkCancellation()
             }
             let cleaned = DictationCleanupValidator.validate(candidate,
@@ -96,4 +184,5 @@ final class DictationCleanupSession {
             sourceLanguage: input.languageMetadata.dominantLanguage,
             languageMetadata: input.languageMetadata) == nil ? input : result
     }
+
 }

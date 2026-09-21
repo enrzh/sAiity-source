@@ -10,10 +10,28 @@ import SwiftUI
 @MainActor
 @Observable
 final class OnboardingModel {
-    var step: OnboardingStep = .permission
-    var permissionGranted = false
+    var step: OnboardingStep = .setup
+    var screenRecordingGranted = false
+    var inputMonitoringGranted = false
     var checkingPermission = false
     var askedOnce = false
+
+    enum UseCase: String, CaseIterable {
+        case captions, dictation, both
+
+        var title: String {
+            switch self {
+            case .captions: return String(localized: "Captions")
+            case .dictation: return String(localized: "Dictation")
+            case .both: return String(localized: "Captions + Dictation")
+            }
+        }
+
+        var includesCaptions: Bool { self == .captions || self == .both }
+        var includesDictation: Bool { self == .dictation || self == .both }
+    }
+
+    var useCase: UseCase = .both
 
     /// What the user says they need, which decides what gets downloaded.
     enum Purpose: String, CaseIterable {
@@ -64,9 +82,21 @@ final class OnboardingModel {
         }
     }
 
+    var needsScreenRecording: Bool { useCase.includesCaptions }
+    var needsInputMonitoring: Bool { useCase.includesDictation }
+    var permissionGranted: Bool {
+        (!needsScreenRecording || screenRecordingGranted)
+            && (!needsInputMonitoring || inputMonitoringGranted)
+    }
+
     func refreshPermission() async {
         checkingPermission = true
-        permissionGranted = await ScreenRecordingPermission.probe()
+        screenRecordingGranted = needsScreenRecording
+            ? await ScreenRecordingPermission.probe()
+            : true
+        inputMonitoringGranted = needsInputMonitoring
+            ? InputMonitoringPermission.preflight
+            : true
         checkingPermission = false
     }
 
@@ -75,6 +105,7 @@ final class OnboardingModel {
     func apply() {
         ASREngine.selected = purpose.engine
         state.engine = purpose.engine
+        state.dictationEnabled = useCase.includesDictation
     }
 
     /// The asset onboarding offers to download: the engine's currently-selected
@@ -122,7 +153,7 @@ struct OnboardingView: View {
             Divider()
             footer
         }
-        .frame(width: 640, height: 560)
+        .frame(width: 640, height: 600)
         // The window's own translucency, not a painted gradient — the same
         // material Settings uses, so the two windows read as one app. See
         // VibrantBackground for why this is the honest version of "fancy".
@@ -182,37 +213,49 @@ struct OnboardingView: View {
     private var permission: some View {
         VStack(alignment: .leading, spacing: 14) {
             header("lock.shield",
-                   "Allow Screen Recording",
-                   "macOS has no separate permission for system audio — Screen Recording is the one that gates it. sAiity records no video and takes no screenshots.")
+                   "Permission",
+                   "Everything runs on this Mac. No audio ever leaves it.")
 
-            HStack(spacing: 8) {
-                Image(systemName: model.permissionGranted
-                      ? "checkmark.circle.fill" : "exclamationmark.circle")
-                    .foregroundStyle(model.permissionGranted ? Color.green : Color.orange)
-                Text(model.permissionGranted ? "Granted." : "Not granted yet.")
-                if model.checkingPermission { ProgressView().controlSize(.small) }
-            }
-            .padding(.top, 4)
-
-            if !model.permissionGranted {
-                HStack {
-                    Button("Allow…") {
-                        // Effective only on the very first ask; after that macOS
-                        // ignores it, which is why Open Settings sits next to it.
+            if model.needsScreenRecording {
+                permissionRow(
+                    title: "Screen Recording",
+                    symbol: "rectangle.dashed.badge.record",
+                    granted: model.screenRecordingGranted,
+                    explanation: "macOS has no separate permission for system audio — Screen Recording is the one that gates it. sAiity records no video and takes no screenshots.") {
                         ScreenRecordingPermission.request()
                         model.askedOnce = true
                         Task { await model.refreshPermission() }
+                    } openSettings: {
+                        ScreenRecordingPermission.openSettings()
                     }
-                    .buttonStyle(.borderedProminent)
-                    Button("Open Settings") { ScreenRecordingPermission.openSettings() }
-                }
-                if model.askedOnce, ScreenRecordingPermission.canRelaunch {
-                    Text("Already allowed it in System Settings but still showing as not granted? macOS sometimes only applies it to a fresh launch.")
-                        .font(.caption).foregroundStyle(.secondary).padding(.top, 6)
+                if model.askedOnce, ScreenRecordingPermission.canRelaunch,
+                   !model.screenRecordingGranted {
                     Button("Quit & Reopen") { ScreenRecordingPermission.relaunch() }
                         .controlSize(.small)
                 }
             }
+
+            if model.needsInputMonitoring {
+                permissionRow(
+                    title: "Input Monitoring",
+                    symbol: "keyboard",
+                    granted: model.inputMonitoringGranted,
+                    explanation: "Required to detect your dictation shortcut in other apps.") {
+                        InputMonitoringPermission.request()
+                        model.askedOnce = true
+                        Task { await model.refreshPermission() }
+                    } openSettings: {
+                        InputMonitoringPermission.openSettings()
+                    }
+            }
+
+            if model.needsInputMonitoring {
+                Label("Accessibility is requested only when dictation inserts text into another app.",
+                      systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if model.checkingPermission { ProgressView().controlSize(.small) }
             Spacer()
         }
         .task { await model.refreshPermission() }
@@ -241,41 +284,92 @@ struct OnboardingView: View {
         }
     }
 
+    @ViewBuilder
+    private func permissionRow(title: LocalizedStringKey,
+                               symbol: String,
+                               granted: Bool,
+                               explanation: LocalizedStringKey,
+                               request: @escaping () -> Void,
+                               openSettings: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: granted ? "checkmark.circle.fill" : symbol)
+                    .foregroundStyle(granted ? Color.green : Color.orange)
+                Text(title).font(.body.weight(.medium))
+                Spacer()
+                Text(granted ? "Granted." : "Not granted yet.")
+                    .foregroundStyle(.secondary)
+            }
+            if !granted {
+                Text(explanation)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                HStack {
+                    Button("Allow…", action: request)
+                        .buttonStyle(.borderedProminent)
+                    Button("Open Settings", action: openSettings)
+                }
+            }
+        }
+        .padding(12)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+    }
+
     private var setup: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            header("waveform",
-                   "Choose a recognition model",
-                   "Pick the language coverage you need. You can change it later in Settings.")
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                header("sparkles",
+                       "What for",
+                       "Choose what you want to use. You can change this later in Settings.")
 
-            ForEach(OnboardingModel.Purpose.allCases, id: \.self) { p in
-                choice(title: p.title, detail: p.detail, selected: model.purpose == p) {
-                    model.purpose = p
-                }
-            }
-
-            Divider().padding(.vertical, 4)
-            ForEach(model.assetsToOffer) { asset in
-                let status = ModelRegistry.status(of: asset)
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(asset.title).font(.body.weight(.medium))
-                        Text(asset.detail).font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: 12)
-                    if status.isInstalled {
-                        Label("Ready", systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green).font(.callout)
-                    } else {
-                        AssetControl(state: model.state, status: status, prominent: true)
+                ForEach(OnboardingModel.UseCase.allCases, id: \.self) { useCase in
+                    choice(title: useCase.title,
+                           detail: useCase.includesCaptions && useCase.includesDictation
+                               ? String(localized: "One download and you are set")
+                               : useCase.includesCaptions
+                                   ? String(localized: "It captures the audio your Mac plays — the microphone stays off unless you later opt in under Settings → Captions.")
+                                   : String(localized: "Dictation is separate from live captions. It never starts the caption service and is not saved as a meeting transcript."),
+                           selected: model.useCase == useCase) {
+                        model.useCase = useCase
                     }
                 }
-                .padding(10)
-                .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+
+                Divider().padding(.vertical, 4)
+                Text("Choose a recognition model")
+                    .font(.headline)
+                Text("Pick the language coverage you need. You can change it later in Settings.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                ForEach(OnboardingModel.Purpose.allCases, id: \.self) { p in
+                    choice(title: p.title, detail: p.detail, selected: model.purpose == p) {
+                        model.purpose = p
+                    }
+                }
+
+                Divider().padding(.vertical, 4)
+                ForEach(model.assetsToOffer) { asset in
+                    let status = ModelRegistry.status(of: asset)
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(asset.title).font(.body.weight(.medium))
+                            Text(asset.detail).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 12)
+                        if status.isInstalled {
+                            Label("Ready", systemImage: "checkmark.circle.fill")
+                                .foregroundStyle(.green).font(.callout)
+                        } else {
+                            AssetControl(state: model.state, status: status, prominent: true)
+                        }
+                    }
+                    .padding(10)
+                    .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+                }
+                if let e = model.state.modelError {
+                    Text(e).font(.caption).foregroundStyle(.red)
+                }
             }
-            if let e = model.state.modelError {
-                Text(e).font(.caption).foregroundStyle(.red)
-            }
-            Spacer()
         }
         .task { model.state.refreshModels() }
     }
@@ -313,7 +407,7 @@ struct OnboardingView: View {
         HStack {
             Text(model.step.title).font(.caption).foregroundStyle(.secondary)
             Spacer()
-            if model.step != .welcome {
+            if model.step != OnboardingStep.allCases.first {
                 Button("Back") { back() }
             }
             Button(model.step == .finish ? "Done" : "Continue") { advance() }
@@ -404,7 +498,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
             return
         }
         let model = OnboardingModel(state: state)
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 560),
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 600),
                          styleMask: [.titled, .closable],
                          backing: .buffered, defer: false)
         w.title = String(localized: "Set up sAiity")

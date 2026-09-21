@@ -305,6 +305,7 @@ PLIST_EXEC=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP/Conten
     exit 1
 }
 echo "launch smoke: --version passed"
+./scripts/verify-release.sh "$APP"
 echo "built: $APP"
 
 # Notarisation. Requires a Developer ID Application certificate and a stored

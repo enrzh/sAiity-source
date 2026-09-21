@@ -33,7 +33,8 @@ struct ModelRegistryTests {
 
         // MADLAD is the reason this test exists: it was downloadable, 1.86 GB,
         // and had no row anywhere in the app.
-        for expected in ["asr.nemotron", "asr.nemotron.fast", "asr.parakeetEou", "mt.madlad", "mt.hymt2.1.8b.q4"] {
+        for expected in ["asr.nemotron", "asr.nemotron.fast", "asr.parakeetEou",
+                         "diarization.lseend.dihard3.100ms", "mt.madlad", "mt.hymt2.1.8b.q4"] {
             #expect(ids.contains(expected), "missing asset \(expected)")
         }
         // Whisper was cut: its translate mode stopped emitting finals ~25 s into
@@ -236,6 +237,18 @@ struct DownloadCoordinatorTests {
         #expect(ids.contains(AssetID.parakeetEou))
         #expect(ids.contains(AssetID.madlad))
         #expect(ids.contains(AssetID.hyMT2))
+    }
+
+    @Test("speaker diarization is a removable recognition asset")
+    func speakerDiarizationAssetIsCatalogued() {
+        let asset = ModelRegistry.assets().first { $0.id == AssetID.speakerDiarization }
+        #expect(asset?.family == .recognition)
+        #expect(asset?.install != nil)
+        if let asset, case .remove(let url) = asset.removal {
+            #expect(url.path.hasPrefix(ModelRegistry.root.path + "/"))
+        } else {
+            Issue.record("speaker diarization has no removal path")
+        }
     }
 }
 

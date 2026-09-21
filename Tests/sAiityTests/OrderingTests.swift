@@ -107,4 +107,14 @@ struct OrderingTests {
         #expect(!vtt.contains(","), "VTT timings use periods, not SRT commas")
         #expect(vtt.contains("Guten Morgen.\nGood morning.\n"))
     }
+
+    @Test("speaker labels are included in exports without changing unlabeled output")
+    func speakerLabelsExport() {
+        let labeled = Segment(i: 0, t0: 0, t1: 2, text: "Hallo world.",
+                              loc: "de-DE", tr: "Hello world.", trLoc: "en",
+                              words: nil, speaker: "speaker-1")
+        #expect(Export.txt([labeled]).hasPrefix("Speaker 2: Hallo world."))
+        #expect(Export.srt([labeled]).contains("Speaker 2: Hallo world.\nHello world."))
+        #expect(Export.vtt([labeled]).contains("Speaker 2: Hallo world.\nHello world."))
+    }
 }

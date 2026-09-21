@@ -37,6 +37,27 @@ import Testing
         func detectedLanguage() async -> String? { "en" }
     }
 
+    final class RecordingEngine: FluidStreamingEngine, @unchecked Sendable {
+        let sampleRate = 16_000.0
+        private let lock = NSLock()
+        private var batches: [[Float]] = []
+
+        var processedSamples: [Float] {
+            lock.withLock { batches.flatMap { $0 } }
+        }
+
+        func load(progress: @escaping @Sendable (String) -> Void) async throws {}
+        func reset() async {}
+        func setPartial(_ callback: @escaping @Sendable (String) -> Void) async {}
+
+        func process(_ samples: [Float]) async throws {
+            lock.withLock { batches.append(samples) }
+        }
+
+        func finishSession() async -> String? { nil }
+        func teardown() async {}
+    }
+
     final class SegmentedEngine: FluidStreamingEngine, @unchecked Sendable {
         let sampleRate = 16_000.0
         var events: [String] = []
@@ -117,6 +138,30 @@ import Testing
         #expect(engine.loads == 1)
         #expect(engine.resets >= 2)
         #expect(engine.teardowns == 1)
+    }
+
+    @Test("streaming batches swap without dropping captured samples")
+    func streamingBatchSwapConservesSamples() async throws {
+        let engine = RecordingEngine()
+        let backend = StreamingASRBackend(name: "Test", engine: engine)
+        try await backend.prepare(locale: Locale(identifier: "en-US")) { _ in }
+        try await backend.start { _ in }
+
+        let format = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4)!
+        buffer.frameLength = 4
+        for (index, sample) in [1, 2, 3, 4].enumerated() {
+            buffer.floatChannelData![0][index] = Float(sample)
+        }
+        backend.feed(buffer)
+
+        for _ in 0..<100 where engine.processedSamples.count < 4 {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        await backend.stop()
+
+        #expect(engine.processedSamples == [1.0, 2.0, 3.0, 4.0])
+        await backend.release()
     }
 
     @Test("dictation completion returns the full engine result without emitting a caption")

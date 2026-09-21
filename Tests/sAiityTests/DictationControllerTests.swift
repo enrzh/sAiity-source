@@ -123,6 +123,10 @@ import Testing
         var result = DictationTranscriptionResult(regions: [])
         var transcriptionStarted = false
         var blockTranscription = false
+        var transcriptionError: Error?
+        var onChunk: (@Sendable (TranscriptChunk) -> Void)?
+        var streamingResult: String?
+        var finishDictationCalls = 0
 
         init(log: EventLog) { self.log = log }
 
@@ -132,15 +136,22 @@ import Testing
         }
         func start(onChunk: @escaping @Sendable (TranscriptChunk) -> Void) async throws {
             starts += 1
+            self.onChunk = onChunk
         }
         func feed(_ buffer: AVAudioPCMBuffer) {}
         func stop() async {}
         func release() async {}
+        func finishDictation() async -> String? {
+            finishDictationCalls += 1
+            return streamingResult
+        }
+        func emitDraft(_ chunk: TranscriptChunk) { onChunk?(chunk) }
         func transcribeDictation(samples: [Float],
                                  regions: [DictationSpeechRegion]) async throws -> DictationTranscriptionResult {
             receivedSamples = samples
             receivedRegions = regions
             transcriptionStarted = true
+            if let transcriptionError { throw transcriptionError }
             if blockTranscription {
                 try await Task.sleep(nanoseconds: 60_000_000_000)
             }
@@ -164,11 +175,13 @@ import Testing
         let backend = FakeBackend(log: log)
         let capture = FakeCapture(log: log)
         let inserter = FakeInserter()
+        var snapshot: DictationResultSnapshot?
         let controller = DictationController(
             makeBackend: { backend },
             capture: capture,
             inserter: inserter,
-            captionsActive: { false })
+            captionsActive: { false },
+            onResult: { snapshot = $0 })
 
         controller.press()
         await controller.waitForWorkForTests()
@@ -177,6 +190,13 @@ import Testing
 
         #expect(log.values == ["capture.stop", "backend.finishDictation"])
         #expect(inserter.inserted == ["hello from dictation"])
+        #expect(snapshot == DictationResultSnapshot(rawText: "hello from dictation",
+                                                     outputText: "hello from dictation",
+                                                     wasCleaned: false,
+                                                     wasTranslated: false,
+                                                     languageMetadata: .init(regions: [
+                                                         .init(text: "hello from dictation", language: "en")
+                                                     ])))
         #expect(controller.phase == .result("Copied to Clipboard"))
     }
 
@@ -260,13 +280,15 @@ import Testing
 
     @Test("ordinary preparation never prepares selected Whisper")
     func ordinaryPreparationDoesNotPrepareWhisper() async {
+        let backend = FakeBackend(log: EventLog())
         let capture = FakeCapture(log: EventLog())
         let controller = DictationController(
-            makeBackend: { FakeBackend(log: EventLog()) }, capture: capture,
+            makeBackend: { backend }, capture: capture,
             inserter: FakeInserter(), captionsActive: { false },
             dictationUsesWhisper: { true }, whisperIsReady: { false })
         controller.prepare(); await controller.waitForWorkForTests()
         #expect(!capture.started)
+        #expect(backend.prepares == 0)
     }
 
     @Test("Whisper press before explicit readiness fails without preparing")
@@ -451,13 +473,17 @@ import Testing
         let backend = FakeBackend(log: EventLog())
         backend.authoritativeResult = input
         let inserter = FakeInserter()
+        var snapshot: DictationResultSnapshot?
+        var issues: [String] = []
         let controller = DictationController(
             makeBackend: { backend },
             capture: FakeCapture(log: EventLog()),
             inserter: inserter,
             captionsActive: { false },
             cleanupConfiguration: { DictationCleanupConfiguration(enabled: true) },
-            cleanup: { _, _ in "Send the project report to another address on 2026-08-31 today." })
+            cleanup: { _, _ in "Send the project report to another address on 2026-08-31 today." },
+            onResult: { snapshot = $0 },
+            onIssue: { operation, _ in issues.append(operation) })
 
         controller.press()
         await controller.waitForWorkForTests()
@@ -465,6 +491,8 @@ import Testing
         await controller.waitForWorkForTests()
 
         #expect(inserter.inserted == [input])
+        #expect(snapshot?.cleanupUnavailable == true)
+        #expect(issues == ["dictation.cleanup"])
     }
 
     @Test("cleanup never translates when dictation translation is disabled")
@@ -520,6 +548,38 @@ import Testing
         #expect(backend.receivedSamples == [0.4, 0.4, 0.4])
         #expect(backend.receivedRegions.count == 1)
         #expect(inserter.inserted == ["Ich denke we should ship"])
+    }
+
+    @Test("fast streaming dictation flushes the warm session instead of replaying audio")
+    func fastStreamingDictationUsesDraftSession() async {
+        let backend = FakeSegmentedBackend(log: EventLog())
+        backend.streamingResult = "Hallo world"
+        let capture = FakeCapture(log: EventLog())
+        capture.samples = [0.4, 0.4, 0.4]
+        let inserter = FakeInserter()
+        var draft = ""
+        let controller = DictationController(
+            makeBackend: { backend },
+            capture: capture,
+            inserter: inserter,
+            captionsActive: { false },
+            onDraft: { draft = $0 },
+            dictationStreamingDraftEnabled: { true })
+
+        controller.press()
+        await controller.waitForWorkForTests()
+        #expect(backend.starts == 1)
+        backend.emitDraft(.init(text: "Hallo", isFinal: true))
+        backend.emitDraft(.init(text: "world", isFinal: false))
+        await Task.yield()
+
+        controller.release()
+        await controller.waitForWorkForTests()
+
+        #expect(draft == "Hallo world")
+        #expect(backend.finishDictationCalls == 1)
+        #expect(!backend.transcriptionStarted)
+        #expect(inserter.inserted == ["Hallo world"])
     }
 
     @Test("controller cancellation during segmented transcription drops the result")
@@ -624,6 +684,7 @@ import Testing
     func translationFailureFallsBackToOriginal() async {
         let backend = FakeBackend(log: EventLog())
         let inserter = FakeInserter()
+        var issues: [String] = []
         let controller = DictationController(
             makeBackend: { backend },
             capture: FakeCapture(log: EventLog()),
@@ -632,7 +693,8 @@ import Testing
             translationConfiguration: {
                 DictationTranslationConfiguration(enabled: true, target: "de")
             },
-            translate: { _, _, _ in nil })
+            translate: { _, _, _ in nil },
+            onIssue: { operation, _ in issues.append(operation) })
 
         controller.press()
         await controller.waitForWorkForTests()
@@ -642,6 +704,29 @@ import Testing
         #expect(inserter.inserted == ["hello from dictation"])
         #expect(controller.phase == .result(
             "Translation unavailable — original copied to Clipboard"))
+        #expect(issues == ["dictation.translation"])
+    }
+
+    @Test("transcription failure is visible to diagnostics")
+    func transcriptionFailureReportsIssue() async {
+        let backend = FakeSegmentedBackend(log: EventLog())
+        backend.transcriptionError = BackendError.notPrepared
+        var issues: [String] = []
+        let controller = DictationController(
+            makeBackend: { backend },
+            capture: FakeCapture(log: EventLog()),
+            inserter: FakeInserter(),
+            captionsActive: { false },
+            onIssue: { operation, reason in issues.append("\(operation):\(reason)") })
+
+        controller.press()
+        await controller.waitForWorkForTests()
+        controller.release()
+        await controller.waitForWorkForTests()
+
+        #expect(issues.count == 1)
+        #expect(issues[0].hasPrefix("dictation.transcription:"))
+        #expect(controller.phase == .failure(BackendError.notPrepared.localizedDescription))
     }
 
     @Test("translation is skipped when dictation translation is disabled")

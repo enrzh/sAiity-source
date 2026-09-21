@@ -47,7 +47,7 @@ final class ASRBackendPool: ASRBackendProvider {
     #endif
 
     init(makeBackend: @escaping () -> TranscriptionBackend,
-         idleEvictionDelay: Duration = .seconds(45)) {
+         idleEvictionDelay: Duration = .seconds(300)) {
         self.makeBackend = makeBackend
         self.idleEvictionDelay = idleEvictionDelay
     }

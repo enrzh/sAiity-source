@@ -65,6 +65,7 @@ SAIITY_VERSION="$VERSION" ./build-app.sh --notarize
 plutil -lint build/sAiity.app/Contents/Info.plist >/dev/null
 test -x build/sAiity.app/Contents/MacOS/sAiity
 codesign --verify --deep --strict build/sAiity.app
+./scripts/verify-release.sh build/sAiity.app "$VERSION"
 
 ZIP="build/sAiity.zip"
 [ -f "$ZIP" ] || { echo "FATAL: $ZIP missing after notarize"; exit 1; }
@@ -95,6 +96,7 @@ cat > build/appcast.xml <<XML
 XML
 
 cp "$ZIP" "build/sAiity-$VERSION.zip"
+./scripts/validate-appcast.sh build/appcast.xml "build/sAiity-$VERSION.zip" "$VERSION"
 
 # Only create the tag after the notarised archive, signature, appcast, and
 # release copy have all completed. A failed release must not leave a tag

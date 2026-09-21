@@ -63,20 +63,7 @@ final class MADLADTranslator: Translating, @unchecked Sendable {
     /// common way to lose this resource, so fail before touching MLX and leave
     /// the original caption visible instead of terminating the app.
     static var hasBundledMetalLibrary: Bool {
-        guard let root = Bundle.main.resourceURL,
-              let enumerator = FileManager.default.enumerator(
-                  at: root,
-                  includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
-                  options: [.skipsHiddenFiles]) else {
-            return false
-        }
-        for case let url as URL in enumerator where url.pathExtension == "metallib" {
-            guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
-                  values.isRegularFile == true,
-                  (values.fileSize ?? 0) > 0 else { continue }
-            return true
-        }
-        return false
+        TranslationPreflight.hasBundledMetalLibrary()
     }
 
     func prepare(from source: String, to target: String,
@@ -89,7 +76,7 @@ final class MADLADTranslator: Translating, @unchecked Sendable {
                 String(localized: "MADLAD cannot translate into \(AppLanguage(code: target).displayName)."))
         }
         guard Self.hasBundledMetalLibrary else {
-            throw TranslationEngineError.notAvailable(
+            throw TranslationEngineError.runtimeUnavailable(
                 String(localized: "Translation is unavailable because the MLX Metal library is missing from this app build."))
         }
 
@@ -166,6 +153,19 @@ final class MADLADTranslator: Translating, @unchecked Sendable {
         // MADLAD infers the source language itself; only the target is given,
         // and it must be the model's own spelling: "zh", never "zh-Hans".
         return lock.withLock { try? t.translate(text, to: native) }
+    }
+
+    /// MADLAD can decode a marked batch in one serialized graph invocation.
+    /// The strict marker parser makes this an optimization only: any model
+    /// response that edits the framing returns nil and the caller retries the
+    /// same regions one by one.
+    func translateRegions(_ regions: [TranslationRegion], to target: String) async -> [String]? {
+        guard let t = translator,
+              let native = MADLADLanguageProvider.nativeCode(for: target),
+              let prompt = TranslationBatchMarkers.encode(regions) else { return nil }
+        let raw = lock.withLock { try? t.translate(prompt, to: native) }
+        guard let raw else { return nil }
+        return TranslationBatchMarkers.decode(raw, count: regions.count)
     }
 
     /// Dropping the reference is not enough to get the memory back.
@@ -267,6 +267,19 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
     For short or already-clean text, make no changes. Output only the edited transcript.
     """
 
+    /// The release path uses deterministic formatting and validation around the
+    /// model. Keep the model prompt small there: the long contract above stays
+    /// available for diagnostics/tests, but paying for its examples on every
+    /// cleanup request delays the text the user is waiting for.
+    static let cleanupFastSystemPrompt = """
+    You are a conservative speech editor. Return only the edited transcript.
+    Remove obvious fillers, accidental repetitions, false starts, and explicit
+    self-corrections. Fix punctuation and spoken formatting commands such as
+    new line, new paragraph, and bullet point. Preserve meaning, numbers,
+    names, URLs, technical terms, tone, and uncertainty. Never summarize,
+    answer, embellish, or translate. Keep every language span exactly as spoken.
+    """
+
     static func cleanupUserPrompt(_ text: String,
                                   sourceLanguage: String? = nil,
                                   languageMetadata: DictationLanguageMetadata? = nil) -> String {
@@ -288,13 +301,12 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
         } else {
             languageInstruction = "Infer the speaker's language from the transcript, preserve that same language, and never translate."
         }
+        let vocabularyInstruction = DictationVocabulary.promptInstruction
         return """
-        Edit this speech transcript now. Remove contextually obvious fillers,
-        accidental repeated words, false starts, and superseded wording from explicit
-        self-corrections. Apply explicit spoken formatting commands and keep the
-        speaker's original intent and voice.
+        Edit this transcript in place. Apply only clear speech repairs and spoken
+        formatting commands. Do not invent content.
         """ + languageInstruction + """
-        Do not return the noisy input unchanged when one of those repairs is obvious.
+        """ + (vocabularyInstruction.isEmpty ? "" : "\n\(vocabularyInstruction)\n") + """
         Return only the edited transcript, with no label or explanation.
 
         <TRANSCRIPT>
@@ -309,7 +321,7 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
         guard llm != nil else { return nil }
         let baseline = DictationCleanupValidator.deterministicCleanup(text,
                                                                        sourceLanguage: sourceLanguage)
-        guard let raw = await generate(system: Self.cleanupSystemPrompt,
+        guard let raw = await generate(system: Self.cleanupFastSystemPrompt,
                                        user: Self.cleanupUserPrompt(baseline,
                                                                     sourceLanguage: sourceLanguage,
                                                                     languageMetadata: languageMetadata)) else {
@@ -344,6 +356,43 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
                                                   preserving: text,
                                                   sourceLanguage: sourceLanguage,
                                                   languageMetadata: languageMetadata)
+    }
+
+    /// Cleans several code-switched regions in one model invocation. Markers
+    /// keep the model from merging languages; the caller validates each slice
+    /// before it can reach the clipboard or text insertion path.
+    func cleanupRegions(_ regions: [DictationRegionTranscript]) async -> [String]? {
+        guard llm != nil, regions.count > 1 else { return nil }
+        let blocks = regions.enumerated().map { index, region in
+            let source = region.language == "auto" ? nil : region.language
+            let baseline = DictationCleanupValidator.deterministicCleanup(
+                region.text,
+                sourceLanguage: source)
+            return "<REGION_\(index)>\(baseline)</REGION_\(index)>"
+        }.joined(separator: "\n")
+        let user = """
+        Edit each region independently. Preserve its language exactly and never
+        move words between regions. Return the same markers in the same order,
+        with only the edited transcript between each pair. Return no explanation.
+
+        \(DictationVocabulary.promptInstruction)
+
+        \(blocks)
+        """
+        guard let raw = await generate(system: Self.cleanupFastSystemPrompt,
+                                       user: user) else { return nil }
+        var output: [String] = []
+        output.reserveCapacity(regions.count)
+        for index in regions.indices {
+            let open = "<REGION_\(index)>"
+            let close = "</REGION_\(index)>"
+            guard let start = raw.range(of: open),
+                  let end = raw.range(of: close, range: start.upperBound..<raw.endIndex),
+                  start.upperBound <= end.lowerBound else { return nil }
+            output.append(String(raw[start.upperBound..<end.lowerBound])
+                .trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        return output
     }
 
     /// The language name to put in the prompt, always in English.
@@ -612,10 +661,12 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
 
 enum TranslationEngineError: LocalizedError {
     case notAvailable(String)
+    case runtimeUnavailable(String)
 
     var errorDescription: String? {
         switch self {
         case .notAvailable(let why): return why
+        case .runtimeUnavailable(let why): return why
         }
     }
 }

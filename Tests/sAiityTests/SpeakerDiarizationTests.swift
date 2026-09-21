@@ -6,6 +6,57 @@ import FluidAudio
 
 struct SpeakerDiarizationTests {
 
+    @Test("caption attribution chooses the speaker with the greatest weighted overlap")
+    func attributesByOverlap() {
+        var attributor = SpeakerCaptionAttributor()
+        attributor.ingest([
+            SpeakerDiarizationEvent(speakerID: "speaker-0", start: 0, end: 1,
+                                    confidence: 0.8, isFinal: true),
+            SpeakerDiarizationEvent(speakerID: "speaker-1", start: 0.8, end: 2,
+                                    confidence: 0.9, isFinal: true)
+        ])
+
+        #expect(attributor.speakerID(for: 0.75, end: 1.2) == "speaker-1")
+        #expect(attributor.speakerID(for: 2, end: 3) == nil)
+    }
+
+    @Test("brief speaker glitches do not redraw the current speaker")
+    func shortSwitchesUseHysteresis() {
+        var attributor = SpeakerCaptionAttributor()
+        attributor.ingest([
+            SpeakerDiarizationEvent(speakerID: "speaker-0", start: 0, end: 2,
+                                    confidence: 0.8, isFinal: true),
+            SpeakerDiarizationEvent(speakerID: "speaker-1", start: 1.8, end: 2.05,
+                                    confidence: 0.9, isFinal: true),
+            SpeakerDiarizationEvent(speakerID: "speaker-1", start: 2.05, end: 3.2,
+                                    confidence: 0.9, isFinal: true)
+        ])
+
+        #expect(attributor.speakerID(for: 0.4, end: 1.2) == "speaker-0")
+        #expect(attributor.speakerID(for: 1.8, end: 2.05) == "speaker-0")
+        #expect(attributor.speakerID(for: 2.05, end: 3.2) == "speaker-1")
+    }
+
+    @Test("final diarization wins over a conflicting tentative update")
+    func finalizedEventsAreStable() {
+        var attributor = SpeakerCaptionAttributor()
+        attributor.ingest([
+            SpeakerDiarizationEvent(speakerID: "speaker-1", start: 1, end: 2,
+                                    confidence: 0.9, isFinal: true),
+            SpeakerDiarizationEvent(speakerID: "speaker-0", start: 1, end: 2,
+                                    confidence: 1, isFinal: false)
+        ])
+
+        #expect(attributor.speakerID(for: 1.1, end: 1.8) == "speaker-1")
+    }
+
+    @Test("speaker labels stay opaque and deterministic")
+    func labelsDoNotClaimIdentity() {
+        #expect(SpeakerLabel.displayName(for: "speaker-0") == "Speaker 1")
+        #expect(SpeakerLabel.displayName(for: "speaker-3") == "Speaker 4")
+        #expect(SpeakerLabel.displayName(for: "unknown") == "unknown")
+    }
+
     @Test("FluidAudio timeline segments map to stable local speaker events")
     func mapsFinalAndTentativeSegments() {
         let finalized = DiarizerSegment(

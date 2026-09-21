@@ -10,8 +10,10 @@ import Testing
         #expect(!DictationCleanupValidator.needsModelCleanup("Um, please please send the report.", sourceLanguage: "en"))
         #expect(DictationCleanupValidator.needsModelCleanup("Send the report, I mean the revised report."))
         #expect(DictationCleanupValidator.needsModelCleanup("Morgen, nein, besser gesagt am Freitag.", sourceLanguage: "de"))
-        #expect(DictationCleanupValidator.needsModelCleanup("你好，send the report.", sourceLanguage: "en"))
-        #expect(DictationCleanupValidator.needsModelCleanup("Envoyez le rapport.", sourceLanguage: "fr"))
+        #expect(!DictationCleanupValidator.needsModelCleanup("你好，send the report.", sourceLanguage: "en"))
+        #expect(!DictationCleanupValidator.needsModelCleanup("Envoyez le rapport.", sourceLanguage: "fr"))
+        #expect(!DictationCleanupValidator.needsModelCleanup("Envía el informe mañana.", sourceLanguage: "es"))
+        #expect(!DictationCleanupValidator.needsModelCleanup("明日レポートを送ってください。", sourceLanguage: "ja"))
     }
 
     @Test("cleanup validator applies only the documented plain-text rules")
@@ -130,8 +132,19 @@ import Testing
             "Ähm, also, bitte sende den Bericht.", sourceLanguage: "de-DE") ==
             "Bitte sende den Bericht.")
         #expect(DictationCleanupValidator.deterministicCleanup(
+            "Um... Ja", sourceLanguage: "de-DE") == "Ja")
+        #expect(DictationCleanupValidator.deterministicCleanup(
+            "Wir treffen uns um 8 Uhr.", sourceLanguage: "de-DE") ==
+            "Wir treffen uns um 8 Uhr.")
+        #expect(DictationCleanupValidator.deterministicCleanup(
             "Um relatório sobre amanhã.", sourceLanguage: "pt-BR") ==
             "Um relatório sobre amanhã.")
+        #expect(DictationCleanupValidator.deterministicCleanup(
+            "ええと、明日レポートを送ってください。", sourceLanguage: "ja-JP") ==
+            "明日レポートを送ってください。")
+        #expect(DictationCleanupValidator.deterministicCleanup(
+            "Envoyez le rapport demain\\", sourceLanguage: "fr-FR") ==
+            "Envoyez le rapport demain")
     }
 
     @Test("cleanup removes model-added outer quotes")

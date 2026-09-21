@@ -136,4 +136,13 @@ struct LanguageTests {
         #expect(WhisperDictationBackend.locale == "auto")
         #expect(defaults.string(forKey: key) == "auto")
     }
+
+    @Test("Caption source detection can change per complete sentence")
+    func captionSourceDetectionDoesNotUseSessionDominantLanguage() {
+        #expect(LanguageDetector.languageCode(
+            in: "Das ist ein vollständiger deutscher Untertitelsatz.") == "de")
+        #expect(LanguageDetector.languageCode(
+            in: "This is a complete English subtitle sentence.") == "en")
+        #expect(LanguageDetector.languageCode(in: "Okay.") == nil)
+    }
 }

@@ -37,6 +37,7 @@ struct CaptionStyleTests {
         ("widthFraction",             { $0.widthFraction = 0.9 }),
         ("screenMargin",              { $0.screenMargin = 77 }),
         ("maxHeight",                  { $0.maxHeight = 480 }),
+        ("dictationWidth",             { $0.dictationWidth = 360 }),
         ("autoResize",                 { $0.autoResize.toggle() }),
         ("showTranslation",           { $0.showTranslation.toggle() }),
         ("hidden",                    { $0.hidden.toggle() }),
@@ -89,6 +90,29 @@ struct CaptionStyleTests {
         #expect(got == want, "translation font is \(got), expected \(want)")
     }
 
+    @Test("Text size adapts to long captions")
+    func textSizeFitsItsLineBudget() {
+        let style = TextStyle.original
+        let short = style.fittedFont(for: "Hello", width: 700,
+                                     minimumSize: 18, maxLines: 4)
+        let long = style.fittedFont(
+            for: String(repeating: "A long caption that needs to wrap. ", count: 20),
+            width: 120, minimumSize: 18, maxLines: 3)
+
+        #expect(abs(Double(short.pointSize) - style.fontSize) < 0.01)
+        #expect(long.pointSize < style.fontSize)
+        #expect(long.pointSize >= 18)
+    }
+
+    @Test("Font growth has a small settling threshold")
+    func fontGrowthIsStabilized() {
+        let style = TextStyle.original
+        let font = style.stabilizedFont(for: "Short text", width: 700,
+                                        minimumSize: 18, maxLines: 4,
+                                        previousPointSize: 29)
+        #expect(font.pointSize == 29)
+    }
+
     @Test("Defaults are legible rather than merely pretty")
     func defaultsAreReadable() {
         let s = CaptionStyle()
@@ -119,5 +143,62 @@ struct CaptionStyleTests {
         #expect(style.showTranslation == false)
         #expect(style.maxHeight == 260)
         #expect(style.autoResize)
+    }
+
+    @Test("Dictation defaults are independent from caption preferences")
+    func dictationDefaultsAreIndependent() {
+        var captions = CaptionStyle()
+        captions.original.fontSize = 58
+        captions.glassStyle = CaptionStyle.liquidGlass
+
+        let dictation = CaptionStyle.dictationDefaults
+        #expect(dictation.original == .dictation)
+        #expect(dictation.original.fontSize != captions.original.fontSize)
+        #expect(dictation.glassStyle == CaptionStyle.regularGlass)
+    }
+
+    @Test("Balanced is the default preset for both surfaces")
+    func balancedPresetMatchesDefaults() {
+        #expect(CaptionStyle().matchingPreset(for: .captions) == .balanced)
+        #expect(CaptionStyle.dictationDefaults.matchingPreset(for: .dictation) == .balanced)
+    }
+
+    @Test("Presets change appearance without changing behavior")
+    func presetsPreserveBehavior() {
+        var style = CaptionStyle()
+        style.hidden = true
+        style.showTranslation = false
+        style.autoResize = false
+        let customWidth = style.dictationWidth
+
+        let readable = BubbleStylePreset.readable.applying(to: style, context: .captions)
+        #expect(readable.hidden)
+        #expect(readable.showTranslation == false)
+        #expect(readable.autoResize == false)
+        #expect(readable.dictationWidth == customWidth)
+        #expect(readable.original.fontSize > style.original.fontSize)
+        #expect(readable.matchingPreset(for: .captions) == .readable)
+    }
+
+    @Test("Manual visual edits switch the preset to Custom")
+    func manualEditIsCustom() {
+        var style = CaptionStyle()
+        #expect(style.matchingPreset(for: .captions) == .balanced)
+        style.lineGap += 1
+        #expect(style.matchingPreset(for: .captions) == nil)
+    }
+
+    @Test("Caption and dictation presets keep unrelated dimensions independent")
+    func presetContextsRemainIndependent() {
+        var captions = CaptionStyle()
+        captions.dictationWidth = 411
+        let captionResult = BubbleStylePreset.minimal.applying(to: captions, context: .captions)
+        #expect(captionResult.dictationWidth == 411)
+
+        var dictation = CaptionStyle.dictationDefaults
+        dictation.widthFraction = 0.91
+        let dictationResult = BubbleStylePreset.readable.applying(to: dictation, context: .dictation)
+        #expect(dictationResult.widthFraction == 0.91)
+        #expect(dictationResult.dictationWidth == 320)
     }
 }

@@ -74,10 +74,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         detailedCleanup: { [weak self] transcription in
             await self?.cleanupDictatedText(transcription)
         },
+        onResult: { [weak self] result in
+            self?.lastDictationResult = result
+        },
+        onDraft: { [weak self] text in
+            self?.showDictationDraft(text)
+        },
         onWaveform: { levels in
             waveformDelivery.submit(levels)
         },
         dictationUsesWhisper: { DictationRecognizer.selected == .whisper },
+        dictationStreamingDraftEnabled: {
+            DictationRecognizer.selected == .streaming
+                && SettingsWindowController.state.dictationProfile == .fast
+                && !SettingsWindowController.state.dictationCleanupEnabled
+                && !SettingsWindowController.state.translateDictation
+        },
         transcribeWhisper: { samples, locale in
             try await WhisperDictationBackend().transcribe(samples: samples, locale: locale)
         },
@@ -87,13 +99,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                                                      locale: locale)
         },
         whisperIsReady: { WhisperDictationBackend.isReady(WhisperDictationBackend.model) },
+        onIssue: { operation, reason in
+            Diagnostics.recordFailure(operation: operation, reason: reason)
+        },
+        onTiming: { operation, seconds, cold in
+            Diagnostics.recordTiming(operation: "dictation.\(operation)", seconds: seconds, cold: cold)
+        },
         onPhaseChanged: { [weak self] phase in
             self?.updateDictationToast(phase)
             self?.scheduleTranslatorEvictionIfIdle()
         })
     }()
     private let dictationHotkeyMonitor = DictationHotkeyMonitor()
+    private var dictationPrewarmTask: Task<Void, Never>?
+    private var lastDictationResult: DictationResultSnapshot?
+    private var dictationFeedbackTask: Task<Void, Never>?
     private let capture = SystemAudioCapture()
+    private let speakerDiarization = SpeakerDiarizationSession()
     private var engine = ASREngine.effective
 
     override init() {
@@ -150,9 +172,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 cleanup: { text, source, metadata in
                     await translator.cleanup(text, sourceLanguage: source, languageMetadata: metadata)
                 },
+                cleanupRegions: { regions in
+                    await translator.cleanupRegions(regions)
+                },
                 stop: { await translator.stop() })
         }
     }
+
     /// Model destruction is serialized with native inference.
     private func stopTranslator(_ translator: Translating?) async {
         guard let translator else { return }
@@ -228,7 +254,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     static func makeDictationStreamingBackend() -> TranscriptionBackend {
         let engine = ASREngine(rawValue: UserDefaults.standard.string(forKey: "dictationStreamingEngine") ?? ASREngine.recommended.rawValue) ?? .recommended
-        return engine.makeBackend()
+        guard engine == .nemotron else { return engine.makeBackend() }
+        let preferredTier = NemotronEngine.selectedChunkMs
+        let installed = Set(NemotronEngine.availableChunkMs.filter {
+            NemotronEngine.isDownloaded(chunkMs: $0)
+        })
+        let tier = NemotronEngine.hasExplicitChunkSelection
+            ? preferredTier
+            : ASRAdaptivePolicy.chooseRuntimeTier(preferred: preferredTier,
+                                                   available: NemotronEngine.availableChunkMs,
+                                                   installed: installed)
+        let name = String(localized: "NVIDIA Nemotron (streaming, on-device)")
+        return StreamingASRBackend(
+            name: name,
+            engine: NemotronEngine(chunkMs: tier),
+            onPerformance: { rtf, _ in
+                ASRAdaptivePolicy.record(realTimeFactor: rtf, tier: tier)
+            })
     }
 
     func refreshDictationRuntime() {
@@ -243,6 +285,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var translatorPreparedTarget: String?
     private let translatorInferenceGate = TranslationInferenceGate()
     private var translatorReady = false
+    private var translationRuntimeFallback = TranslationRuntimeFallback()
     private let translatorIdleEviction = IdleEviction()
     private var translatorUsers = 0
     private var translatorIdleWaiters: [CheckedContinuation<Void, Never>] = []
@@ -284,10 +327,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // A newer choice landed while we were releasing. Let that one do the
             // loading rather than paying for a model already superseded.
             guard generation == self.translatorGeneration else { return }
-            let selected = self.selectedTranslationEngine(for: scope) ?? .recommended
-            self.activeTranslatorEngine = selected
-            self.activeTranslator = selected.makeTranslator()
-            await self.prepareTranslatorIfNeeded(scope: scope)
+            var attempted: Set<TranslationEngine> = []
+            while generation == self.translatorGeneration,
+                  let selected = self.selectedTranslationEngine(for: scope),
+                  !attempted.contains(selected) {
+                attempted.insert(selected)
+                self.activeTranslatorEngine = selected
+                self.activeTranslator = selected.makeTranslator()
+                _ = await self.prepareTranslatorIfNeeded(scope: scope,
+                                                         allowRuntimeFallback: false)
+                if self.translatorReady || self.activeTranslator != nil { return }
+            }
         }
     }
 
@@ -370,18 +420,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func selectedTranslationEngine(for scope: TranslationEngineScope) -> TranslationEngine? {
+        let preferred: TranslationEngine?
         switch scope {
         case .captions:
-            return TranslationEngine.visibleSelection(TranslationEngine.selected)
+            // Captions historically use the recommended engine when a target
+            // is enabled before the user has persisted a picker choice. Keep
+            // that default while still letting the runtime quarantine remove
+            // a broken engine for this session.
+            preferred = TranslationEngine.visibleSelection(TranslationEngine.selected)
+                ?? .recommended
         case .dictation:
             // Dictation's picker visibly offers the recommended engine even
             // before the user has persisted a choice. Treat that recommendation
             // as the runtime default so enabling translation does not silently
             // produce an unconfigured translator.
-            return TranslationEngine.visibleSelection(TranslationEngine.dictationSelected)
+            preferred = TranslationEngine.visibleSelection(TranslationEngine.dictationSelected)
                 ?? TranslationEngine.visibleSelection(TranslationEngine.selected)
                 ?? .recommended
         }
+        return translationRuntimeFallback.resolve(preferred)
     }
 
     private func translationTarget(for scope: TranslationEngineScope,
@@ -404,7 +461,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func prepareTranslatorIfNeeded(requestedTarget: String? = nil,
                                            allowWithoutCaptions: Bool = false,
                                            sourceLanguage: String? = nil,
-                                           scope: TranslationEngineScope = .captions) async -> Bool {
+                                           scope: TranslationEngineScope = .captions,
+                                           allowRuntimeFallback: Bool = true) async -> Bool {
         translatorIdleEviction.cancel()
         guard let target = translationTarget(for: scope, requestedTarget: requestedTarget) else {
             return false
@@ -444,6 +502,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             setStatus("Translation: \(AppLanguage(code: target).displayName) — loads on start")
             return false
         }
+        let coldPrepare = !translatorReady
+        let prepareStarted = ContinuousClock.now
         let src = sourceLanguage ?? detectedLanguage ?? locale.identifier(.bcp47)
         NSLog("sAiity translator: selected=\(selectedEngine.rawValue) object=\(engine.name) src=\(src) dst=\(target) scope=\(scope.rawValue)")
         // Frozen BEFORE the await, like `target` above and for the same
@@ -469,6 +529,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                   activeTranslator != nil else { return false }
             translatorReady = true
             translatorPreparedTarget = target
+            Diagnostics.recordTiming(operation: "translator.prepare",
+                                     seconds: elapsedSeconds(since: prepareStarted),
+                                     cold: coldPrepare)
             if let assetID { LoadHealth.clear(assetID) }
             setStatus("Translating with \(selectedEngine.displayName)")
             return true
@@ -482,6 +545,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             activeTranslatorEngine = nil
             translatorPreparedTarget = nil
             await stopTranslator(failed)
+            translationRuntimeFallback.quarantine(selectedEngine)
             // Bytes on disk that refuse to load are damage worth remembering —
             // the Models page turns this into a "Re-download" the user can
             // actually connect to the error, instead of the same status-line
@@ -490,13 +554,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case is CancellationError: break
             case let e as URLError where e.code == .cancelled: break
             default:
-                if let assetID {
-                    LoadHealth.recordFailureIfInstalled(assetID, reason: error.localizedDescription)
+                if let assetID, !Self.isRuntimeResourceFailure(error) {
+                    LoadHealth.recordFailureIfInstalled(assetID,
+                                                        reason: DiagnosticsRedactor.redact(error.localizedDescription))
                 }
             }
-            setStatus("Translation unavailable: \(error.localizedDescription)")
+            let fallback = selectedTranslationEngine(for: scope)
+            if allowRuntimeFallback, let fallback, fallback != selectedEngine,
+               translatorSwap == nil {
+                activeTranslatorEngine = fallback
+                activeTranslator = fallback.makeTranslator()
+                setStatus("\(selectedEngine.displayName) unavailable — trying \(fallback.displayName)")
+                return await prepareTranslatorIfNeeded(requestedTarget: requestedTarget,
+                                                       allowWithoutCaptions: allowWithoutCaptions,
+                                                       sourceLanguage: sourceLanguage,
+                                                       scope: scope,
+                                                       allowRuntimeFallback: false)
+            }
+            if let fallback {
+                setStatus("\(selectedEngine.displayName) unavailable — will use \(fallback.displayName)")
+            } else {
+                setStatus("Translation unavailable: \(error.localizedDescription)")
+            }
             NSLog("sAiity translator prepare failed: \(error.localizedDescription)")
             return false
+        }
+    }
+
+    private static func isRuntimeResourceFailure(_ error: Error) -> Bool {
+        guard let error = error as? TranslationEngineError else { return false }
+        if case .runtimeUnavailable = error { return true }
+        return false
+    }
+
+    /// Retire a translator after a native inference returns no result. The
+    /// current caller still holds its use lease, so teardown waits for that
+    /// lease rather than releasing MLX/llama state from inside inference.
+    private func retireFailedTranslator(_ engine: TranslationEngine,
+                                         reason: String) {
+        translationRuntimeFallback.quarantine(engine)
+        guard activeTranslatorEngine == engine else { return }
+        let outgoing = activeTranslator
+        activeTranslator = nil
+        activeTranslatorEngine = nil
+        translatorPreparedTarget = nil
+        translatorReady = false
+        NSLog("sAiity translator retired: engine=%@ reason=%@", engine.rawValue, reason)
+        Task { @MainActor [weak self, outgoing] in
+            guard let self else { return }
+            await self.waitForTranslatorUsersToFinish()
+            await self.stopTranslator(outgoing)
         }
     }
 
@@ -517,7 +624,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Dictation may use a different engine than captions. Switch through
         // the serialized lifecycle before entering native inference, and keep
         // the model resident between regions and presses.
-        let desiredEngine = TranslationEngine.dictationEffective
+        guard let desiredEngine = selectedTranslationEngine(for: .dictation) else { return nil }
         if activeTranslator == nil || activeTranslatorEngine != desiredEngine {
             swapTranslator(for: .dictation)
         }
@@ -545,9 +652,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                               scope: .dictation),
               let engine = activeTranslator else { return nil }
         do {
-            return try await translatorInferenceGate.run {
+            let started = ContinuousClock.now
+            let result: String? = try await translatorInferenceGate.run {
                 await engine.translate(text, from: source, to: target)
             }
+            Diagnostics.recordTiming(operation: "translator.inference",
+                                     seconds: elapsedSeconds(since: started),
+                                     cold: false)
+            if result == nil {
+                retireFailedTranslator(desiredEngine, reason: "dictation inference returned no output")
+            }
+            return result
         } catch {
             NSLog("sAiity dictation translation unavailable: \(error.localizedDescription)")
             return nil
@@ -567,10 +682,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return await translateDictatedText(text, source: source, target: target)
         }
 
-        let regionsNeedingTranslation = transcription.regions.filter { region in
-            let source = region.language
-                ?? transcription.languageMetadata.dominantLanguage
-                ?? "auto"
+        let runs = transcription.translationRuns
+        let regionsNeedingTranslation = runs.filter { region in
+            let source = region.language ?? "auto"
             return !TranslationLanguage.isSame(source, as: target)
         }
         // Every region is already in the requested target language. Preserve
@@ -583,7 +697,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // caption/dictation inference can enter while this authoritative result
         // is being assembled.
         translatorIdleEviction.cancel()
-        let desiredEngine = TranslationEngine.dictationEffective
+        guard let desiredEngine = selectedTranslationEngine(for: .dictation) else { return nil }
         if activeTranslator == nil || activeTranslatorEngine != desiredEngine {
             swapTranslator(for: .dictation)
         }
@@ -604,33 +718,67 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               let engine = activeTranslator else { return nil }
 
         do {
-            return try await translatorInferenceGate.run {
-                var translated: [String] = []
-                translated.reserveCapacity(transcription.regions.count)
-                for region in transcription.regions {
+            let started = ContinuousClock.now
+            let result: String? = try await translatorInferenceGate.run {
+                var translated = Array(repeating: "", count: runs.count)
+                var pending: [(index: Int, region: DictationRegionTranscript)] = []
+                pending.reserveCapacity(runs.count)
+                for (index, region) in runs.enumerated() {
                     try Task.checkCancellation()
-                    let source = region.language
-                        ?? transcription.languageMetadata.dominantLanguage
-                        ?? "auto"
+                    let source = region.language ?? "auto"
                     if TranslationLanguage.isSame(source, as: target) {
-                        translated.append(region.text)
-                        continue
+                        translated[index] = region.text
+                    } else {
+                        pending.append((index, region))
                     }
-                    guard let value = await engine.translate(region.text,
+                }
+
+                if pending.count > 1 {
+                    let batch = pending.map {
+                        TranslationRegion(text: $0.region.text,
+                                          source: $0.region.language ?? "auto")
+                    }
+                    if let values = await engine.translateRegions(batch, to: target),
+                       values.count == pending.count {
+                        for (item, value) in zip(pending, values) {
+                            translated[item.index] = value
+                        }
+                    }
+                }
+
+                // Engines without strict batching, and malformed native batch
+                // responses, use the proven sequential path. This also keeps
+                // Hy-MT2/custom translators correct without special cases.
+                for item in pending where translated[item.index].isEmpty {
+                    try Task.checkCancellation()
+                    let source = item.region.language ?? "auto"
+                    guard let value = await engine.translate(item.region.text,
                                                               from: source,
                                                               to: target) else {
                         return nil
                     }
-                    translated.append(value)
+                    translated[item.index] = value
                 }
                 return DictationTranscriptMerger.merge(translated)
             }
+            Diagnostics.recordTiming(operation: "translator.inference",
+                                     seconds: elapsedSeconds(since: started),
+                                     cold: false)
+            if result == nil {
+                retireFailedTranslator(desiredEngine, reason: "dictation inference returned no output")
+            }
+            return result
         } catch is CancellationError {
             return nil
         } catch {
             NSLog("sAiity dictation translation unavailable: \(error.localizedDescription)")
             return nil
         }
+    }
+
+    private func elapsedSeconds(since start: ContinuousClock.Instant) -> Double {
+        let elapsed = start.duration(to: .now).components
+        return Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
     }
 
     /// Model loading/release and native inference must never overlap. The
@@ -671,7 +819,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               pendingTranslations == 0,
               translatorUsers == 0 else { return }
         translatorIdleEviction.schedule(
-            after: .seconds(45),
+            after: .seconds(300),
             shouldEvict: { [weak self] in
                 guard let self else { return false }
                 return self.translatorReady
@@ -749,6 +897,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     private var statusLine = String(localized: "Idle")
     private var showedAnyCaption = false
+    private var captionFirstTextLogged = false
+    private var captionFirstFinalLogged = false
 
     // Recording is deliberately separate from captioning and defaults to OFF:
     // captions are ephemeral, a transcript is a durable record of a conversation
@@ -840,7 +990,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch s.value {
         // CJK punctuation and kana, CJK ideographs, Thai. Korean is written
         // WITH spaces despite being written in Hangul, so it is not here.
-        case 0x3000...0x30FF, 0x3400...0x4DBF, 0x4E00...0x9FFF, 0x0E00...0x0E7F:
+        case 0x3000...0x30FF, 0x3400...0x4DBF, 0x4E00...0x9FFF,
+             0x0E00...0x0E7F, 0xFF00...0xFFEF:
             return true
         default:
             return false
@@ -851,6 +1002,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         String(joinClauses(parts).suffix(maxSentenceChars))
     }
     private var sessionLines: [Segment] = []
+    private var speakerAttributor = SpeakerCaptionAttributor()
+    private var currentSpeakerLabel: String?
     /// Bumped by start(), so an async result from the previous session cannot
     /// patch a line of this one that happens to share an index.
     private var sessionGeneration = 0
@@ -931,10 +1084,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         NotificationCenter.default.addObserver(forName: .saiityDictationSettingChanged,
-                                               object: nil, queue: .main) { [weak self] _ in
+                                               object: nil, queue: .main) { [weak self] note in
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                let refreshRuntime = note.userInfo?["refreshRuntime"] as? Bool == true
                 self.dictationHotkeyMonitor.updateChord(SettingsWindowController.state.dictationChord)
+                if refreshRuntime { self.refreshDictationRuntime() }
                 if SettingsWindowController.state.dictationEnabled {
                     self.ensureDictationHotkey()
                 } else {
@@ -1006,7 +1161,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         HotKeyCenter.shared.register(.clearCaption) { [weak self] in
             self?.clearCaption()
         }
-
         // Keep the menu-bar picker and the window in step — they write the same
         // preference, so without this they silently disagree.
         NotificationCenter.default.addObserver(forName: .saiityTranslateTargetChanged, object: nil,
@@ -1085,8 +1239,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onRelease: { [weak self] in
                 Task { @MainActor in self?.dictationController.release() }
             }) else { return false }
-        dictationController.prepare()
+        // Warm an installed model immediately so the first key press starts
+        // recording quickly. A missing model stays cold here; preparation on
+        // the first press is what should initiate the deliberate download.
+        if Self.dictationModelIsInstalled() {
+            if DictationRecognizer.selected == .whisper {
+                dictationPrewarmTask?.cancel()
+                dictationPrewarmTask = Task { @MainActor [weak self] in
+                    do {
+                        try await self?.prepareSelectedWhisperModelForUse()
+                    } catch is CancellationError {
+                        return
+                    } catch {
+                        Diagnostics.recordFailure(operation: "dictation.prewarm",
+                                                  reason: error.localizedDescription)
+                    }
+                }
+            } else {
+                dictationController.prepare()
+            }
+        }
         return true
+    }
+
+    private static func dictationModelIsInstalled() -> Bool {
+        if DictationRecognizer.selected == .whisper {
+            return WhisperDictationBackend.isReady(WhisperDictationBackend.model)
+        }
+        let engine = ASREngine(rawValue: UserDefaults.standard.string(forKey: "dictationStreamingEngine")
+                               ?? ASREngine.recommended.rawValue) ?? .recommended
+        switch engine {
+        case .parakeetEou:
+            return ParakeetEouEngine.isDownloaded()
+        case .nemotron:
+            if NemotronEngine.hasExplicitChunkSelection {
+                return NemotronEngine.isDownloaded(chunkMs: NemotronEngine.selectedChunkMs)
+            }
+            return NemotronEngine.availableChunkMs.contains {
+                NemotronEngine.isDownloaded(chunkMs: $0)
+            }
+        }
     }
 
     /// AppKit can accept a panel order request during application launch while
@@ -1156,9 +1348,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             dictationToast.show(phase: phase)
         case .ready:
             dictationToast.show(phase: phase, autoDismissAfter: .seconds(4.5))
-        case .starting, .dictating, .transcribing, .cleaning, .translating, .inserting, .limit:
+        case .starting:
+            // Do not let a previous result flash while a new recording is
+            // being prepared. The finished result is shown only from the
+            // terminal `.result` phase below.
+            lastDictationResult = nil
+            dictationFeedbackTask?.cancel()
+            dictationFeedbackTask = nil
             dictationToast.show(phase: phase)
-        case .recovery, .result, .failure:
+        case .dictating, .transcribing, .cleaning, .translating, .inserting, .limit:
+            dictationToast.show(phase: phase)
+        case .recovery, .failure:
             dictationToast.show(phase: phase)
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(2))
@@ -1166,8 +1366,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.dictationController.markReadyAfterFeedback()
                 }
             }
+        case .result(let message):
+            if let output = lastDictationResult?.outputText.trimmingCharacters(in: .whitespacesAndNewlines),
+               !output.isEmpty {
+                dictationToast.show(resultText: output, autoDismissAfter: nil)
+            } else {
+                dictationToast.show(text: message, animated: false)
+            }
+            scheduleDictationFeedbackDismissal()
         }
         guard phase != .idle else { return }
+    }
+
+    private func showDictationDraft(_ text: String) {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        switch dictationController.phase {
+        case .transcribing, .cleaning, .translating, .inserting:
+            dictationToast.show(resultText: text, autoDismissAfter: nil)
+        default:
+            break
+        }
+    }
+
+    private func scheduleDictationFeedbackDismissal() {
+        dictationFeedbackTask?.cancel()
+        dictationFeedbackTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(4.5))
+            guard let self, !Task.isCancelled else { return }
+            if self.dictationController.phase.automaticallyDismissesToast {
+                self.dictationController.markReadyAfterFeedback()
+            }
+            self.dictationFeedbackTask = nil
+        }
     }
 
     private func positionDictationToast() {
@@ -1206,6 +1436,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         s.isEnabled = false
         menu.addItem(s)
         menu.addItem(.separator())
+        if Onboarding.needsRun {
+            let setup = NSMenuItem(title: String(localized: "Finish setup…"),
+                                   action: #selector(openSetup), keyEquivalent: "")
+            setup.image = Self.menuSymbol("checklist")
+            menu.addItem(setup)
+            menu.addItem(.separator())
+        }
         let toggleItem = NSMenuItem(title: state.isActive ? String(localized: "Stop captions") : String(localized: "Start captions"),
                                     action: #selector(toggle), keyEquivalent: "")
         if let sc = HotKeyCenter.shortcut(for: .toggleCaptions), sc.isUsable {
@@ -1236,8 +1473,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                   keyEquivalent: ",")
         settings.image = Self.menuSymbol("gear")
         menu.addItem(settings)
-        // About lives in the secondary About & Support sheet. It is not a thing
-        // you reach for mid-session, but remains reachable with the licences.
         let update = NSMenuItem(title: String(localized: "Check for Updates…"),
                                 action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)),
                                 keyEquivalent: "")
@@ -1486,6 +1721,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor in SettingsWindowController.show() }
     }
 
+    @objc private func openSetup() {
+        Task { @MainActor in
+            OnboardingWindowController.shared.show(state: SettingsWindowController.state)
+        }
+    }
+
 
 
     @objc private func toggle() {
@@ -1515,7 +1756,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let recent = sessionLines.suffix(3).enumerated().map { index, segment in
             CaptionHistoryEntry(sentenceID: -1_000_000 - index,
                                  original: segment.text,
-                                 translation: segment.tr)
+                                 translation: segment.tr,
+                                 speakerLabel: segment.speaker.map(SpeakerLabel.displayName))
         }
         guard !recent.isEmpty else { return }
         recentFlashTask?.cancel()
@@ -1660,9 +1902,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         state = .starting
         translatorIdleEviction.cancel()
         showedAnyCaption = false
+        captionFirstTextLogged = false
+        captionFirstFinalLogged = false
         overlay.reservesTranslationRow =
             translateTo != nil && CaptionStyle.current.showTranslation
         sessionLines.removeAll()
+        speakerAttributor = SpeakerCaptionAttributor()
+        currentSpeakerLabel = nil
         subtitleSessionStartedAt = Date()
         pendingTranslations = 0
         shownTranslationID = nil
@@ -1736,6 +1982,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 try Task.checkCancellation()
                 captureFormat = fmt
+                let speakerLabelsEnabled = UserDefaults.standard.bool(forKey: "speakerLabelsEnabled")
+                let speakerSessionGeneration = sessionGeneration
+                var useSpeakerDiarization = false
+                if speakerLabelsEnabled {
+                    setStatus("Preparing speaker identification…")
+                    do {
+                        try await speakerDiarization.prepare()
+                        try speakerDiarization.start(
+                            sourceSampleRate: fmt.sampleRate,
+                            onEvents: { [weak self] events in
+                                Task { @MainActor [weak self] in
+                                    guard let self,
+                                          self.sessionGeneration == speakerSessionGeneration else { return }
+                                    self.speakerAttributor.ingest(events)
+                                }
+                            })
+                        useSpeakerDiarization = true
+                    } catch {
+                        // Optional labels must never prevent ordinary captions.
+                        NSLog("sAiity diarization unavailable: \(error.localizedDescription)")
+                    }
+                }
+                let shouldFeedSpeakerDiarization = useSpeakerDiarization
                 try await capture.start(
                     targetFormat: fmt,
                     // Capture the backend we are starting WITH, rather than
@@ -1745,7 +2014,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     // unsynchronised read/write of a class reference. Binding it
                     // once also guarantees the audio goes to the engine the
                     // stream was configured for.
-                    onBuffer: { [captureSink] buf in captureSink.feed(buf) },
+                    onBuffer: { [captureSink, speakerDiarization] buf in
+                        captureSink.feed(buf)
+                        if shouldFeedSpeakerDiarization { speakerDiarization.feed(buf) }
+                    },
                     onState: { audio in
                         Task { @MainActor [self] in self.captureStateChanged(audio) }
                     })
@@ -1969,6 +2241,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     private func releaseSessionResources() async {
         await capture.stop()
+        await speakerDiarization.stop()
         // Stop delivering audio before returning the lease. Otherwise a capture
         // callback racing teardown can feed a backend that the pool has already
         // marked idle.
@@ -1992,6 +2265,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     private func releaseModels() async {
         await stopAsync()
+        await speakerDiarization.release()
         await dictationController.invalidatePreparedBackend()
         await asrBackendPool.replace(with: AppDelegate.makeActiveBackend())
         await unloadTranslator(reason: "model deletion")
@@ -2040,8 +2314,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // After committing a sentence the engine often emits a lone "." as the
         // start of the next one; showing that would blank the bar to a dot.
         guard text.rangeOfCharacter(from: .alphanumerics) != nil else { return }
+        if let startedAt = subtitleSessionStartedAt {
+            let elapsed = Date().timeIntervalSince(startedAt)
+            if !captionFirstTextLogged {
+                NSLog("sAiity caption timing: first-text %.3fs", elapsed)
+                captionFirstTextLogged = true
+            }
+            if chunk.isFinal, !captionFirstFinalLogged {
+                NSLog("sAiity caption timing: first-final %.3fs", elapsed)
+                captionFirstFinalLogged = true
+            }
+        }
         if TestHooks.verboseLogging {
-            NSLog("sAiity chunk final=\(chunk.isFinal): \(text)")
+            NSLog("sAiity chunk final=%@ chars=%d", chunk.isFinal ? "true" : "false", text.count)
         }
         showedAnyCaption = true
 
@@ -2057,20 +2342,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // it belongs to the previous line, until its successor replaces it —
         // and only a translation two or more sentences stale is cleared, since
         // under two newer sentences it no longer helps anyone.
-        if sentenceClosed, sentenceParts.isEmpty {
-            sentenceClosed = false
-            displaySentenceID += 1
-            // A new sentence is the natural end of a manual clear.
-            if let cleared = clearedSentenceID, cleared < displaySentenceID {
-                clearedSentenceID = nil
-            }
-            if let shown = shownTranslationID, displaySentenceID - shown >= 2 {
-                shownTranslationID = nil
-            } else {
-                if let shown = shownTranslationID {
-                    overlay.markTranslationStale(forSentenceID: shown)
-                }
-            }
+        advanceToNextSentenceIfNeeded()
+
+        // A speaker change is a stronger boundary than punctuation: keeping two
+        // voices in one row makes the label lie. Only final ASR chunks can close
+        // the current row, so volatile revisions never cause flicker.
+        let incomingSpeakerID = chunk.isFinal ? speakerID(for: chunk) : nil
+        if chunk.isFinal,
+           !sentenceParts.isEmpty,
+           let currentSpeakerLabel,
+           let incomingSpeakerID,
+           currentSpeakerLabel != SpeakerLabel.displayName(for: incomingSpeakerID) {
+            closeSentence()
+            advanceToNextSentenceIfNeeded()
         }
 
         // The user cleared this sentence off the screen. Keep tracking it —
@@ -2084,7 +2368,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             lastVolatileText = text
             if !suppressed {
                 overlay.show(text: Self.trimmedForDisplay(sentenceParts + [text]),
-                             isFinal: false, sentenceID: displaySentenceID)
+                             isFinal: false, sentenceID: displaySentenceID,
+                             speakerLabel: currentSpeakerLabel)
             }
             return
         }
@@ -2102,9 +2387,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sentenceWords.append(contentsOf: chunk.words)
         lastVolatileText = ""
         lastFinalText = Self.joinClauses(sentenceParts)
+        let speakerID = incomingSpeakerID
+        if let speakerID {
+            currentSpeakerLabel = SpeakerLabel.displayName(for: speakerID)
+        }
+        let speakerLabel = currentSpeakerLabel
         if !suppressed {
             overlay.show(text: Self.trimmedForDisplay(sentenceParts), isFinal: true,
-                         sentenceID: displaySentenceID)
+                         sentenceID: displaySentenceID,
+                         speakerLabel: speakerLabel)
         }
 
         // Finished, or run on for so long that waiting costs more than an
@@ -2118,6 +2409,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // The sentence is still open; in live mode, translate what exists
             // of it so far. The close will produce the authoritative version.
             kickLiveTranslation(of: lastFinalText, sentenceID: displaySentenceID)
+        }
+    }
+
+    /// Starts the next display row after a completed sentence. Keeping this in
+    /// one place is important because speaker changes can close a row before
+    /// punctuation or the pause boundary does.
+    private func advanceToNextSentenceIfNeeded() {
+        guard sentenceClosed, sentenceParts.isEmpty else { return }
+        sentenceClosed = false
+        displaySentenceID += 1
+        currentSpeakerLabel = nil
+        // A new sentence is the natural end of a manual clear.
+        if let cleared = clearedSentenceID, cleared < displaySentenceID {
+            clearedSentenceID = nil
+        }
+        if let shown = shownTranslationID, displaySentenceID - shown >= 2 {
+            shownTranslationID = nil
+        } else if let shown = shownTranslationID {
+            overlay.markTranslationStale(forSentenceID: shown)
         }
     }
 
@@ -2143,7 +2453,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // deliberately refuses to translate — which would stand for two
         // sentences with nothing to correct it.
         if alreadyInTargetLanguage(text) { return }
-        let source = detectedLanguage ?? locale.identifier(.bcp47)
+        let source = captionSourceLanguage(for: text)
         guard let target = translateTo else { return }
         let request = LiveTranslationRequest(text: text,
                                              sentenceID: sentenceID,
@@ -2174,9 +2484,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             beginTranslatorUse()
             defer { endTranslatorUse() }
             guard let engine = activeTranslator else { return }
+            let engineKind = activeTranslatorEngine
             guard let out = try? await translatorInferenceGate.run({
                 await engine.translate(text, from: srcCode, to: target)
-            }), !out.isEmpty else { return }
+            }), !out.isEmpty else {
+                if let engineKind {
+                    retireFailedTranslator(engineKind, reason: "live inference returned no output")
+                }
+                return
+            }
             // Same guards as the authoritative path: not across a session
             // boundary, and only under the sentence it translates. The
             // `!sentenceClosed` leg drops a partial that resolves after the
@@ -2187,7 +2503,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                   displaySentenceID == sentenceID, !sentenceClosed,
                   CaptionStyle.current.showTranslation else { return }
             if TestHooks.verboseLogging {
-                NSLog("sAiity live translated: \(out)")
+                NSLog("sAiity live translated: chars=%d target=%@", out.count, target)
             }
             overlay.showTranslation(out, forSentenceID: sentenceID)
             shownTranslationID = sentenceID
@@ -2231,6 +2547,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let lang = r.dominantLanguage?.rawValue.split(separator: "-").first
         else { return false }
         return lang == want
+    }
+
+    private func captionSourceLanguage(for text: String) -> String {
+        LanguageDetector.languageCode(in: text)
+            ?? detectedLanguage
+            ?? locale.identifier(.bcp47)
+    }
+
+    private func speakerID(for chunk: TranscriptChunk) -> String? {
+        guard UserDefaults.standard.bool(forKey: "speakerLabelsEnabled") else { return nil }
+        return speakerAttributor.speakerID(for: chunk.start, end: chunk.end)
     }
 
     private func emitSentence(_ text: String, chunk: TranscriptChunk, sentenceID: Int) {
@@ -2299,6 +2626,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // sentence and the last — measured on the segments' own timestamps,
         // so it needs no extra state and no acoustic guesswork.
         let turn = idx > 0 && chunk.start - sessionLines[idx - 1].t1 >= 2.0
+        let speakerID = speakerID(for: chunk)
 
         // `trLoc` is nil here on purpose. It is a record of OUTCOME, not of
         // intent, so only the site that assigns `tr` may assign it — otherwise
@@ -2309,10 +2637,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                     text: text, loc: locale.identifier(.bcp47),
                                     tr: nil, trLoc: nil,
                                     words: chunk.words.isEmpty ? nil : chunk.words,
-                                    turn: turn ? true : nil))
+                                    turn: turn ? true : nil,
+                                    speaker: speakerID))
 
         // Translate concurrently; the result is patched in by index.
-        let srcCode = detectedLanguage ?? locale.identifier(.bcp47)
+        let srcCode = captionSourceLanguage(for: text)
         let translation: Task<String?, Never> = Task { @MainActor in
             guard translating else { return nil }
             defer {
@@ -2322,15 +2651,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.beginTranslatorUse()
             defer { self.endTranslatorUse() }
             guard let target, let engine = activeTranslator else { return nil }
+            let engineKind = activeTranslatorEngine
             // Empty counts as nothing translated. MADLAD returns "" for a short
             // or noisy caption — it has no emptiness check, unlike the LLM path's
             // sanitizer — and an empty string is non-nil, so it would otherwise
             // record a translation that is not there.
             guard let out = try? await translatorInferenceGate.run({
                 await engine.translate(text, from: srcCode, to: target)
-            }), !out.isEmpty else { return nil }
+            }), !out.isEmpty else {
+                if let engineKind {
+                    self.retireFailedTranslator(engineKind, reason: "caption inference returned no output")
+                }
+                return nil
+            }
             if TestHooks.verboseLogging {
-                NSLog("sAiity translated [\(TranslationEngine.effective.rawValue)]: \(out)")
+                NSLog("sAiity translated engine=%@ chars=%d target=%@",
+                      engineKind?.rawValue ?? "unknown", out.count, target)
             }
             // Guard the generation: Stop clears sessionLines, and a translation
             // resolving across that boundary would patch a line of the NEXT
@@ -2376,7 +2712,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         chunk, locale: self.locale.identifier(.bcp47),
                         translation: tr,
                         translateTo: tr == nil ? nil : target,
-                        turn: turn)
+                        turn: turn,
+                        speaker: speakerID)
                     self.recordedLines += 1
                 } catch {
                     self.transcriptRecordingFailed(error)

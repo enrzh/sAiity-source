@@ -47,7 +47,7 @@ struct LibraryView: View {
 /// honestly: they can be measured but no app can delete them.
 struct ModelsView: View {
     @Bindable var state: AppState
-    @State private var showAdvancedTranslation = false
+    @State private var showAdvancedModels = false
 
     /// Recommended first, otherwise registry order. The Recognition section
     /// used to open with the fast Nemotron tier — the ~640 MB variant whose own
@@ -68,31 +68,48 @@ struct ModelsView: View {
             .map(\.element)
     }
 
+    private func recommendedAssets(_ family: ModelAsset.Family) -> [AssetStatus] {
+        assets(family).filter { $0.asset.recommended || $0.asset.use.isSelected }
+    }
+
+    private func advancedAssets() -> [AssetStatus] {
+        let shown = Set(recommendedAssets(.recognition).map(\.id)
+                        + recommendedAssets(.translation).map(\.id)
+                        + (state.dictationCleanupEnabled
+                           ? recommendedAssets(.cleanup).map(\.id) : []))
+        return state.assets.filter {
+            guard state.dictationCleanupEnabled || $0.asset.family != .cleanup else { return false }
+            return !shown.contains($0.id)
+        }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 SettingsSection(title: "Recognition",
                                 subtitle: "Keep the local recognition models you use for captions and dictation.") {
-                    ForEach(assets(.recognition)) { assetRow($0) }
+                    ForEach(recommendedAssets(.recognition)) { assetRow($0) }
                 }
 
                 SettingsSection(title: "Translation",
                                 subtitle: "MADLAD is the recommended local translator.") {
-                    ForEach(assets(.translation, advanced: false)) { assetRow($0) }
+                    ForEach(recommendedAssets(.translation)) { assetRow($0) }
                 }
 
-                SettingsSection(title: "Advanced translation",
-                                subtitle: "Optional specialist translation model.") {
-                    DisclosureGroup(isExpanded: $showAdvancedTranslation) {
-                        ForEach(assets(.translation, advanced: true)) { assetRow($0) }
-                    } label: {
-                        Label("Show advanced models", systemImage: "chevron.right")
+                if state.dictationCleanupEnabled {
+                    SettingsSection(title: "Dictation cleanup",
+                                    subtitle: "Optional local models for punctuation, fillers, and spoken formatting.") {
+                        ForEach(recommendedAssets(.cleanup)) { assetRow($0) }
                     }
                 }
 
-                SettingsSection(title: "Dictation cleanup",
-                                subtitle: "Optional local models for punctuation, fillers, and spoken formatting.") {
-                    ForEach(assets(.cleanup)) { assetRow($0) }
+                DisclosureGroup(isExpanded: $showAdvancedModels) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(advancedAssets()) { assetRow($0) }
+                    }
+                    .padding(.top, 8)
+                } label: {
+                    Label("Show advanced models", systemImage: "chevron.right")
                 }
 
                 SettingsSection(title: "Storage",
@@ -216,6 +233,9 @@ struct DictationView: View {
     @State private var inputMonitoringGranted = CGPreflightListenEventAccess()
     @State private var accessibilityGranted = AXIsProcessTrusted()
     @State private var showAdvancedTranslation = false
+    @State private var showAdvancedStyling = false
+    @State private var showAdvancedSettings = false
+    @State private var vocabularyText = DictationVocabulary.serialized
 
     internal static func cleanupAssets(from assets: [AssetStatus]) -> [AssetStatus] {
         let selectedFile = LocalModel.cleanupSelected?.file
@@ -291,6 +311,10 @@ struct DictationView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
+                quickSettings
+
+                DisclosureGroup("Advanced settings", isExpanded: $showAdvancedSettings) {
+                    VStack(alignment: .leading, spacing: 0) {
                 SettingsSection(title: "Press to talk",
                                 subtitle: "Hold the shortcut, speak naturally, and release to insert the result.") {
                     HStack {
@@ -308,6 +332,14 @@ struct DictationView: View {
                         DictationShortcutRecorder(state: state)
                             .frame(width: 220, height: 30)
                     }
+                    Picker("Dictation profile", selection: Binding(
+                        get: { state.dictationProfile },
+                        set: { state.dictationProfile = $0 })) {
+                        ForEach(DictationProfile.allCases, id: \.self) { profile in
+                            Text(profile.displayName).tag(profile)
+                        }
+                    }
+                    .pickerStyle(.menu)
                 }
 
                 SettingsSection(title: "Output",
@@ -414,21 +446,33 @@ struct DictationView: View {
                                 subtitle: "Remove fillers, repetitions, false starts, and spoken formatting locally.") {
                     Toggle("Clean up dictated text", isOn: $state.dictationCleanupEnabled)
                     cleanupModelControls
+                    TextField("Protected vocabulary (comma separated)", text: $vocabularyText)
+                        .textFieldStyle(.roundedBorder)
+                        .onChange(of: vocabularyText) { _, value in
+                            DictationVocabulary.serialized = value
+                        }
+                    Text("Optional names and technical terms keep their spelling during cleanup.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 SettingsSection(title: "Dictation bubble",
-                                subtitle: "Use the same surface styling for the press-to-talk result.") {
-                    BubbleSurfaceControls(state: state)
-                    HStack {
-                        Spacer()
-                        ResetButton {
-                            var style = state.style
-                            let defaults = CaptionStyle()
-                            style.glassStyle = defaults.glassStyle
-                            style.tintHex = defaults.tintHex
-                            style.cornerRadius = defaults.cornerRadius
-                            state.style = style
+                                subtitle: "Choose a simple look for the result bubble. Advanced styling stays collapsed.") {
+                    BubbleStylePresetControl(style: $state.dictationStyle,
+                                             context: .dictation)
+                    DisclosureGroup("Advanced styling", isExpanded: $showAdvancedStyling) {
+                        VStack(alignment: .leading, spacing: 14) {
+                            Text("Layout").font(.subheadline.weight(.medium))
+                            BubbleSurfaceControls(style: $state.dictationStyle)
+                            HStack {
+                                Button("Preview") {
+                                    NotificationCenter.default.post(name: .saiityDictationPreview, object: nil)
+                                }
+                                Spacer()
+                                ResetButton { state.dictationStyle = CaptionStyle.dictationDefaults }
+                            }
                         }
+                        .padding(.top, 4)
                     }
                 }
 
@@ -458,6 +502,9 @@ struct DictationView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                    }
+                    .padding(.top, 8)
+                }
             }
             .padding(.horizontal, 30)
             .padding(.vertical, 8)
@@ -476,6 +523,93 @@ struct DictationView: View {
         .sheet(isPresented: $state.showLocalModels) {
             LocalModelsView(state: state)
         }
+    }
+
+    @ViewBuilder
+    private var quickSettings: some View {
+        SettingsSection(title: "Press to talk",
+                        subtitle: "Hold the shortcut, speak naturally, and release to insert the result.") {
+            HStack {
+                Label("Dictation", systemImage: state.dictationEnabled ? "mic.fill" : "mic.slash")
+                    .font(.body.weight(.medium))
+                Spacer()
+                Toggle("Enabled", isOn: $state.dictationEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+            }
+            HStack {
+                Label("Shortcut", systemImage: "command")
+                .foregroundStyle(.secondary)
+                Spacer()
+                DictationShortcutRecorder(state: state)
+                    .frame(width: 220, height: 30)
+            }
+            Picker("Dictation profile", selection: Binding(
+                get: { state.dictationProfile },
+                set: { state.dictationProfile = $0 })) {
+                ForEach(DictationProfile.allCases.filter { $0 != .custom }, id: \.self) { profile in
+                    Text(profile.displayName).tag(profile)
+                }
+            }
+            .pickerStyle(.segmented)
+        }
+
+        SettingsSection(title: "Output",
+                        subtitle: "Results are processed locally and pasted when a focused text field is available.") {
+            Toggle("Translate dictated text", isOn: $state.translateDictation)
+            HStack {
+                Label("Target language", systemImage: "character.book.closed")
+                Spacer()
+                Button {
+                    state.showDictationTranslationPicker = true
+                } label: {
+                    HStack(spacing: 5) {
+                        Text(state.dictationTranslateTo.map { AppLanguage(code: $0).displayName }
+                             ?? String(localized: "Off"))
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption2)
+                    }
+                }
+                .disabled(!state.translateDictation)
+            }
+            if state.translateDictation && state.dictationTranslateTo == nil {
+                Label("Choose a target before speaking.", systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+
+        SettingsSection(title: "Cleanup",
+                        subtitle: "Remove fillers, repetitions, false starts, and spoken formatting locally.") {
+            Toggle("Clean up dictated text", isOn: $state.dictationCleanupEnabled)
+            HStack {
+                Label(state.llmModel?.label ?? String(localized: "Not ready"),
+                      systemImage: state.llmModel?.isDownloaded == true
+                          ? "checkmark.circle.fill" : "arrow.down.circle")
+                    .foregroundStyle(state.llmModel?.isDownloaded == true
+                                     ? Color.secondary : Color.orange)
+                Spacer()
+                Button("Models") { SettingsWindowController.selectModelsPane() }
+                    .controlSize(.small)
+            }
+        }
+
+        SettingsSection(title: "Dictation bubble",
+                        subtitle: "Choose a simple look for the result bubble.") {
+            LabeledToggle("Show dictation bubble",
+                          "Shows the result and waveform after dictation finishes.",
+                          isOn: Binding(get: { !state.dictationStyle.hidden },
+                                        set: { state.dictationStyle.hidden = !$0 }))
+            BubbleStylePresetControl(style: $state.dictationStyle, context: .dictation)
+        }
+
+        HStack {
+            Spacer()
+            Button("Advanced settings…") { showAdvancedSettings = true }
+                .controlSize(.small)
+        }
+        .padding(.horizontal, 30)
+        .padding(.vertical, 12)
     }
 
     @ViewBuilder
@@ -689,10 +823,16 @@ private struct DictationShortcutRecorder: NSViewRepresentable {
 struct CaptionsView: View {
     @Bindable var state: AppState
     @State private var showAdvancedTranslation = false
+    @State private var showAdvancedStyling = false
+    @State private var showAdvancedSettings = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
+            quickSettings
+
+            DisclosureGroup("Advanced settings", isExpanded: $showAdvancedSettings) {
+                VStack(alignment: .leading, spacing: 0) {
             SettingsSection(title: "Engine",
                             subtitle: "Choose the local recognizer and its latency.") {
                 Picker("Recognition", selection: $state.engine) {
@@ -774,6 +914,13 @@ struct CaptionsView: View {
                 }
             }
 
+            SettingsSection(title: "Speakers",
+                            subtitle: "Optionally label different voices in the live transcript.") {
+                LabeledToggle("Identify speakers",
+                              "Uses a separate local model and labels turns as Speaker 1, Speaker 2, and so on. It does not identify people by name. Captions continue normally if the model is unavailable.",
+                              isOn: $state.speakerLabelsEnabled)
+            }
+
             SettingsSection(title: "Translation",
                             subtitle: "Translate locally when a caption sentence closes.") {
                 LabeledToggle("Show the translation line",
@@ -847,6 +994,9 @@ struct CaptionsView: View {
                     Text(e).font(.caption).foregroundStyle(.orange)
                 }
             }
+                }
+                .padding(.top, 8)
+            }
             }
             .padding(.horizontal, 0)
             .padding(.vertical, 8)
@@ -864,25 +1014,70 @@ struct CaptionsView: View {
     }
 
     @ViewBuilder
-    private var appearanceSections: some View {
-        SettingsSection(title: "Bubble",
-                        subtitle: "Control the subtitle surface, its size, and its live appearance.") {
+    private var quickSettings: some View {
+        SettingsSection(title: "Captions",
+                        subtitle: "Show local subtitles from the audio your Mac plays.") {
+            LabeledToggle("Show the caption bubble",
+                          "Hides the subtitles without stopping recognition, so you can keep a transcript running with nothing on screen.",
+                          isOn: Binding(get: { !state.style.hidden },
+                                        set: { state.style.hidden = !$0 }))
             HStack {
+                Label("Language", systemImage: "waveform")
                 Spacer()
-                ResetButton {
-                    let d = CaptionStyle()
-                    state.style.glassStyle = d.glassStyle
-                    state.style.tintHex = d.tintHex
-                    state.style.cornerRadius = d.cornerRadius
-                    state.style.widthFraction = d.widthFraction
-                    state.style.screenMargin = d.screenMargin
-                    state.style.maxHeight = d.maxHeight
-                    state.style.autoResize = d.autoResize
-                    state.style.hidden = d.hidden
-                    state.captionClickThrough = true
-                    NotificationCenter.default.post(name: .saiityResetBubble, object: nil)
+                Text(state.engine == nil
+                     ? String(localized: "Not set")
+                     : state.engine == .parakeetEou
+                         ? String(localized: "English only")
+                         : String(localized: "Any language"))
+                    .foregroundStyle(.secondary)
+                Button("Models") { SettingsWindowController.selectModelsPane() }
+                    .controlSize(.small)
+            }
+        }
+
+        SettingsSection(title: "Translation",
+                        subtitle: "Optionally show a local translation under each caption.") {
+            LabeledToggle("Show the translation line",
+                          "The second line under each caption. Turning this off keeps translation running for the transcript but hides it on screen.",
+                          isOn: $state.style.showTranslation)
+            HStack {
+                Label("Translate to", systemImage: "character.book.closed")
+                Spacer()
+                Button {
+                    state.showTranslationPicker = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(state.translateTo.map { AppLanguage(code: $0).displayName }
+                             ?? String(localized: "Off"))
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption2)
+                    }
+                }
+                if state.translateTo != nil {
+                    Button("Off") { state.translateTo = nil }
+                        .controlSize(.small)
                 }
             }
+        }
+
+        SettingsSection(title: "Bubble",
+                        subtitle: "Choose a simple look for the subtitle bubble.") {
+            BubbleStylePresetControl(style: $state.style, context: .captions)
+        }
+
+        HStack {
+            Spacer()
+            Button("Advanced settings…") { showAdvancedSettings = true }
+                .controlSize(.small)
+        }
+        .padding(.horizontal, 30)
+        .padding(.vertical, 12)
+    }
+
+    @ViewBuilder
+    private var appearanceSections: some View {
+        SettingsSection(title: "Bubble",
+                        subtitle: "Choose a simple look for the subtitle bubble. Advanced styling stays collapsed.") {
             LabeledToggle("Show the caption bubble",
                           "Hides the subtitles without stopping recognition, so you can keep a transcript running with nothing on screen.",
                           isOn: Binding(get: { !state.style.hidden },
@@ -893,71 +1088,43 @@ struct CaptionsView: View {
             LabeledToggle("Announce captions to VoiceOver",
                           "Off by default. Each finished sentence is posted as a VoiceOver announcement, which also reaches a connected braille display. In-progress text is never announced — it would arrive faster than speech or braille can render it.",
                           isOn: $state.announceCaptions)
-            BubbleSurfaceControls(state: state, includePositioning: true)
-                }
-
-        textStyleSection("Original text", $state.style.original,
-                         note: "The recognised speech. It is dimmed while the engine may still revise it — that is the second opacity below.",
-                         volatile: true,
-                         reset: { state.style.original = .original })
-
-            SettingsSection(title: "Translated text",
-                            subtitle: "Control the appearance of the optional translation line.") {
-                HStack {
-                    Spacer()
-                    ResetButton {
-                        state.style.translation = .translation
+            BubbleStylePresetControl(style: $state.style, context: .captions)
+            DisclosureGroup("Advanced styling", isExpanded: $showAdvancedStyling) {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Layout").font(.subheadline.weight(.medium))
+                    BubbleSurfaceControls(style: $state.style, includePositioning: true)
+                    HStack {
+                        Spacer()
+                        ResetButton {
+                            let d = CaptionStyle()
+                            state.style.glassStyle = d.glassStyle
+                            state.style.tintHex = d.tintHex
+                            state.style.cornerRadius = d.cornerRadius
+                            state.style.widthFraction = d.widthFraction
+                            state.style.screenMargin = d.screenMargin
+                            state.style.maxHeight = d.maxHeight
+                            state.style.autoResize = d.autoResize
+                            NotificationCenter.default.post(name: .saiityResetBubble, object: nil)
+                        }
                     }
+                    Divider()
+                    Text("Text size adapts automatically to the available width.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    HStack {
+                        Button("Preview") {
+                            NotificationCenter.default.post(name: .saiityCaptionPreview, object: nil)
+                        }
+                        Button("Reset position") {
+                            NotificationCenter.default.post(name: .saiityResetBubble, object: nil)
+                        }
+                        ResetButton("Reset everything") { state.style = CaptionStyle() }
+                    }
+                    .controlSize(.small)
                 }
-                textStyleControls($state.style.translation, volatile: false)
+                .padding(.top, 4)
             }
-        SettingsSection(title: "Preview and spacing",
-                        subtitle: "Changes apply live to the real caption bubble.") {
-            slider("Gap between the lines", $state.style.lineGap, 0...24, "%.0f")
-            HStack {
-                Button("Preview") {
-                    NotificationCenter.default.post(name: .saiityCaptionPreview, object: nil)
-                }
-                Button("Reset position") {
-                    NotificationCenter.default.post(name: .saiityResetBubble, object: nil)
-                }
-                ResetButton("Reset everything") { state.style = CaptionStyle() }
-            }
-            .controlSize(.small)
         }
-    }
-
-    /// One group of text controls, used for both roles so they cannot drift.
-    @ViewBuilder
-    private func textStyleSection(_ title: LocalizedStringKey, _ style: Binding<TextStyle>,
-                                  note: LocalizedStringKey, volatile: Bool,
-                                  reset: @escaping () -> Void) -> some View {
-        SettingsSection(title: title, subtitle: note) {
-            HStack {
-                Spacer()
-                ResetButton(action: reset)
-            }
-            textStyleControls(style, volatile: volatile)
-        }
-    }
-
-    @ViewBuilder
-    private func textStyleControls(_ style: Binding<TextStyle>, volatile: Bool) -> some View {
-        slider("Size", style.fontSize, 12...72, "%.0f")
-        Picker("Weight", selection: style.weight) {
-            Text("Light").tag(-0.4); Text("Regular").tag(0.0)
-            Text("Medium").tag(0.23); Text("Semibold").tag(0.3); Text("Bold").tag(0.4)
-        }
-        .pickerStyle(.segmented)
-        ColorPicker("Colour", selection: Binding(
-            get: { Color(nsColor: style.wrappedValue.color) },
-            set: { style.colorHex.wrappedValue = CaptionStyle.hex(from: NSColor($0)) }))
-        slider("Opacity", style.opacity, 0.2...1.0, "%.0f%%", scale: 100)
-        if volatile {
-            slider("Opacity while still being revised", style.volatileOpacity, 0.2...1.0,
-                   "%.0f%%", scale: 100)
-        }
-        Stepper("Maximum lines: \(style.wrappedValue.maxLines)", value: style.maxLines, in: 1...8)
     }
 
     /// Sliders here are always label + track + read-out; writing that out five
@@ -1006,33 +1173,109 @@ struct ResetButton: View {
     }
 }
 
-/// Surface-only controls shared by the caption and dictation bubbles. Text
-/// typography and caption placement stay on the Captions page because the
-/// dictation toast has a fixed, compact layout.
+struct BubbleStylePresetControl: View {
+    @Binding var style: CaptionStyle
+    let context: BubbleStyleContext
+
+    private var selectedPreset: BubbleStylePreset? {
+        style.matchingPreset(for: context)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Preset")
+                    .font(.subheadline.weight(.medium))
+                Spacer()
+                if selectedPreset == nil {
+                    Label("Custom", systemImage: "slider.horizontal.3")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: 8)], spacing: 8) {
+                ForEach(BubbleStylePreset.allCases, id: \.self) { preset in
+                    Button {
+                        style = preset.applying(to: style, context: context)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 8) {
+                            presetPreview(preset)
+                            HStack(spacing: 6) {
+                                Text(preset.title)
+                                    .font(.callout.weight(.medium))
+                                    .lineLimit(1)
+                                Spacer(minLength: 4)
+                                if selectedPreset == preset {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(.tint)
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
+                        .padding(10)
+                        .contentShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(selectedPreset == preset
+                                  ? Color.accentColor.opacity(0.12)
+                                  : Color(nsColor: .controlBackgroundColor))
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(selectedPreset == preset
+                                    ? Color.accentColor
+                                    : Color.primary.opacity(0.12),
+                                    lineWidth: selectedPreset == preset ? 1.5 : 1)
+                    }
+                    .accessibilityLabel(Text(preset.title))
+                    .accessibilityAddTraits(selectedPreset == preset ? .isSelected : [])
+                }
+            }
+
+            Text("Presets change appearance only. Behavior and translation settings stay unchanged.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func presetPreview(_ preset: BubbleStylePreset) -> some View {
+        HStack(spacing: 3) {
+            Capsule()
+                .fill(preset == .readable ? Color.primary : Color.primary.opacity(0.65))
+                .frame(width: preset == .readable ? 34 : 24, height: 5)
+            Capsule()
+                .fill(preset == .liquidGlass ? Color.accentColor : Color.secondary.opacity(0.65))
+                .frame(width: preset == .minimal ? 14 : 22, height: 5)
+            if preset == .liquidGlass {
+                Image(systemName: "drop.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.tint)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 8)
+        .frame(height: 24)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+    }
+}
+
 struct BubbleSurfaceControls: View {
-    @Bindable var state: AppState
+    @Binding var style: CaptionStyle
     var includePositioning = false
 
     var body: some View {
         Group {
-            Picker("Background", selection: $state.style.glassStyle) {
-                Text("Glass").tag(CaptionStyle.regularGlass)
-                Text("Clear").tag(CaptionStyle.clearGlass)
-                Text("Solid").tag(CaptionStyle.solidGlass)
-                Text("Liquid Glass").tag(CaptionStyle.liquidGlass)
-            }
-            .pickerStyle(.segmented)
-            ColorPicker("Background tint", selection: Binding(
-                get: { Color(nsColor: state.style.tintColor ?? .black) },
-                set: { state.style.tintHex = CaptionStyle.hex(from: NSColor($0)) }))
-            surfaceSlider("Corner radius", $state.style.cornerRadius, 0...40, "%.0f")
             if includePositioning {
-                Picker("Sizing", selection: $state.style.autoResize) {
+                Picker("Sizing", selection: $style.autoResize) {
                     Text("Auto adjust").tag(true)
                     Text("Drag to resize").tag(false)
                 }
                 .pickerStyle(.segmented)
-                if state.style.autoResize {
+                if style.autoResize {
                     Text("The bubble adapts to the display automatically.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -1041,10 +1284,23 @@ struct BubbleSurfaceControls: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                surfaceSlider("Gap to screen edge", $state.style.screenMargin, 0...160, "%.0f")
-                surfaceSlider("Maximum height", $state.style.maxHeight, 120...720, "%.0f")
+                surfaceSlider("Gap to screen edge", $style.screenMargin, 0...160, "%.0f")
+                surfaceSlider("Maximum height", $style.maxHeight, 120...720, "%.0f")
+            } else {
+                surfaceSlider("Maximum result height", $style.maxHeight, 120...420, "%.0f")
             }
+            Label(layoutSummary, systemImage: "ruler")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
+    }
+
+    private var layoutSummary: String {
+        if includePositioning {
+            let sizing = style.autoResize ? "Auto width" : "Drag to resize"
+            return "\(sizing) · max height \(Int(style.maxHeight)) pt · \(Int(style.screenMargin)) pt edge"
+        }
+        return "Preset width · max result height \(Int(style.maxHeight)) pt"
     }
 
     @ViewBuilder
@@ -1516,6 +1772,7 @@ struct TranscriptsView: View {
 /// correctly", which is a different question from "what did it record".
 struct GeneralView: View {
     @Bindable var state: AppState
+    @State private var diagnosticsRevision = 0
 
     private var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
@@ -1530,18 +1787,82 @@ struct GeneralView: View {
         return text
     }
 
+    @ViewBuilder
+    private func setupStatusRow(title: LocalizedStringKey,
+                                symbol: String,
+                                value: String,
+                                actionTitle: LocalizedStringKey?,
+                                action: @escaping () -> Void) -> some View {
+        HStack(spacing: 10) {
+            Label(title, systemImage: symbol)
+            Spacer(minLength: 12)
+            Text(value)
+                .foregroundStyle(.secondary)
+            if let actionTitle {
+                Button(actionTitle, action: action)
+                    .controlSize(.small)
+            }
+        }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
             SettingsSection(title: "Status",
                             subtitle: "A quick check of recognition and permissions on this Mac.") {
-                LabeledContent("Engine", value: state.engine?.displayName ?? String(localized: "None chosen"))
-                LabeledContent("Screen Recording",
-                               value: CGPreflightScreenCaptureAccess()
-                                   ? String(localized: "Granted")
-                                   : String(localized: "Not granted"))
-                Text("System-audio capture is gated behind Screen Recording — macOS has no audio-only permission.")
-                    .font(.caption)
+                setupStatusRow(
+                    title: "Recognition",
+                    symbol: "waveform",
+                    value: state.engine == nil
+                        ? String(localized: "Not set")
+                        : state.engine?.needsDownload == true
+                            ? String(localized: "Not downloaded yet — see Models.")
+                            : String(localized: "Ready"),
+                    actionTitle: "Models") {
+                        SettingsWindowController.selectModelsPane()
+                    }
+                setupStatusRow(
+                    title: "Captions",
+                    symbol: "captions.bubble",
+                    value: CGPreflightScreenCaptureAccess()
+                        ? String(localized: "Ready")
+                        : String(localized: "Permission required"),
+                    actionTitle: CGPreflightScreenCaptureAccess() ? nil : "Open Settings") {
+                        ScreenRecordingPermission.openSettings()
+                    }
+                setupStatusRow(
+                    title: "Dictation",
+                    symbol: "mic",
+                    value: !state.dictationEnabled
+                        ? String(localized: "Off")
+                        : CGPreflightListenEventAccess()
+                            ? String(localized: "Ready")
+                            : String(localized: "Permission required"),
+                    actionTitle: state.dictationEnabled && !CGPreflightListenEventAccess()
+                        ? "Open Settings" : nil) {
+                        InputMonitoringPermission.openSettings()
+                    }
+                setupStatusRow(
+                    title: "Translation",
+                    symbol: "character.book.closed",
+                    value: state.translateTo.map { AppLanguage(code: $0).displayName }
+                        ?? String(localized: "Off"),
+                    actionTitle: "Captions") {
+                        SettingsWindowController.selectedPane = .captions
+                        NotificationCenter.default.post(name: .saiitySelectSettingsPane,
+                                                        object: SettingsPane.captions.rawValue)
+                    }
+                setupStatusRow(
+                    title: "Dictation cleanup",
+                    symbol: "wand.and.stars",
+                    value: !state.dictationCleanupEnabled
+                        ? String(localized: "Off")
+                        : state.llmModel?.isDownloaded == true
+                            ? String(localized: "Ready")
+                            : String(localized: "Not ready"),
+                    actionTitle: "Models") {
+                        SettingsWindowController.selectModelsPane()
+                    }
             }
 
             SettingsSection(title: "Startup",
@@ -1557,6 +1878,29 @@ struct GeneralView: View {
 
             SettingsSection(title: "Troubleshooting",
                             subtitle: "Repair permissions, save diagnostics, or review app information.") {
+                if let failure = Diagnostics.latestFailure {
+                    LabeledContent("Last operation", value: failure.operation)
+                    Text(failure.reason)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .textSelection(.enabled)
+                } else {
+                    Text("No recent runtime failures.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                let timings = Array(Diagnostics.recentTimings.prefix(5))
+                if !timings.isEmpty {
+                    Divider()
+                    Text("Recent timings")
+                        .font(.caption.weight(.medium))
+                    ForEach(Array(timings.enumerated()), id: \.offset) { _, timing in
+                        let temperature = timing.cold == nil ? "" : (timing.cold == true ? " · cold" : " · warm")
+                        Text(verbatim: "\(timing.operation) · \(String(format: "%.2f s", timing.seconds))\(temperature)")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 HStack {
                     Button("Run setup again…") {
                         Onboarding.reset()
@@ -1573,6 +1917,7 @@ struct GeneralView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
+            .id(diagnosticsRevision)
 
             SettingsSection(title: "Privacy",
                             subtitle: "Recognition, translation, and transcripts stay on this Mac.") {
@@ -1595,6 +1940,9 @@ struct GeneralView: View {
             .frame(maxWidth: 780, alignment: .leading)
         }
         .task { await state.refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: Diagnostics.changed)) { _ in
+            diagnosticsRevision += 1
+        }
     }
 }
 

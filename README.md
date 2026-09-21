@@ -76,6 +76,17 @@ The release test command is:
 A plain debug test run is not the supported verification path on this
 toolchain.
 
+For a local real-model regression run, keep recordings outside the repository
+and provide a `manifest.json` beside 1...12 mono Float32 16 kHz WAV fixtures:
+
+    SAIITY_ASR_BENCHMARK_DIR=/absolute/fixtures scripts/model-matrix.sh
+
+The matrix records cold model preparation, sequential segmented latency, real-
+time factor, WER, and language-span preservation. It never downloads weights
+and fails when the benchmark test is skipped. Release bundles are checked with
+`scripts/verify-release.sh`; generated Sparkle feeds are checked against their
+ZIP with `scripts/validate-appcast.sh`.
+
 The build scripts use `/Applications/Xcode.app/Contents/Developer` through
 `DEVELOPER_DIR` by default and do not change global `xcode-select`. Override
 that variable when another installed Xcode is required.
@@ -99,19 +110,15 @@ included in the application bundle.
 
 ## Release
 
-The current signed and notarized release is [sAiity 2.4.2](https://github.com/enrzh/sAiity/releases/tag/v2.4.2).
+The current signed and notarized release is [sAiity 2.5.0](https://github.com/enrzh/sAiity/releases/tag/v2.5.0).
 
-- [Download the DMG](https://github.com/enrzh/sAiity/releases/download/v2.4.2/sAiity-2.4.2.dmg)
-- [Download the ZIP](https://github.com/enrzh/sAiity/releases/download/v2.4.2/sAiity-2.4.2.zip)
+- [Download the DMG](https://github.com/enrzh/sAiity/releases/download/v2.5.0/sAiity-2.5.0.dmg)
+- [Download the ZIP](https://github.com/enrzh/sAiity/releases/download/v2.5.0/sAiity-2.5.0.zip)
 - [Sparkle update feed](https://enrzh.github.io/sAiity/appcast.xml)
 
-This release adds live microphone waveforms to dictation, hardens dictation
-translation, improves conservative cleanup and spoken formatting, simplifies
-translation model choices, and keeps subtitle history scrollable with transcript
-export.
-
-DMG SHA-256: `ad8d81d300186e7b74e8924315774344b7f1e93f5a74c0d355b130d2234d9155`
-
-ZIP SHA-256: `fc2790c86dd7382b95daf729b96355e4dd2e6c2b6780fc3084c2caaf43eb4ccb`
+This release adds silence-aware segmented dictation, automatic code-switching
+support, resident-model reuse, adaptive local ASR selection, safer mixed-language
+cleanup and translation, cancellation diagnostics, and more reliable caption and
+dictation bubble feedback.
 
 sAiity is part of the [aiity](https://aiity.de) family.

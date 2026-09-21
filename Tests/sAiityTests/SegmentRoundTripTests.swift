@@ -27,7 +27,8 @@ struct SegmentRoundTripTests {
             trLoc: "en",
             words: [TimedWord(start: 12.25, end: 12.6, text: "Guten"),
                     TimedWord(start: 12.6, end: 13.1, text: " Morgen,")],
-            turn: true)
+            turn: true,
+            speaker: "speaker-0")
 
         // Exactly what Retranslator.write does: encode the decoded value.
         let line = try JSONEncoder().encode(original)
@@ -41,6 +42,7 @@ struct SegmentRoundTripTests {
         #expect(back.tr == original.tr)
         #expect(back.trLoc == original.trLoc)
         #expect(back.turn == true, "the turn break must not be dropped")
+        #expect(back.speaker == "speaker-0", "speaker metadata must survive")
         #expect(back.words?.count == 2, "per-word timings must survive")
         #expect(back.words?.first?.text == "Guten")
         #expect(back.words?.first?.start == 12.25)
@@ -51,6 +53,7 @@ struct SegmentRoundTripTests {
                                              from: try JSONEncoder().encode(back))
         #expect(again.words?.count == 2)
         #expect(again.turn == true)
+        #expect(again.speaker == "speaker-0")
     }
 
     /// The absent-optional case: a line recorded without translation or word
@@ -71,5 +74,6 @@ struct SegmentRoundTripTests {
         let back = try JSONDecoder().decode(Segment.self, from: data)
         #expect(back.tr == nil && back.trLoc == nil)
         #expect(back.words == nil && back.turn == nil)
+        #expect(back.speaker == nil)
     }
 }

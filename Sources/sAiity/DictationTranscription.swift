@@ -43,6 +43,13 @@ struct SpeechRegionSegmenter: Sendable {
     func segment(_ samples: [Float], sampleRate: Double) -> [DictationSpeechRegion] {
         guard !samples.isEmpty, sampleRate > 0 else { return [] }
 
+        // A press that captured only silence should never enter a recognizer.
+        // Besides wasting a full decode, silent audio is where Whisper is most
+        // likely to emit transport markers or hallucinated words.
+        guard samples.contains(where: { abs($0) > configuration.silenceThreshold }) else {
+            return []
+        }
+
         let silenceSamples = max(1, durationSamples(configuration.silenceDuration, sampleRate: sampleRate))
         let contextSamples = max(0, durationSamples(configuration.boundaryContext, sampleRate: sampleRate))
         let minimumSamples = max(1, durationSamples(configuration.minimumSpeechDuration, sampleRate: sampleRate))
@@ -181,7 +188,8 @@ struct DictationLanguageMetadata: Equatable, Sendable {
         dominantLanguage = dominantCode.flatMap { firstCode[$0] }
 
         let languageMix = counts.count > 1
-        let scriptMix = Set(regions.compactMap { Self.scriptFamily(in: $0.text) }).count > 1
+        let scriptMix = regions.contains { Self.scriptFamilies(in: $0.text).count > 1 }
+            || Set(regions.compactMap { Self.scriptFamily(in: $0.text) }).count > 1
         containsMultipleLanguages = languageMix || scriptMix
     }
 
@@ -215,6 +223,108 @@ struct DictationLanguageMetadata: Equatable, Sendable {
         }
         return nil
     }
+
+    private static func scriptFamilies(in text: String) -> Set<ScriptFamily> {
+        var result = Set<ScriptFamily>()
+        for scalar in text.unicodeScalars {
+            switch scalar.value {
+            case 0x0041...0x024F, 0x1E00...0x1EFF: result.insert(.latin)
+            case 0x0400...0x052F: result.insert(.cyrillic)
+            case 0x0600...0x06FF, 0x0750...0x077F, 0x08A0...0x08FF: result.insert(.arabic)
+            case 0x0900...0x097F: result.insert(.devanagari)
+            case 0x1100...0x11FF, 0xAC00...0xD7AF: result.insert(.hangul)
+            case 0x3040...0x30FF: result.insert(.kana)
+            case 0x3400...0x4DBF, 0x4E00...0x9FFF, 0xF900...0xFAFF: result.insert(.han)
+            default: continue
+            }
+        }
+        return result
+    }
+}
+
+/// Refines obvious script switches inside one recognizer region. Audio models
+/// do not expose reliable mid-region language tags, but script transitions are
+/// unambiguous and cost no second decode. Same-script switches remain attached
+/// to the recognizer region rather than being guessed from a short text window.
+private enum DictationCodeSwitching {
+    private enum Script: Hashable {
+        case latin, cyrillic, arabic, devanagari, hangul, han, kana
+    }
+
+    static func split(_ region: DictationRegionTranscript) -> [DictationRegionTranscript] {
+        let characters = Array(region.text)
+        guard characters.count > 1 else { return [region] }
+        var parts: [(String, Script)] = []
+        var current = ""
+        var currentScript: Script?
+
+        func flush() {
+            guard let script = currentScript,
+                  !current.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                current.removeAll(keepingCapacity: true)
+                currentScript = nil
+                return
+            }
+            parts.append((current, script))
+            current.removeAll(keepingCapacity: true)
+            currentScript = nil
+        }
+
+        for character in characters {
+            let nextScript = script(for: character)
+            if let nextScript, let currentScript, nextScript != currentScript {
+                flush()
+            }
+            if currentScript == nil, let nextScript {
+                currentScript = nextScript
+            }
+            current.append(character)
+        }
+        flush()
+        guard parts.count > 1 else { return [region] }
+
+        return parts.map { text, scriptFamily in
+            DictationRegionTranscript(text: text.trimmingCharacters(in: .whitespacesAndNewlines),
+                                      language: language(for: scriptFamily,
+                                                         original: region.language,
+                                                         text: text))
+        }
+    }
+
+    private static func language(for scriptFamily: Script,
+                                 original: String?,
+                                 text: String) -> String? {
+        let base = original?.replacingOccurrences(of: "_", with: "-")
+            .split(separator: "-").first.map(String.init)?.lowercased()
+        switch scriptFamily {
+        case .han:
+            return text.contains(where: { script(for: $0) == .kana }) || base == "ja" ? "ja" : "zh"
+        case .kana: return "ja"
+        case .hangul: return "ko"
+        case .cyrillic: return base ?? "ru"
+        case .arabic: return base ?? "ar"
+        case .devanagari: return base ?? "hi"
+        case .latin:
+            if let base, !["auto", "zh", "ja", "ko"].contains(base) { return base }
+            return "en"
+        }
+    }
+
+    private static func script(for character: Character) -> Script? {
+        for scalar in character.unicodeScalars {
+            switch scalar.value {
+            case 0x0041...0x024F, 0x1E00...0x1EFF: return .latin
+            case 0x0400...0x052F: return .cyrillic
+            case 0x0600...0x06FF, 0x0750...0x077F, 0x08A0...0x08FF: return .arabic
+            case 0x0900...0x097F: return .devanagari
+            case 0x1100...0x11FF, 0xAC00...0xD7AF: return .hangul
+            case 0x3040...0x30FF, 0x31F0...0x31FF: return .kana
+            case 0x3400...0x4DBF, 0x4E00...0x9FFF, 0xF900...0xFAFF: return .han
+            default: continue
+            }
+        }
+        return nil
+    }
 }
 
 struct DictationTranscriptionResult: Equatable, Sendable {
@@ -222,10 +332,31 @@ struct DictationTranscriptionResult: Equatable, Sendable {
     let text: String
     let languageMetadata: DictationLanguageMetadata
 
+    /// Translation can batch adjacent regions with the same source language,
+    /// while keeping a separate run for every code-switch.
+    var translationRuns: [DictationRegionTranscript] {
+        var result: [DictationRegionTranscript] = []
+        result.reserveCapacity(regions.count)
+        for region in regions {
+            if let last = result.last,
+               let lastLanguage = last.language,
+               let language = region.language,
+               TranslationLanguage.isSame(lastLanguage, as: language) {
+                result[result.count - 1] = .init(
+                    text: DictationTranscriptMerger.merge([last.text, region.text]),
+                    language: lastLanguage)
+            } else {
+                result.append(region)
+            }
+        }
+        return result
+    }
+
     init(regions: [DictationRegionTranscript]) {
-        self.regions = regions
-        self.text = DictationTranscriptMerger.merge(regions.map(\.text))
-        self.languageMetadata = DictationLanguageMetadata(regions: regions)
+        let refined = regions.flatMap(DictationCodeSwitching.split)
+        self.regions = refined
+        self.text = DictationTranscriptMerger.merge(refined.map(\.text))
+        self.languageMetadata = DictationLanguageMetadata(regions: refined)
     }
 
     init(text: String, language: String?) {
@@ -329,6 +460,7 @@ enum DictationTranscriptMerger {
             return false
         }
         if "，。！？、；：".contains(previous) { return false }
+        if ",.;:!?".contains(previous) { return true }
         guard previous.isLetter || previous.isNumber,
               next.isLetter || next.isNumber else { return false }
         return !(isCJK(previous) && isCJK(next))

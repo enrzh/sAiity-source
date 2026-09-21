@@ -18,6 +18,9 @@ struct Segment: Codable, Sendable {
     /// invention. Optional so sessions written before the field decode
     /// unchanged.
     var turn: Bool? = nil
+    /// Opaque local diarizer ID, for example `speaker-0`. Optional so sessions
+    /// written before speaker support decode unchanged.
+    var speaker: String? = nil
 }
 
 struct SessionMeta: Codable, Sendable {
@@ -108,13 +111,14 @@ actor TranscriptStore {
     /// so a two-hour meeting costs nothing per line.
     func append(_ chunk: TranscriptChunk, locale: String,
                 translation: String?, translateTo: String?,
-                turn: Bool = false) throws {
+                turn: Bool = false, speaker: String? = nil) throws {
         guard let handle else { return }
         let seg = Segment(i: index, t0: chunk.start, t1: chunk.end,
                           text: chunk.text, loc: locale,
                           tr: translation, trLoc: translateTo,
                           words: chunk.words.isEmpty ? nil : chunk.words,
-                          turn: turn ? true : nil)
+                          turn: turn ? true : nil,
+                          speaker: speaker)
         var data = try JSONEncoder().encode(seg)
         data.append(0x0A)
         do {

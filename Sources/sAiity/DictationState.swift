@@ -98,6 +98,50 @@ enum DictationPhase: Equatable, Sendable {
     case failure(String)
 }
 
+/// A small preset over the existing dictation controls. `custom` is derived
+/// from the controls, so changing an individual setting never lies about the
+/// active mode.
+enum DictationProfile: String, CaseIterable, Sendable {
+    case fast
+    case balanced
+    case accurate
+    case custom
+
+    var displayName: String {
+        switch self {
+        case .fast: return String(localized: "Fast")
+        case .balanced: return String(localized: "Balanced")
+        case .accurate: return String(localized: "Accurate")
+        case .custom: return String(localized: "Custom")
+        }
+    }
+}
+
+/// Kept in memory only. It gives users a recovery path when cleanup or
+/// translation changes wording without persisting microphone text by default.
+struct DictationResultSnapshot: Equatable, Sendable {
+    let rawText: String
+    let outputText: String
+    let wasCleaned: Bool
+    let wasTranslated: Bool
+    let cleanupUnavailable: Bool
+    /// Metadata for the text currently shown in the result bubble. It is kept
+    /// separate from rawText because a translated result no longer has the
+    /// source regions' language mix.
+    let languageMetadata: DictationLanguageMetadata?
+
+    init(rawText: String, outputText: String, wasCleaned: Bool,
+         wasTranslated: Bool, languageMetadata: DictationLanguageMetadata? = nil,
+         cleanupUnavailable: Bool = false) {
+        self.rawText = rawText
+        self.outputText = outputText
+        self.wasCleaned = wasCleaned
+        self.wasTranslated = wasTranslated
+        self.cleanupUnavailable = cleanupUnavailable
+        self.languageMetadata = languageMetadata
+    }
+}
+
 struct DictationToastPresentation: Equatable, Sendable {
     let label: String
     let value: String

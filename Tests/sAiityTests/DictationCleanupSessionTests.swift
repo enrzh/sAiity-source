@@ -41,7 +41,11 @@ struct DictationCleanupSessionTests {
             await withCheckedContinuation { continuation in
                 self.continuation = continuation
                 watchdog = Task {
-                    do { try await Task.sleep(for: .seconds(3)) }
+                    // The complete suite runs main-actor tests in parallel;
+                    // unrelated model/setup tests can delay this mock task.
+                    // Keep the failure escape hatch, but do not make it a
+                    // three-second race against the scheduler.
+                    do { try await Task.sleep(for: .seconds(10)) }
                     catch { return }
                     Issue.record("Native mock was not explicitly released")
                     release()
@@ -60,7 +64,7 @@ struct DictationCleanupSessionTests {
     }
 
     private func waitUntil(_ condition: () -> Bool) async -> Bool {
-        let deadline = ContinuousClock.now.advanced(by: .seconds(1))
+        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
         while !condition(), ContinuousClock.now < deadline {
             try? await Task.sleep(for: .milliseconds(1))
         }
@@ -100,6 +104,25 @@ struct DictationCleanupSessionTests {
         }
         #expect(mock.events == ["load-1b", "cleanup-1b", "cleanup-1b"])
         #expect(mock.calls.map { $0.0 } == [repair, repair])
+        await session.invalidate()
+    }
+
+    @Test("same-language regions share one cleanup request")
+    func sameLanguageRegionsBatch() async {
+        let session = DictationCleanupSession(gate: TranslationInferenceGate())
+        let mock = MockModel()
+        mock.output = "Send the revised report."
+        let input = DictationTranscriptionResult(regions: [
+            .init(text: "Send the report", language: "en-US"),
+            .init(text: "I mean the revised report.", language: "en-US"),
+        ])
+
+        let result = await session.cleanup(input, modelKey: "1b") { mock.load("1b") }
+
+        #expect(mock.calls.count == 1)
+        #expect(mock.calls.first?.0 == "Send the report I mean the revised report.")
+        #expect(result?.text == "Send the revised report.")
+        #expect(result?.regions.map(\.language) == ["en-US"])
         await session.invalidate()
     }
 

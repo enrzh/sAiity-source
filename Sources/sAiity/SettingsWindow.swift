@@ -226,6 +226,13 @@ final class AppState {
         }
     }
 
+    /// Optional local diarization. It is opt-in because it downloads and
+    /// keeps a separate model resident; when off, captions use the original
+    /// single-speaker path with no additional work.
+    var speakerLabelsEnabled = UserDefaults.standard.bool(forKey: "speakerLabelsEnabled") {
+        didSet { UserDefaults.standard.set(speakerLabelsEnabled, forKey: "speakerLabelsEnabled") }
+    }
+
     /// Press-to-talk is separate from live captions. It is enabled by default,
     /// but can be disabled without changing any caption or microphone-mixing
     /// preference.
@@ -241,6 +248,50 @@ final class AppState {
             guard dictationRecognizer != oldValue else { return }
             DictationRecognizer.selected = dictationRecognizer
             NotificationCenter.default.post(name: .saiityDictationSettingChanged, object: nil)
+        }
+    }
+
+    /// The profile is inferred from the real controls. A manual tweak becomes
+    /// Custom immediately instead of leaving a stale preset badge behind.
+    var dictationProfile: DictationProfile {
+        get {
+            let streaming = ASREngine(rawValue: UserDefaults.standard.string(forKey: "dictationStreamingEngine") ?? ASREngine.recommended.rawValue) ?? .recommended
+            if dictationRecognizer == .whisper,
+               WhisperDictationBackend.locale == "auto",
+               dictationCleanupEnabled { return .accurate }
+            if dictationRecognizer == .streaming,
+               streaming == .nemotron,
+               nemotronTier == 1120,
+               !dictationCleanupEnabled { return .fast }
+            if dictationRecognizer == .streaming,
+               streaming == .nemotron,
+               nemotronTier == NemotronEngine.chunkMs,
+               dictationCleanupEnabled { return .balanced }
+            return .custom
+        }
+        set {
+            guard newValue != .custom else { return }
+            switch newValue {
+            case .fast:
+                dictationRecognizer = .streaming
+                UserDefaults.standard.set(ASREngine.nemotron.rawValue, forKey: "dictationStreamingEngine")
+                nemotronTier = 1120
+                dictationCleanupEnabled = false
+            case .balanced:
+                dictationRecognizer = .streaming
+                UserDefaults.standard.set(ASREngine.nemotron.rawValue, forKey: "dictationStreamingEngine")
+                nemotronTier = NemotronEngine.chunkMs
+                dictationCleanupEnabled = true
+            case .accurate:
+                dictationRecognizer = .whisper
+                WhisperDictationBackend.locale = "auto"
+                dictationCleanupEnabled = true
+            case .custom:
+                break
+            }
+            NotificationCenter.default.post(name: .saiityDictationSettingChanged,
+                                            object: nil,
+                                            userInfo: ["refreshRuntime": true])
         }
     }
     /// Optional dedicated engine for press-to-talk translation. When unset,
@@ -316,10 +367,13 @@ final class AppState {
         }
     }
 
-    /// Writing back to CaptionStyle.current persists AND posts the change
-    /// notification, so the live bubble updates as the slider moves.
+    /// Caption and dictation bubbles keep separate persisted appearances, even
+    /// though they share the same rendering surface.
     var style: CaptionStyle = CaptionStyle.current {
         didSet { CaptionStyle.current = style }
+    }
+    var dictationStyle: CaptionStyle = CaptionStyle.currentDictation {
+        didSet { CaptionStyle.currentDictation = dictationStyle }
     }
 
     func refreshModels() {
@@ -721,17 +775,18 @@ enum SettingsWindowController {
 // MARK: - Views
 
 enum SettingsPane: String, CaseIterable, Hashable, Identifiable {
-    case captions, dictation, library
+    case setup, captions, dictation, library
 
     // Legacy destinations remain valid for menu notifications and older tests,
     // but are deliberately not presented as top-level navigation items.
     case models, transcripts, general
 
-    static var allCases: [SettingsPane] { [.captions, .dictation, .library] }
+    static var allCases: [SettingsPane] { [.setup, .captions, .dictation, .library] }
 
     var id: String { rawValue }
     var title: LocalizedStringKey {
         switch self {
+        case .setup: "Setup"
         case .captions: "Captions"
         case .dictation: "Dictation"
         case .library: "Library"
@@ -742,6 +797,7 @@ enum SettingsPane: String, CaseIterable, Hashable, Identifiable {
     }
     var symbol: String {
         switch self {
+        case .setup: "checklist"
         case .captions: "captions.bubble"
         case .dictation: "mic"
         case .library: "books.vertical"
@@ -760,7 +816,6 @@ struct SettingsRootView: View {
     @State private var selection: SettingsPane
     @State private var libraryTab: LibraryTab = .models
     @State private var sidebarVisible = true
-    @State private var showSupport = false
 
     private let sidebarWidth: CGFloat = 190
 
@@ -783,22 +838,12 @@ struct SettingsRootView: View {
                     .padding(.bottom, 8)
 
                     List(selection: $selection) {
+                        navigationRow(.setup)
                         navigationRow(.captions)
                         navigationRow(.dictation)
                         navigationRow(.library)
                     }
                     .listStyle(.sidebar)
-
-                    Button {
-                        showSupport = true
-                    } label: {
-                        Label("About & Support", systemImage: "info.circle")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
                 }
                 .frame(width: sidebarWidth)
                 .background(Color(nsColor: .underPageBackgroundColor))
@@ -816,20 +861,9 @@ struct SettingsRootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .saiitySelectSettingsPane)) { note in
             guard let raw = note.object as? String,
                   let pane = SettingsPane(rawValue: raw) else { return }
-            if pane == .general {
-                showSupport = true
-            } else {
-                if pane == .models { libraryTab = .models }
-                if pane == .transcripts { libraryTab = .transcripts }
-                selection = Self.primaryPane(for: pane)
-            }
-        }
-        .sheet(isPresented: $showSupport) {
-            SheetShell(title: "About & Support",
-                       subtitle: "Permissions, diagnostics, privacy, and app information.",
-                       width: 620, height: 560) {
-                GeneralView(state: state)
-            }
+            if pane == .models { libraryTab = .models }
+            if pane == .transcripts { libraryTab = .transcripts }
+            selection = Self.primaryPane(for: pane)
         }
     }
 
@@ -840,7 +874,8 @@ struct SettingsRootView: View {
 
     private static func primaryPane(for pane: SettingsPane) -> SettingsPane {
         switch pane {
-        case .models, .transcripts, .general: .library
+        case .models, .transcripts: .library
+        case .general: .setup
         default: pane
         }
     }
@@ -848,6 +883,11 @@ struct SettingsRootView: View {
     @ViewBuilder
     private func detailView(for pane: SettingsPane) -> some View {
         switch pane {
+        case .setup:
+            SettingsPage(title: pane.title, sidebarVisible: sidebarVisible,
+                         onToggleSidebar: { sidebarVisible.toggle() }) {
+                GeneralView(state: state)
+            }
         case .captions:
             SettingsPage(title: pane.title, sidebarVisible: sidebarVisible,
                          onToggleSidebar: { sidebarVisible.toggle() }) {

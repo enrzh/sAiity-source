@@ -108,6 +108,42 @@ import Testing
         #expect(ASREngine.selected == .parakeetEou)
     }
 
+    @Test("dictation profiles map to the existing runtime controls")
+    func dictationProfilesApplyWithoutChangingCaptionEngine() {
+        let defaults = UserDefaults.standard
+        let keys = ["dictationRecognizer", "dictationStreamingEngine", "nemotronChunkMs",
+                    "dictationCleanupEnabled", "whisperDictationLocale", "asrEngine"]
+        let snapshot = keys.map { ($0, defaults.object(forKey: $0)) }
+        defer {
+            snapshot.forEach { key, value in
+                if let value { defaults.set(value, forKey: key) }
+                else { defaults.removeObject(forKey: key) }
+            }
+        }
+
+        defaults.set(ASREngine.parakeetEou.rawValue, forKey: "asrEngine")
+        defaults.removeObject(forKey: "dictationRecognizer")
+        defaults.removeObject(forKey: "dictationStreamingEngine")
+        defaults.removeObject(forKey: "nemotronChunkMs")
+        defaults.removeObject(forKey: "dictationCleanupEnabled")
+        defaults.removeObject(forKey: "whisperDictationLocale")
+
+        let state = AppState()
+        #expect(state.dictationProfile == .balanced)
+
+        state.dictationProfile = .fast
+        #expect(state.dictationRecognizer == .streaming)
+        #expect(defaults.string(forKey: "dictationStreamingEngine") == ASREngine.nemotron.rawValue)
+        #expect(state.nemotronTier == 1120)
+        #expect(!state.dictationCleanupEnabled)
+
+        state.dictationProfile = .accurate
+        #expect(state.dictationRecognizer == .whisper)
+        #expect(WhisperDictationBackend.locale == "auto")
+        #expect(state.dictationCleanupEnabled)
+        #expect(ASREngine.selected == .parakeetEou)
+    }
+
     @Test("dictation translation is opt-in and persisted")
     func dictationTranslationIsOptIn() {
         let defaults = UserDefaults.standard

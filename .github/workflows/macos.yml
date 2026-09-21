@@ -58,5 +58,11 @@ jobs:
           codesign --verify --deep --strict build/sAiity.app
           build/sAiity.app/Contents/MacOS/sAiity --version
 
+      - name: Verify release bundle hardening
+        run: ./scripts/verify-release.sh build/sAiity.app
+
+      - name: Check model matrix harness
+        run: ./scripts/model-matrix.sh --check-only
+
       - name: Check repository formatting
         run: git diff --check

@@ -49,6 +49,7 @@ enum AssetRemoval: Sendable {
 enum AssetUse: Sendable {
     case never
     case whenRecognitionEngine(ASREngine)
+    case whenSpeakerDiarization
     /// One latency tier of the Nemotron model. Only the selected tier counts as
     /// in use — the other is just bytes that can be deleted freely.
     case whenNemotronTier(chunkMs: Int)
@@ -61,7 +62,8 @@ enum AssetUse: Sendable {
         case .whenTranslator(let engine): return engine.isAdvanced
         case .whenQwenVariant: return true
         case .whenCleanupModel: return false
-        case .never, .whenRecognitionEngine, .whenNemotronTier: return false
+        case .never, .whenRecognitionEngine, .whenSpeakerDiarization,
+             .whenNemotronTier: return false
         }
     }
 
@@ -72,6 +74,8 @@ enum AssetUse: Sendable {
             return false
         case .whenRecognitionEngine(let e):
             return ASREngine.selected == e
+        case .whenSpeakerDiarization:
+            return UserDefaults.standard.bool(forKey: "speakerLabelsEnabled")
         case .whenNemotronTier(let ms):
             return ASREngine.selected == .nemotron && NemotronEngine.selectedChunkMs == ms
         case .whenTranslator(let t):
@@ -202,6 +206,7 @@ enum ModelRegistry {
 
     static func assets() -> [ModelAsset] {
         ASREngine.allCases.flatMap(\.assetDescriptors)
+            + [SpeakerDiarizationModel.asset]
             + TranslationEngine.allCases.flatMap(\.assetDescriptors)
     }
 

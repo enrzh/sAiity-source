@@ -423,9 +423,17 @@ private final class FlippedDocumentView: NSView {
 }
 
 private final class CaptionRowView: NSView {
+    let speaker = NSTextField(labelWithString: "")
     let original = NSTextField(labelWithString: "")
     let translation = NSTextField(labelWithString: "")
     private var style = CaptionStyle()
+    private var originalPointSize: CGFloat?
+    private var translationPointSize: CGFloat?
+    private static let textHeightCache: NSCache<NSString, NSNumber> = {
+        let cache = NSCache<NSString, NSNumber>()
+        cache.countLimit = 512
+        return cache
+    }()
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -433,15 +441,21 @@ private final class CaptionRowView: NSView {
         // free of Auto Layout also removes a second re-entry point while the
         // scroll document is first being displayed on macOS 27.
         translatesAutoresizingMaskIntoConstraints = true
+        addSubview(speaker)
         addSubview(original)
         addSubview(translation)
-        for text in [original, translation] {
+        for text in [speaker, original, translation] {
             text.alignment = .center
             text.lineBreakMode = .byWordWrapping
             text.cell?.wraps = true
             text.translatesAutoresizingMaskIntoConstraints = true
             text.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         }
+        speaker.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        speaker.textColor = .secondaryLabelColor
+        speaker.isHidden = true
+        speaker.setAccessibilityRole(.staticText)
+        speaker.setAccessibilityLabel(String(localized: "Speaker"))
         original.setAccessibilityRole(.staticText)
         original.setAccessibilityLabel(String(localized: "Live caption"))
         translation.setAccessibilityRole(.staticText)
@@ -453,11 +467,30 @@ private final class CaptionRowView: NSView {
     override func layout() {
         super.layout()
         let width = max(1, bounds.width)
+        let originalFont = style.original.stabilizedFont(
+            for: original.stringValue,
+            width: width,
+            minimumSize: 18,
+            maxLines: style.original.maxLines,
+            previousPointSize: originalPointSize)
+        originalPointSize = originalFont.pointSize
+        original.font = originalFont
         let originalHeight = Self.textHeight(original.stringValue,
-                                              font: style.original.font,
+                                              font: originalFont,
                                               width: width,
                                               maxLines: style.original.maxLines)
         var top = bounds.height
+        if !speaker.isHidden {
+            let speakerFont = speaker.font ?? NSFont.systemFont(ofSize: 11)
+            let speakerHeight = ceil(speakerFont.ascender
+                                     - speakerFont.descender
+                                     + speakerFont.leading)
+            speaker.frame = NSRect(x: 0, y: max(0, top - speakerHeight),
+                                   width: width, height: speakerHeight)
+            top -= speakerHeight + 3
+        } else {
+            speaker.frame = .zero
+        }
         original.frame = NSRect(x: 0,
                                 y: max(0, top - originalHeight),
                                 width: width,
@@ -469,9 +502,17 @@ private final class CaptionRowView: NSView {
 
         if !translation.isHidden {
             top -= CGFloat(style.lineGap)
+            let translationFont = style.translation.stabilizedFont(
+                for: translation.stringValue.isEmpty ? " " : translation.stringValue,
+                width: width,
+                minimumSize: 16,
+                maxLines: style.translation.maxLines,
+                previousPointSize: translationPointSize)
+            translationPointSize = translationFont.pointSize
+            translation.font = translationFont
             let translationHeight = Self.textHeight(
                 translation.stringValue.isEmpty ? " " : translation.stringValue,
-                font: style.translation.font,
+                font: translationFont,
                 width: width,
                 maxLines: style.translation.maxLines)
             translation.frame = NSRect(x: 0,
@@ -503,6 +544,8 @@ private final class CaptionRowView: NSView {
 
     func set(entry: CaptionHistoryEntry, style: CaptionStyle, staleDim: CGFloat,
              reserveTranslation: Bool) {
+        speaker.stringValue = entry.speakerLabel ?? ""
+        speaker.isHidden = entry.speakerLabel?.isEmpty ?? true
         original.stringValue = entry.original
         translation.stringValue = entry.translation ?? ""
         apply(style: style,
@@ -513,8 +556,13 @@ private final class CaptionRowView: NSView {
     static func textHeight(_ text: String, font: NSFont, width: CGFloat,
                            maxLines: Int) -> CGFloat {
         guard !text.isEmpty else { return 0 }
+        let cacheWidth = max(1, floor(width / 4) * 4)
+        let key = "\(text)|\(font.fontName)|\(font.pointSize)|\(maxLines)|\(cacheWidth)" as NSString
+        if let cached = textHeightCache.object(forKey: key) {
+            return CGFloat(cached.doubleValue)
+        }
         let rect = (text as NSString).boundingRect(
-            with: NSSize(width: max(1, width), height: .greatestFiniteMagnitude),
+            with: NSSize(width: cacheWidth, height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading],
             attributes: [.font: font])
         var height = ceil(rect.height)
@@ -522,20 +570,30 @@ private final class CaptionRowView: NSView {
             let line = ceil(font.ascender - font.descender + font.leading)
             height = min(height, line * CGFloat(maxLines) + 2)
         }
+        textHeightCache.setObject(NSNumber(value: Double(height)), forKey: key)
         return height
     }
 
     static func height(for entry: CaptionHistoryEntry, style: CaptionStyle,
-                       originalFont: NSFont, translationFont: NSFont,
                        width: CGFloat, reserveTranslation: Bool) -> CGFloat {
+        let originalFont = style.original.fittedFont(for: entry.original,
+                                                     width: width,
+                                                     minimumSize: 18,
+                                                     maxLines: style.original.maxLines)
         let original = textHeight(entry.original, font: originalFont,
                                   width: width, maxLines: style.original.maxLines)
+        let speakerHeight: CGFloat = (entry.speakerLabel?.isEmpty ?? true) ? 0 : 18
         guard style.showTranslation,
               reserveTranslation || !(entry.translation ?? "").isEmpty else {
-            return original
+            return original + speakerHeight + (speakerHeight > 0 ? 3 : 0)
         }
         let t = entry.translation ?? " "
-        return original + CGFloat(style.lineGap)
+        let translationFont = style.translation.fittedFont(for: t,
+                                                           width: width,
+                                                           minimumSize: 16,
+                                                           maxLines: style.translation.maxLines)
+        return speakerHeight + original + (speakerHeight > 0 ? 3 : 0)
+            + CGFloat(style.lineGap)
             + textHeight(t, font: translationFont, width: width,
                          maxLines: style.translation.maxLines)
     }
@@ -859,14 +917,10 @@ final class OverlayWindow: NSPanel {
         // and the bubble grows until the persisted limit, then the scroll view
         // carries the older rows.
         var contentH: CGFloat = 0
-        let originalFont = st.original.font
-        let translationFont = st.translation.font
         for (index, entry) in history.entries.enumerated() {
             let reserve = reservesTranslationRow
                 && entry.sentenceID == history.entries.last?.sentenceID
             contentH += CaptionRowView.height(for: entry, style: st,
-                                              originalFont: originalFont,
-                                              translationFont: translationFont,
                                               width: contentW,
                                               reserveTranslation: reserve)
             if index > 0 { contentH += Self.historyRowGap }
@@ -1077,8 +1131,8 @@ final class OverlayWindow: NSPanel {
     func showPreview() {
         let st = CaptionStyle.current
         clearHistory()
-        show(text: CaptionStyle.sampleOriginal, isFinal: true, sentenceID: -1)
-        showTranslation(st.showTranslation ? CaptionStyle.sampleTranslation : "",
+        show(text: CaptionStyle.longPreviewOriginal, isFinal: true, sentenceID: -1)
+        showTranslation(st.showTranslation ? CaptionStyle.longPreviewTranslation : "",
                         forSentenceID: -1)
         presentIfNeeded()
     }
@@ -1107,10 +1161,11 @@ final class OverlayWindow: NSPanel {
 
     /// `text` is shown dimmed while volatile so it is visually obvious the
     /// engine may still revise it.
-    func show(text: String, isFinal: Bool, sentenceID: Int? = nil) {
+    func show(text: String, isFinal: Bool, sentenceID: Int? = nil,
+              speakerLabel: String? = nil) {
         let id = sentenceID ?? history.entries.last?.sentenceID ?? -1
         if !text.isEmpty {
-            history.upsertOriginal(text, sentenceID: id)
+            history.upsertOriginal(text, sentenceID: id, speakerLabel: speakerLabel)
             renderHistory(changedSentenceID: id)
         }
         // effectiveStyle, not CaptionStyle.current: captions update several
@@ -1121,6 +1176,17 @@ final class OverlayWindow: NSPanel {
         rowViews[id]?.original.alphaValue = isFinal
             ? st.original.opacity : st.original.volatileOpacity
         guard !st.hidden else { orderOut(nil); return }
+        presentIfNeeded()
+    }
+
+    /// Replace one completed row without disturbing its translation or the
+    /// surrounding history. The caller keeps the source text for fallback.
+    func replaceOriginal(_ text: String, forSentenceID sentenceID: Int,
+                         speakerLabel: String? = nil) {
+        guard !text.isEmpty else { return }
+        history.upsertOriginal(text, sentenceID: sentenceID,
+                               speakerLabel: speakerLabel)
+        renderHistory(changedSentenceID: sentenceID)
         presentIfNeeded()
     }
 
@@ -1210,8 +1276,6 @@ final class OverlayWindow: NSPanel {
             let reserve = reservesTranslationRow
                 && entry.sentenceID == history.entries.last?.sentenceID
             let height = CaptionRowView.height(for: entry, style: st,
-                                               originalFont: st.original.font,
-                                               translationFont: st.translation.font,
                                                width: width,
                                                reserveTranslation: reserve)
             row.frame = NSRect(x: 0, y: y, width: width, height: max(1, height))

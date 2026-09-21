@@ -47,7 +47,7 @@ import Testing
                                 }, stop: { await translator.stop() })
                             }
                         }
-                        print("CLEANUP_BENCH model=\(model.file) mode=\(mode) round=\(round) fixture=\(index) seconds=\(seconds(start)) text=\(result?.text ?? "nil") memory=\(MemoryPolicy.describeFootprint())")
+                        print("CLEANUP_BENCH model=\(model.file) mode=\(mode) round=\(round) fixture=\(index) seconds=\(seconds(start)) outputChars=\(result?.text.count ?? 0) memory=\(MemoryPolicy.describeFootprint())")
                         #expect(result != nil)
                         #expect(result?.languageMetadata.regionLanguages == fixture.languageMetadata.regionLanguages)
                     }

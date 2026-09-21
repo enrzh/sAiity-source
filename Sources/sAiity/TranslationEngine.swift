@@ -13,7 +13,74 @@ protocol Translating: AnyObject, Sendable {
     /// Nil means "could not translate" — the caller keeps the original line
     /// rather than showing nothing.
     func translate(_ text: String, from source: String, to target: String) async -> String?
+    /// Optional one-call path for several independent regions. Engines that do
+    /// not support strict markers return nil and the caller falls back to the
+    /// existing sequential path.
+    func translateRegions(_ regions: [TranslationRegion], to target: String) async -> [String]?
     func stop() async
+}
+
+extension Translating {
+    func translateRegions(_ regions: [TranslationRegion], to target: String) async -> [String]? {
+        nil
+    }
+}
+
+/// A source span passed to a translator without flattening code-switched text
+/// into one misleading source-language claim.
+struct TranslationRegion: Equatable, Sendable {
+    let text: String
+    let source: String
+}
+
+/// Marker framing for a batched native translation. The parser is deliberately
+/// strict: a malformed or reordered response is a batch miss, never a reason
+/// to put marker text on the user's clipboard.
+enum TranslationBatchMarkers {
+    private static let prefix = "<sAiity-translation-region-"
+
+    static func encode(_ regions: [TranslationRegion]) -> String? {
+        guard regions.count > 1 else { return nil }
+        guard !regions.contains(where: { $0.text.contains(prefix) }) else { return nil }
+        return regions.enumerated().map { index, region in
+            "\(marker(index))\n\(region.text.trimmingCharacters(in: .whitespacesAndNewlines))\n"
+        }.joined()
+    }
+
+    static func decode(_ raw: String, count: Int) -> [String]? {
+        guard count > 1 else { return nil }
+        let whole = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard whole.hasPrefix(marker(0)) else { return nil }
+
+        var result: [String] = []
+        result.reserveCapacity(count)
+        for index in 0..<count {
+            let current = marker(index)
+            guard let currentRange = whole.range(of: current) else { return nil }
+            let contentStart = currentRange.upperBound
+            let contentEnd: String.Index
+            if index + 1 < count {
+                guard let nextRange = whole.range(of: marker(index + 1),
+                                                  range: contentStart..<whole.endIndex) else {
+                    return nil
+                }
+                contentEnd = nextRange.lowerBound
+            } else {
+                contentEnd = whole.endIndex
+            }
+            let value = whole[contentStart..<contentEnd]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty,
+                  !value.contains(prefix),
+                  !value.contains("<sAiity-translation-region-") else { return nil }
+            result.append(String(value))
+        }
+        return result.count == count ? result : nil
+    }
+
+    private static func marker(_ index: Int) -> String {
+        prefix + String(index) + ">"
+    }
 }
 
 /// Compares language identity without treating a regional/script variant as a

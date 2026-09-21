@@ -46,6 +46,12 @@ final class NemotronEngine: FluidStreamingEngine, @unchecked Sendable {
         set { UserDefaults.standard.set(newValue, forKey: "nemotronChunkMs") }
     }
 
+    /// A missing preference means the user has not chosen a tier and adaptive
+    /// dictation may select among tiers already on disk.
+    static var hasExplicitChunkSelection: Bool {
+        UserDefaults.standard.object(forKey: "nemotronChunkMs") != nil
+    }
+
     /// This instance's tier — fixed at init, because the tier IS the model: each
     /// one is its own ~640 MB directory with the chunk size baked into the
     /// encoder. Switching tiers means a different backend, not a setting.

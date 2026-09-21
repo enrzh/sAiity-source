@@ -92,6 +92,23 @@ struct LanguageDetector {
         detected = nil
     }
 
+    /// Detect one sufficiently complete caption without using the session's
+    /// accumulated dominant language. Live captions can switch languages
+    /// between sentences, so the session result is only a fallback for short
+    /// or ambiguous lines.
+    static func languageCode(in text: String,
+                             minimumCharacters: Int = 18,
+                             minimumProbability: Double = 0.80) -> String? {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard value.count >= minimumCharacters else { return nil }
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(value)
+        guard let language = recognizer.dominantLanguage else { return nil }
+        let probability = recognizer.languageHypotheses(withMaximum: 1)[language] ?? 0
+        guard probability >= minimumProbability else { return nil }
+        return language.rawValue
+    }
+
     /// The installed transcriber locale that best matches a detected language,
     /// or nil when no model for it is on disk. Detection can only ever choose
     /// among installed models.

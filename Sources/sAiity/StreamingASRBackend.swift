@@ -136,10 +136,18 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
     }
 
     private let pendingLock = NSLock()
-    private var pending: [Float] = []
+    private var pending = FloatRingBuffer()
+    /// Reused by the pump so handing a batch to the engine does not trigger a
+    /// copy-on-write copy when `pending` is cleared.
+    private var processing: [Float] = []
+    private var processedAudioSamples = 0
+    private var processingWallSeconds = 0.0
+    private var processedBatchCount = 0
+    private var peakPendingSamples = 0
     /// True while the backlog is over its cap, so the log records the onset
     /// rather than one line per audio callback, fifty times a second.
     private var overflowing = false
+    private let onPerformance: (@Sendable (Double, Double) -> Void)?
 
     /// How much un-processed audio may pile up before the oldest is dropped.
     ///
@@ -162,6 +170,7 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
     /// stopping the task, and two callers must not both believe they own it.
     private let pumpLock = NSLock()
     private var pump: Task<Void, Never>?
+    private var wakeContinuation: AsyncStream<Void>.Continuation?
 
     #if SAIITY_TEST_HOOKS
     /// Test-only view of the backlog. The cap is the whole point of `feed`, and
@@ -177,28 +186,37 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
     /// second pump, or a `finish()`, re-enter the actor and corrupt its buffer
     /// offset.
     private func stopPump() async {
-        guard let p = (pumpLock.withLock { () -> Task<Void, Never>? in
+        let (p, wake) = pumpLock.withLock { () -> (Task<Void, Never>?, AsyncStream<Void>.Continuation?) in
             let p = pump
             pump = nil
-            return p
-        }) else { return }
+            let wake = wakeContinuation
+            wakeContinuation = nil
+            return (p, wake)
+        }
+        wake?.finish()
+        guard let p else { return }
         p.cancel()
         await p.value
     }
 
     private func stopPumpAndClearPending() async {
         await stopPump()
+        logAndResetPerformance()
         // Not `keepingCapacity`: a stopped session should not retain its
         // high-water audio allocation while the loaded model remains cached.
         pendingLock.withLock {
-            pending = []
+            pending.removeAll(keepingCapacity: false)
+            processing = []
             overflowing = false
         }
     }
 
-    init(name: String, engine: any FluidStreamingEngine) {
+    init(name: String,
+         engine: any FluidStreamingEngine,
+         onPerformance: (@Sendable (Double, Double) -> Void)? = nil) {
         self.name = name
         self.engine = engine
+        self.onPerformance = onPerformance
     }
 
     var inputFormat: AVAudioFormat? {
@@ -219,6 +237,7 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
         // exactly the overlap this type exists to prevent, and it is how the
         // buffer-offset trap documented above was reached in the field.
         await stopPump()
+        logAndResetPerformance()
         // Reset the streaming state while retaining the loaded weights. This
         // covers both the first start and a start after an interrupted session.
         await engine.reset()
@@ -226,7 +245,14 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
         commitLock.withLock { committed = ""; lastSeen = ""; lastCommitAt = Date() }
         sessionStart = Date()
         lastFinalEnd = 0
-        pendingLock.withLock { pending.removeAll(keepingCapacity: true) }
+        pendingLock.withLock {
+            pending.removeAll(keepingCapacity: true)
+            processing.removeAll(keepingCapacity: true)
+            processedAudioSamples = 0
+            processingWallSeconds = 0
+            processedBatchCount = 0
+            peakPendingSamples = 0
+        }
 
         await engine.setPartial { [weak self] text in
             guard let self else { return }
@@ -271,22 +297,38 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
         }
 
         // The single pump. See the type doc for why this is a correctness
-        // requirement rather than an optimisation.
-        pumpLock.withLock {
-        pump = Task { [weak self] in
-            while !Task.isCancelled {
-                guard let self else { return }
-                let batch: [Float] = self.pendingLock.withLock {
-                    defer { self.pending.removeAll(keepingCapacity: true) }
-                    return self.pending
-                }
-                guard !batch.isEmpty else {
-                    try? await Task.sleep(nanoseconds: 80_000_000)
-                    continue
-                }
-                try? await self.engine.process(batch)
-            }
+        // requirement rather than an optimisation. Audio arrival wakes the
+        // pump immediately; the old fixed sleep added up to 80 ms before every
+        // otherwise-idle stream could begin processing.
+        let wakeStream = AsyncStream<Void>(bufferingPolicy: .bufferingNewest(1)) { continuation in
+            pumpLock.withLock { wakeContinuation = continuation }
         }
+        pumpLock.withLock {
+            pump = Task { [weak self] in
+                for await _ in wakeStream {
+                    guard let self else { return }
+                    while !Task.isCancelled {
+                        let hasBatch = self.pendingLock.withLock { () -> Bool in
+                            guard !self.pending.isEmpty else { return false }
+                            self.pending.drain(into: &self.processing)
+                            return !self.processing.isEmpty
+                        }
+                        guard hasBatch else { break }
+                        let batchSamples = self.processing.count
+                        let started = ContinuousClock.now
+                        try? await self.engine.process(self.processing)
+                        let elapsed = started.duration(to: .now).components
+                        let wallSeconds = Double(elapsed.seconds)
+                            + Double(elapsed.attoseconds) / 1_000_000_000_000_000_000
+                        self.pendingLock.withLock {
+                            self.processedAudioSamples += batchSamples
+                            self.processingWallSeconds += wallSeconds
+                            self.processedBatchCount += 1
+                            self.processing.removeAll(keepingCapacity: true)
+                        }
+                    }
+                }
+            }
         }
         sessionStarted = true
     }
@@ -300,7 +342,8 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
         let src = UnsafeBufferPointer(start: ch[0], count: n)
         let cap = maxPendingSamples
         pendingLock.withLock {
-            pending.append(contentsOf: src)
+            pending.append(src)
+            peakPendingSamples = max(peakPendingSamples, pending.count)
             // See maxPendingSeconds. `count > cap` is what makes the removal
             // count strictly smaller than the array — the unclamped version of
             // this arithmetic is what traps inside FluidAudio.
@@ -308,12 +351,34 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
                 overflowing = false
                 return
             }
-            pending.removeFirst(pending.count - cap)
+            pending.dropFirst(pending.count - cap)
             if !overflowing {
                 overflowing = true
                 NSLog("sAiity asr: \(name) backlog over \(Int(Self.maxPendingSeconds))s — dropping oldest audio")
             }
         }
+        let wake = pumpLock.withLock { wakeContinuation }
+        wake?.yield(())
+    }
+
+    private func logAndResetPerformance() {
+        let metrics = pendingLock.withLock { () -> (Int, Double, Int, Int) in
+            defer {
+                processedAudioSamples = 0
+                processingWallSeconds = 0
+                processedBatchCount = 0
+                peakPendingSamples = 0
+            }
+            return (processedAudioSamples, processingWallSeconds,
+                    processedBatchCount, peakPendingSamples)
+        }
+        guard metrics.2 > 0 else { return }
+        let audioSeconds = Double(metrics.0) / engine.sampleRate
+        let realTimeFactor = metrics.1 / max(audioSeconds, 0.001)
+        let peakBacklogSeconds = Double(metrics.3) / engine.sampleRate
+        onPerformance?(realTimeFactor, peakBacklogSeconds)
+        NSLog("sAiity caption timing: backend=%@ audio=%.3fs compute=%.3fs rtf=%.3f batches=%d peak-backlog=%.3fs",
+              name, audioSeconds, metrics.1, realTimeFactor, metrics.2, peakBacklogSeconds)
     }
 
     /// Audio went silent: whatever is still volatile is a finished utterance.

@@ -19,6 +19,9 @@ struct DictationASRPerformanceTests {
         let name: String
         let samples: [Float]
         let regions: [DictationSpeechRegion]
+        let expectedText: String?
+        let expectedLanguages: [String]?
+        let maxWER: Double?
     }
 
     /// The app's Nemotron loader also offers downloads. This adapter uses only
@@ -44,6 +47,7 @@ struct DictationASRPerformanceTests {
     }
 
     private func fixtures(in directory: URL) throws -> [Fixture] {
+        let manifest = try DictationBenchmarkManifest.load(from: directory)
         let urls = try FileManager.default.contentsOfDirectory(at: directory,
             includingPropertiesForKeys: nil).filter { $0.pathExtension.lowercased() == "wav" }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
@@ -70,15 +74,23 @@ struct DictationASRPerformanceTests {
             guard samples.allSatisfy({ $0.isFinite }) else {
                 throw BenchmarkError("Non-finite samples in \(url.lastPathComponent)")
             }
+            let metadata = manifest[url.lastPathComponent]
             return Fixture(name: url.lastPathComponent, samples: samples,
-                           regions: SpeechRegionSegmenter.default.segment(samples, sampleRate: 16_000))
+                           regions: SpeechRegionSegmenter.default.segment(samples, sampleRate: 16_000),
+                           expectedText: metadata?.expectedText,
+                           expectedLanguages: metadata?.expectedLanguages,
+                           maxWER: metadata?.maxWER)
         }
     }
 
     private func record(_ fields: [String: Any], since start: ContinuousClock.Instant) throws {
         let duration = start.duration(to: .now).components
         var fields = fields
-        fields["seconds"] = Double(duration.seconds) + Double(duration.attoseconds) / 1e18
+        let seconds = Double(duration.seconds) + Double(duration.attoseconds) / 1e18
+        fields["seconds"] = seconds
+        if let audioSeconds = fields["audioSeconds"] as? Double, audioSeconds > 0 {
+            fields["realTimeFactor"] = seconds / audioSeconds
+        }
         let data = try JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys])
         print("SAIITY_ASR_BENCHMARK " + String(decoding: data, as: UTF8.self))
     }
@@ -90,13 +102,32 @@ struct DictationASRPerformanceTests {
                 try Task.checkCancellation()
                 let start = ContinuousClock.now
                 let result = try await decode(fixture)
-                try record(["model": model, "phase": "warm_segmented_decode", "fixture": fixture.name,
-                            "run": run, "audioSeconds": Double(fixture.samples.count) / 16_000,
-                            "inputRegions": fixture.regions.count, "transcript": result.text,
-                            "languages": result.languageMetadata.regionLanguages.map { $0 ?? "unknown" },
-                            "regions": result.regions.map {
-                                ["text": $0.text, "language": $0.language ?? "unknown"]
-                            }], since: start)
+                let audioSeconds = Double(fixture.samples.count) / 16_000
+                var fields: [String: Any] = [
+                    "model": model,
+                    "phase": "warm_segmented_decode",
+                    "fixture": fixture.name,
+                    "run": run,
+                    "audioSeconds": audioSeconds,
+                    "inputRegions": fixture.regions.count,
+                    "outputChars": result.text.count,
+                    "languages": result.languageMetadata.regionLanguages.map { $0 ?? "unknown" },
+                    "outputRegions": result.regions.count,
+                ]
+                if let expectedText = fixture.expectedText {
+                    let wer = DictationBenchmarkScorer.wordErrorRate(reference: expectedText,
+                                                                      hypothesis: result.text)
+                    fields["wer"] = wer
+                    if let maxWER = fixture.maxWER, wer > maxWER {
+                        throw BenchmarkError("\(fixture.name): \(model) WER \(wer) exceeds max \(maxWER)")
+                    }
+                }
+                if let expectedLanguages = fixture.expectedLanguages {
+                    fields["languagePreserved"] = DictationBenchmarkScorer.preservesLanguageSequence(
+                        expected: expectedLanguages,
+                        actual: result.languageMetadata.regionLanguages.compactMap { $0 })
+                }
+                try record(fields, since: start)
             }
         }
     }

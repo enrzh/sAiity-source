@@ -72,20 +72,20 @@ import Testing
         DictationToastWindow.accessibilityPreferences = DictationToastWindow.systemAccessibilityPreferences
     }
 
-    @Test("Liquid Glass is shared by the dictation bubble")
+    @Test("Liquid Glass is configurable on the dictation bubble")
     func liquidGlassStyle() {
         let defaults = UserDefaults.standard
-        let previous = defaults.data(forKey: CaptionStyle.key)
+        let previous = defaults.data(forKey: CaptionStyle.dictationKey)
         DictationToastWindow.accessibilityPreferences = { (false, false, false) }
         defer {
-            if let previous { defaults.set(previous, forKey: CaptionStyle.key) }
-            else { defaults.removeObject(forKey: CaptionStyle.key) }
+            if let previous { defaults.set(previous, forKey: CaptionStyle.dictationKey) }
+            else { defaults.removeObject(forKey: CaptionStyle.dictationKey) }
             DictationToastWindow.accessibilityPreferences = DictationToastWindow.systemAccessibilityPreferences
         }
 
-        var style = CaptionStyle.current
+        var style = CaptionStyle.currentDictation
         style.glassStyle = CaptionStyle.liquidGlass
-        CaptionStyle.current = style
+        CaptionStyle.currentDictation = style
         let window = makeWindow()
         #expect(window.renderedBubbleStyleForTests == CaptionStyle.liquidGlass)
         #expect(window.usesLiquidGlassForTests)
@@ -95,37 +95,85 @@ import Testing
     @Test("Liquid Glass falls back to solid for reduced transparency")
     func liquidGlassAccessibilityFallback() {
         let defaults = UserDefaults.standard
-        let previous = defaults.data(forKey: CaptionStyle.key)
+        let previous = defaults.data(forKey: CaptionStyle.dictationKey)
         DictationToastWindow.accessibilityPreferences = { (false, true, false) }
         defer {
-            if let previous { defaults.set(previous, forKey: CaptionStyle.key) }
-            else { defaults.removeObject(forKey: CaptionStyle.key) }
+            if let previous { defaults.set(previous, forKey: CaptionStyle.dictationKey) }
+            else { defaults.removeObject(forKey: CaptionStyle.dictationKey) }
             DictationToastWindow.accessibilityPreferences = DictationToastWindow.systemAccessibilityPreferences
         }
 
-        var style = CaptionStyle.current
+        var style = CaptionStyle.currentDictation
         style.glassStyle = CaptionStyle.liquidGlass
-        CaptionStyle.current = style
+        CaptionStyle.currentDictation = style
         let window = makeWindow()
         #expect(window.renderedBubbleStyleForTests == CaptionStyle.solidGlass)
         #expect(!window.usesLiquidGlassForTests)
         window.dismiss()
     }
 
+    @Test("dictation styling is independent and resizes the result bubble")
+    func dictationStyleIsIndependentAndLive() async {
+        let defaults = UserDefaults.standard
+        let previousCaption = defaults.data(forKey: CaptionStyle.key)
+        let previousDictation = defaults.data(forKey: CaptionStyle.dictationKey)
+        defer {
+            if let previousCaption { defaults.set(previousCaption, forKey: CaptionStyle.key) }
+            else { defaults.removeObject(forKey: CaptionStyle.key) }
+            if let previousDictation { defaults.set(previousDictation, forKey: CaptionStyle.dictationKey) }
+            else { defaults.removeObject(forKey: CaptionStyle.dictationKey) }
+        }
+
+        var caption = CaptionStyle.current
+        caption.glassStyle = CaptionStyle.liquidGlass
+        CaptionStyle.current = caption
+
+        var dictation = CaptionStyle.dictationDefaults
+        dictation.glassStyle = CaptionStyle.regularGlass
+        dictation.dictationWidth = 360
+        dictation.original.fontSize = 20
+        CaptionStyle.currentDictation = dictation
+
+        let window = makeWindow()
+        #expect(window.renderedBubbleStyleForTests == CaptionStyle.regularGlass)
+        window.show(resultText: "A result styled independently from captions.", autoDismissAfter: nil)
+        #expect(window.frame.width == 360)
+        #expect(window.resultFontSizeForTests == 20)
+
+        dictation.dictationWidth = 420
+        CaptionStyle.currentDictation = dictation
+        await Task.yield()
+        await Task.yield()
+        #expect(window.frame.width == 420)
+        window.dismiss()
+    }
+
+    @Test("dictation preview shows a result bubble")
+    func dictationPreviewShowsResult() async {
+        let window = makeWindow()
+        NotificationCenter.default.post(name: .saiityDictationPreview, object: nil)
+        await Task.yield()
+        await Task.yield()
+
+        #expect(window.resultVisibleForTests)
+        #expect(window.resultTextForTests == CaptionStyle.longDictationPreview)
+        window.dismiss()
+    }
+
     @Test("changing dictation bubble styles keeps its content attached")
     func styleChangesPreserveDictationContent() async {
         let defaults = UserDefaults.standard
-        let previous = defaults.data(forKey: CaptionStyle.key)
+        let previous = defaults.data(forKey: CaptionStyle.dictationKey)
         DictationToastWindow.accessibilityPreferences = { (false, false, false) }
         defer {
-            if let previous { defaults.set(previous, forKey: CaptionStyle.key) }
-            else { defaults.removeObject(forKey: CaptionStyle.key) }
+            if let previous { defaults.set(previous, forKey: CaptionStyle.dictationKey) }
+            else { defaults.removeObject(forKey: CaptionStyle.dictationKey) }
             DictationToastWindow.accessibilityPreferences = DictationToastWindow.systemAccessibilityPreferences
         }
 
-        var style = CaptionStyle.current
+        var style = CaptionStyle.currentDictation
         style.glassStyle = CaptionStyle.regularGlass
-        CaptionStyle.current = style
+        CaptionStyle.currentDictation = style
         let window = makeWindow()
         window.show(phase: .dictating)
         #expect(window.bubbleContentAttachedForTests)
@@ -136,7 +184,7 @@ import Testing
                            CaptionStyle.clearGlass, CaptionStyle.solidGlass,
                            CaptionStyle.liquidGlass, CaptionStyle.regularGlass] {
             style.glassStyle = glassStyle
-            CaptionStyle.current = style
+            CaptionStyle.currentDictation = style
             await Task.yield()
             await Task.yield()
             #expect(window.bubbleContentAttachedForTests,
@@ -342,11 +390,46 @@ import Testing
         let window = makeWindow()
         window.show(phase: .dictating)
         #expect(window.waveformVisibleForTests)
+        #expect(!window.resultVisibleForTests)
         #expect(window.frame.width == 224)
         #expect(window.waveformFrameForTests.width >= 172)
         #expect(window.waveformFrameForTests.height >= 34)
         window.show(phase: .transcribing)
         #expect(!window.waveformVisibleForTests)
+        window.dismiss()
+    }
+
+    @Test("completed dictation is shown as a scrollable bubble result")
+    func completedDictationShowsResultText() {
+        let window = makeWindow()
+        let text = String(repeating: "This is a completed dictation. ", count: 40)
+
+        window.show(resultText: text, autoDismissAfter: nil)
+
+        #expect(window.resultVisibleForTests)
+        #expect(!window.labelVisibleForTests)
+        #expect(window.resultTextForTests == text)
+        #expect(window.frame.height <= 420)
+        #expect(window.resultScrollFrameForTests.height > 0)
+
+        window.show(phase: .dictating)
+        #expect(!window.resultVisibleForTests)
+        #expect(window.waveformVisibleForTests)
+        #expect(window.frame.height == 54)
+        window.dismiss()
+    }
+
+    @Test("returning from a result restores the compact bubble height")
+    func resultHeightDoesNotPersistIntoStatus() {
+        let window = makeWindow()
+        window.show(resultText: String(repeating: "Long result. ", count: 40), autoDismissAfter: nil)
+        #expect(window.frame.height > 54)
+
+        window.show(phase: .ready)
+
+        #expect(window.frame.height == 54)
+        #expect(window.labelVisibleForTests)
+        #expect(!window.resultVisibleForTests)
         window.dismiss()
     }
 
