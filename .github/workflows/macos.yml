@@ -64,5 +64,8 @@ jobs:
       - name: Check model matrix harness
         run: ./scripts/model-matrix.sh --check-only
 
+      - name: Check caption matrix harness
+        run: ./scripts/caption-matrix.sh --check-only
+
       - name: Check repository formatting
         run: git diff --check

@@ -1,21 +1,39 @@
 import Foundation
 
-/// Which recognition engine to run. All are fully on-device; they differ in what
-/// they are good at, and the difference is real enough that the honest answer is
-/// to let the user pick per situation rather than choose for them.
+/// Which recognition engine to run. Nemotron is the supported on-device path;
+/// the raw Parakeet case remains only so old preferences and model files can be
+/// read without silently re-entering the product surface.
 enum ASREngine: String, CaseIterable, Sendable {
     case nemotron
+    /// Legacy on-disk value. Keep the raw case so old preferences can be read
+    /// and normalized without making it selectable again.
     case parakeetEou
 
+    /// Nemotron is the only recognition path exposed by the product.
+    static var allCases: [ASREngine] { [.nemotron] }
+
+    static func visibleSelection(_ engine: ASREngine?) -> ASREngine? {
+        guard let engine, allCases.contains(engine) else { return nil }
+        return engine
+    }
+
     /// What the user has chosen — or nothing, which is the honest state of a
-    /// Mac where no recognition model has been downloaded yet.
-    ///
-    /// This was `= .nemotron`, and a non-optional default is not a small lie:
-    /// Settings painted Nemotron as the selected engine, the Models page badged
-    /// it "in use", and neither had any bytes behind it. Pressing Start then
-    /// committed to a 634 MB download nobody had agreed to. Nothing is chosen
-    /// on the user's behalf here; `recommended` is what the UI offers instead.
-    @Defaults(optionalRawKey: "asrEngine") static var selected: ASREngine?
+    /// Mac where no recognition model has been downloaded yet. Legacy values
+    /// are deliberately normalized away rather than silently selecting a model
+    /// the user can no longer choose.
+    static var selected: ASREngine? {
+        get {
+            visibleSelection(UserDefaults.standard.string(forKey: "asrEngine")
+                .flatMap(ASREngine.init(rawValue:)))
+        }
+        set {
+            if let value = visibleSelection(newValue) {
+                UserDefaults.standard.set(value.rawValue, forKey: "asrEngine")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "asrEngine")
+            }
+        }
+    }
 
     /// The engine to suggest when nothing is chosen. A suggestion is not a
     /// selection: it is rendered as a badge and a Download button, never as a
@@ -26,6 +44,28 @@ enum ASREngine: String, CaseIterable, Sendable {
     /// `AppDelegate.start()` refuses to begin otherwise — so the fallback here
     /// keeps the backend types non-optional without ever deciding anything.
     static var effective: ASREngine { selected ?? recommended }
+
+    /// Dictation's streaming path has always been able to persist its engine
+    /// separately. Normalize a retired Parakeet value to the supported
+    /// Nemotron path instead of letting an old preference resurrect it.
+    static var dictationSelected: ASREngine? {
+        get {
+            guard let raw = UserDefaults.standard.string(forKey: "dictationStreamingEngine"),
+                  let value = ASREngine(rawValue: raw) else { return nil }
+            return visibleSelection(value)
+        }
+        set {
+            if let value = visibleSelection(newValue) {
+                UserDefaults.standard.set(value.rawValue, forKey: "dictationStreamingEngine")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "dictationStreamingEngine")
+            }
+        }
+    }
+
+    static var dictationEffective: ASREngine {
+        dictationSelected ?? recommended
+    }
 
     var displayName: String {
         switch self {
@@ -40,6 +80,17 @@ enum ASREngine: String, CaseIterable, Sendable {
             return String(localized: "One multilingual model, 634 MB, downloaded once. Its own metadata declares 121 language tags — European, Asian and African — and it identifies the spoken language from audio rather than being told, so there is no per-language switching. Better on noisy and music-backed audio; slightly higher latency.")
         case .parakeetEou:
             return String(localized: "English only, 437 MB. A fifth of Nemotron's parameters, so it reaches the first word sooner, and it detects the end of an utterance itself, so sentences break where the speaker actually stopped. Pick this if you only caption English; it will produce confident nonsense on anything else.")
+        }
+    }
+
+    /// The compact label used in the everyday settings surface. The full
+    /// explanation stays available in help and on the Models page.
+    var shortSummary: String {
+        switch self {
+        case .nemotron:
+            return String(localized: "Multilingual · 634 MB · detects language automatically")
+        case .parakeetEou:
+            return String(localized: "English only · 437 MB · fastest")
         }
     }
 
@@ -133,7 +184,7 @@ enum ASREngine: String, CaseIterable, Sendable {
                     // Each tier is measured and deleted as ITS OWN directory —
                     // removing one must not take the other tier with it.
                     storage: .directory(NemotronEngine.variantDirectory(chunkMs: ms),
-                                        markers: ["metadata.json"]),
+                                        markers: ["metadata.json", NemotronEngine.completionMarker]),
                     removal: .remove(NemotronEngine.variantDirectory(chunkMs: ms)),
                     use: .whenNemotronTier(chunkMs: ms),
                     install: { sink in

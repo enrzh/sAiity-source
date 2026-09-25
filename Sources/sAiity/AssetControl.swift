@@ -2,11 +2,10 @@ import SwiftUI
 
 /// The trailing control for a downloadable model, everywhere one appears.
 ///
-/// Progress + Cancel → Remove (partial) → Delete (installed) → Download. This
-/// existed as three hand-written copies — Models page, the model picker sheet,
-/// onboarding — each styled slightly differently, and adding Cancel would have
-/// meant writing it three times. The registry already unified the data; this
-/// unifies the view of it.
+/// Progress + Cancel → Resume/Remove (partial) → Delete (installed) → Download.
+/// This existed as three hand-written copies — Models page, the model picker
+/// sheet, onboarding — each styled slightly differently. The registry already
+/// unified the data; this unifies the view of it.
 struct AssetControl: View {
     @Bindable var state: AppState
     let status: AssetStatus
@@ -23,6 +22,12 @@ struct AssetControl: View {
                         Text("\(Int(f * 100))%").font(.caption2).foregroundStyle(.secondary)
                     } else {
                         ProgressView().controlSize(.small)
+                    }
+                    if let note = state.downloadProgress?.note {
+                        Text(note)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
                 }
                 Button("Cancel") { state.cancelDownload() }
@@ -42,6 +47,7 @@ struct AssetControl: View {
                 Button("Re-download") {
                     Task { await state.redownload(status.asset) }
                 }
+                .buttonStyle(.glass)
                 .controlSize(.small)
                 .disabled(state.activeDownload != nil)
                 .help("Delete the damaged files and fetch \(status.asset.title) again.")
@@ -50,8 +56,26 @@ struct AssetControl: View {
                 }
                 .controlSize(.small)
             }
-        } else if status.isInstalled || status.isPartial {
-            Button(status.isPartial ? "Remove" : "Delete", role: .destructive) {
+        } else if status.isPartial, status.asset.install != nil {
+            // A cancelled transfer is useful state, not a dead end. The
+            // downloader keeps its validator and completed bytes, so make the
+            // next action continue rather than forcing the user to throw away
+            // a multi-gigabyte file and start over.
+            HStack(spacing: 6) {
+                Button("Resume") {
+                    Task { await state.download(status.asset) }
+                }
+                .buttonStyle(.glass)
+                .controlSize(prominent ? .regular : .small)
+                .disabled(state.activeDownload != nil)
+                .help("Continue downloading \(status.asset.title) from the saved partial file.")
+                Button("Remove", role: .destructive) {
+                    Task { await state.delete(status.asset) }
+                }
+                .controlSize(.small)
+            }
+        } else if status.isInstalled {
+            Button("Delete", role: .destructive) {
                 Task { await state.delete(status.asset) }
             }
             .controlSize(.small)
@@ -61,7 +85,7 @@ struct AssetControl: View {
                    : "Download") {
                 Task { await state.download(status.asset) }
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.glass)
             .controlSize(prominent ? .regular : .small)
             .disabled(state.activeDownload != nil)
         }

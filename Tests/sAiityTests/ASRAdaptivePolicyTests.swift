@@ -3,7 +3,7 @@ import Testing
 
 @testable import sAiity
 
-@Suite struct ASRAdaptivePolicyTests {
+@Suite(.serialized) struct ASRAdaptivePolicyTests {
     @Test("adaptive policy prefers fast tier after a healthy measurement")
     func healthyFastTier() {
         #expect(ASRAdaptivePolicy.choose(
@@ -71,5 +71,32 @@ import Testing
             available: [1120, 2240],
             installed: installed,
             scope: .dictation) == 2240)
+    }
+
+    @Test("captions prefer the installed fast tier before a measurement exists")
+    func captionsPreferFastWithoutMeasurement() {
+        #expect(ASRAdaptivePolicy.chooseRuntimeTier(
+            preferred: 2240,
+            available: [1120, 2240],
+            installed: [1120, 2240],
+            scope: .captions) == 1120)
+    }
+
+    @Test("caption overloads keep the next automatic session on the fast tier")
+    func overloadForcesFastTier() {
+        let defaults = UserDefaults.standard
+        let key = "captionsASROverloaded"
+        let old = defaults.object(forKey: key)
+        defer {
+            if let old { defaults.set(old, forKey: key) }
+            else { defaults.removeObject(forKey: key) }
+        }
+
+        ASRAdaptivePolicy.markOverloaded(scope: .captions)
+        #expect(ASRAdaptivePolicy.chooseRuntimeTier(
+            preferred: 2240,
+            available: [1120, 2240],
+            installed: [1120, 2240],
+            scope: .captions) == 1120)
     }
 }

@@ -157,6 +157,7 @@ final class DictationCleanupSession {
             try Task.checkCancellation()
         }
 
+        let modelIndexSet = Set(modelIndexes)
         var regions: [DictationRegionTranscript] = []
         regions.reserveCapacity(input.regions.count)
         for (index, region) in input.regions.enumerated() {
@@ -167,7 +168,7 @@ final class DictationCleanupSession {
             var candidate = baseline
             if let value = batched[index] {
                 candidate = value
-            } else if modelIndexes.contains(index) {
+            } else if modelIndexSet.contains(index) {
                 modelCalls += 1
                 candidate = await model?.cleanup(region.text, source, metadata) ?? baseline
                 try Task.checkCancellation()

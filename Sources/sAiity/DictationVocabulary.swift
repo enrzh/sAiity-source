@@ -34,6 +34,26 @@ enum DictationVocabulary {
         return "Protected vocabulary: " + terms.joined(separator: ", ") + ". Preserve the exact spelling and casing of these terms whenever they appear."
     }
 
+    /// Correct casing/spelling for an exact term after ASR has recognised it.
+    /// This is deliberately conservative: it never invents a term or changes
+    /// words that are not already present in the transcript.
+    static func preservingSpelling(in text: String) -> String {
+        var result = text
+        for term in terms {
+            var searchStart = result.startIndex
+            while searchStart < result.endIndex,
+                  let range = result.range(of: term,
+                                           options: [.caseInsensitive, .diacriticInsensitive],
+                                           range: searchStart..<result.endIndex) {
+                result.replaceSubrange(range, with: term)
+                searchStart = result.index(range.lowerBound,
+                                           offsetBy: term.count,
+                                           limitedBy: result.endIndex) ?? result.endIndex
+            }
+        }
+        return result
+    }
+
     private static func parse(_ value: String) -> [String] {
         value.components(separatedBy: CharacterSet(charactersIn: ",\n;"))
     }

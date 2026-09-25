@@ -1,4 +1,4 @@
-# sAiity 2.0 — speaker labels, and Windows
+# sAiity 2.0 — Windows and caption quality
 
 Written 2026-08-14, against v1.3.0. Everything here is grounded in a research
 pass over the current tree and the current state of the relevant projects;
@@ -13,42 +13,28 @@ The Windows port is far less risky than it looks, because the exact ASR model
 sAiity already ships now runs cross-platform. The genuinely hard, unresolved
 question on Windows is not recognition — it is whether the caption bubble can
 be click-through **and** have a blurred background at the same time. Answer
-that with a half-day spike before committing to anything else. Meanwhile the
-highest-value feature on Mac, speaker labels, turns out to already be sitting
-in a dependency that is pinned in `Package.resolved`. Do that first, on Mac,
-because it changes the transcript data model — and changing that once, before
-a second platform exists, is much cheaper than changing it twice.
+that with a half-day spike before committing to anything else. On macOS, the
+current product intentionally keeps processing local and minimal: recognition,
+translation, transcripts, and the live subtitle bubble.
 
 ---
 
 ## Part 1 — Features (Mac first)
 
-### 1. Speaker labels — do this first
+### 1. Speaker identification — removed from the product
 
-FluidAudio 0.15.5, already pinned, ships a `Diarizer` module:
-`SortformerDiarizer`, `LSEENDDiarizer`, `DiarizerTimeline`, `DiarizerConfig`,
-and a public `enrollSpeaker(withAudio:named:)`. Weights come from ungated
-`FluidInference/*` Hugging Face repos, which `DownloadCoordinator` already
-knows how to fetch and `ModelRegistry` already knows how to present.
-
-So the machine-learning part is a dependency upgrade, not a research project.
-The work is everywhere else: a speaker id has to thread through `Segment`,
-`TranscriptStore`, the JSONL schema, `Export` and all four writers, the bubble
-renderer, and the transcript viewer — plus colour/name assignment and a way to
-rename "Speaker 2" to a person.
-
-- **Backend:** Sortformer by default (max 4 speakers, ~480 ms streaming
-  updates, stable labels). LS-EEND behind a setting for larger groups.
-- **Free win:** when mic mixing is on, that channel is *known*. Label it "Me"
-  deterministically rather than making the model guess.
-- **Why first:** it is the most requested feature in this category, and it is
-  the one that changes the on-disk format. Do format changes before the port.
+The earlier diarization experiment is no longer part of sAiity. It added a
+second model, another inference pass, extra settings, and a misleading promise
+about knowing who spoke. The app now keeps the simpler local path: recognition
+and translation, with turn breaks only when the audio clock shows a real pause.
+Old transcript metadata is retained for safe decode/re-encode compatibility,
+but no new labels are produced or displayed.
 
 ### 2. Summarise a session — nearly free
 
 `LLM.swift` is already a dependency and a GGUF model is already shipped as
 translator #2. A one-shot "summarise this transcript" — TL;DR, decisions,
-action items, and once diarization lands, per-speaker — is mostly prompt work
+and action items — is mostly prompt work
 and a map-reduce for long sessions that will not fit a small local context.
 
 This is the feature that changes what the app is *for*: from "I can read what
@@ -162,7 +148,7 @@ hypothesis→sentence layer with recorded hypothesis streams as fixtures.
 Windows 11 ships **Live Captions** system-wide and free, with translation.
 A Windows sAiity argues against an OS feature. The pitch has to be the parts
 Live Captions does not do: 450-language translation, saved searchable
-transcripts with speaker labels, exports, per-app capture, re-translation. That
+transcripts with fast local search, exports, per-app capture, re-translation. That
 is a real pitch — but it is a different one from the Mac version, where the
 argument is quality and native feel.
 
@@ -170,14 +156,12 @@ argument is quality and native feel.
 
 ## Sequencing
 
-1. **Speaker labels on Mac** — changes the data model; do it before a second
-   platform exists. → ships as **1.4**
-2. **Summary + glossary on Mac** → **1.5**
-3. **The acrylic/click-through spike** — half a day, gates everything below
-4. **Extract the core** (no behaviour change, Mac stays green throughout)
-5. **Windows: capture → sherpa-onnx → overlay** — the prototype
-6. **Windows: settings, transcripts, updates, installer** — the long tail
-7. **2.0** = both platforms, speaker labels, caption output
+1. **Summary + glossary on Mac** → **1.5**
+2. **The acrylic/click-through spike** — half a day, gates everything below
+3. **Extract the core** (no behaviour change, Mac stays green throughout)
+4. **Windows: capture → sherpa-onnx → overlay** — the prototype
+5. **Windows: settings, transcripts, updates, installer** — the long tail
+6. **2.0** = both platforms, caption output
 
 Steps 1–2 are weeks. Steps 4–6 are months, and step 6 is where the schedule
 actually goes: settings, five languages, transcripts, updates and an installer

@@ -14,6 +14,8 @@ struct SheetShell<Content: View, HeaderAccessory: View>: View {
     let subtitle: LocalizedStringKey
     let width: CGFloat
     let height: CGFloat
+    let dismissTitle: LocalizedStringKey
+    let dismissIsDefaultAction: Bool
     @ViewBuilder var headerAccessory: HeaderAccessory
     @ViewBuilder var content: Content
 
@@ -21,12 +23,16 @@ struct SheetShell<Content: View, HeaderAccessory: View>: View {
 
     init(title: LocalizedStringKey, subtitle: LocalizedStringKey,
          width: CGFloat, height: CGFloat,
+         dismissTitle: LocalizedStringKey = "Done",
+         dismissIsDefaultAction: Bool = true,
          @ViewBuilder headerAccessory: () -> HeaderAccessory = { EmptyView() },
          @ViewBuilder content: () -> Content) {
         self.title = title
         self.subtitle = subtitle
         self.width = width
         self.height = height
+        self.dismissTitle = dismissTitle
+        self.dismissIsDefaultAction = dismissIsDefaultAction
         self.headerAccessory = headerAccessory()
         self.content = content()
     }
@@ -40,13 +46,21 @@ struct SheetShell<Content: View, HeaderAccessory: View>: View {
                 }
                 Spacer()
                 headerAccessory
-                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+                if dismissIsDefaultAction {
+                    Button(dismissTitle) { dismiss() }
+                        .buttonStyle(.glassProminent)
+                        .keyboardShortcut(.defaultAction)
+                } else {
+                    Button(dismissTitle) { dismiss() }
+                        .buttonStyle(.glass)
+                }
             }
             .padding(14)
             Divider()
             content
         }
         .frame(width: width, height: height)
+        .background(.regularMaterial)
         .onExitCommand { dismiss() }
     }
 }

@@ -17,8 +17,51 @@ struct CaptionProcessingTests {
 
     @Test("Mixed script boundaries stay readable without duplicating punctuation")
     func mixedScriptJoining() {
-        #expect(CaptionTextMerger.join(["Hallo", "world", "你好", "世界"]) == "Hallo world你好世界")
+        #expect(CaptionTextMerger.join(["Hallo", "world", "你好", "世界"]) == "Hallo world 你好世界")
         #expect(CaptionTextMerger.join(["hello world", "world again"]) == "hello world again")
+        #expect(CaptionTextMerger.join(["你好", "can you"]) == "你好 can you")
+    }
+
+    @Test("Mixed Latin language spans are detected without a dominant-language overwrite")
+    func mixedLatinLanguageSpans() {
+        let spans = CaptionLanguageSpanDetector.analyze(
+            "Ich denke we should ship this today.",
+            fallbackLanguage: "de")
+
+        #expect(CaptionLanguageSpanDetector.isMixed(spans))
+        #expect(spans.map(\.language) == ["de", "en"])
+        #expect(spans.map(\.text) == ["Ich denke", "we should ship this today."])
+    }
+
+    @Test("Short mixed Latin spans retain their language metadata")
+    func shortLatinSpansKeepLanguage() {
+        let spans = CaptionLanguageSpanDetector.analyze(
+            "Can you send mir bitte die Rechnung?",
+            fallbackLanguage: "en")
+
+        #expect(spans.map(\.language) == ["en", "de"])
+    }
+
+    @Test("Mixed script spans retain a readable boundary")
+    func mixedScriptLanguageSpans() {
+        let spans = CaptionLanguageSpanDetector.analyze(
+            "你好，can you check das nochmal",
+            fallbackLanguage: "de")
+
+        #expect(CaptionLanguageSpanDetector.isMixed(spans))
+        #expect(spans.first?.language == "zh")
+        #expect(spans.map(\.text).joined().contains("can you check"))
+    }
+
+    @Test("Caption timing uses the audio clock without inventing word precision")
+    func captionTiming() {
+        let first = CaptionTiming.range(for: "hello", audioEnd: 2, previousEnd: 0)
+        #expect(first.end == 2)
+        #expect(first.start > 0)
+
+        let second = CaptionTiming.range(for: "world", audioEnd: 1.5, previousEnd: 2)
+        #expect(second.start == 1.5)
+        #expect(second.end == 1.5)
     }
 
     @Test("Cumulative punctuation becomes final and leaves a volatile tail")

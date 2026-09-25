@@ -16,11 +16,6 @@
             BorderBrush="#32FFFFFF"
             BorderThickness="1">
         <StackPanel>
-            <TextBlock Text="Speaker 1"
-                       Foreground="#A8FFFFFF"
-                       FontSize="13"
-                       FontWeight="SemiBold"
-                       Margin="0,0,0,5" />
             <TextBlock Text="This is a Windows caption overlay preview."
                        Foreground="White"
                        FontSize="24"

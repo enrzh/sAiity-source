@@ -106,6 +106,49 @@ struct FileDownloaderTests {
         }
     }
 
+    @Test("Cancellation preserves a resumable partial and validator")
+    func cancellationPreservesResumeState() async throws {
+        let body = Self.modelData("cancel")
+        let destination = try Self.destination()
+        defer {
+            FileDownloader.testSessionConfiguration = nil
+            BlockingURLProtocol.started = false
+            Self.remove(destination)
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [BlockingURLProtocol.self]
+        FileDownloader.testSessionConfiguration = { configuration }
+        BlockingURLProtocol.started = false
+        let part = destination.appendingPathExtension("part")
+        try Data(body.prefix(1)).write(to: part)
+        try "cancel-v1".write(to: part.appendingPathExtension("etag"), atomically: true, encoding: .utf8)
+
+        let task = Task {
+            try await FileDownloader.download(
+                from: URL(string: "https://models.test/cancel.gguf")!,
+                to: destination,
+                expectedBytes: Int64(body.count),
+                requireMagic: FileDownloader.ggufMagic,
+                progress: { _ in })
+        }
+        for _ in 0..<100 {
+            if BlockingURLProtocol.started { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(BlockingURLProtocol.started)
+        task.cancel()
+        do {
+            try await task.value
+            Issue.record("A cancelled download unexpectedly completed")
+        } catch is CancellationError {
+            // Expected: the next attempt must be able to resume from the part.
+        } catch {
+            Issue.record("Unexpected cancellation error: \(error)")
+        }
+        #expect(FileManager.default.fileExists(atPath: destination.appendingPathExtension("part").path))
+        #expect(FileManager.default.fileExists(atPath: destination.appendingPathExtension("part.etag").path))
+    }
+
     @Test("Expected size rejects a clean but truncated response")
     func rejectsTruncatedResponse() async throws {
         let body = Self.modelData("short")
@@ -229,6 +272,21 @@ private final class StubURLProtocol: URLProtocol {
         client.urlProtocol(self, didReceive: http, cacheStoragePolicy: .notAllowed)
         if !response.body.isEmpty { client.urlProtocol(self, didLoad: response.body) }
         client.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+private final class BlockingURLProtocol: URLProtocol {
+    static var started = false
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        // The test pre-seeds the validator and partial file. Leave the request
+        // open so cancellation exercises the resume-state preservation path.
+        Self.started = true
     }
 
     override func stopLoading() {}

@@ -5,6 +5,45 @@ import Testing
 
 @MainActor
 @Suite struct SettingsWindowTests {
+    @Test("settings keeps the everyday destinations separate")
+    func settingsNavigationIsCompact() {
+        #expect(SettingsPane.allCases == [.setup, .captions, .dictation, .library, .transcripts])
+    }
+
+    @Test("interrupted download cleanup preserves completed models")
+    func interruptedDownloadCleanupPreservesCompletedModels() async throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("saiity-interrupted-test-\(UUID().uuidString)")
+        let partialURL = root.appendingPathComponent("partial", isDirectory: true)
+        let completeURL = root.appendingPathComponent("complete", isDirectory: true)
+        try FileManager.default.createDirectory(at: partialURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: completeURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let partial = ModelAsset(
+            id: "test.partial", family: .translation, title: "Partial", detail: "",
+            recommended: false, licence: nil, advertisedBytes: nil,
+            storage: .directory(partialURL, markers: ["weights.bin"]),
+            removal: .remove(partialURL), use: .never, install: nil)
+        let complete = ModelAsset(
+            id: "test.complete", family: .translation, title: "Complete", detail: "",
+            recommended: false, licence: nil, advertisedBytes: nil,
+            storage: .directory(completeURL, markers: ["weights.bin"]),
+            removal: .remove(completeURL), use: .never, install: nil)
+        try Data(repeating: 1, count: 2048)
+            .write(to: partialURL.appendingPathComponent("weights.part"))
+        try Data(repeating: 2, count: 16)
+            .write(to: completeURL.appendingPathComponent("weights.bin"))
+
+        let state = AppState()
+        state.assets = [ModelRegistry.status(of: partial), ModelRegistry.status(of: complete)]
+        let freed = await state.clearInterruptedDownloads(includeRetired: false)
+
+        #expect(freed == 2048)
+        #expect(!FileManager.default.fileExists(atPath: partialURL.path))
+        #expect(FileManager.default.fileExists(atPath: completeURL.path))
+    }
+
     @Test("download captures model and refreshes readiness")
     func downloadActionUsesCapturedModelAndRefreshesReadiness() async {
         var events: [String] = []
@@ -67,17 +106,20 @@ import Testing
     @Test("dictation cleanup is on by default and persists independently")
     func dictationCleanupIsIndependent() {
         let defaults = UserDefaults.standard
-        let keys = ["dictationCleanupEnabled", "dictationRecognizer"]
+        let keys = ["dictationCleanupEnabled", "dictationRecognizer", "asrEngine",
+                    "translateTo", "translateDictation", "dictationTranslateTo",
+                    "dictationTranslateToMigrated", CaptionStyle.key]
         let snapshot = keys.map { ($0, defaults.object(forKey: $0)) }
         defer { snapshot.forEach { key, value in value.map { defaults.set($0, forKey: key) } ?? defaults.removeObject(forKey: key) } }
         defaults.removeObject(forKey: "dictationCleanupEnabled")
         defaults.removeObject(forKey: "dictationRecognizer")
         let state = AppState()
-        #expect(state.dictationCleanupEnabled == true)
+        let cleanupReady = state.llmModel?.isDownloaded == true
+        #expect(state.dictationCleanupEnabled == cleanupReady)
         state.dictationCleanupEnabled = false
         #expect(defaults.bool(forKey: "dictationCleanupEnabled") == false)
         state.dictationCleanupEnabled = true
-        #expect(defaults.bool(forKey: "dictationCleanupEnabled"))
+        #expect(state.dictationCleanupEnabled == cleanupReady)
         state.engine = .nemotron
         state.dictationRecognizer = .whisper
         #expect(ASREngine.selected == .nemotron)
@@ -95,9 +137,14 @@ import Testing
     @Test("dictation recognizer choices update runtime selection without changing captions")
     func dictationRecognizerChoicesAreIndependent() {
         let defaults = UserDefaults.standard
-        let snapshot = ["dictationRecognizer", "asrEngine", "whisperDictationSelected"].map { ($0, defaults.object(forKey: $0)) }
+        let snapshot = ["dictationRecognizer", "asrEngine", "dictationStreamingEngine", "whisperDictationSelected",
+                        "dictationCleanupEnabled", "translateDictation", "translateTo",
+                        CaptionStyle.key].map { ($0, defaults.object(forKey: $0)) }
         defer { snapshot.forEach { key, value in value.map { defaults.set($0, forKey: key) } ?? defaults.removeObject(forKey: key) } }
         defaults.set(ASREngine.parakeetEou.rawValue, forKey: "asrEngine")
+        defaults.set(ASREngine.parakeetEou.rawValue, forKey: "dictationStreamingEngine")
+        #expect(ASREngine.dictationSelected == nil)
+        #expect(ASREngine.dictationEffective == .nemotron)
         DictationRecognizer.selected = .streaming
         let state = AppState()
         state.dictationRecognizer = .whisper
@@ -105,14 +152,15 @@ import Testing
         #expect(DictationRecognizer.selected == .whisper)
         #expect(WhisperDictationBackend.isSelected)
         #expect(WhisperDictationBackend.model == .small)
-        #expect(ASREngine.selected == .parakeetEou)
+        #expect(ASREngine.selected != .parakeetEou)
     }
 
     @Test("dictation profiles map to the existing runtime controls")
     func dictationProfilesApplyWithoutChangingCaptionEngine() {
         let defaults = UserDefaults.standard
         let keys = ["dictationRecognizer", "dictationStreamingEngine", "nemotronChunkMs",
-                    "dictationCleanupEnabled", "whisperDictationLocale", "asrEngine"]
+                    "dictationCleanupEnabled", "whisperDictationLocale", "asrEngine",
+                    "translateTo", "translateDictation", CaptionStyle.key]
         let snapshot = keys.map { ($0, defaults.object(forKey: $0)) }
         defer {
             snapshot.forEach { key, value in
@@ -129,7 +177,8 @@ import Testing
         defaults.removeObject(forKey: "whisperDictationLocale")
 
         let state = AppState()
-        #expect(state.dictationProfile == .balanced)
+        let cleanupReady = state.llmModel?.isDownloaded == true
+        #expect(state.dictationProfile == (cleanupReady ? DictationProfile.balanced : .custom))
 
         state.dictationProfile = .fast
         #expect(state.dictationRecognizer == .streaming)
@@ -140,22 +189,25 @@ import Testing
         state.dictationProfile = .accurate
         #expect(state.dictationRecognizer == .whisper)
         #expect(WhisperDictationBackend.locale == "auto")
-        #expect(state.dictationCleanupEnabled)
-        #expect(ASREngine.selected == .parakeetEou)
+        #expect(state.dictationCleanupEnabled == cleanupReady)
+        #expect(ASREngine.selected != .parakeetEou)
     }
 
     @Test("dictation translation is opt-in and persisted")
     func dictationTranslationIsOptIn() {
         let defaults = UserDefaults.standard
-        let previous = defaults.object(forKey: "translateDictation")
+        let keys = ["translateDictation", "dictationTranslateTo", "dictationTranslateToMigrated",
+                    "asrEngine", "dictationCleanupEnabled", "translateTo", CaptionStyle.key]
+        let snapshot = keys.map { ($0, defaults.object(forKey: $0)) }
         defer {
-            if let previous {
-                defaults.set(previous, forKey: "translateDictation")
-            } else {
-                defaults.removeObject(forKey: "translateDictation")
+            snapshot.forEach { key, value in
+                if let value { defaults.set(value, forKey: key) }
+                else { defaults.removeObject(forKey: key) }
             }
         }
 
+        defaults.set(true, forKey: "dictationTranslateToMigrated")
+        defaults.set("de", forKey: "dictationTranslateTo")
         defaults.removeObject(forKey: "translateDictation")
         let state = AppState()
         #expect(state.translateDictation == false)
@@ -167,10 +219,12 @@ import Testing
         #expect(defaults.bool(forKey: "translateDictation") == false)
     }
 
-    @Test("dictation translation engine can be selected independently")
+    @Test("legacy dictation translation engines fall back to MADLAD")
     func dictationTranslationEngineIsIndependent() {
         let defaults = UserDefaults.standard
-        let keys = ["translationEngine", "dictationTranslationEngine"]
+        let keys = ["translationEngine", "dictationTranslationEngine", "asrEngine",
+                    "dictationCleanupEnabled", "translateDictation", "translateTo",
+                    "dictationTranslateTo", "dictationTranslateToMigrated", CaptionStyle.key]
         let snapshot = keys.map { ($0, defaults.object(forKey: $0)) }
         defer {
             snapshot.forEach { key, value in
@@ -180,16 +234,13 @@ import Testing
         }
 
         defaults.set(TranslationEngine.madlad.rawValue, forKey: "translationEngine")
-        defaults.removeObject(forKey: "dictationTranslationEngine")
+        defaults.set(TranslationEngine.hyMT2.rawValue, forKey: "dictationTranslationEngine")
         let state = AppState()
         #expect(state.dictationTranslationEngine == nil)
         #expect(TranslationEngine.dictationEffective == .madlad)
-
-        state.dictationTranslationEngine = .hyMT2
+        // Keep the retired raw value for rollback; the normalized view is what
+        // every runtime path consumes.
         #expect(defaults.string(forKey: "dictationTranslationEngine") == TranslationEngine.hyMT2.rawValue)
-        state.translationEngine = .qwen
-        #expect(state.dictationTranslationEngine == .hyMT2)
-        #expect(TranslationEngine.dictationEffective == .hyMT2)
     }
 
     @Test("legacy Qwen translation selections fall back to MADLAD")
@@ -213,7 +264,8 @@ import Testing
     @Test("first dictation target initialization inherits captions once, including Off")
     func dictationTargetMigratesOnce() {
         let defaults = UserDefaults.standard
-        let keys = ["translateTo", "dictationTranslateTo", "dictationTranslateToMigrated"]
+        let keys = ["translateTo", "dictationTranslateTo", "dictationTranslateToMigrated",
+                    "asrEngine", "dictationCleanupEnabled", "translateDictation", CaptionStyle.key]
         let snapshot = keys.map { ($0, defaults.object(forKey: $0)) }
         defer {
             snapshot.forEach { key, value in
@@ -245,6 +297,16 @@ import Testing
 
     @Test("dictation language picker has its own presentation state")
     func dictationPickerIsIndependent() {
+        let defaults = UserDefaults.standard
+        let keys = ["asrEngine", "dictationCleanupEnabled", "translateDictation", "translateTo",
+                    "dictationTranslateTo", "dictationTranslateToMigrated", CaptionStyle.key]
+        let snapshot = keys.map { ($0, defaults.object(forKey: $0)) }
+        defer {
+            snapshot.forEach { key, value in
+                if let value { defaults.set(value, forKey: key) }
+                else { defaults.removeObject(forKey: key) }
+            }
+        }
         let state = AppState()
         #expect(state.showTranslationPicker == false)
         #expect(state.showDictationTranslationPicker == false)
@@ -270,22 +332,32 @@ import Testing
 
     @Test("dictation picker request selects the Dictation pane")
     func dictationPickerRequestSelectsDictationPane() {
-        SettingsWindowController.showDictationTranslationPicker()
+        let defaults = UserDefaults.standard
+        let keys = ["asrEngine", "dictationCleanupEnabled", "translateDictation", "translateTo",
+                    "dictationTranslateTo", "dictationTranslateToMigrated", CaptionStyle.key]
+        let snapshot = keys.map { ($0, defaults.object(forKey: $0)) }
         defer {
-            NSApp.windows
-                .first(where: { $0.title == "sAiity" })?
-                .close()
+            snapshot.forEach { key, value in
+                if let value { defaults.set(value, forKey: key) }
+                else { defaults.removeObject(forKey: key) }
+            }
+            settingsWindow()?.close()
             SettingsWindowController.state.showDictationTranslationPicker = false
         }
+        SettingsWindowController.showDictationTranslationPicker()
 
-        guard let window = NSApp.windows.first(where: { $0.title == "sAiity" }) else {
+        guard let window = settingsWindow() else {
             Issue.record("settings window was not created")
             return
         }
 
         #expect(SettingsWindowController.state.showDictationTranslationPicker)
         #expect(SettingsWindowController.selectedPane == .dictation)
+        #expect(window.title == SettingsPane.dictation.windowTitle)
+        #expect(window.standardWindowButton(.miniaturizeButton)?.isEnabled == true)
+        #expect(window.standardWindowButton(.zoomButton)?.isEnabled == true)
         #expect(window.contentViewController != nil)
+        #expect(abs((window.contentView?.bounds.height ?? 0) - 420) < 1)
     }
 
     @Test("recognition deletion releases dictation's fallback backend")
@@ -308,6 +380,16 @@ import Testing
             removal: .remove(directory),
             use: .never,
             install: nil)
+        let defaults = UserDefaults.standard
+        let keys = ["asrEngine", "dictationCleanupEnabled", "translateDictation", "translateTo",
+                    "dictationTranslateTo", "dictationTranslateToMigrated", CaptionStyle.key]
+        let snapshot = keys.map { ($0, defaults.object(forKey: $0)) }
+        defer {
+            snapshot.forEach { key, value in
+                if let value { defaults.set(value, forKey: key) }
+                else { defaults.removeObject(forKey: key) }
+            }
+        }
         let state = AppState()
         var released = 0
         let previousRelease = CaptionSession.shared.releaseModels
@@ -325,24 +407,53 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: directory.path))
     }
 
+    @Test("model inventory refresh completes asynchronously and caches its snapshot")
+    func modelInventoryRefreshIsNonBlockingAndCached() async {
+        let state = AppState()
+        await state.refreshModelsAsync(force: true)
+        #expect(!state.assets.isEmpty)
+        #expect(!state.isModelsLoading)
+        #expect(state.ownedBytes >= 0)
+    }
+
     @Test("settings uses the navigation shell")
     func settingsUsesNavigationShell() {
-        SettingsWindowController.show()
+        let defaults = UserDefaults.standard
+        let keys = ["asrEngine", "dictationCleanupEnabled", "translateDictation", "translateTo",
+                    "dictationTranslateTo", "dictationTranslateToMigrated", CaptionStyle.key]
+        let snapshot = keys.map { ($0, defaults.object(forKey: $0)) }
         defer {
-            NSApp.windows
-                .first(where: { $0.title == "sAiity" })?
-                .close()
+            snapshot.forEach { key, value in
+                if let value { defaults.set(value, forKey: key) }
+                else { defaults.removeObject(forKey: key) }
+            }
+            settingsWindow()?.close()
         }
+        SettingsWindowController.show()
 
-        guard let window = NSApp.windows.first(where: { $0.title == "sAiity" }) else {
+        guard let window = settingsWindow() else {
             Issue.record("settings window was not created")
             return
         }
 
+        let titles = [SettingsPane.setup, .captions, .dictation, .library, .transcripts].map(\.windowTitle)
+        #expect(titles.contains(window.title))
+        #expect(SettingsPane.library.windowTitle == "Models")
+        #expect(SettingsPane.transcripts.windowTitle == "Transcripts")
         #expect(SettingsWindowController.selectedPane == .dictation || SettingsWindowController.selectedPane == .captions)
         #expect(window.titlebarAppearsTransparent == false)
+        #expect(window.isOpaque)
+        #expect(window.toolbar != nil)
+        #expect(window.standardWindowButton(.miniaturizeButton)?.isEnabled == true)
+        #expect(window.standardWindowButton(.zoomButton)?.isEnabled == true)
         #expect(window.contentViewController != nil)
-        #expect(window.contentView?.bounds.width ?? 0 >= 900)
-        #expect(window.contentView?.bounds.height ?? 0 >= 600)
+        #expect(window.contentView?.bounds.width ?? 0 >= 760)
+        #expect(abs((window.contentView?.bounds.height ?? 0) - 420) < 1)
+    }
+
+    private func settingsWindow() -> NSWindow? {
+        NSApp.windows.first {
+            $0.identifier == SettingsWindowController.settingsWindowIdentifier
+        }
     }
 }

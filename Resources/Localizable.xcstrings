@@ -1,6 +1,117 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%lld pt": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "%lld pt" } },
+        "es": { "stringUnit": { "state": "translated", "value": "%lld pt" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "%lld pt" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "%lld pt" } }
+      }
+    },
+    "Optional specialist for 37 languages. Choose it when you want broader language coverage.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Optionaler Spezialist für 37 Sprachen. Wählen Sie ihn für eine breitere Sprachabdeckung." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Especialista opcional para 37 idiomas. Elíigelo si necesitas una cobertura más amplia." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Spécialiste facultatif pour 37 langues. Choisissez-le pour une couverture plus large." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "37言語に対応したオプションの専用エンジンです。より広い言語カバレッジが必要な場合に使用します。" } }
+      }
+    },
+    "Experimental local LLM translation. Useful for cleanup and language experiments, but less predictable than a dedicated translation model. Choose a Qwen, Gemma, or custom GGUF in Models.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Experimentelle lokale LLM-Übersetzung. Nützlich für Bereinigung und Sprachversuche, aber weniger berechenbar als ein dediziertes Übersetzungsmodell. Wählen Sie Qwen, Gemma oder eine eigene GGUF-Datei unter Modelle." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Traducción experimental con LLM local. Útil para la limpieza y los experimentos de idiomas, pero menos predecible que un modelo de traducción dedicado. Elija Qwen, Gemma o un GGUF personalizado en Modelos." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Traduction LLM locale expérimentale. Utile pour le nettoyage et les expérimentations linguistiques, mais moins prévisible qu’un modèle de traduction dédié. Choisissez Qwen, Gemma ou un GGUF personnalisé dans Modèles." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "実験的なローカルLLM翻訳です。整理や言語の実験には便利ですが、専用翻訳モデルより予測しにく습니다。モデルで Qwen、Gemma、または独自の GGUF を選択してください。" } }
+      }
+    },
+    "Processing and shortcuts": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Verarbeitung und Tastenkürzel" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Procesamiento y atajos" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Traitement et raccourcis" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "処理とショートカット" } }
+      }
+    },
+    "Processing and appearance": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Verarbeitung und Darstellung" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Procesamiento y apariencia" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Traitement et apparence" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "処理と外観" } }
+      }
+    },
+    "Diagnostics and app details": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Diagnose und App-Informationen" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Diagnóstico y detalles de la app" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Diagnostics et détails de l’app" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "診断とアプリ情報" } }
+      }
+    },
+    "Font size": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Schriftgröße" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Tamaño de fuente" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Taille de police" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "文字サイズ" } }
+      }
+    },
+    "Original and translation update together in the live bubble.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Original und Übersetzung werden gemeinsam in der Live-Blase aktualisiert." } },
+        "es": { "stringUnit": { "state": "translated", "value": "El original y la traducción se actualizan juntos en la burbuja en vivo." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "L’original et la traduction se mettent à jour ensemble dans la bulle en direct." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "元の字幕と翻訳は、ライブバブルで同時に更新されます。" } }
+      }
+    },
+    "the selected languages": {
+      "extractionState": "manual",
+      "shouldTranslate": false
+    },
+    "%@ only recognises %@. This sounds like %@ — switch engine in Settings → Captions.": {
+      "extractionState": "manual",
+      "shouldTranslate": false
+    },
+    "%@ recognises %@ only — this sounds like %@": {
+      "extractionState": "manual",
+      "shouldTranslate": false
+    },
+    "English": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Englisch"}},
+        "es": {"stringUnit": {"state": "translated", "value": "Inglés"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Anglais"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "英語"}}
+      }
+    },
+    "Chinese": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Chinesisch"}},
+        "es": {"stringUnit": {"state": "translated", "value": "Chino"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Chinois"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "中国語"}}
+      }
+    },
+    "English / Chinese": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {"stringUnit": {"state": "translated", "value": "Englisch / Chinesisch"}},
+        "es": {"stringUnit": {"state": "translated", "value": "Inglés / chino"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Anglais / chinois"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "英語 / 中国語"}}
+      }
+    },
     "Setup": {
       "extractionState": "manual",
       "localizations": {
@@ -98,15 +209,6 @@
         "es": {"stringUnit": {"state": "translated", "value": "Elige un aspecto sencillo para la burbuja de resultados."}},
         "fr": {"stringUnit": {"state": "translated", "value": "Choisissez une apparence simple pour la bulle de résultat."}},
         "ja": {"stringUnit": {"state": "translated", "value": "結果バブルのシンプルな外観を選択します。"}}
-      }
-    },
-    "Advanced settings": {
-      "extractionState": "manual",
-      "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Erweiterte Einstellungen"}},
-        "es": {"stringUnit": {"state": "translated", "value": "Ajustes avanzados"}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Réglages avancés"}},
-        "ja": {"stringUnit": {"state": "translated", "value": "詳細設定"}}
       }
     },
     "Finish setup…": {
@@ -307,13 +409,13 @@
         "ja": {"stringUnit": {"state": "translated", "value": "音声入力中のみ"}}
       }
     },
-    "Show advanced models": {
+    "Auto": {
       "extractionState": "manual",
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Erweiterte Modelle anzeigen"}},
-        "es": {"stringUnit": {"state": "translated", "value": "Mostrar modelos avanzados"}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Afficher les modèles avancés"}},
-        "ja": {"stringUnit": {"state": "translated", "value": "高度なモデルを表示"}}
+        "de": {"stringUnit": {"state": "translated", "value": "Auto"}},
+        "es": {"stringUnit": {"state": "translated", "value": "Auto"}},
+        "fr": {"stringUnit": {"state": "translated", "value": "Auto"}},
+        "ja": {"stringUnit": {"state": "translated", "value": "自動"}}
       }
     },
     "Automatic": {
@@ -3088,6 +3190,197 @@
             "value": "透明"
           }
         }
+      }
+    },
+    "Use case": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Anwendungsfall" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Caso de uso" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Cas d’utilisation" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ユースケース" } }
+      }
+    },
+    "Recognition model": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Erkennungsmodell" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Modelo de reconocimiento" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Modèle de reconnaissance" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "音声認識モデル" } }
+      }
+    },
+    "Updates": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Updates" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Actualizaciones" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Mises à jour" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "アップデート" } }
+      }
+    },
+    "More options": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Weitere Optionen" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Más opciones" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Plus d’options" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "その他のオプション" } }
+      }
+    },
+    "Expanded": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Erweitert" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Expandido" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Développé" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "展開" } }
+      }
+    },
+    "Collapsed": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Reduziert" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Contraído" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Réduit" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "折りたたみ" } }
+      }
+    },
+    "Clear Interrupted…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Unterbrochene Downloads löschen …" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Borrar descargas interrumpidas…" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Effacer les téléchargements interrompus…" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "中断したダウンロードを削除…" } }
+      }
+    },
+    "Delete interrupted downloads without removing completed models.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Unterbrochene Downloads löschen, ohne installierte Modelle zu entfernen." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Borra las descargas interrumpidas sin eliminar los modelos completados." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Supprimez les téléchargements interrompus sans retirer les modèles terminés." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "完了したモデルを削除せず、中断したダウンロードを削除します。" } }
+      }
+    },
+    "Clear interrupted downloads?": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Unterbrochene Downloads löschen?" } },
+        "es": { "stringUnit": { "state": "translated", "value": "¿Borrar las descargas interrumpidas?" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Effacer les téléchargements interrompus ?" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "中断したダウンロードを削除しますか？" } }
+      }
+    },
+    "This frees %@. Completed models stay installed.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Dadurch werden %@ freigegeben. Installierte Modelle bleiben erhalten." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Esto libera %@. Los modelos completados se conservan." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Cela libère %@. Les modèles terminés restent installés." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "%@ を解放します。完了したモデルは保持されます。" } }
+      }
+    },
+    "Cleared %@ of interrupted downloads.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "%@ an unterbrochenen Downloads gelöscht." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Se borraron %@ de descargas interrumpidas." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "%@ de téléchargements interrompus effacés." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "中断したダウンロードを %@ 削除しました。" } }
+      }
+    },
+    "A download is still in progress.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Ein Download läuft noch." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Todavía hay una descarga en curso." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Un téléchargement est encore en cours." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ダウンロードがまだ進行中です。" } }
+      }
+    },
+    "Stop captions or dictation before clearing this model's files.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stoppen Sie die Untertitel oder Diktat, bevor Sie die Dateien dieses Modells löschen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Detén los subtítulos o el dictado antes de borrar los archivos de este modelo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arrêtez les sous-titres ou la dictée avant de supprimer les fichiers de ce modèle."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このモデルのファイルを削除する前に、字幕または音声入力を停止してください。"
+          }
+        }
+      }
+    },
+    "Some interrupted downloads could not be cleared.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Einige unterbrochene Downloads konnten nicht gelöscht werden." } },
+        "es": { "stringUnit": { "state": "translated", "value": "No se pudieron borrar algunas descargas interrumpidas." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Certains téléchargements interrompus n’ont pas pu être effacés." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "一部の中断したダウンロードを削除できませんでした。" } }
+      }
+    },
+    "Clear Interrupted": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Unterbrochene löschen" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Borrar interrumpidas" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Effacer les interruptions" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "中断分を削除" } }
+      }
+    },
+    "Quick controls": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Schnellsteuerung" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Controles rápidos" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Contrôles rapides" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "クイックコントロール" } }
+      }
+    },
+    "Multilingual · 634 MB · detects language automatically": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Mehrsprachig · 634 MB · erkennt die Sprache automatisch" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Multilingüe · 634 MB · detecta el idioma automáticamente" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Multilingue · 634 Mo · détecte la langue automatiquement" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "多言語 · 634 MB · 言語を自動検出" } }
+      }
+    },
+    "English only · 437 MB · fastest": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Nur Englisch · 437 MB · am schnellsten" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Solo inglés · 437 MB · más rápido" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Anglais uniquement · 437 Mo · le plus rapide" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "英語のみ · 437 MB · 最速" } }
+      }
+    },
+    "Clear search": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Suche löschen" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Borrar búsqueda" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Effacer la recherche" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "検索をクリア" } }
       }
     },
     "Clear the caption": {
@@ -6884,7 +7177,6 @@
     "Accessibility access is enabled": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Bedienungshilfen aktiviert" } }, "es": { "stringUnit": { "state": "translated", "value": "Acceso a Accesibilidad activado" } }, "fr": { "stringUnit": { "state": "translated", "value": "Accès à l’accessibilité activé" } }, "ja": { "stringUnit": { "state": "translated", "value": "アクセシビリティアクセスが有効です" } } } },
     "Accessibility": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Bedienungshilfen" } }, "es": { "stringUnit": { "state": "translated", "value": "Accesibilidad" } }, "fr": { "stringUnit": { "state": "translated", "value": "Accessibilité" } }, "ja": { "stringUnit": { "state": "translated", "value": "アクセシビリティ" } } } },
     "After granting access, quit and reopen sAiity.": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Beende sAiity nach dem Erteilen des Zugriffs und öffne die App erneut." } }, "es": { "stringUnit": { "state": "translated", "value": "Después de conceder el acceso, cierra sAiity y vuelve a abrirlo." } }, "fr": { "stringUnit": { "state": "translated", "value": "Après avoir accordé l’accès, quittez puis rouvrez sAiity." } }, "ja": { "stringUnit": { "state": "translated", "value": "アクセスを許可した後、sAiityを終了して再度開いてください。" } } } },
-    "Allow…": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Erlauben …" } }, "es": { "stringUnit": { "state": "translated", "value": "Permitir…" } }, "fr": { "stringUnit": { "state": "translated", "value": "Autoriser…" } }, "ja": { "stringUnit": { "state": "translated", "value": "許可…" } } } },
     "Allowed": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Erlaubt" } }, "es": { "stringUnit": { "state": "translated", "value": "Permitido" } }, "fr": { "stringUnit": { "state": "translated", "value": "Autorisé" } }, "ja": { "stringUnit": { "state": "translated", "value": "許可済み" } } } },
     "Dictation is separate from live captions. It never starts the caption service and is not saved as a meeting transcript.": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Das Diktat ist von den Live-Untertiteln getrennt. Es startet den Untertiteldienst nicht und wird nicht als Gesprächstranskript gespeichert." } }, "es": { "stringUnit": { "state": "translated", "value": "El dictado es independiente de los subtítulos en directo. No inicia el servicio de subtítulos ni se guarda como transcripción de una reunión." } }, "fr": { "stringUnit": { "state": "translated", "value": "La dictée est séparée des sous-titres en direct. Elle ne démarre pas le service de sous-titres et n’est pas enregistrée comme transcription de réunion." } }, "ja": { "stringUnit": { "state": "translated", "value": "音声入力はライブ字幕とは別の機能です。字幕サービスを開始せず、会議の文字起こしとして保存されません。" } } } },
     "Dictating, transcribing, and the clipboard result appear briefly above the bottom edge of the screen.": { "extractionState": "manual", "localizations": { "de": { "stringUnit": { "state": "translated", "value": "Diktat, Transkription und das Ergebnis in der Zwischenablage erscheinen kurz über dem unteren Bildschirmrand." } }, "es": { "stringUnit": { "state": "translated", "value": "El dictado, la transcripción y el resultado del portapapeles aparecen brevemente sobre el borde inferior de la pantalla." } }, "fr": { "stringUnit": { "state": "translated", "value": "La dictée, la transcription et le résultat dans le presse-papiers apparaissent brièvement au-dessus du bord inférieur de l’écran." } }, "ja": { "stringUnit": { "state": "translated", "value": "音声入力、文字起こし、クリップボードの結果は画面下端の上に短時間表示されます。" } } } },
@@ -8135,6 +8427,35 @@
           "stringUnit": {
             "state": "translated",
             "value": "原文"
+          }
+        }
+      }
+    },
+    "Other files: %@ — retired or incomplete downloads.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Weitere Dateien: %@ – eingestellte oder unvollständige Downloads."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Otros archivos: %@ — descargas retiradas o incompletas."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Autres fichiers : %@ — téléchargements retirés ou incomplets."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "その他のファイル: %@ — 廃止された、または不完全なダウンロード。"
           }
         }
       }
@@ -10034,6 +10355,35 @@
           "stringUnit": {
             "state": "translated",
             "value": "ショートカット"
+          }
+        }
+      }
+    },
+    "Global controls for starting and stopping captions.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Globale Steuerung zum Starten und Stoppen der Untertitel."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Controles globales para iniciar y detener los subtítulos."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Commandes globales pour démarrer et arrêter les sous-titres."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "字幕の開始と停止を操作するグローバルショートカット。"
           }
         }
       }
@@ -13699,15 +14049,6 @@
         "ja": { "stringUnit": { "state": "translated", "value": "MADLADは推奨のローカル翻訳エンジンです。字幕で翻訳先の言語を選択してください。" } }
       }
     },
-    "Advanced translation": {
-      "extractionState": "manual",
-      "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Erweiterte Übersetzung" } },
-        "es": { "stringUnit": { "state": "translated", "value": "Traducción avanzada" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Traduction avancée" } },
-        "ja": { "stringUnit": { "state": "translated", "value": "高度な翻訳" } }
-      }
-    },
     "Specialist and local LLM models are optional. Use them when you have a tested reason to prefer them.": {
       "extractionState": "manual",
       "localizations": {
@@ -13753,24 +14094,6 @@
         "ja": { "stringUnit": { "state": "translated", "value": "MADLADは推奨のローカル翻訳エンジンです。「モデル」からダウンロードしてください。" } }
       }
     },
-    "Advanced": {
-      "extractionState": "manual",
-      "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Erweitert" } },
-        "es": { "stringUnit": { "state": "translated", "value": "Avanzado" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Avancé" } },
-        "ja": { "stringUnit": { "state": "translated", "value": "詳細" } }
-      }
-    },
-    "Advanced styling": {
-      "extractionState": "manual",
-      "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Erweiterte Gestaltung" } },
-        "es": { "stringUnit": { "state": "translated", "value": "Estilo avanzado" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Style avancé" } },
-        "ja": { "stringUnit": { "state": "translated", "value": "詳細なスタイル" } }
-      }
-    },
     "Layout": {
       "extractionState": "manual",
       "localizations": {
@@ -13787,24 +14110,6 @@
         "es": { "stringUnit": { "state": "translated", "value": "El tamaño del texto se adapta automáticamente al ancho disponible." } },
         "fr": { "stringUnit": { "state": "translated", "value": "La taille du texte s’adapte automatiquement à la largeur disponible." } },
         "ja": { "stringUnit": { "state": "translated", "value": "テキストサイズは使用可能な幅に合わせて自動調整されます。" } }
-      }
-    },
-    "Choose a simple look for the subtitle bubble. Advanced styling stays collapsed.": {
-      "extractionState": "manual",
-      "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Wähle einen einfachen Look für die Untertitel-Sprechblase. Die erweiterte Gestaltung bleibt eingeklappt." } },
-        "es": { "stringUnit": { "state": "translated", "value": "Elige un aspecto sencillo para la burbuja de subtítulos. El estilo avanzado permanece contraído." } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Choisissez un aspect simple pour la bulle de sous-titres. Le style avancé reste réduit." } },
-        "ja": { "stringUnit": { "state": "translated", "value": "字幕バブルのシンプルな外観を選択します。詳細なスタイルは折りたたまれたままです。" } }
-      }
-    },
-    "Choose a simple look for the result bubble. Advanced styling stays collapsed.": {
-      "extractionState": "manual",
-      "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Wähle einen einfachen Look für die Ergebnis-Sprechblase. Die erweiterte Gestaltung bleibt eingeklappt." } },
-        "es": { "stringUnit": { "state": "translated", "value": "Elige un aspecto sencillo para la burbuja de resultados. El estilo avanzado permanece contraído." } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Choisissez un aspect simple pour la bulle de résultat. Le style avancé reste réduit." } },
-        "ja": { "stringUnit": { "state": "translated", "value": "結果バブルのシンプルな外観を選択します。詳細なスタイルは折りたたまれたままです。" } }
       }
     },
     "Presets change appearance only. Behavior and translation settings stay unchanged.": {
@@ -13832,24 +14137,6 @@
         "es": { "stringUnit": { "state": "translated", "value": "Modelos locales experimentales" } },
         "fr": { "stringUnit": { "state": "translated", "value": "Modèles locaux expérimentaux" } },
         "ja": { "stringUnit": { "state": "translated", "value": "実験的なローカルモデル" } }
-      }
-    },
-    "Optional specialist for 37 languages. Keep it in Advanced until a language-pair benchmark shows it beats MADLAD for your use case.": {
-      "extractionState": "manual",
-      "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Optionales Spezialmodell für 37 Sprachen. Lass es unter Erweitert, bis ein Sprachpaar-Benchmark zeigt, dass es für deinen Anwendungsfall besser als MADLAD ist." } },
-        "es": { "stringUnit": { "state": "translated", "value": "Especialista opcional para 37 idiomas. Déjalo en Avanzado hasta que una evaluación por pares de idiomas demuestre que supera a MADLAD en tu caso." } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Spécialiste optionnel pour 37 langues. Gardez-le dans Avancé jusqu'à ce qu'un benchmark par paire de langues montre qu'il dépasse MADLAD pour votre usage." } },
-        "ja": { "stringUnit": { "state": "translated", "value": "37言語に対応するオプションの専門モデルです。言語ペアのベンチマークで用途におけるMADLAD超えが確認されるまで、詳細設定に置いてください。" } }
-      }
-    },
-    "Experimental local LLM translation. Useful for cleanup and language experiments, but less predictable than a dedicated translation model. Choose a Qwen, Gemma, or custom GGUF under Advanced.": {
-      "extractionState": "manual",
-      "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Experimentelle Übersetzung mit einem lokalen LLM. Nützlich für Bereinigung und Sprachtests, aber weniger vorhersehbar als ein dediziertes Übersetzungsmodell. Wähle unter Erweitert ein Qwen-, Gemma- oder eigenes GGUF-Modell." } },
-        "es": { "stringUnit": { "state": "translated", "value": "Traducción experimental con un LLM local. Es útil para limpieza y experimentos de idiomas, pero es menos predecible que un modelo de traducción dedicado. Elige un Qwen, Gemma o GGUF propio en Avanzado." } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Traduction expérimentale avec un LLM local. Utile pour le nettoyage et les expériences linguistiques, mais moins prévisible qu'un modèle de traduction dédié. Choisissez un Qwen, Gemma ou GGUF personnalisé dans Avancé." } },
-        "ja": { "stringUnit": { "state": "translated", "value": "ローカルLLMによる実験的な翻訳です。クリーンアップや言語実験には便利ですが、専用翻訳モデルより予測しにくい動作になります。詳細設定でQwen、Gemma、またはカスタムGGUFを選択してください。" } }
       }
     },
     "Experimental quality — verify important translations.": {
@@ -13915,15 +14202,6 @@
         "ja": { "stringUnit": { "state": "translated", "value": "デフォルトは%@ msです。短い値は息継ぎで分割し、長い値は翻訳を遅らせます。" } }
       }
     },
-    "Show advanced engines…": {
-      "extractionState": "manual",
-      "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Erweiterte Modelle anzeigen …" } },
-        "es": { "stringUnit": { "state": "translated", "value": "Mostrar motores avanzados…" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Afficher les moteurs avancés…" } },
-        "ja": { "stringUnit": { "state": "translated", "value": "詳細なエンジンを表示…" } }
-      }
-    },
     "Transcript saved to library": {
       "extractionState": "manual",
       "localizations": {
@@ -13969,76 +14247,13 @@
         "ja": { "stringUnit": { "state": "translated", "value": "音声入力の整理モデル" } }
       }
     },
-    "Preparing speaker identification…": {
+    "This model is not downloaded yet — fetch it under Models.": {
       "extractionState": "manual",
       "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Sprechererkennung wird vorbereitet …" } },
-        "es": { "stringUnit": { "state": "translated", "value": "Preparando la identificación de hablantes…" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Préparation de l’identification des locuteurs…" } },
-        "ja": { "stringUnit": { "state": "translated", "value": "話者識別を準備中…" } }
-      }
-    },
-    "Speaker": {
-      "extractionState": "manual",
-      "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Sprecher" } },
-        "es": { "stringUnit": { "state": "translated", "value": "Hablante" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Locuteur" } },
-        "ja": { "stringUnit": { "state": "translated", "value": "話者" } }
-      }
-    },
-    "Identify speakers": {
-      "extractionState": "manual",
-      "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Sprecher erkennen" } },
-        "es": { "stringUnit": { "state": "translated", "value": "Identificar hablantes" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Identifier les locuteurs" } },
-        "ja": { "stringUnit": { "state": "translated", "value": "話者を識別" } }
-      }
-    },
-    "Optional local speaker identification model for live captions.": {
-      "extractionState": "manual",
-      "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Optionales lokales Modell zur Sprechererkennung für Live-Untertitel." } },
-        "es": { "stringUnit": { "state": "translated", "value": "Modelo local opcional para identificar hablantes en subtítulos en directo." } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Modèle local facultatif pour identifier les locuteurs dans les sous-titres en direct." } },
-        "ja": { "stringUnit": { "state": "translated", "value": "ライブ字幕で話者を識別するオプションのローカルモデルです。" } }
-      }
-    },
-    "Downloading speaker identification model…": {
-      "extractionState": "manual",
-      "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Sprechererkennungsmodell wird geladen …" } },
-        "es": { "stringUnit": { "state": "translated", "value": "Descargando el modelo de identificación de hablantes…" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Téléchargement du modèle d’identification des locuteurs…" } },
-        "ja": { "stringUnit": { "state": "translated", "value": "話者識別モデルをダウンロード中…" } }
-      }
-    },
-    "Speaker %lld": {
-      "extractionState": "manual",
-      "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Sprecher %lld" } },
-        "es": { "stringUnit": { "state": "translated", "value": "Hablante %lld" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Locuteur %lld" } },
-        "ja": { "stringUnit": { "state": "translated", "value": "話者 %lld" } }
-      }
-    },
-    "Speaker identification is not ready yet.": {
-      "extractionState": "manual",
-      "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Die Sprechererkennung ist noch nicht bereit." } },
-        "es": { "stringUnit": { "state": "translated", "value": "La identificación de hablantes aún no está lista." } },
-        "fr": { "stringUnit": { "state": "translated", "value": "L’identification des locuteurs n’est pas encore prête." } },
-        "ja": { "stringUnit": { "state": "translated", "value": "話者識別の準備がまだできていません。" } }
-      }
-    },
-    "Speaker identification is already running.": {
-      "extractionState": "manual",
-      "localizations": {
-        "de": { "stringUnit": { "state": "translated", "value": "Die Sprechererkennung läuft bereits." } },
-        "es": { "stringUnit": { "state": "translated", "value": "La identificación de hablantes ya está en ejecución." } },
-        "fr": { "stringUnit": { "state": "translated", "value": "L’identification des locuteurs est déjà en cours." } },
-        "ja": { "stringUnit": { "state": "translated", "value": "話者識別はすでに実行中です。" } }
+        "de": { "stringUnit": { "state": "translated", "value": "Dieses Modell wurde noch nicht heruntergeladen — lade es unter Modelle herunter." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Este modelo aún no se ha descargado — obténelo en Modelos." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Ce modèle n’est pas encore téléchargé — récupérez-le dans Modèles." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "このモデルは未ダウンロードです。モデルから取得してください。" } }
       }
     },
     "Last operation": {
@@ -14068,6 +14283,33 @@
         "ja": { "stringUnit": { "state": "translated", "value": "最近の処理時間" } }
       }
     },
+    "Visible lag": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Sichtbare Verzögerung" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Latencia visible" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Latence visible" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "表示遅延" } }
+      }
+    },
+    "ASR load": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "ASR-Auslastung" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Carga de ASR" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Charge ASR" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ASR負荷" } }
+      }
+    },
+    "No caption measurements yet. Start captions once to collect them.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Noch keine Untertitelmessungen. Starte die Untertitel einmal, um sie zu erfassen." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Aún no hay mediciones de subtítulos. Inicia los subtítulos una vez para recopilarlas." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Aucune mesure de sous-titres pour le moment. Lancez les sous-titres une fois pour les recueillir." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "字幕の測定値はまだありません。字幕を一度開始すると収集されます。" } }
+      }
+    },
     "Protected vocabulary (comma separated)": {
       "extractionState": "manual",
       "localizations": {
@@ -14077,6 +14319,24 @@
         "ja": { "stringUnit": { "state": "translated", "value": "保護する用語（コンマ区切り）" } }
       }
     },
+    "Shared with dictation. Recognized names and technical terms keep their spelling in captions.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Mit dem Diktat geteilt. Erkannte Namen und Fachbegriffe behalten in den Untertiteln ihre Schreibweise." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Compartido con el dictado. Los nombres y términos técnicos reconocidos mantienen su ortografía en los subtítulos." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Partagé avec la dictée. Les noms et termes techniques reconnus conservent leur orthographe dans les sous-titres." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "音声入力と共有します。認識された名前や専門用語は字幕でも綴りを維持します。" } }
+      }
+    },
+    "Dropped audio": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Verworfene Audiodaten" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Audio descartado" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Audio abandonné" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "破棄された音声" } }
+      }
+    },
     "Optional names and technical terms keep their spelling during cleanup.": {
       "extractionState": "manual",
       "localizations": {
@@ -14084,6 +14344,492 @@
         "es": { "stringUnit": { "state": "translated", "value": "Los nombres y términos técnicos opcionales mantienen su ortografía durante la limpieza." } },
         "fr": { "stringUnit": { "state": "translated", "value": "Les noms et termes techniques facultatifs conservent leur orthographe lors du nettoyage." } },
         "ja": { "stringUnit": { "state": "translated", "value": "任意の名前や専門用語は、クリーンアップ中も綴りを維持します。" } }
+      }
+    },
+    "Time until the caption appears": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Zeit bis der Untertitel erscheint" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Tiempo hasta que aparece el subtítulo" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Temps avant l’apparition du sous-titre" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "字幕が表示されるまでの時間" } }
+      }
+    },
+    "Translation delay": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Übersetzungsverzögerung" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Retraso de la traducción" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Délai de traduction" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "翻訳の遅れ" } }
+      }
+    },
+    "Recognition speed": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Erkennungsgeschwindigkeit" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Velocidad de reconocimiento" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Vitesse de reconnaissance" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "認識速度" } }
+      }
+    },
+    "Audio not captioned": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Nicht untertitelter Ton" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Audio sin subtítulos" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Audio non sous-titré" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "字幕にならなかった音声" } }
+      }
+    },
+    "Keeping up": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Hält mit" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Al día" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Suit le rythme" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "追いついている" } }
+      }
+    },
+    "Falling behind": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Bleibt zurück" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Se está retrasando" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Prend du retard" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "遅れている" } }
+      }
+    },
+    "Under 0.1 seconds": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Unter 0,1 Sekunden" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Menos de 0,1 segundos" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Moins de 0,1 seconde" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "0.1秒未満" } }
+      }
+    },
+    "%@ seconds": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "%@ Sekunden" } },
+        "es": { "stringUnit": { "state": "translated", "value": "%@ segundos" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "%@ secondes" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "%@秒" } }
+      }
+    },
+    "None": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Nichts" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Nada" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Rien" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "なし" } }
+      }
+    },
+    "Names on this Mac": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Namen auf diesem Mac" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Nombres en este Mac" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Noms sur ce Mac" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "このMac上の名前" } }
+      }
+    },
+    "Name on this Mac": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Name auf diesem Mac" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Nombre en este Mac" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Nom sur ce Mac" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "このMac上の名前" } }
+      }
+    },
+    "When captions appear": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Wann Untertitel erscheinen" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Cuándo aparecen los subtítulos" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Quand les sous-titres apparaissent" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "字幕が出るまで" } }
+      }
+    },
+    "About 2 seconds": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Etwa 2 Sekunden" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Unos 2 segundos" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Environ 2 secondes" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "約2秒" } }
+      }
+    },
+    "About 1 second": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Etwa 1 Sekunde" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Alrededor de 1 segundo" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Environ 1 seconde" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "約1秒" } }
+      }
+    },
+    "This choice is a separate download. Get it under Models.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Diese Wahl ist ein eigener Download. Hole sie unter Modelle." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Esta opción es una descarga aparte. Consíguela en Modelos." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Ce choix est un téléchargement à part. Récupérez-le sous Modèles." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "この選択は別のダウンロードです。「モデル」から取得してください。" } }
+      }
+    },
+    "Choose the local recognizer.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Wähle die lokale Erkennung." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Elige el reconocedor local." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Choisissez le moteur de reconnaissance local." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ローカルの認識を選んでください。" } }
+      }
+    },
+    "Resume": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Fortsetzen" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Reanudar" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Reprendre" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "再開" } }
+      }
+    },
+    "Continue downloading %@ from the saved partial file.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "%@ aus der gespeicherten Teildatei weiterladen." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Continuar descargando %@ desde el archivo parcial guardado." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Reprendre le téléchargement de %@ à partir du fichier partiel enregistré." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "保存された部分ファイルから %@ のダウンロードを続行します。" } }
+      }
+    },
+    "Checking download…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Download wird geprüft …" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Comprobando la descarga…" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Vérification du téléchargement…" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ダウンロードを確認中…" } }
+      }
+    },
+    "Loading credits…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Credits werden geladen …" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Cargando los créditos…" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Chargement des crédits…" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "クレジットを読み込み中…" } }
+      }
+    },
+    "Checking…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Wird geprüft …" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Comprobando…" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Vérification…" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "確認中…" } }
+      }
+    },
+    "Loading transcripts…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Transkripte werden geladen …" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Cargando transcripciones…" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Chargement des transcriptions…" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "文字起こしを読み込み中…" } }
+      }
+    },
+    "Local model inventory": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Lokales Modellverzeichnis" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Inventario local de modelos" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Inventaire local des modèles" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ローカルモデルの一覧" } }
+      }
+    },
+    "Checking downloaded models…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Heruntergeladene Modelle werden geprüft …" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Comprobando los modelos descargados…" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Vérification des modèles téléchargés…" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ダウンロード済みモデルを確認中…" } }
+      }
+    },
+    "Partial download — %@ saved · Resume continues where it stopped": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Teilweise heruntergeladen — %@ gespeichert · Fortsetzen setzt an der letzten Stelle fort" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Descarga parcial: %@ guardado · Reanudar continúa donde se detuvo" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Téléchargement partiel : %@ enregistré · Reprendre continue où il s’est arrêté" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "部分的にダウンロード済み — %@ を保存 · 再開すると続きからダウンロードします" } }
+      }
+    },
+    "Preparing Whisper…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Whisper wird vorbereitet …" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Preparando Whisper…" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Préparation de Whisper…" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "Whisper を準備中…" } }
+      }
+    },
+    "Checking Whisper…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Whisper wird geprüft …" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Comprobando Whisper…" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Vérification de Whisper…" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "Whisper を確認中…" } }
+      }
+    },
+    "Searching saved transcripts…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Gespeicherte Transkripte werden durchsucht …" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Buscando en las transcripciones guardadas…" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Recherche dans les transcriptions enregistrées…" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "保存した文字起こしを検索中…" } }
+      }
+    },
+    "Refreshing models": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Modelle werden aktualisiert" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Actualizando modelos" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Actualisation des modèles" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "モデルを更新中" } }
+      }
+    },
+    "Refresh": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Aktualisieren" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Actualizar" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Actualiser" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "更新" } }
+      }
+    },
+    "Show this transcript in Finder": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Dieses Transkript im Finder anzeigen" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Mostrar esta transcripción en Finder" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Afficher cette transcription dans le Finder" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "この文字起こしを Finder に表示" } }
+      }
+    },
+    "Delete this transcript permanently": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Dieses Transkript endgültig löschen" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Eliminar esta transcripción permanentemente" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Supprimer définitivement cette transcription" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "この文字起こしを完全に削除" } }
+      }
+    },
+    "Check downloaded models again": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Heruntergeladene Modelle erneut prüfen" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Comprobar de nuevo los modelos descargados" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Vérifier à nouveau les modèles téléchargés" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ダウンロード済みモデルを再確認" } }
+      }
+    },
+    "Refreshing…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Wird aktualisiert …" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Actualizando…" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Actualisation…" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "更新中…" } }
+      }
+    },
+    "Refreshing settings": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Einstellungen werden aktualisiert" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Actualizando ajustes" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Actualisation des réglages" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "設定を更新中" } }
+      }
+    },
+    "Audio never leaves this Mac. Recognition, translation, and transcripts stay on this Mac.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Audio verlässt diesen Mac nie. Erkennung, Übersetzung und Transkripte bleiben auf diesem Mac." } },
+        "es": { "stringUnit": { "state": "translated", "value": "El audio nunca sale de este Mac. El reconocimiento, la traducción y las transcripciones se quedan en este Mac." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "L’audio ne quitte jamais ce Mac. La reconnaissance, la traduction et les transcriptions restent sur ce Mac." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "音声がこの Macから出ることはありません。認識、翻訳、文字起こしはすべてこの Mac内に保存されます。" } }
+      }
+    },
+    "%@ · max height %d pt · %d pt edge": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "%@ · maximale Höhe %d pt · %d pt Rand" } },
+        "es": { "stringUnit": { "state": "translated", "value": "%@ · altura máxima %d pt · %d pt de margen" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "%@ · hauteur maximale %d pt · %d pt de marge" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "%@ · 最大高さ %d pt · %d pt の余白" } }
+      }
+    },
+    "Preset width · max result height %d pt": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Preset-Breite · maximale Ergebnishöhe %d pt" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Ancho del preajuste · altura máxima del resultado %d pt" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Largeur du préréglage · hauteur maximale du résultat %d pt" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "プリセット幅 · 結果の最大高さ %d pt" } }
+      }
+    },
+    "Custom settings": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Benutzerdefinierte Einstellungen" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Ajustes personalizados" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Réglages personnalisés" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "カスタム設定" } }
+      }
+    },
+    "Choose the local cleanup model and protected vocabulary. The everyday on/off switch is on the Dictation page.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Wähle das lokale Bereinigungsmodell und die geschützten Begriffe. Der normale Ein-/Aus-Schalter befindet sich auf der Diktat-Seite." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Elige el modelo local de limpieza y el vocabulario protegido. El interruptor habitual está en la página Dictado." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Choisissez le modèle local de nettoyage et le vocabulaire protégé. L’interrupteur courant se trouve sur la page Dictée." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ローカルクリーンアップモデルと保護する用語を選択します。通常のオン／オフスイッチは音声入力ページにあります。" } }
+      }
+    },
+    "Fine-tune the result bubble after choosing a preset on the Dictation page.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Passe die Ergebnisblase an, nachdem du auf der Diktat-Seite ein Preset gewählt hast." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Ajusta la burbuja de resultado después de elegir un preajuste en la página Dictado." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Affinez la bulle de résultat après avoir choisi un préréglage sur la page Dictée." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "音声入力ページでプリセットを選んでから結果バブルを調整します。" } }
+      }
+    },
+    "Fine-tune interaction after choosing a preset on the Captions page.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Passe die Interaktion an, nachdem du auf der Untertitel-Seite ein Preset gewählt hast." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Ajusta la interacción después de elegir un preajuste en la página Subtítulos." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Affinez l’interaction après avoir choisi un préréglage sur la page Sous-titres." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "字幕ページでプリセットを選んでから操作を調整します。" } }
+      }
+    },
+    "Auto width": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Automatische Breite" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Ancho automático" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Largeur automatique" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "幅を自動調整" } }
+      }
+    },
+    "Preset width": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Preset-Breite" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Ancho del preajuste" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Largeur du préréglage" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "プリセット幅" } }
+      }
+    },
+    "Shortcut ready — Accessibility needed": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Kurzbefehl bereit — Bedienungshilfen erforderlich" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Atajo listo: se necesita Accesibilidad" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Raccourci prêt — Accessibilité nécessaire" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ショートカットは準備完了 — アクセシビリティが必要です" } }
+      }
+    },
+    "Area": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Bereich" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Área" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Domaine" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "領域" } }
+      }
+    },
+    "All models": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Alle Modelle" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Todos los modelos" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Tous les modèles" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "すべてのモデル" } }
+      }
+    },
+    "Every local model, including experimental and specialist options.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Jedes lokale Modell, einschließlich experimenteller und spezialisierter Optionen." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Todos los modelos locales, incluidas las opciones experimentales y especializadas." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Tous les modèles locaux, y compris les options expérimentales et spécialisées." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "実験的や特殊なオプションを含む、すべてのローカルモデル。" } }
+      }
+    },
+    "Fine-tune the result bubble and its interaction.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Passe die Ergebnisblase und ihre Interaktion an." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Ajusta la burbuja de resultado y su interacción." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Affinez la bulle de résultat et son interaction." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "結果バブルとその操作を調整します。" } }
+      }
+    },
+    "Fine-tune the caption bubble and its interaction.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Passe die Untertitelblase und ihre Interaktion an." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Ajusta la burbuja de subtítulos y su interacción." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Affinez la bulle de sous-titres et son interaction." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "字幕バブルとその操作を調整します。" } }
+      }
+    },
+    "Caption speed": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Geschwindigkeit der Untertitel" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Velocidad de los subtítulos" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Vitesse des sous-titres" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "字幕の速度" } }
+      }
+    },
+    "Choose how quickly captions update or how much context each update uses.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Wähle, wie schnell Untertitel aktualisiert werden oder wie viel Kontext jede Aktualisierung verwendet." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Elige la frecuencia de actualización de los subtítulos o el contexto que usa cada actualización." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Choisissez la fréquence de mise à jour des sous-titres ou le contexte utilisé par chaque mise à jour." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "字幕の更新頻度と、各更新で使用するコンテキストを選択します。" } }
+      }
+    },
+    "Vocabulary": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Vokabular" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Vocabulario" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Vocabulaire" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "語彙" } }
+      }
+    },
+    "Keep names and technical terms consistent across captions and dictation.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Namen und Fachbegriffe in Untertiteln und Diktat konsistent halten." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Mantén coherentes los nombres y términos técnicos en los subtítulos y el dictado." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Gardez les noms et les termes techniques cohérents dans les sous-titres et la dictée." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "字幕と音声入力で名前や専門用語を一貫して表記します。" } }
       }
     }
   },

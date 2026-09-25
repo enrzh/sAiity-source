@@ -68,7 +68,7 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
     /// separate, much shorter signal on level rather than on exact zero, and it
     /// is what lets a finished sentence be translated the moment the speaker
     /// stops instead of waiting out a time budget.
-    var onSpeechGap: (@Sendable () -> Void)?
+    var onSpeechGap: (@Sendable (Range<Int>) -> Void)?
 
     private var stream: SCStream?
     private var converter: AVAudioConverter?
@@ -183,7 +183,7 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
 
     /// SCStream delivers 48 kHz; the gap threshold is measured against the
     /// stream, not the resampled buffer the recogniser receives.
-    private static let streamSampleRate: Double = 48_000
+    static let streamSampleRate: Double = 48_000
 
     // Diagnostics: audio seconds captured vs audio seconds actually delivered.
     private var inSeconds = 0.0
@@ -469,7 +469,7 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
                           "\(range)", gapDetector.noiseFloor)
                 }
                 gapFires += 1
-                onSpeechGap?()
+                onSpeechGap?(range)
             }
         }
     }

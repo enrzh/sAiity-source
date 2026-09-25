@@ -249,7 +249,16 @@ struct WhisperDictationBackend {
         }
     }
     static func modelFolder(for c: ModelChoice, under root: URL = ModelRegistry.root) -> URL { folder(c, root) }
-    static func isReady(_ c: ModelChoice, under root: URL = ModelRegistry.root) -> Bool { required(c, root) && FileManager.default.fileExists(atPath: folder(c, root).appendingPathComponent(c.readinessMarkerName).path) }
+    static func isReady(_ c: ModelChoice, under root: URL = ModelRegistry.root) -> Bool {
+        let modelFolder = folder(c, root)
+        // The marker is the cheap, authoritative readiness signal. Checking it
+        // first avoids enumerating three CoreML directories on every render
+        // when the model has not been downloaded yet.
+        guard FileManager.default.fileExists(atPath: modelFolder.appendingPathComponent(c.readinessMarkerName).path) else {
+            return false
+        }
+        return required(c, root)
+    }
     func prepareModel(_ c: ModelChoice, under root: URL? = nil, progress: @escaping @Sendable (Progress) -> Void = { _ in }) async throws { let root = root ?? self.root; let mutex = await Self.mutexes.mutex(for: "\(root.path):\(c.identifier)"); return try await mutex.run { try await self.prepareModelUnlocked(c, root, progress) } }
     func prepareModelForUse(_ c: ModelChoice, under root: URL? = nil, progress: @escaping @Sendable (Progress) -> Void = { _ in }) async throws {
         let root = root ?? self.root

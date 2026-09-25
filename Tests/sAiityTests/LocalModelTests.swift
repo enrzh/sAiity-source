@@ -162,9 +162,12 @@ struct LocalModelTests {
         #expect(ASREngine.effective == ASREngine.recommended)
         #expect(TranslationEngine.effective == TranslationEngine.recommended)
 
+        #expect(ASREngine.allCases == [.nemotron])
+        #expect(ASREngine.visibleSelection(.parakeetEou) == nil)
         ASREngine.selected = .parakeetEou
-        #expect(ASREngine.selected == .parakeetEou)
-        #expect(ASREngine.effective == .parakeetEou)
+        #expect(ASREngine.selected == nil)
+        #expect(ASREngine.effective == .nemotron)
+        #expect(UserDefaults.standard.string(forKey: "asrEngine") == nil)
         ASREngine.selected = nil
         #expect(UserDefaults.standard.string(forKey: "asrEngine") == nil)
 

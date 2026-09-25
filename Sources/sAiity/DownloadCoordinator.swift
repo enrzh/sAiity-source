@@ -140,7 +140,6 @@ enum AssetID {
         chunkMs < NemotronEngine.chunkMs ? "asr.nemotron.fast" : "asr.nemotron"
     }
     static let parakeetEou = "asr.parakeetEou"
-    static let speakerDiarization = "diarization.lseend.dihard3.100ms"
     static let madlad = "mt.madlad"
     static let hyMT2 = "mt.hymt2.1.8b.q4"
     static func llm(file: String) -> String { "mt.llm.\(file)" }

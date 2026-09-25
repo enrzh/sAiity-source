@@ -66,7 +66,7 @@ enum LLMLanguageProvider: TranslationLanguageProvider {
     static let canonicalCodes: Set<String> = Set(LanguageCatalog.all.map(\.code))
 
     /// An instruct LLM has no hard language list, so the full catalogue remains
-    /// reachable in Advanced. The picker separates the languages we are
+    /// reachable in Models. The picker separates the languages we are
     /// comfortable recommending from the long tail instead of treating them
     /// as equally reliable.
     static func supportedCanonicalCodes() async -> Set<String> {

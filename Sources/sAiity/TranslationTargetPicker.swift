@@ -29,10 +29,10 @@ struct TranslationTargetPicker: View {
     }
     private var available: [AppLanguage] { matches.filter { supported.contains($0.code) } }
     private var recommendedAvailable: [AppLanguage] {
-        available.filter { engine != .qwen || LLMLanguageProvider.isStrong($0.code) }
+        available
     }
     private var experimentalAvailable: [AppLanguage] {
-        available.filter { engine == .qwen && !LLMLanguageProvider.isStrong($0.code) }
+        []
     }
     private var elsewhere: [AppLanguage] { matches.filter { !supported.contains($0.code) } }
 
@@ -42,10 +42,12 @@ struct TranslationTargetPicker: View {
     /// previews the recommended one and says so in the subtitle — an empty list
     /// would leave the user with no way to understand why.
     private var configuredEngine: TranslationEngine? {
+        let raw: TranslationEngine?
         switch scope {
-        case .captions: return state.translationEngine
-        case .dictation: return state.dictationTranslationEngine
+        case .captions: raw = state.translationEngine
+        case .dictation: raw = state.dictationTranslationEngine
         }
+        return TranslationEngine.visibleSelection(raw)
     }
     private var engine: TranslationEngine {
         configuredEngine
@@ -72,16 +74,27 @@ struct TranslationTargetPicker: View {
                    width: 500, height: 560) {
             // A macOS .searchable installs into a toolbar, which a bare sheet
             // does not have — so the field is explicit.
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
                 TextField("Search \(LanguageCatalog.all.count) languages", text: $query)
                     .textFieldStyle(.plain)
                 if !query.isEmpty {
-                    Button { query = "" } label: { Image(systemName: "xmark.circle.fill") }
-                        .buttonStyle(.plain).foregroundStyle(.secondary)
+                    Button { query = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Clear search")
                 }
             }
-            .padding(.horizontal, 14).padding(.vertical, 9)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color(nsColor: .separatorColor).opacity(0.35), lineWidth: 0.5)
+            }
             Divider()
 
             if loading {
@@ -177,9 +190,13 @@ struct TargetUnsupportedNotice: View {
 
     @State private var engines: [TranslationEngine] = []
 
+    private var currentEngine: TranslationEngine {
+        TranslationEngine.visibleSelection(state.translationEngine) ?? .recommended
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Label("\((state.translationEngine ?? .recommended).displayName) cannot translate into \(AppLanguage(code: target).displayName).",
+            Label("\(currentEngine.displayName) cannot translate into \(AppLanguage(code: target).displayName).",
                   systemImage: "exclamationmark.triangle")
                 .font(.caption).foregroundStyle(Color.orange)
             if engines.isEmpty {
@@ -194,9 +211,9 @@ struct TargetUnsupportedNotice: View {
                 }
             }
         }
-        .task(id: "\(target)|\(state.translationEngine?.rawValue ?? "recommended")") {
+        .task(id: "\(target)|\(currentEngine.rawValue)") {
             engines = await LanguageCatalog.engines(supporting: target)
-                .filter { $0 != state.translationEngine }
+                .filter { $0 != currentEngine }
         }
     }
 }
@@ -214,10 +231,12 @@ private struct AlternativeEngines: View {
     @State private var engines: [TranslationEngine] = []
 
     private var configuredEngine: TranslationEngine? {
+        let raw: TranslationEngine?
         switch scope {
-        case .captions: return state.translationEngine
-        case .dictation: return state.dictationTranslationEngine
+        case .captions: raw = state.translationEngine
+        case .dictation: raw = state.dictationTranslationEngine
         }
+        return TranslationEngine.visibleSelection(raw)
     }
 
     var body: some View {

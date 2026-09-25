@@ -42,6 +42,68 @@ enum DiagnosticsTimingSummarizer {
     }
 }
 
+/// The settings rows for caption timing. The diagnostics file keeps p50 and
+/// p95; this is the wording a person reads, with no ratios or percentiles.
+enum CaptionPerformanceCopy {
+    /// A real-time factor at or below 1 means recognition finished at least as
+    /// fast as the audio arrived.
+    static func recognitionSpeed(p50RealTimeFactor rtf: Double) -> String {
+        guard rtf.isFinite, rtf <= 1 else {
+            return String(localized: "Falling behind")
+        }
+        return String(localized: "Keeping up")
+    }
+
+    static func duration(_ seconds: Double) -> String {
+        guard seconds.isFinite, seconds >= 0.05 else {
+            return String(localized: "Under 0.1 seconds")
+        }
+        let shown = String(format: "%.1f", seconds)
+        return String(localized: "\(shown) seconds")
+    }
+
+    static func audioNotCaptioned(_ seconds: Double) -> String {
+        guard seconds.isFinite, seconds >= 0.05 else {
+            return String(localized: "None")
+        }
+        return duration(seconds)
+    }
+}
+
+/// The caption-page choice for how soon a line can appear, and the pause
+/// readout beside it. The stored tier and the pause hold stay in milliseconds.
+/// This only changes the words a person reads.
+enum CaptionLatencyCopy {
+    static func title(chunkMs: Int) -> String {
+        switch chunkMs {
+        case 1120: return String(localized: "About 1 second")
+        default: return String(localized: "About 2 seconds")
+        }
+    }
+
+    static var missingDownload: String {
+        String(localized: "This choice is a separate download. Get it under Models.")
+    }
+
+    /// 750 ms is 0.75 seconds, not 0.8. Keep a second decimal only when the
+    /// tenth would hide it.
+    static func pauseLength(milliseconds: Double) -> String {
+        let seconds = milliseconds / 1000
+        let hundredths = (seconds * 100).rounded() / 100
+        let tenths = (hundredths * 10).rounded() / 10
+        let shown = abs(hundredths - tenths) < 0.001
+            ? String(format: "%.1f", hundredths)
+            : String(format: "%.2f", hundredths)
+        return String(localized: "\(shown) seconds")
+    }
+
+    /// Clear is a command for a caption that is on screen. An empty or hidden
+    /// bubble has nothing to clear.
+    static func clearEnabled(showingCaption: Bool) -> Bool {
+        showingCaption
+    }
+}
+
 /// One shareable text file answering "what state was the app in".
 ///
 /// Every log site in this app is NSLog, so the causal detail behind most
@@ -131,7 +193,6 @@ public enum Diagnostics {
         out.append("")
         out.append("recognition: \(ASREngine.selected?.rawValue ?? "none selected")"
                    + " · nemotron tier \(NemotronEngine.selectedChunkMs) ms")
-        out.append("speaker labels: \(UserDefaults.standard.bool(forKey: "speakerLabelsEnabled") ? "on" : "off")")
         out.append("translation: \(TranslationEngine.selected?.rawValue ?? "none selected")"
                    + " · cleanup model \(LocalModel.cleanupSelected?.file ?? "—")")
         out.append("mlx metallib: \(MADLADTranslator.hasBundledMetalLibrary ? "present" : "missing")")

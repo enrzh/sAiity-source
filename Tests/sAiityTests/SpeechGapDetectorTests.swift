@@ -80,6 +80,31 @@ struct SpeechGapDetectorTests {
         #expect(feed(&d, rms: 0.0095, ms: 1000), "did not re-arm after speech resumed")
     }
 
+    @Test("Gap events carry the absolute capture sample watermark")
+    func gapCarriesSampleRange() {
+        var d = SpeechGapDetector(holdFrames: Self.holdFrames)
+        _ = speak(&d, around: 0.05, ms: 2000)
+
+        var event: SpeechActivityEvent?
+        for _ in 0..<50 {
+            event = d.processEvent(rms: 0.0095,
+                                   frames: Self.frames,
+                                   sampleRate: Self.rate)
+            if case .gap = event { break }
+        }
+
+        guard let event else {
+            Issue.record("expected a gap event")
+            return
+        }
+        guard case .gap(let range) = event else {
+            Issue.record("expected a gap event")
+            return
+        }
+        #expect(range.lowerBound < range.upperBound)
+        #expect(range.upperBound == d.observedSampleCount)
+    }
+
     @Test("Ordinary speech dynamics do not fire mid-sentence")
     func speechDynamicsDoNotFire() {
         var d = SpeechGapDetector(holdFrames: Self.holdFrames)

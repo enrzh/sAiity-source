@@ -11,6 +11,7 @@ import Testing
         var teardowns = 0
         var finishResult: String?
         var finishCalls = 0
+        var processError: Error?
         var partial: (@Sendable (String) -> Void)?
 
         func load(progress: @escaping @Sendable (String) -> Void) async throws {
@@ -24,7 +25,9 @@ import Testing
         func setPartial(_ callback: @escaping @Sendable (String) -> Void) async {
             partial = callback
         }
-        func process(_ samples: [Float]) async throws {}
+        func process(_ samples: [Float]) async throws {
+            if let processError { throw processError }
+        }
         func finishSession() async -> String? {
             finishCalls += 1
             return finishResult
@@ -52,6 +55,45 @@ import Testing
 
         func process(_ samples: [Float]) async throws {
             lock.withLock { batches.append(samples) }
+        }
+
+        func finishSession() async -> String? { nil }
+        func teardown() async {}
+    }
+
+    final class GatedEngine: FluidStreamingEngine, @unchecked Sendable {
+        let sampleRate = 16_000.0
+        private let lock = NSLock()
+        private var started = false
+        private var released = false
+        private var continuation: CheckedContinuation<Void, Never>?
+
+        var processStarted: Bool { lock.withLock { started } }
+
+        func load(progress: @escaping @Sendable (String) -> Void) async throws {}
+        func reset() async {}
+        func setPartial(_ callback: @escaping @Sendable (String) -> Void) async {}
+
+        func process(_ samples: [Float]) async throws {
+            lock.withLock { started = true }
+            await withCheckedContinuation { continuation in
+                let resumeImmediately = lock.withLock { () -> Bool in
+                    if released { return true }
+                    self.continuation = continuation
+                    return false
+                }
+                if resumeImmediately { continuation.resume() }
+            }
+        }
+
+        func releaseProcess() {
+            let pending = lock.withLock { () -> CheckedContinuation<Void, Never>? in
+                released = true
+                let value = continuation
+                continuation = nil
+                return value
+            }
+            pending?.resume()
         }
 
         func finishSession() async -> String? { nil }
@@ -119,6 +161,22 @@ import Testing
         }
     }
 
+    final class LockedFlag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var storage = false
+
+        var value: Bool { lock.withLock { storage } }
+        func set() { lock.withLock { storage = true } }
+    }
+
+    final class MetricsLog: @unchecked Sendable {
+        private let lock = NSLock()
+        private var storage: StreamingASRMetrics?
+
+        var value: StreamingASRMetrics? { lock.withLock { storage } }
+        func set(_ metrics: StreamingASRMetrics) { lock.withLock { storage = metrics } }
+    }
+
     @Test("stopping a streaming backend keeps it reusable until release")
     func stopPreservesLoadedEngine() async throws {
         let engine = FakeEngine()
@@ -161,6 +219,98 @@ import Testing
         await backend.stop()
 
         #expect(engine.processedSamples == [1.0, 2.0, 3.0, 4.0])
+        await backend.release()
+    }
+
+    @Test("stop drains a final pending batch before releasing the engine")
+    func stopDrainsFinalBatch() async throws {
+        let engine = RecordingEngine()
+        let backend = StreamingASRBackend(name: "Test", engine: engine)
+        try await backend.prepare(locale: Locale(identifier: "en-US")) { _ in }
+        try await backend.start { _ in }
+
+        let format = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4)!
+        buffer.frameLength = 4
+        for (index, sample) in [1, 2, 3, 4].enumerated() {
+            buffer.floatChannelData![0][index] = Float(sample)
+        }
+        backend.feed(buffer)
+        await backend.stop()
+
+        #expect(engine.processedSamples == [1.0, 2.0, 3.0, 4.0])
+        await backend.release()
+    }
+
+    @Test("processing failures are reported and never counted as consumed audio")
+    func processingFailureIsNotCounted() async throws {
+        struct TestError: Error {}
+        let engine = FakeEngine()
+        engine.processError = TestError()
+        let metrics = MetricsLog()
+        let backend = StreamingASRBackend(name: "Test", engine: engine,
+                                          onMetrics: { metrics.set($0) })
+        try await backend.prepare(locale: Locale(identifier: "en-US")) { _ in }
+        try await backend.start { _ in }
+
+        let format = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1_600)!
+        buffer.frameLength = 1_600
+        backend.feed(buffer)
+        try await Task.sleep(for: .milliseconds(100))
+        await backend.stop()
+
+        #expect(metrics.value?.processingErrorCount == 1)
+        #expect(metrics.value?.processedAudioSamples == 0)
+        await backend.release()
+    }
+
+    @Test("drain waits for the audio watermark before a gap flush")
+    func drainWaitsForProcessedAudio() async throws {
+        let engine = GatedEngine()
+        let backend = StreamingASRBackend(name: "Test", engine: engine)
+        try await backend.prepare(locale: Locale(identifier: "en-US")) { _ in }
+        try await backend.start { _ in }
+
+        let format = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1_600)!
+        buffer.frameLength = 1_600
+        backend.feed(buffer)
+        for _ in 0..<100 where !engine.processStarted {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        #expect(engine.processStarted)
+
+        let completed = LockedFlag()
+        let drain = Task {
+            await backend.drain(toAudioSample: 1_600)
+            completed.set()
+        }
+        try await Task.sleep(nanoseconds: 30_000_000)
+        #expect(!completed.value)
+
+        engine.releaseProcess()
+        await drain.value
+        #expect(completed.value)
+        await backend.release()
+    }
+
+    @Test("flushing after the watermark keeps the final word")
+    func gapFlushKeepsFinalWord() async throws {
+        let engine = FakeEngine()
+        let backend = StreamingASRBackend(name: "Test", engine: engine)
+        let emitted = ChunkLog()
+        try await backend.prepare(locale: Locale(identifier: "en-US")) { _ in }
+        try await backend.start { emitted.append($0) }
+
+        engine.partial?("Please keep the final word")
+        await backend.drain(toAudioSample: 0)
+        await backend.flushPending()
+
+        let values = emitted.values
+        #expect(values.last?.text == "Please keep the final word")
+        #expect(values.last?.isFinal == true)
+        #expect(values.dropLast().allSatisfy { !$0.isFinal })
         await backend.release()
     }
 

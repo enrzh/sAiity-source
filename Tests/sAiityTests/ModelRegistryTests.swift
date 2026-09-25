@@ -16,7 +16,7 @@ struct ModelRegistryTests {
         // madlad and whisper — 6.9 GB, one click, no confirmation. It was
         // unreachable only because the engine picker had a single case.
         let root = ModelRegistry.root.standardizedFileURL
-        for asset in ModelRegistry.assets() {
+        for asset in ModelRegistry.assets() + ModelRegistry.retiredAssets() {
             guard case .remove(let url) = asset.removal else { continue }
             let target = url.standardizedFileURL
             #expect(target != root, "\(asset.id) would delete the entire models root")
@@ -33,14 +33,16 @@ struct ModelRegistryTests {
 
         // MADLAD is the reason this test exists: it was downloadable, 1.86 GB,
         // and had no row anywhere in the app.
-        for expected in ["asr.nemotron", "asr.nemotron.fast", "asr.parakeetEou",
-                         "diarization.lseend.dihard3.100ms", "mt.madlad", "mt.hymt2.1.8b.q4"] {
+        for expected in ["asr.nemotron", "asr.nemotron.fast", "mt.madlad"] {
             #expect(ids.contains(expected), "missing asset \(expected)")
         }
+        #expect(!ids.contains("asr.parakeetEou"))
+        #expect(!ids.contains("mt.hymt2.1.8b.q4"))
         // Whisper was cut: its translate mode stopped emitting finals ~25 s into
         // every session. Leaving a registry entry behind would put a 2.9 GB
         // download back on the Models page with no engine to use it.
         #expect(!ids.contains { $0.contains("whisper") }, "Whisper was removed; a stale asset remains")
+        #expect(!ids.contains { $0.contains("diarization") }, "Speaker diarization was removed; a stale asset remains")
         // Apple went the same way: its translator needed no download but could
         // only reach the pairs macOS had, and it kept a whole second code path
         // alive for one engine.
@@ -134,7 +136,11 @@ struct ModelRegistryTests {
             .appendingPathComponent("metadata.json")
         #expect(marker.path.contains("nemotron-multilingual"))
         #expect(NemotronEngine.isDownloaded()
-                == FileManager.default.fileExists(atPath: marker.path))
+                == (NemotronEngine.hasCompletionMarker()
+                    || NemotronEngine.hasCompleteRuntimeFiles()))
+        #expect(NemotronEngine.hasCompletionMarker()
+                == FileManager.default.fileExists(
+                    atPath: NemotronEngine.completionMarkerURL().path))
     }
 }
 
@@ -234,21 +240,9 @@ struct DownloadCoordinatorTests {
         #expect(AssetID.hyMT2 == "mt.hymt2.1.8b.q4")
         #expect(AssetID.llm(file: "x.gguf") == "mt.llm.x.gguf")
         let ids = Set(ModelRegistry.snapshot().map(\.asset.id))
-        #expect(ids.contains(AssetID.parakeetEou))
+        #expect(!ids.contains(AssetID.parakeetEou))
         #expect(ids.contains(AssetID.madlad))
-        #expect(ids.contains(AssetID.hyMT2))
-    }
-
-    @Test("speaker diarization is a removable recognition asset")
-    func speakerDiarizationAssetIsCatalogued() {
-        let asset = ModelRegistry.assets().first { $0.id == AssetID.speakerDiarization }
-        #expect(asset?.family == .recognition)
-        #expect(asset?.install != nil)
-        if let asset, case .remove(let url) = asset.removal {
-            #expect(url.path.hasPrefix(ModelRegistry.root.path + "/"))
-        } else {
-            Issue.record("speaker diarization has no removal path")
-        }
+        #expect(!ids.contains(AssetID.hyMT2))
     }
 }
 

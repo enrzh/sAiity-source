@@ -49,7 +49,6 @@ enum AssetRemoval: Sendable {
 enum AssetUse: Sendable {
     case never
     case whenRecognitionEngine(ASREngine)
-    case whenSpeakerDiarization
     /// One latency tier of the Nemotron model. Only the selected tier counts as
     /// in use — the other is just bytes that can be deleted freely.
     case whenNemotronTier(chunkMs: Int)
@@ -62,8 +61,7 @@ enum AssetUse: Sendable {
         case .whenTranslator(let engine): return engine.isAdvanced
         case .whenQwenVariant: return true
         case .whenCleanupModel: return false
-        case .never, .whenRecognitionEngine, .whenSpeakerDiarization,
-             .whenNemotronTier: return false
+        case .never, .whenRecognitionEngine, .whenNemotronTier: return false
         }
     }
 
@@ -74,8 +72,6 @@ enum AssetUse: Sendable {
             return false
         case .whenRecognitionEngine(let e):
             return ASREngine.selected == e
-        case .whenSpeakerDiarization:
-            return UserDefaults.standard.bool(forKey: "speakerLabelsEnabled")
         case .whenNemotronTier(let ms):
             return ASREngine.selected == .nemotron && NemotronEngine.selectedChunkMs == ms
         case .whenTranslator(let t):
@@ -155,6 +151,10 @@ struct ModelInventory: Sendable {
     let assets: [AssetStatus]
     let ownedBytes: Int64
     let strayBytes: Int64
+    /// Incomplete files belonging to retired engines. They stay out of the
+    /// product catalogue, but the cleanup action must still be able to reach
+    /// them without making the user remove every current model.
+    let retiredPartialBytes: Int64
 }
 
 /// The one place that knows about every model on disk.
@@ -205,39 +205,72 @@ enum ModelRegistry {
     // MARK: - The catalogue
 
     static func assets() -> [ModelAsset] {
+        // Translation is MADLAD-only in the product. Keep the local GGUF
+        // catalogue for dictation cleanup, but do not expose retired Hy-MT2 or
+        // Qwen translation downloads in the Models page.
         ASREngine.allCases.flatMap(\.assetDescriptors)
-            + [SpeakerDiarizationModel.asset]
-            + TranslationEngine.allCases.flatMap(\.assetDescriptors)
+            + TranslationEngine.userSelectableCases.flatMap(\.assetDescriptors)
+            + TranslationEngine.qwen.assetDescriptors
+    }
+
+    /// Descriptors for weights that an older build could have downloaded. They
+    /// are deliberately not part of `assets()` and never appear as selectable
+    /// rows; this list exists only so an interrupted transfer can be cleaned
+    /// without deleting the user's current models.
+    static func retiredAssets() -> [ModelAsset] {
+        ASREngine.parakeetEou.assetDescriptors + TranslationEngine.hyMT2.assetDescriptors
+    }
+
+    static func retiredPartialAssets() -> [ModelAsset] {
+        retiredAssets().filter { status(of: $0).isPartial }
+    }
+
+    static func retiredPartialBytes() -> Int64 {
+        retiredPartialAssets().reduce(Int64(0)) { $0 + status(of: $1).bytesOnDisk }
+    }
+
+    /// Fast readiness check for failure bookkeeping. It deliberately avoids
+    /// measuring the model tree or the entire models root.
+    static func isInstalled(_ asset: ModelAsset) -> Bool {
+        if asset.id == AssetID.nemotron(chunkMs: 1120) {
+            return NemotronEngine.isDownloaded(chunkMs: 1120)
+        }
+        if asset.id == AssetID.nemotron(chunkMs: NemotronEngine.chunkMs) {
+            return NemotronEngine.isDownloaded(chunkMs: NemotronEngine.chunkMs)
+        }
+        switch asset.storage {
+        case .directory(let dir, let markers):
+            return markers.allSatisfy {
+                FileManager.default.fileExists(atPath: dir.appendingPathComponent($0).path)
+            }
+        case .file(let url, let expected):
+            let bytes = Int64((try? FileManager.default.attributesOfItem(
+                atPath: url.path)[.size] as? Int) ?? 0)
+            guard bytes > 0 else { return false }
+            guard let expected else { return true }
+            return Double(bytes) >= Double(expected) * 0.98
+        }
     }
 
     static func status(of asset: ModelAsset) -> AssetStatus {
         switch asset.storage {
-        case .directory(let dir, let markers):
+        case .directory(let dir, _):
             let bytes = byteSize(of: dir)
-            let complete = markers.allSatisfy {
-                FileManager.default.fileExists(atPath: dir.appendingPathComponent($0).path)
-            }
+            let complete = isInstalled(asset)
             return AssetStatus(asset: asset, isInstalled: complete,
                                isPartial: !complete && bytes > 0, bytesOnDisk: bytes)
 
-        case .file(let url, let expected):
+        case .file(let url, _):
             let fm = FileManager.default
             let bytes = Int64((try? fm.attributesOfItem(
                 atPath: url.path)[.size] as? Int) ?? 0)
-            // A GGUF that is short is a truncated download, not a model. With
-            // no expected size, presence is the signal — see the case comment.
-            let complete: Bool
-            if let expected {
-                complete = bytes > 0 && Double(bytes) >= Double(expected) * 0.98
-            } else {
-                complete = bytes > 0
-            }
+            let complete = isInstalled(asset)
             // Resume state counts. FileDownloader now keeps `<file>.part` and
             // its validator across a cancel or a quit, deliberately — but a
             // row that says "not downloaded" while gigabytes sit beside it is
             // the same dishonesty this page was built to end. Reported as a
             // partial, which is exactly what it is, and what gives the row
-            // its Remove button.
+            // its Resume/Remove controls.
             let partBytes = Int64((try? fm.attributesOfItem(
                 atPath: url.appendingPathExtension("part").path)[.size] as? Int) ?? 0)
             if !complete, partBytes > 0 {
@@ -256,11 +289,15 @@ enum ModelRegistry {
 
     static func inventorySnapshot() -> ModelInventory {
         let statuses = assets().map(status(of:))
+        let retiredPartials = retiredPartialAssets().map(status(of:))
         let owned = byteSize(of: root)
         let known = statuses.reduce(Int64(0)) { $0 + $1.bytesOnDisk }
+            + retiredPartials.reduce(Int64(0)) { $0 + $1.bytesOnDisk }
+        let retiredBytes = retiredPartials.reduce(Int64(0)) { $0 + $1.bytesOnDisk }
         return ModelInventory(assets: statuses,
                               ownedBytes: owned,
-                              strayBytes: max(0, owned - known))
+                              strayBytes: max(0, owned - known),
+                              retiredPartialBytes: retiredBytes)
     }
 
     // MARK: - Totals

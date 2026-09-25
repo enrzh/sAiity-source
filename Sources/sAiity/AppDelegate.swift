@@ -15,7 +15,7 @@ import UniformTypeIdentifiers
 /// after their first `await`. The compiler warned about it; nothing enforced it.
 /// Class-level isolation makes that a build error instead.
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     #if SAIITY_TEST_HOOKS
     var whisperPreparationForTests: (@Sendable (WhisperDictationBackend.ModelChoice, @escaping @Sendable (Progress) -> Void) async throws -> Void)?
     #endif
@@ -115,7 +115,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastDictationResult: DictationResultSnapshot?
     private var dictationFeedbackTask: Task<Void, Never>?
     private let capture = SystemAudioCapture()
-    private let speakerDiarization = SpeakerDiarizationSession()
     private var engine = ASREngine.effective
 
     override init() {
@@ -259,6 +258,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                          seconds: metrics.peakBacklogSeconds,
                                          cold: false)
                 if metrics.droppedAudioSeconds > 0 {
+                    ASRAdaptivePolicy.markOverloaded(scope: .captions)
+                    Diagnostics.recordTiming(operation: "captions.asr.dropped",
+                                             seconds: metrics.droppedAudioSeconds,
+                                             cold: false)
                     Diagnostics.recordFailure(
                         operation: "captions.audio",
                         reason: String(format: "dropped %.3fs of backlog audio",
@@ -289,11 +292,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                          tier: tier,
                                          scope: .captions)
             },
-            onMetrics: metrics)
+            onMetrics: metrics,
+            onBackpressure: { backlogSeconds in
+                Task { @MainActor in
+                    ASRAdaptivePolicy.markOverloaded(scope: .captions)
+                    Diagnostics.recordTiming(operation: "captions.asr.backpressure",
+                                             seconds: backlogSeconds,
+                                             cold: false)
+                }
+            })
     }
 
     static func makeDictationStreamingBackend() -> TranscriptionBackend {
-        let engine = ASREngine(rawValue: UserDefaults.standard.string(forKey: "dictationStreamingEngine") ?? ASREngine.recommended.rawValue) ?? .recommended
+        let engine = ASREngine.dictationEffective
         guard engine == .nemotron else { return engine.makeBackend() }
         let preferredTier = NemotronEngine.selectedChunkMs
         let installed = Set(NemotronEngine.availableChunkMs.filter {
@@ -320,6 +331,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await dictationController.invalidatePreparedBackend()
             await dictationBackendPool.replace(with: Self.makeDictationStreamingBackend())
         }
+    }
+
+    /// Quiesce runtime-backed models before Settings removes an incomplete
+    /// selected asset. The caller has already established that no transfer is
+    /// active; this is the second safety door for a model that was prewarmed
+    /// outside a visible caption session.
+    @discardableResult
+    func prepareForModelCleanup() async -> Bool {
+        guard state == .idle,
+              !dictationController.isBusy,
+              translatorSwap == nil,
+              translatorUsers == 0 else { return false }
+        await dictationController.invalidatePreparedBackend()
+        let outgoing = activeTranslator
+        activeTranslator = nil
+        activeTranslatorEngine = nil
+        translatorPreparedTarget = nil
+        translatorReady = false
+        await stopTranslator(outgoing)
+        return true
     }
 
     private var activeTranslator: Translating?
@@ -931,6 +962,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The in-flight start. Held so `stopAsync()` can cancel it and wait for it
     /// to actually leave the engine before tearing anything down.
     private var sessionTask: Task<Void, Never>?
+    /// Coalesces repeated gap callbacks and is cancelled by teardown. The
+    /// callback itself runs on the capture queue; only this task touches the
+    /// main-actor sentence state.
+    private var speechGapTask: Task<Void, Never>?
 
     private var locale = Locale(identifier: "en-US")
     /// BCP-47, nil = off. Persisted — it was previously an in-memory var, so the
@@ -1026,8 +1061,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         String(joinClauses(parts).suffix(maxSentenceChars))
     }
     private var sessionLines: [Segment] = []
-    private var speakerAttributor = SpeakerCaptionAttributor()
-    private var currentSpeakerLabel: String?
     /// Bumped by start(), so an async result from the previous session cannot
     /// patch a line of this one that happens to share an index.
     private var sessionGeneration = 0
@@ -1046,7 +1079,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Stable caption translations are safe to reuse within one session. The
     /// key excludes the segment index deliberately: repeated ASR boundaries
     /// should not invoke the same native model twice.
-    private var captionTranslationCache: [CaptionTranslationKey: String] = [:]
+    private var captionTranslationCache = BoundedCache<CaptionTranslationKey, String>(capacity: 64)
     private var captionTranslationTasks: [Int: Task<String?, Never>] = [:]
 
     /// How many caption lines may be waiting on the translator at once.
@@ -1225,7 +1258,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(forName: .saiityEngineChanged, object: nil,
                                                queue: .main) { [weak self] note in
             guard let raw = note.userInfo?["engine"] as? String,
-                  let e = ASREngine(rawValue: raw) else { return }
+                  let parsed = ASREngine(rawValue: raw),
+                  let e = ASREngine.visibleSelection(parsed) else { return }
             // Delivered on .main, but the closure itself is nonisolated. Hop
             // explicitly instead of assuming the dispatch queue is the actor.
             Task { @MainActor [weak self] in self?.engineChanged(to: e) }
@@ -1303,12 +1337,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if DictationRecognizer.selected == .whisper {
             return WhisperDictationBackend.isReady(WhisperDictationBackend.model)
         }
-        let engine = ASREngine(rawValue: UserDefaults.standard.string(forKey: "dictationStreamingEngine")
-                               ?? ASREngine.recommended.rawValue) ?? .recommended
-        switch engine {
-        case .parakeetEou:
-            return ParakeetEouEngine.isDownloaded()
-        case .nemotron:
+        let engine = ASREngine.dictationEffective
+        if engine == .nemotron {
             if NemotronEngine.hasExplicitChunkSelection {
                 return NemotronEngine.isDownloaded(chunkMs: NemotronEngine.selectedChunkMs)
             }
@@ -1316,6 +1346,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NemotronEngine.isDownloaded(chunkMs: $0)
             }
         }
+        return false
     }
 
     /// AppKit can accept a panel order request during application launch while
@@ -1493,6 +1524,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         toggleItem.image = Self.menuSymbol("captions.bubble")
         menu.addItem(toggleItem)
 
+        let clearItem = NSMenuItem(title: String(localized: "Clear the caption"),
+                                   action: #selector(clearCaptionFromMenu),
+                                   keyEquivalent: "")
+        if let sc = HotKeyCenter.shortcut(for: .clearCaption), sc.isUsable {
+            // Shown for discoverability, same as Start/Stop. The real binding
+            // is the global hot key; a menu key equivalent only fires while
+            // this menu-bar app is frontmost, which it is not.
+            clearItem.title += "  (\(sc.displayString))"
+        }
+        clearItem.image = Self.menuSymbol("xmark.circle")
+        clearItem.tag = Self.clearCaptionMenuTag
+        clearItem.isEnabled = CaptionLatencyCopy.clearEnabled(
+            showingCaption: overlay.hasVisibleCaption)
+        menu.addItem(clearItem)
+
         let chord = SettingsWindowController.state.dictationChord.displayString
         let dictationItem = NSMenuItem(title: String(localized: "Hold \(chord) to Dictate"),
                                        action: nil, keyEquivalent: "")
@@ -1523,9 +1569,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         quit.target = NSApp
         menu.addItem(quit)
         assignTargets(menu)
+        menu.delegate = self
         guard let statusItem else { return }
         statusItem.menu = menu
     }
+
+    /// Caption text arrives without rebuilding the menu. Refresh Clear when
+    /// the menu opens so it is disabled when the bubble has nothing on it.
+    func menuWillOpen(_ menu: NSMenu) {
+        guard let item = menu.item(withTag: Self.clearCaptionMenuTag) else { return }
+        item.isEnabled = CaptionLatencyCopy.clearEnabled(
+            showingCaption: overlay.hasVisibleCaption)
+    }
+
+    @objc private func clearCaptionFromMenu(_ sender: Any?) {
+        clearCaption()
+    }
+
+    private static let clearCaptionMenuTag = 174
 
 
     /// Only claim items that have not already chosen a target — otherwise this
@@ -1793,8 +1854,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let recent = sessionLines.suffix(3).enumerated().map { index, segment in
             CaptionHistoryEntry(sentenceID: -1_000_000 - index,
                                  original: segment.text,
-                                 translation: segment.tr,
-                                 speakerLabel: segment.speaker.map(SpeakerLabel.displayName))
+                                 translation: segment.tr)
         }
         guard !recent.isEmpty else { return }
         recentFlashTask?.cancel()
@@ -1948,6 +2008,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             setStatus("Downloading \(chosen.displayName) before captions can start…")
         }
         state = .starting
+        speechGapTask?.cancel()
+        speechGapTask = nil
         translatorIdleEviction.cancel()
         showedAnyCaption = false
         captionFirstTextLogged = false
@@ -1962,8 +2024,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         captionTranslationTasks.values.forEach { $0.cancel() }
         captionTranslationTasks.removeAll()
         captionTranslationCache.removeAll(keepingCapacity: true)
-        speakerAttributor = SpeakerCaptionAttributor()
-        currentSpeakerLabel = nil
         subtitleSessionStartedAt = Date()
         pendingTranslations = 0
         shownTranslationID = nil
@@ -2045,29 +2105,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 try Task.checkCancellation()
                 captureFormat = fmt
-                let speakerLabelsEnabled = UserDefaults.standard.bool(forKey: "speakerLabelsEnabled")
-                let speakerSessionGeneration = sessionGeneration
-                var useSpeakerDiarization = false
-                if speakerLabelsEnabled {
-                    setStatus("Preparing speaker identification…")
-                    do {
-                        try await speakerDiarization.prepare()
-                        try speakerDiarization.start(
-                            sourceSampleRate: fmt.sampleRate,
-                            onEvents: { [weak self] events in
-                                Task { @MainActor [weak self] in
-                                    guard let self,
-                                          self.sessionGeneration == speakerSessionGeneration else { return }
-                                    self.speakerAttributor.ingest(events)
-                                }
-                            })
-                        useSpeakerDiarization = true
-                    } catch {
-                        // Optional labels must never prevent ordinary captions.
-                        NSLog("sAiity diarization unavailable: \(error.localizedDescription)")
-                    }
-                }
-                let shouldFeedSpeakerDiarization = useSpeakerDiarization
                 let captureStart = ContinuousClock.now
                 try await capture.start(
                     targetFormat: fmt,
@@ -2078,9 +2115,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     // unsynchronised read/write of a class reference. Binding it
                     // once also guarantees the audio goes to the engine the
                     // stream was configured for.
-                    onBuffer: { [captureSink, speakerDiarization] buf in
+                    onBuffer: { [captureSink] buf in
                         captureSink.feed(buf)
-                        if shouldFeedSpeakerDiarization { speakerDiarization.feed(buf) }
                     },
                     onState: { audio in
                         Task { @MainActor [self] in self.captureStateChanged(audio) }
@@ -2092,8 +2128,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Commit on a pause, which is what makes a finished sentence
                 // translate when the speaker stops rather than when a 3.5 s
                 // budget runs out.
-                capture.onSpeechGap = { [weak self] in
-                    Task { @MainActor in await self?.commitAtSpeechGap() }
+                capture.onSpeechGap = { [weak self] range in
+                    Task { @MainActor in self?.scheduleSpeechGapCommit(range) }
                 }
 
                 if saveTranscript { await beginRecording() }
@@ -2173,46 +2209,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Report the detected language. With a single multilingual engine there
     /// is nothing to switch — the value's real job is telling the translator
     /// what the source language actually is.
-    @MainActor
-    /// Commit whatever is pending because the speaker paused.
-    ///
-    /// Delayed deliberately. The recogniser decodes in 2240 ms chunks, so at the
-    /// instant a gap is detected the words leading up to it may not have been
-    /// decoded yet — flushing immediately would push the end of the sentence
-    /// into the NEXT line. Waiting a beat lets the trailing chunk land first.
-    private func commitAtSpeechGap() async {
-        guard state == .running else { return }
-        // The backend now drains bounded 160 ms windows, so waiting a full
-        // chunk-sized 350 ms only adds latency after the detector already held
-        // a confirmed gap.
-        try? await Task.sleep(nanoseconds: 120_000_000)
-        guard state == .running else { return }
-        guard let backend = captionBackend else { return }
-        await backend.flushPending()
-        // flushPending emits the tail through the same callback as every other
-        // chunk, and that callback hops to the main actor — so the tail is still
-        // in flight right here. Closing now strands it: measured, the final
-        // "wird" of a sentence became the whole of the next one, alone on
-        // screen. Let it land first.
-        try? await Task.sleep(nanoseconds: 40_000_000)
-        guard state == .running else { return }
-
-        // A pause after a comma is a breath, not the end of a thought. Closing
-        // on it split "Untertitel für alles, was der Mac abspielt, direkt auf
-        // dem Gerät." into three, each translated without the others. If the
-        // text so far ends mid-clause, give the speaker a moment to carry on;
-        // if more arrives, the gap that follows *it* will do the closing.
-        if let last = lastFinalText.last, Self.clauseContinuations.contains(last) {
-            let partsBefore = sentenceParts.count
-            try? await Task.sleep(nanoseconds: 450_000_000)
-            guard state == .running else { return }
-            guard sentenceParts.count == partsBefore else { return }
+    /// Schedule one pause commit at a time. A capture callback can arrive
+    /// again while the previous watermark is still draining; the newest gap is
+    /// the only boundary worth committing.
+    private func scheduleSpeechGapCommit(_ range: Range<Int>) {
+        speechGapTask?.cancel()
+        let generation = sessionGeneration
+        speechGapTask = Task { @MainActor [weak self] in
+            await self?.commitAtSpeechGap(range, generation: generation)
         }
+    }
 
-        // The pause IS the end of the sentence. That matters most for the
-        // multilingual model, which frequently emits no punctuation at all —
-        // without this its sentences would only ever be closed by the length
-        // cap, in the middle of a word.
+    /// Commit whatever is pending because the speaker paused. The capture
+    /// detector reports a 48 kHz sample-clock range; the backend waits until
+    /// its converted queue has processed that same point before flushing. This
+    /// removes the old fixed sleeps and keeps sentence boundaries stable when
+    /// the model is faster or slower than the balanced tier.
+    private func commitAtSpeechGap(_ range: Range<Int>, generation: Int) async {
+        guard state == .running, generation == sessionGeneration else { return }
+        guard let backend = captionBackend else { return }
+        let sampleRate = await backend.inputFormat?.sampleRate ?? 16_000
+        let target = Int(ceil(Double(range.upperBound)
+                              / SystemAudioCapture.streamSampleRate
+                              * sampleRate))
+        await backend.drain(toAudioSample: target)
+        guard !Task.isCancelled,
+              state == .running,
+              generation == sessionGeneration else { return }
+        await backend.flushPending()
+        guard !Task.isCancelled,
+              state == .running,
+              generation == sessionGeneration else { return }
+
+        // Punctuation is the ASR endpoint. A pause after a comma or colon is
+        // only acoustic evidence, so keep the thought open and wait for either
+        // punctuation, another confirmed gap, or the length cap.
+        if let last = lastFinalText.last,
+           Self.clauseContinuations.contains(last) {
+            return
+        }
         closeSentence()
     }
 
@@ -2243,8 +2278,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // being pointed at the wrong model. Say so plainly.
         let engine = ASREngine.effective
         guard engine.canHear(code) else {
-            setStatus("\(engine.displayName) recognises English only — this sounds like \(name)")
-            overlay.show(text: String(localized: "\(engine.displayName) only recognises English. This sounds like \(name) — switch engine in Settings → Captions."),
+            let supported: String
+            if case .only(let codes) = engine.coverage {
+                supported = codes.sorted().map {
+                    Locale.current.localizedString(forLanguageCode: $0) ?? $0
+                }.joined(separator: ", ")
+            } else {
+                supported = String(localized: "the selected languages")
+            }
+            setStatus("\(engine.displayName) recognises \(supported) only — this sounds like \(name)")
+            overlay.show(text: String(localized: "\(engine.displayName) only recognises \(supported). This sounds like \(name) — switch engine in Settings → Captions."),
                          isFinal: true)
             return
         }
@@ -2317,8 +2360,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// two callers can both run it without coordinating.
     @MainActor
     private func releaseSessionResources() async {
+        speechGapTask?.cancel()
+        speechGapTask = nil
         await capture.stop()
-        await speakerDiarization.stop()
         // Stop delivering audio before returning the lease. Otherwise a capture
         // callback racing teardown can feed a backend that the pool has already
         // marked idle.
@@ -2342,7 +2386,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     private func releaseModels() async {
         await stopAsync()
-        await speakerDiarization.release()
         await dictationController.invalidatePreparedBackend()
         await asrBackendPool.replace(with: AppDelegate.makeActiveBackend())
         await unloadTranslator(reason: "model deletion")
@@ -2386,7 +2429,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// stays on screen until the next utterance's first volatile replaces it.
     @MainActor
     private func render(_ chunk: TranscriptChunk) {
-        let text = chunk.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = DictationVocabulary.preservingSpelling(
+            in: chunk.text.trimmingCharacters(in: .whitespacesAndNewlines))
         guard !text.isEmpty else { return }
         // After committing a sentence the engine often emits a lone "." as the
         // start of the next one; showing that would blank the bar to a dot.
@@ -2408,6 +2452,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                          cold: captionWarmStart)
                 captionFirstFinalLogged = true
             }
+            if chunk.isFinal, chunk.end > 0, let captureStarted = captionCaptureStartedAt {
+                let visibleLag = max(0, elapsedSeconds(since: captureStarted) - chunk.end)
+                Diagnostics.recordTiming(operation: "captions.visible-lag",
+                                         seconds: visibleLag,
+                                         cold: captionWarmStart)
+            }
         }
         if TestHooks.verboseLogging {
             NSLog("sAiity chunk final=%@ chars=%d", chunk.isFinal ? "true" : "false", text.count)
@@ -2428,19 +2478,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // under two newer sentences it no longer helps anyone.
         advanceToNextSentenceIfNeeded()
 
-        // A speaker change is a stronger boundary than punctuation: keeping two
-        // voices in one row makes the label lie. Only final ASR chunks can close
-        // the current row, so volatile revisions never cause flicker.
-        let incomingSpeakerID = chunk.isFinal ? speakerID(for: chunk) : nil
-        if chunk.isFinal,
-           !sentenceParts.isEmpty,
-           let currentSpeakerLabel,
-           let incomingSpeakerID,
-           currentSpeakerLabel != SpeakerLabel.displayName(for: incomingSpeakerID) {
-            closeSentence()
-            advanceToNextSentenceIfNeeded()
-        }
-
         // The user cleared this sentence off the screen. Keep tracking it —
         // the transcript still gets it — but do not paint it back.
         let suppressed = displayLifecycle.isCleared(displayLifecycle.sentenceID)
@@ -2457,8 +2494,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     clearCaptionInstant = nil
                 }
                 overlay.show(text: Self.trimmedForDisplay(sentenceParts + [text]),
-                             isFinal: false, sentenceID: displayLifecycle.sentenceID,
-                             speakerLabel: currentSpeakerLabel)
+                             isFinal: false, sentenceID: displayLifecycle.sentenceID)
             }
             return
         }
@@ -2476,11 +2512,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sentenceWords.append(contentsOf: chunk.words)
         lastVolatileText = ""
         lastFinalText = Self.joinClauses(sentenceParts)
-        let speakerID = incomingSpeakerID
-        if let speakerID {
-            currentSpeakerLabel = SpeakerLabel.displayName(for: speakerID)
-        }
-        let speakerLabel = currentSpeakerLabel
         if !suppressed {
             if let clearedAt = clearCaptionInstant {
                 Diagnostics.recordTiming(operation: "captions.clear-to-visible",
@@ -2488,8 +2519,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 clearCaptionInstant = nil
             }
             overlay.show(text: Self.trimmedForDisplay(sentenceParts), isFinal: true,
-                         sentenceID: displayLifecycle.sentenceID,
-                         speakerLabel: speakerLabel)
+                         sentenceID: displayLifecycle.sentenceID)
         }
 
         // Finished, or run on for so long that waiting costs more than an
@@ -2508,12 +2538,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Starts the next display row after a completed sentence. Keeping this in
-    /// one place is important because speaker changes can close a row before
-    /// punctuation or the pause boundary does.
+    /// one place is important because punctuation and the pause boundary both
+    /// close rows through the same lifecycle.
     private func advanceToNextSentenceIfNeeded() {
         guard displayLifecycle.sentenceClosed, sentenceParts.isEmpty,
               displayLifecycle.advanceIfNeeded() else { return }
-        currentSpeakerLabel = nil
         if let shown = shownTranslationID,
            displayLifecycle.sentenceID - shown >= 2 {
             shownTranslationID = nil
@@ -2577,14 +2606,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             defer { endTranslatorUse() }
             guard let engine = activeTranslator else { return }
             let engineKind = activeTranslatorEngine
+            let translationStarted = ContinuousClock.now
             guard let out = try? await translatorInferenceGate.run({
-                await engine.translate(text, from: srcCode, to: target)
+                await self.translateCaptionText(text,
+                                                fallbackSource: srcCode,
+                                                target: target,
+                                                engine: engine)
             }), !out.isEmpty else {
+                Diagnostics.recordTiming(operation: "captions.translation",
+                                         seconds: self.elapsedSeconds(since: translationStarted),
+                                         cold: false)
                 if let engineKind {
                     retireFailedTranslator(engineKind, reason: "live inference returned no output")
                 }
                 return
             }
+            Diagnostics.recordTiming(operation: "captions.translation",
+                                     seconds: self.elapsedSeconds(since: translationStarted),
+                                     cold: false)
             // Same guards as the authoritative path: not across a session
             // boundary, and only under the sentence it translates. The
             // `!sentenceClosed` leg drops a partial that resolves after the
@@ -2636,13 +2675,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// text. Under 12 characters detection is noise ("Ja." reads as Finnish),
     /// so short lines never skip.
     private func alreadyInTargetLanguage(_ text: String) -> Bool {
-        guard text.count >= 12,
-              let want = translateTo?.split(separator: "-").first else { return false }
-        let r = NLLanguageRecognizer()
-        r.processString(text)
-        guard let lang = r.dominantLanguage?.rawValue.split(separator: "-").first
-        else { return false }
-        return lang == want
+        guard text.count >= 12, let target = translateTo else { return false }
+        let fallback = LanguageDetector.languageCode(in: text)
+            ?? detectedLanguage
+            ?? locale.identifier(.bcp47)
+        let spans = CaptionLanguageSpanDetector.analyze(text,
+                                                         fallbackLanguage: fallback)
+        guard !spans.isEmpty else { return false }
+        return spans.allSatisfy { span in
+            guard let language = span.language else { return false }
+            return TranslationLanguage.isSame(language, as: target)
+        }
     }
 
     private func captionSourceLanguage(for text: String) -> String {
@@ -2651,9 +2694,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ?? locale.identifier(.bcp47)
     }
 
-    private func speakerID(for chunk: TranscriptChunk) -> String? {
-        guard UserDefaults.standard.bool(forKey: "speakerLabelsEnabled") else { return nil }
-        return speakerAttributor.speakerID(for: chunk.start, end: chunk.end)
+    /// Translate a mixed-language caption span by span. A dominant language is
+    /// still useful for short, single-language lines, but it must never be
+    /// passed as the source for an obviously mixed sentence.
+    private func translateCaptionText(_ text: String,
+                                      fallbackSource: String,
+                                      target: String,
+                                      engine: any Translating) async -> String? {
+        let spans = CaptionLanguageSpanDetector.analyze(
+            text,
+            fallbackLanguage: fallbackSource)
+        guard !spans.isEmpty else { return nil }
+        guard CaptionLanguageSpanDetector.isMixed(spans) else {
+            return await engine.translate(text, from: fallbackSource, to: target)
+        }
+
+        var translated = spans.map(\.text)
+        var pending: [(index: Int, span: CaptionLanguageSpan)] = []
+        for (index, span) in spans.enumerated() {
+            guard let source = span.language else { continue }
+            if TranslationLanguage.isSame(source, as: target) { continue }
+            pending.append((index, span))
+        }
+
+        if pending.count > 1 {
+            let regions = pending.map {
+                TranslationRegion(text: $0.span.text, source: $0.span.language ?? "auto")
+            }
+            if let values = await engine.translateRegions(regions, to: target),
+               values.count == pending.count {
+                for (item, value) in zip(pending, values) where !value.isEmpty {
+                    translated[item.index] = value
+                }
+            }
+        }
+
+        for item in pending where translated[item.index] == item.span.text {
+            guard let source = item.span.language else { continue }
+            guard let value = await engine.translate(item.span.text,
+                                                     from: source,
+                                                     to: target),
+                  !value.isEmpty else { continue }
+            translated[item.index] = value
+        }
+        return CaptionTextMerger.join(translated)
     }
 
     private func emitSentence(_ text: String, chunk: TranscriptChunk, sentenceID: Int) {
@@ -2724,7 +2808,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // sentence and the last — measured on the segments' own timestamps,
         // so it needs no extra state and no acoustic guesswork.
         let turn = idx > 0 && chunk.start - sessionLines[idx - 1].t1 >= 2.0
-        let speakerID = speakerID(for: chunk)
 
         // `trLoc` is nil here on purpose. It is a record of OUTCOME, not of
         // intent, so only the site that assigns `tr` may assign it — otherwise
@@ -2741,8 +2824,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                     text: text, loc: srcCode,
                                     tr: nil, trLoc: nil,
                                     words: chunk.words.isEmpty ? nil : chunk.words,
-                                    turn: turn ? true : nil,
-                                    speaker: speakerID))
+                                    turn: turn ? true : nil))
 
         // Translate concurrently; the result is patched in by index.
         let translation: Task<String?, Never> = Task { @MainActor in
@@ -2772,19 +2854,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 defer { self.endTranslatorUse() }
                 guard let engine = activeTranslator else { return nil }
                 let engineKind = activeTranslatorEngine
+                let translationStarted = ContinuousClock.now
                 // Empty counts as nothing translated. MADLAD returns "" for a
                 // short or noisy caption — it has no emptiness check, unlike
                 // the LLM path's sanitizer — and an empty string is non-nil,
                 // so it would otherwise record a translation that is not there.
                 guard let translated = try? await translatorInferenceGate.run({
-                    await engine.translate(text, from: srcCode, to: target)
+                    await self.translateCaptionText(text,
+                                                    fallbackSource: srcCode,
+                                                    target: target,
+                                                    engine: engine)
                 }), !translated.isEmpty else {
+                    Diagnostics.recordTiming(operation: "captions.translation",
+                                             seconds: self.elapsedSeconds(since: translationStarted),
+                                             cold: false)
                     if let engineKind {
                         self.retireFailedTranslator(engineKind,
                                                     reason: "caption inference returned no output")
                     }
                     return nil
                 }
+                Diagnostics.recordTiming(operation: "captions.translation",
+                                         seconds: self.elapsedSeconds(since: translationStarted),
+                                         cold: false)
                 out = translated
             }
 
@@ -2840,8 +2932,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         chunk, locale: self.locale.identifier(.bcp47),
                         translation: tr,
                         translateTo: tr == nil ? nil : target,
-                        turn: turn,
-                        speaker: speakerID)
+                        turn: turn)
                     self.recordedLines += 1
                 } catch {
                     self.transcriptRecordingFailed(error)

@@ -108,13 +108,13 @@ struct OrderingTests {
         #expect(vtt.contains("Guten Morgen.\nGood morning.\n"))
     }
 
-    @Test("speaker labels are included in exports without changing unlabeled output")
-    func speakerLabelsExport() {
-        let labeled = Segment(i: 0, t0: 0, t1: 2, text: "Hallo world.",
-                              loc: "de-DE", tr: "Hello world.", trLoc: "en",
-                              words: nil, speaker: "speaker-1")
-        #expect(Export.txt([labeled]).hasPrefix("Speaker 2: Hallo world."))
-        #expect(Export.srt([labeled]).contains("Speaker 2: Hallo world.\nHello world."))
-        #expect(Export.vtt([labeled]).contains("Speaker 2: Hallo world.\nHello world."))
+    @Test("legacy speaker metadata is ignored by exports")
+    func legacySpeakerMetadataDoesNotLeakIntoExports() {
+        let legacy = Segment(i: 0, t0: 0, t1: 2, text: "Hallo world.",
+                             loc: "de-DE", tr: "Hello world.", trLoc: "en",
+                             words: nil, speaker: "speaker-1")
+        #expect(Export.txt([legacy]) == "Hallo world.\nHello world.")
+        #expect(Export.srt([legacy]).contains("\nHallo world.\nHello world.\n"))
+        #expect(Export.vtt([legacy]).contains("\nHallo world.\nHello world.\n"))
     }
 }

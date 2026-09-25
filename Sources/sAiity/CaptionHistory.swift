@@ -6,15 +6,13 @@ struct CaptionHistoryEntry: Equatable, Sendable {
     let sentenceID: Int
     var original: String
     var translation: String?
-    var speakerLabel: String?
     var translationIsStale = false
 
     init(sentenceID: Int, original: String, translation: String? = nil,
-         speakerLabel: String? = nil, translationIsStale: Bool = false) {
+         translationIsStale: Bool = false) {
         self.sentenceID = sentenceID
         self.original = original
         self.translation = translation
-        self.speakerLabel = speakerLabel
         self.translationIsStale = translationIsStale
     }
 }
@@ -32,17 +30,14 @@ struct CaptionHistory: Equatable, Sendable {
         self.capacity = max(1, capacity)
     }
 
-    mutating func upsertOriginal(_ text: String, sentenceID: Int,
-                                 speakerLabel: String? = nil) {
+    mutating func upsertOriginal(_ text: String, sentenceID: Int) {
         guard !text.isEmpty else { return }
         if let index = entries.firstIndex(where: { $0.sentenceID == sentenceID }) {
             entries[index].original = text
-            entries[index].speakerLabel = speakerLabel
             entries[index].translationIsStale = false
         } else {
             entries.append(CaptionHistoryEntry(sentenceID: sentenceID,
-                                                original: text,
-                                                speakerLabel: speakerLabel))
+                                                original: text))
             trim()
         }
     }

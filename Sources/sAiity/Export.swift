@@ -18,8 +18,7 @@ enum Export {
 
     static func txt(_ segments: [Segment]) -> String {
         segments.map { seg in
-            let prefix = seg.speaker.map { "\(SpeakerLabel.displayName(for: $0)): " } ?? ""
-            var line = prefix + seg.text
+            var line = seg.text
             if let tr = seg.tr, !tr.isEmpty { line += "\n\(tr)" }
             // A turn break reads as a paragraph break — the silence was real,
             // the paragraph is how text spells it.
@@ -55,8 +54,7 @@ enum Export {
             // reader sees the floor change hands without anyone claiming to
             // know whose it became.
             if seg.turn == true { out += "---\n\n" }
-            let speaker = seg.speaker.map { "**\(SpeakerLabel.displayName(for: $0)):** " } ?? ""
-            out += "**\(clock(seg.t0))** \(speaker)\(seg.text)\n"
+            out += "**\(clock(seg.t0))** \(seg.text)\n"
             if let tr = seg.tr, !tr.isEmpty { out += "> \(tr)\n" }
             out += "\n"
         }
@@ -131,14 +129,12 @@ enum Export {
             // sentence and has no per-word timings to split along, so a split
             // would either repeat it under every part-cue or orphan it on one.
             if let tr = seg.tr, !tr.isEmpty {
-                let speaker = seg.speaker.map { "\(SpeakerLabel.displayName(for: $0)): " } ?? ""
-                out += "\(n)\n\(srtTime(seg.t0)) --> \(srtTime(seg.t1))\n\(speaker)\(seg.text)\n\(tr)\n\n"
+                out += "\(n)\n\(srtTime(seg.t0)) --> \(srtTime(seg.t1))\n\(seg.text)\n\(tr)\n\n"
                 n += 1
                 continue
             }
             for c in cues(from: seg) {
-                let speaker = seg.speaker.map { "\(SpeakerLabel.displayName(for: $0)): " } ?? ""
-                out += "\(n)\n\(srtTime(c.t0)) --> \(srtTime(c.t1))\n\(speaker)\(c.text)\n\n"
+                out += "\(n)\n\(srtTime(c.t0)) --> \(srtTime(c.t1))\n\(c.text)\n\n"
                 n += 1
             }
         }
@@ -159,13 +155,11 @@ enum Export {
         var out = "WEBVTT\n\n"
         for seg in segments {
             if let tr = seg.tr, !tr.isEmpty {
-                let speaker = seg.speaker.map { "\(SpeakerLabel.displayName(for: $0)): " } ?? ""
-                out += "\(vttTime(seg.t0)) --> \(vttTime(seg.t1))\n\(speaker)\(seg.text)\n\(tr)\n\n"
+                out += "\(vttTime(seg.t0)) --> \(vttTime(seg.t1))\n\(seg.text)\n\(tr)\n\n"
                 continue
             }
             for c in cues(from: seg) {
-                let speaker = seg.speaker.map { "\(SpeakerLabel.displayName(for: $0)): " } ?? ""
-                out += "\(vttTime(c.t0)) --> \(vttTime(c.t1))\n\(speaker)\(c.text)\n\n"
+                out += "\(vttTime(c.t0)) --> \(vttTime(c.t1))\n\(c.text)\n\n"
             }
         }
         return out

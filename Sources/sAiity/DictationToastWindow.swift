@@ -520,7 +520,7 @@ final class DictationToastWindow: NSPanel {
     }
 
     private func resultSize(for text: String) -> NSSize {
-        let font = resultTextView.font ?? .systemFont(ofSize: 13, weight: .semibold)
+        let font = resultTextView.font ?? .systemFont(ofSize: 13, weight: .medium)
         let style = CaptionStyle.currentDictation
         let measured = (text as NSString).boundingRect(
             with: NSSize(width: contentWidth(for: style), height: .greatestFiniteMagnitude),

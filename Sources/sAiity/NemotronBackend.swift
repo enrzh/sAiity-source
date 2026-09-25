@@ -86,13 +86,46 @@ final class NemotronEngine: FluidStreamingEngine, @unchecked Sendable {
         assetDirectory.appendingPathComponent("multilingual/\(chunkMs)ms", isDirectory: true)
     }
 
+    /// FluidAudio writes `metadata.json` while it is still assembling the
+    /// variant. It is useful to the runtime, but it is not a completion marker:
+    /// treating it as one made a half-fetched Nemotron look ready to Settings.
+    static let completionMarker = "saiity-download-complete"
+    static let requiredRuntimeFiles = [
+        "metadata.json",
+        "tokenizer.json",
+        "joint.mlmodelc/model.mil",
+        "encoder.mlmodelc/model.mil",
+        "decoder.mlmodelc/model.mil",
+        "decoder_joint.mlmodelc/model.mil",
+        "preprocessor.mlmodelc/model.mil",
+    ]
+
+    static func completionMarkerURL(chunkMs: Int = chunkMs) -> URL {
+        variantDirectory(chunkMs: chunkMs).appendingPathComponent(completionMarker)
+    }
+
+    static func hasCompletionMarker(chunkMs: Int = chunkMs) -> Bool {
+        FileManager.default.fileExists(atPath: completionMarkerURL(chunkMs: chunkMs).path)
+    }
+
+    /// Older complete installs predate our marker. Recognize their full model
+    /// shape during migration, while a metadata-only tree remains partial.
+    static func hasCompleteRuntimeFiles(chunkMs: Int = chunkMs) -> Bool {
+        let directory = variantDirectory(chunkMs: chunkMs)
+        return requiredRuntimeFiles.allSatisfy {
+            FileManager.default.fileExists(atPath: directory.appendingPathComponent($0).path)
+        }
+    }
+
     static func isDownloaded(chunkMs: Int = chunkMs) -> Bool {
-        // Check THIS variant's own marker. The previous version scanned the
-        // whole tree for any file named metadata.json — and every .mlmodelc
-        // bundle ships one, so three Whisper bundles made this claim Nemotron
-        // was installed when it was not.
-        FileManager.default.fileExists(
-            atPath: variantDirectory(chunkMs: chunkMs).appendingPathComponent("metadata.json").path)
+        hasCompletionMarker(chunkMs: chunkMs) || hasCompleteRuntimeFiles(chunkMs: chunkMs)
+    }
+
+    static func markDownloaded(chunkMs: Int = chunkMs) {
+        let marker = completionMarkerURL(chunkMs: chunkMs)
+        try? FileManager.default.createDirectory(at: marker.deletingLastPathComponent(),
+                                                 withIntermediateDirectories: true)
+        try? Data().write(to: marker, options: .atomic)
     }
 
     /// Fetch the weights WITHOUT loading them. The Models page only wants the
@@ -106,6 +139,10 @@ final class NemotronEngine: FluidStreamingEngine, @unchecked Sendable {
             progressHandler: { p in
                 progress(DownloadProgress(fraction: p.fractionCompleted, note: String(localized: "Downloading Nemotron…")))
             })
+        // `downloadVariant` returns only after its transfer has completed; the
+        // marker is written here rather than trusting metadata.json, which is
+        // present while the transfer is still running.
+        markDownloaded(chunkMs: chunkMs)
     }
 
     // MARK: - FluidStreamingEngine
@@ -134,6 +171,12 @@ final class NemotronEngine: FluidStreamingEngine, @unchecked Sendable {
         // downloadVariant on an installed tree is a no-op lookup.
         let dir = try await StreamingNemotronMultilingualAsrManager.downloadVariant(
             languageCode: "auto", chunkMs: ms, to: base, progressHandler: { _ in })
+        // Adopt a complete legacy install (which predates our marker) without
+        // forcing another multi-hundred-megabyte download. A genuinely partial
+        // FluidAudio tree has no usable model and still follows the download path.
+        // This call has completed successfully, so it is safe to adopt the
+        // result as the registry's explicit completion marker.
+        Self.markDownloaded(chunkMs: ms)
 
         progress(String(localized: "Loading Nemotron…"))
         try await manager.loadModels(from: dir)

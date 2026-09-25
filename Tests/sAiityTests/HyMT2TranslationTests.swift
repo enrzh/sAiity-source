@@ -6,17 +6,19 @@ import Testing
 @MainActor
 struct HyMT2TranslationTests {
 
-    @Test("Hy-MT2 remains opt-in while MADLAD stays recommended")
+    @Test("MADLAD is the only selectable translation path")
     func engineRecommendationIsUnchanged() {
+        #expect(TranslationEngine.allCases == [.madlad])
         #expect(TranslationEngine.recommended.rawValue == "madlad")
         #expect(TranslationEngine.hyMT2.displayName == "Hy-MT2")
         #expect(TranslationEngine.hyMT2 != TranslationEngine.recommended)
         #expect(TranslationEngine.primaryCases == [.madlad])
-        #expect(TranslationEngine.advancedCases == [.hyMT2])
-        #expect(TranslationEngine.userSelectableCases == [.madlad, .hyMT2])
+        #expect(TranslationEngine.advancedCases.isEmpty)
+        #expect(TranslationEngine.userSelectableCases == [.madlad])
         #expect(!TranslationEngine.madlad.isAdvanced)
         #expect(TranslationEngine.hyMT2.isAdvanced)
         #expect(TranslationEngine.qwen.isAdvanced)
+        #expect(TranslationEngine.visibleSelection(.hyMT2) == nil)
         #expect(TranslationEngine.visibleSelection(.qwen) == nil)
         #expect(TranslationEngine.visibleSelection(.madlad) == .madlad)
         #expect(TranslationEngine.visibleSelection(nil) == nil)
@@ -44,9 +46,9 @@ struct HyMT2TranslationTests {
         #expect(HyMT2LanguageProvider.nativeCode(for: "sw") == nil)
     }
 
-    @Test("Hy-MT2 has one fixed Q4 registry asset")
-    func registryDescriptorIsComplete() {
-        let matching = ModelRegistry.assets().filter { $0.id == AssetID.hyMT2 }
+    @Test("retired Hy-MT2 data has one fixed Q4 cleanup descriptor")
+    func retiredRegistryDescriptorIsComplete() {
+        let matching = ModelRegistry.retiredAssets().filter { $0.id == AssetID.hyMT2 }
         #expect(matching.count == 1)
         guard let asset = matching.first else { return }
 

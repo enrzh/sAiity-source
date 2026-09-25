@@ -87,6 +87,12 @@ and fails when the benchmark test is skipped. Release bundles are checked with
 `scripts/verify-release.sh`; generated Sparkle feeds are checked against their
 ZIP with `scripts/validate-appcast.sh`.
 
+For a real-time live-caption regression run, use the same fixture format with
+`scripts/caption-matrix.sh`. It records first volatile/final caption latency,
+backlog, dropped audio, and real-time factor without downloading model weights:
+
+    SAIITY_CAPTION_BENCHMARK_DIR=/absolute/fixtures scripts/caption-matrix.sh
+
 The build scripts use `/Applications/Xcode.app/Contents/Developer` through
 `DEVELOPER_DIR` by default and do not change global `xcode-select`. Override
 that variable when another installed Xcode is required.

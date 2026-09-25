@@ -157,21 +157,28 @@ enum TranslationTiming: String, CaseIterable, Sendable {
 
 /// Which translator to use.
 ///
-/// The ordering here is the honest recommendation order, and the summaries say
-/// why — including for the opt-in specialist and the slower generic LLM path.
+/// MADLAD is the supported translation path. The raw Hy-MT2 and local-LLM
+/// cases remain internal so old preferences and cleanup models can be read
+/// safely; neither can enter a user-facing engine catalogue.
 enum TranslationEngine: String, CaseIterable, Sendable, Codable {
     case madlad
     case hyMT2
     case qwen
 
+    /// MADLAD is the complete user-facing translation catalogue. The legacy
+    /// cases below remain representable only for old raw preferences and
+    /// compatibility code; they are intentionally absent from `allCases`.
+    static var allCases: [TranslationEngine] { [.madlad] }
+
     /// Keep the normal path deliberately small. The other engines remain
-    /// available for users who knowingly want to trade certainty for a
-    /// specialist or an experimental local LLM.
+    /// available internally for old preferences and cleanup compatibility, but
+    /// never enter a product picker.
     static let primaryCases: [TranslationEngine] = [.madlad]
-    static let advancedCases: [TranslationEngine] = [.hyMT2]
-    /// Engines that are safe to expose in the translation pickers. The local
-    /// LLM case remains internal for cleanup compatibility and old installs.
-    static let userSelectableCases: [TranslationEngine] = [.madlad, .hyMT2]
+    static let advancedCases: [TranslationEngine] = []
+    /// MADLAD is the only translation path exposed in the product. The legacy
+    /// cases remain available internally for old preferences and cleanup
+    /// compatibility, but never appear in a picker.
+    static let userSelectableCases: [TranslationEngine] = [.madlad]
 
     static func visibleSelection(_ engine: TranslationEngine?) -> TranslationEngine? {
         guard let engine, userSelectableCases.contains(engine) else { return nil }
@@ -182,16 +189,41 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
 
     /// The chosen translator, or nothing. Same reasoning as `ASREngine.selected`:
     /// defaulting to MADLAD badged a 1.86 GB model "in use" on a Mac that had
-    /// never downloaded it and had translation switched off.
-    @Defaults(optionalRawKey: "translationEngine") static var selected: TranslationEngine?
+    /// never downloaded it and had translation switched off. Legacy Hy-MT2 and
+    /// local-LLM preferences normalize to no selection.
+    static var selected: TranslationEngine? {
+        get {
+            visibleSelection(UserDefaults.standard.string(forKey: "translationEngine")
+                .flatMap(TranslationEngine.init(rawValue:)))
+        }
+        set {
+            if let value = visibleSelection(newValue) {
+                UserDefaults.standard.set(value.rawValue, forKey: "translationEngine")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "translationEngine")
+            }
+        }
+    }
 
     /// Dictation can use a different local model than captions. Keep this
     /// optional so existing installations continue following their captions
     /// choice until a dedicated dictation engine is selected.
-    @Defaults(optionalRawKey: "dictationTranslationEngine") static var dictationSelected: TranslationEngine?
+    static var dictationSelected: TranslationEngine? {
+        get {
+            visibleSelection(UserDefaults.standard.string(forKey: "dictationTranslationEngine")
+                .flatMap(TranslationEngine.init(rawValue:)))
+        }
+        set {
+            if let value = visibleSelection(newValue) {
+                UserDefaults.standard.set(value.rawValue, forKey: "dictationTranslationEngine")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "dictationTranslationEngine")
+            }
+        }
+    }
 
     /// Suggested when nothing is chosen: the measured fast path and the broad
-    /// coverage default. Specialist and generic alternatives stay opt-in.
+    /// coverage default. Legacy alternatives are compatibility-only.
     static let recommended: TranslationEngine = .madlad
 
     /// The translator to build once one is needed. Guarded by `selected` at the
@@ -218,9 +250,9 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
         case .madlad:
             return String(localized: "MADLAD-400-3B, a dedicated translation model on MLX. Best quality of the local options and Apache-2.0, so it can ship. 1.86 GB, and about 0.2 seconds per sentence once loaded, measured — the fastest of the downloadable engines, and it only ever translates, so it cannot wander off answering the speaker.")
         case .hyMT2:
-            return String(localized: "Optional specialist for 37 languages. Keep it in Advanced until a language-pair benchmark shows it beats MADLAD for your use case.")
+            return String(localized: "Optional specialist for 37 languages. Choose it when you want broader language coverage.")
         case .qwen:
-            return String(localized: "Experimental local LLM translation. Useful for cleanup and language experiments, but less predictable than a dedicated translation model. Choose a Qwen, Gemma, or custom GGUF under Advanced.")
+            return String(localized: "Experimental local LLM translation. Useful for cleanup and language experiments, but less predictable than a dedicated translation model. Choose a Qwen, Gemma, or custom GGUF in Models.")
         }
     }
 

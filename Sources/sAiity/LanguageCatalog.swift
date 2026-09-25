@@ -94,6 +94,6 @@ enum LanguageCatalog {
     /// recommendation order. Used to offer a way forward instead of greying a
     /// row out and saying nothing.
     static func engines(supporting code: String) async -> [TranslationEngine] {
-        TranslationEngine.allCases.filter { supportedCodes(for: $0).contains(code) }
+        TranslationEngine.userSelectableCases.filter { supportedCodes(for: $0).contains(code) }
     }
 }

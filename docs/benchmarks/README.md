@@ -21,3 +21,12 @@ The benchmark runs Nemotron and Whisper sequentially, keeps model weights
 resident between regions, and emits latency, real-time factor, WER, and
 language-preservation fields. Use separate reports for before/after changes;
 do not compare cold preparation with warm segmented decode.
+
+For a real-time caption soak with the same local fixtures, run:
+
+```sh
+SAIITY_CAPTION_BENCHMARK_DIR=/absolute/fixtures scripts/caption-matrix.sh
+```
+
+That harness reports first volatile/final caption latency, backlog, dropped
+audio, and real-time factor. It never downloads weights.

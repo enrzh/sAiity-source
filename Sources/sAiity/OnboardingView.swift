@@ -37,6 +37,10 @@ final class OnboardingModel {
     enum Purpose: String, CaseIterable {
         case anyLanguage, englishOnly
 
+        /// The old English-only choice remains representable for migration, but
+        /// onboarding now offers the single supported recognition path.
+        static var allCases: [Purpose] { [.anyLanguage] }
+
         var title: String {
             switch self {
             case .anyLanguage: return String(localized: "Any language")
@@ -53,8 +57,7 @@ final class OnboardingModel {
         }
         var engine: ASREngine {
             switch self {
-            case .anyLanguage: return .nemotron
-            case .englishOnly: return .parakeetEou
+            case .anyLanguage, .englishOnly: return .nemotron
             }
         }
     }
@@ -165,17 +168,11 @@ struct OnboardingView: View {
     private var stepIndicator: some View {
         let steps = OnboardingStep.allCases
         let current = steps.firstIndex(of: model.step) ?? 0
-        return HStack(spacing: 6) {
-            ForEach(Array(steps.enumerated()), id: \.element) { i, step in
-                Capsule()
-                    .fill(i <= current ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary))
-                    .frame(height: 4)
-                    .animation(.smooth(duration: 0.3), value: model.step)
-                    .accessibilityHidden(true)
-            }
-        }
-        .accessibilityElement()
-        .accessibilityLabel(Text("Step \(current + 1) of \(steps.count)"))
+        return ProgressView(value: Double(current + 1), total: Double(steps.count))
+            .progressViewStyle(.linear)
+            .tint(.accentColor)
+            .accessibilityElement()
+            .accessibilityLabel(Text("Step \(current + 1) of \(steps.count)"))
     }
 
     @ViewBuilder
@@ -197,7 +194,8 @@ struct OnboardingView: View {
                         _ subtitle: LocalizedStringKey) -> some View {
         VStack(spacing: 8) {
             Image(systemName: symbol)
-                .font(.system(size: 38, weight: .regular))
+                .font(.system(size: 34, weight: .medium))
+                .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(.tint)
                 .accessibilityHidden(true)
             Text(title).font(.title2.weight(.semibold))
@@ -291,28 +289,32 @@ struct OnboardingView: View {
                                explanation: LocalizedStringKey,
                                request: @escaping () -> Void,
                                openSettings: @escaping () -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Image(systemName: granted ? "checkmark.circle.fill" : symbol)
-                    .foregroundStyle(granted ? Color.green : Color.orange)
-                Text(title).font(.body.weight(.medium))
-                Spacer()
-                Text(granted ? "Granted." : "Not granted yet.")
-                    .foregroundStyle(.secondary)
-            }
-            if !granted {
-                Text(explanation)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Button("Allow…", action: request)
-                        .buttonStyle(.borderedProminent)
-                    Button("Open Settings", action: openSettings)
+                    Text(granted ? String(localized: "Granted.") : String(localized: "Not granted yet."))
+                        .foregroundStyle(granted ? AnyShapeStyle(.green) : AnyShapeStyle(.secondary))
+                    Spacer()
+                }
+                if !granted {
+                    Text(explanation)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    HStack {
+                        Button("Allow…", action: request)
+                            .buttonStyle(.glassProminent)
+                        Button("Open Settings", action: openSettings)
+                    }
                 }
             }
+        } label: {
+            Label {
+                Text(title)
+            } icon: {
+                Image(systemName: granted ? "checkmark.circle.fill" : symbol)
+                    .foregroundStyle(granted ? AnyShapeStyle(.green) : AnyShapeStyle(.orange))
+            }
         }
-        .padding(12)
-        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private var setup: some View {
@@ -322,56 +324,75 @@ struct OnboardingView: View {
                        "What for",
                        "Choose what you want to use. You can change this later in Settings.")
 
-                ForEach(OnboardingModel.UseCase.allCases, id: \.self) { useCase in
-                    choice(title: useCase.title,
-                           detail: useCase.includesCaptions && useCase.includesDictation
-                               ? String(localized: "One download and you are set")
-                               : useCase.includesCaptions
-                                   ? String(localized: "It captures the audio your Mac plays — the microphone stays off unless you later opt in under Settings → Captions.")
-                                   : String(localized: "Dictation is separate from live captions. It never starts the caption service and is not saved as a meeting transcript."),
-                           selected: model.useCase == useCase) {
-                        model.useCase = useCase
+                Picker("Use case", selection: $model.useCase) {
+                    ForEach(OnboardingModel.UseCase.allCases, id: \.self) { useCase in
+                        Text(verbatim: useCase.title).tag(useCase)
                     }
                 }
-
-                Divider().padding(.vertical, 4)
-                Text("Choose a recognition model")
-                    .font(.headline)
-                Text("Pick the language coverage you need. You can change it later in Settings.")
-                    .font(.caption)
+                .pickerStyle(.segmented)
+                Text(verbatim: model.useCase.includesCaptions && model.useCase.includesDictation
+                     ? String(localized: "One download and you are set")
+                     : model.useCase.includesCaptions
+                         ? String(localized: "It captures the audio your Mac plays — the microphone stays off unless you later opt in under Settings → Captions.")
+                         : String(localized: "Dictation is separate from live captions. It never starts the caption service and is not saved as a meeting transcript."))
+                    .font(.callout)
                     .foregroundStyle(.secondary)
 
-                ForEach(OnboardingModel.Purpose.allCases, id: \.self) { p in
-                    choice(title: p.title, detail: p.detail, selected: model.purpose == p) {
-                        model.purpose = p
+                Divider().padding(.vertical, 4)
+                GroupBox {
+                    HStack(spacing: 10) {
+                        Image(systemName: "waveform")
+                            .font(.title3)
+                            .foregroundStyle(.tint)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(verbatim: ASREngine.nemotron.displayName)
+                                .font(.headline)
+                            Text(verbatim: ASREngine.nemotron.shortSummary)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
                     }
+                } label: {
+                    Text("Recognition model")
                 }
 
                 Divider().padding(.vertical, 4)
                 ForEach(model.assetsToOffer) { asset in
-                    let status = ModelRegistry.status(of: asset)
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(asset.title).font(.body.weight(.medium))
-                            Text(asset.detail).font(.caption).foregroundStyle(.secondary)
+                    let status = model.state.assets.first { $0.asset.id == asset.id }
+                    GroupBox {
+                        HStack(alignment: .top, spacing: 12) {
+                            Text(verbatim: asset.detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer(minLength: 12)
+                            if status?.isInstalled == true {
+                                Label("Ready", systemImage: "checkmark.circle.fill")
+                                    .foregroundStyle(.green).font(.callout)
+                            } else if let status {
+                                AssetControl(state: model.state, status: status, prominent: true)
+                            } else {
+                                HStack(spacing: 8) {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                    Text("Checking download…")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
                         }
-                        Spacer(minLength: 12)
-                        if status.isInstalled {
-                            Label("Ready", systemImage: "checkmark.circle.fill")
-                                .foregroundStyle(.green).font(.callout)
-                        } else {
-                            AssetControl(state: model.state, status: status, prominent: true)
-                        }
+                    } label: {
+                        Text(verbatim: asset.title)
+                            .font(.headline)
                     }
-                    .padding(10)
-                    .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
                 }
                 if let e = model.state.modelError {
                     Text(e).font(.caption).foregroundStyle(.red)
                 }
             }
         }
-        .task { model.state.refreshModels() }
+        .task { await model.state.refreshModelsAsync(force: true) }
     }
 
     private var finish: some View {
@@ -379,9 +400,15 @@ struct OnboardingView: View {
             header("checkmark.seal",
                    "Ready",
                    "Everything is in place.")
-            Toggle("Check for updates automatically", isOn: $model.wantsAutoUpdates)
-            Text("Asks aiity.de about once a day whether a newer version exists. The check sends no audio, no transcripts and no identifiers — but it is a network request, so it is off unless you want it. You can always check by hand from the menu bar.")
-                .font(.caption).foregroundStyle(.secondary)
+            GroupBox {
+                VStack(alignment: .leading, spacing: 6) {
+                    Toggle("Check for updates automatically", isOn: $model.wantsAutoUpdates)
+                    Text("Asks aiity.de about once a day whether a newer version exists. The check sends no audio, no transcripts and no identifiers — but it is a network request, so it is off unless you want it. You can always check by hand from the menu bar.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            } label: {
+                Label("Updates", systemImage: "arrow.triangle.2.circlepath")
+            }
             Divider().padding(.vertical, 2)
             // Read the live binding rather than the default: it is user-editable,
             // and telling someone the wrong shortcut is worse than telling them none.
@@ -409,13 +436,16 @@ struct OnboardingView: View {
             Spacer()
             if model.step != OnboardingStep.allCases.first {
                 Button("Back") { back() }
+                    .buttonStyle(.glass)
             }
             Button(model.step == .finish ? "Done" : "Continue") { advance() }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.glassProminent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(model.step == .permission && !model.permissionGranted)
         }
-        .padding(14)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(.regularMaterial)
     }
 
     /// `text` is a LocalizedStringKey, not a String, and that is the whole
@@ -429,30 +459,6 @@ struct OnboardingView: View {
             Text(text)
             Spacer(minLength: 0)
         }
-    }
-
-    private func choice(title: String, detail: String, selected: Bool,
-                        action: @escaping () -> Void) -> some View {
-        // A Button rather than a tap gesture, so the wizard is operable by
-        // keyboard and announced properly — first-run is exactly the moment a
-        // VoiceOver user must not hit a dead end.
-        Button(action: action) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: selected ? "largecircle.fill.circle" : "circle")
-                    .foregroundStyle(selected ? Color.accentColor : .secondary)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.body.weight(.medium))
-                    Text(detail).font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(10)
-            .background(selected ? AnyShapeStyle(.tint.opacity(0.12)) : AnyShapeStyle(.clear),
-                        in: RoundedRectangle(cornerRadius: 8))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private func advance() {

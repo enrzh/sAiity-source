@@ -1,13 +1,17 @@
 # Captions Detection, Transcription, and Processing Quality Plan
 
-> Status: proposed. This document is a plan only; it does not authorize
-> runtime edits, a commit, a push, or a release.
+> Status: historical plan. This document is retained for context only; it does
+> not authorize runtime edits, a commit, a push, or a release.
+>
+> Update (2026-09-25): speaker attribution and speaker labels were removed from
+> the product. The remaining caption, translation, and transcript performance
+> work is still relevant, but speaker-specific steps below are obsolete.
 
 ## Goal
 
 Make live subtitles arrive earlier, break at better speech boundaries, contain
-fewer recognition errors, and remain correct while translation, speaker labels,
-and transcript persistence run around them.
+fewer recognition errors, and remain correct while translation and transcript
+persistence run around them.
 
 The work is for the live captions/subtitle path. Dictation remains unchanged
 unless a small pure audio or text utility can be reused without changing its
@@ -23,7 +27,7 @@ ScreenCaptureKit
   -> adaptive RMS SpeechGapDetector
   -> StreamingASRBackend / Nemotron or Parakeet
   -> cumulative partial-text commit logic
-  -> AppDelegate sentence assembly and speaker attribution
+  -> AppDelegate sentence assembly and display lifecycle
   -> translation, overlay, and TranscriptStore
 ```
 
@@ -39,9 +43,8 @@ Important current behavior:
   rolling timer, or a character cap, then flushes the tail on a speech gap.
 - Final timestamps are estimated from wall-clock time and text length because
   the current engine callback does not expose word timestamps.
-- `AppDelegate` owns sentence assembly, display lifecycle, speaker boundaries,
-  language inference, live translation, authoritative translation, and
-  transcript persistence. It already protects translation with generation and
+- `AppDelegate` owns sentence assembly, display lifecycle, language inference,
+  live translation, authoritative translation, and transcript persistence. It already protects translation with generation and
   latest-wins checks, but those state transitions are spread across the render
   path.
 - `ASRAdaptivePolicy` now records caption and dictation measurements
@@ -58,7 +61,7 @@ Important current behavior:
    translation inference merely to reduce perceived latency.
 4. Preserve the original recognized text as the authoritative caption record.
    Formatting and translation must not silently rewrite recognition.
-5. Treat per-segment language and speaker metadata as facts with confidence,
+5. Treat per-segment language and timing metadata as facts with confidence,
    not as commands to normalize the whole session.
 6. Improve defaults internally. Do not add another settings page or expose raw
    VAD thresholds unless measurements show a user-facing control is necessary.
@@ -290,7 +293,7 @@ must leave the original caption visible and record a redacted diagnostic.
   automatic fallback.
 - Reuse capture and processing buffers. Avoid copying the complete audio session
   for a streaming caption path.
-- Keep ASR, translation, diarization, and cleanup inference serialized at the
+- Keep ASR, translation, and cleanup inference serialized at the
   boundaries where their models or engines are not concurrency-safe.
 - Add signpost-style timing around capture, ASR, endpointing, translation, and
   persistence only if the existing diagnostics cannot answer the latency
@@ -355,10 +358,9 @@ Run on the release device with warm and cold models:
 7. Digital silence before playback, during playback, and after playback.
 8. Captions clear during volatile text, final text, pending translation, and a
    speech-gap flush.
-9. Speaker labels off and on with alternating speakers.
-10. Translation off, translation on with a warm model, and translation on
-    while the translator is still preparing.
-11. Stop/start, engine switch, cancellation, and a stalled stream.
+9. Translation off, translation on with a warm model, and translation on
+   while the translator is still preparing.
+10. Stop/start, engine switch, cancellation, and a stalled stream.
 
 ## Files and Ownership
 

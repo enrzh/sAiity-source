@@ -28,8 +28,8 @@ enum LoadHealth {
     /// load what was never downloaded is not damage, it is the normal
     /// not-installed state every other surface already explains.
     static func recordFailureIfInstalled(_ assetID: String, reason: String) {
-        guard ModelRegistry.snapshot()
-            .first(where: { $0.asset.id == assetID })?.isInstalled == true else { return }
+        guard let asset = ModelRegistry.assets().first(where: { $0.id == assetID }),
+              ModelRegistry.isInstalled(asset) else { return }
         var t = all
         guard t[assetID] != reason else { return }
         t[assetID] = reason

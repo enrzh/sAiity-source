@@ -1,6 +1,76 @@
 import AppKit
 import Foundation
 
+extension Notification.Name {
+    /// Posted after the saved-session catalog changes so an open Settings
+    /// window can refresh only the transcript list, without coupling the
+    /// transcript store to a particular view.
+    static let saiityTranscriptLibraryChanged = Notification.Name("sAiityTranscriptLibraryChanged")
+}
+
+private struct TranscriptFileStamp: Equatable {
+    let modified: Date
+    let size: Int
+}
+
+/// Metadata decoding is cheap for a small library, but the settings window can
+/// ask for the same catalog repeatedly while a recording is being closed. Keep
+/// decoded `meta.json` values keyed by a file stamp so a forced refresh still
+/// notices edits without rereading unchanged files.
+private final class TranscriptListCache: @unchecked Sendable {
+    struct Entry {
+        let stamp: TranscriptFileStamp
+        let session: SessionRef
+    }
+
+    private let lock = NSLock()
+    private var entries: [String: Entry] = [:]
+
+    func snapshot(names: [String], load: (String) -> SessionRef?) -> [SessionRef] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        var result: [SessionRef] = []
+        result.reserveCapacity(names.count)
+        for name in names {
+            let url = TranscriptStore.sessionsDir.appendingPathComponent(name, isDirectory: true)
+                .appendingPathComponent("meta.json")
+            let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+            guard let attributes,
+                  let modified = attributes[.modificationDate] as? Date else {
+                entries.removeValue(forKey: name)
+                continue
+            }
+            let size = (attributes[.size] as? NSNumber)?.intValue ?? 0
+            let stamp = TranscriptFileStamp(modified: modified, size: size)
+            if let cached = entries[name], cached.stamp == stamp {
+                result.append(cached.session)
+            } else if let session = load(name) {
+                entries[name] = Entry(stamp: stamp, session: session)
+                result.append(session)
+            } else {
+                entries.removeValue(forKey: name)
+            }
+        }
+
+        let current = Set(names)
+        entries = entries.filter { current.contains($0.key) }
+        return result
+    }
+
+    func remove(_ name: String) {
+        lock.lock()
+        entries.removeValue(forKey: name)
+        lock.unlock()
+    }
+
+    func removeAll() {
+        lock.lock()
+        entries.removeAll(keepingCapacity: true)
+        lock.unlock()
+    }
+}
+
 /// One committed line of a meeting.
 struct Segment: Codable, Sendable {
     var i: Int
@@ -11,15 +81,12 @@ struct Segment: Codable, Sendable {
     var tr: String?           // translation, when enabled
     var trLoc: String?
     var words: [TimedWord]?
-    /// A turn BREAK, not a speaker id — the honest subset of diarization.
-    /// True when ≥2 s of audio-clock silence preceded this line: a gap that
-    /// long usually means the floor changed hands, and saying "a new turn
-    /// starts here" is defensible where naming who took it would be
-    /// invention. Optional so sessions written before the field decode
-    /// unchanged.
+    /// A turn break in the audio clock. Optional so sessions written before
+    /// the field decode unchanged.
     var turn: Bool? = nil
-    /// Opaque local diarizer ID, for example `speaker-0`. Optional so sessions
-    /// written before speaker support decode unchanged.
+    /// Legacy diarization metadata. It is retained only so an old transcript
+    /// survives a decode/re-encode cycle; the app never creates, displays, or
+    /// exports new speaker labels.
     var speaker: String? = nil
 }
 
@@ -55,6 +122,7 @@ struct SessionRef: Sendable, Identifiable {
 /// transcript is a durable record of a conversation other people were part of.
 actor TranscriptStore {
     static let shared = TranscriptStore()
+    private static let listCache = TranscriptListCache()
 
     /// `~/Library/Application Support/de.aiity.saiity`
     static var root: URL {
@@ -111,14 +179,13 @@ actor TranscriptStore {
     /// so a two-hour meeting costs nothing per line.
     func append(_ chunk: TranscriptChunk, locale: String,
                 translation: String?, translateTo: String?,
-                turn: Bool = false, speaker: String? = nil) throws {
+                turn: Bool = false) throws {
         guard let handle else { return }
         let seg = Segment(i: index, t0: chunk.start, t1: chunk.end,
                           text: chunk.text, loc: locale,
                           tr: translation, trLoc: translateTo,
                           words: chunk.words.isEmpty ? nil : chunk.words,
-                          turn: turn ? true : nil,
-                          speaker: speaker)
+                          turn: turn ? true : nil)
         var data = try JSONEncoder().encode(seg)
         data.append(0x0A)
         do {
@@ -183,11 +250,15 @@ actor TranscriptStore {
 
     nonisolated static func list() -> [SessionRef] {
         let fm = FileManager.default
-        guard let names = try? fm.contentsOfDirectory(atPath: sessionsDir.path) else { return [] }
+        guard let names = try? fm.contentsOfDirectory(atPath: sessionsDir.path) else {
+            listCache.removeAll()
+            return []
+        }
         let dec = JSONDecoder()
         dec.dateDecodingStrategy = .iso8601
-        return names.sorted(by: >).compactMap { name in
-            let d = sessionsDir.appendingPathComponent(name, isDirectory: true)
+        let sessionsDirectory = sessionsDir
+        return listCache.snapshot(names: names.sorted(by: >)) { name in
+            let d = sessionsDirectory.appendingPathComponent(name, isDirectory: true)
             guard let data = try? Data(contentsOf: d.appendingPathComponent("meta.json")),
                   let m = try? dec.decode(SessionMeta.self, from: data) else { return nil }
             return SessionRef(id: name, url: d, meta: m)
@@ -234,6 +305,7 @@ actor TranscriptStore {
                                                ofItemAtPath: directory.appendingPathComponent("meta.json").path)
         try? FileManager.default.setAttributes([.posixPermissions: 0o600],
                                                ofItemAtPath: directory.appendingPathComponent("segments.jsonl").path)
+        listCache.removeAll()
         return SessionRef(id: id, url: directory, meta: meta)
     }
 
@@ -290,6 +362,7 @@ actor TranscriptStore {
     /// Deletion is real: the directory goes, no tombstone, nothing else refers
     /// to it.
     nonisolated static func delete(_ session: SessionRef) {
+        listCache.remove(session.id)
         // Drop the cached lines with the file. Nothing else would: the stamp
         // check only catches a file that still EXISTS and changed, so a
         // deleted session's text would otherwise sit in memory until the app
@@ -365,6 +438,7 @@ enum SessionCatalog {
     static func invalidate() {
         cachedSessions = nil
         cachedRows = nil
+        NotificationCenter.default.post(name: .saiityTranscriptLibraryChanged, object: nil)
     }
 
     /// The rendered titles are locale-dependent; the scan behind them is not.

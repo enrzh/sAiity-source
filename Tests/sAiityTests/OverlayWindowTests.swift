@@ -23,6 +23,27 @@ import Testing
         window.orderOut(nil)
     }
 
+    @Test("caption font changes reach the live bubble for both text roles")
+    func captionFontChangesAreAppliedTogether() {
+        let defaults = UserDefaults.standard
+        let key = CaptionStyle.key
+        let previous = defaults.data(forKey: key)
+        defer {
+            if let previous { defaults.set(previous, forKey: key) }
+            else { defaults.removeObject(forKey: key) }
+        }
+
+        var style = CaptionStyle.current
+        style.original.fontSize = 38
+        style.translation.fontSize = 38
+        CaptionStyle.current = style
+
+        let window = OverlayWindow()
+        #expect(window.renderedStyleForTests.original.fontSize == 38)
+        #expect(window.renderedStyleForTests.translation.fontSize == 38)
+        window.orderOut(nil)
+    }
+
     @Test("explicitly revealing the subtitle bubble works before the first caption")
     func revealBeforeFirstCaption() {
         let defaults = UserDefaults.standard
@@ -79,6 +100,52 @@ import Testing
 
         window.clearHistory(keepVisible: true)
         #expect(window.isVisible)
+        #expect(!window.hasVisibleCaption)
+        window.orderOut(nil)
+    }
+
+    @Test("clear is only for a caption that is on screen")
+    func clearRequiresAVisibleCaption() {
+        let defaults = UserDefaults.standard
+        let styleKey = CaptionStyle.key
+        let previousStyle = defaults.data(forKey: styleKey)
+        defer {
+            if let previousStyle {
+                defaults.set(previousStyle, forKey: styleKey)
+            } else {
+                defaults.removeObject(forKey: styleKey)
+            }
+        }
+
+        var style = CaptionStyle.current
+        style.hidden = false
+        CaptionStyle.current = style
+        let window = OverlayWindow()
+        #expect(!window.hasVisibleCaption)
+
+        window.show(text: "A caption is showing.", isFinal: true, sentenceID: 1)
+        #expect(window.hasVisibleCaption)
+        #expect(CaptionLatencyCopy.clearEnabled(showingCaption: window.hasVisibleCaption))
+
+        style.hidden = true
+        CaptionStyle.current = style
+        #expect(!window.hasVisibleCaption)
+        window.orderOut(nil)
+    }
+
+    @Test("volatile caption updates coalesce layout renders")
+    func volatileUpdatesCoalesce() async throws {
+        let window = OverlayWindow()
+        let before = window.renderPassesForTests
+
+        for index in 0..<8 {
+            window.show(text: "Hello revision \(index)",
+                        isFinal: false,
+                        sentenceID: 1)
+        }
+        try await Task.sleep(nanoseconds: 180_000_000)
+
+        #expect(window.renderPassesForTests - before <= 2)
         window.orderOut(nil)
     }
 }

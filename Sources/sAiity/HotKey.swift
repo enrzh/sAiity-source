@@ -139,12 +139,15 @@ final class HotKeyCenter {
     }
 
     /// Re-read the stored shortcut and re-register. Called after the user edits it.
-    func rebind(_ action: Action) {
+    /// Returns whether the selected combination is now owned by this app. A
+    /// nil or unusable shortcut is a deliberate state, not a registration error.
+    @discardableResult
+    func rebind(_ action: Action) -> Bool {
         if let existing = refs[action] {
             UnregisterEventHotKey(existing)
             refs[action] = nil
         }
-        guard let s = Self.shortcut(for: action), s.isUsable else { return }
+        guard let s = Self.shortcut(for: action), s.isUsable else { return true }
 
         var ref: EventHotKeyRef?
         // The signature is arbitrary but must be stable; the id indexes our table.
@@ -155,9 +158,11 @@ final class HotKeyCenter {
         if status == noErr, let ref {
             NSLog("sAiity hotkey registered: \(action.rawValue) = \(s.displayString)")
             refs[action] = ref
+            return true
         } else {
             // Almost always means another app already owns this combination.
             NSLog("sAiity hotkey \(action.rawValue) failed to register: \(status)")
+            return false
         }
     }
 

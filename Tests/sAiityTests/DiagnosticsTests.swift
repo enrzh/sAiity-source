@@ -65,4 +65,37 @@ import Testing
         #expect(DiagnosticsRedactor.redact("sAiity live translated: private output")
             .contains("<redacted>"))
     }
+
+    @Test("caption performance rows use plain wording")
+    func captionPerformanceWording() {
+        #expect(CaptionPerformanceCopy.recognitionSpeed(p50RealTimeFactor: 1)
+                == String(localized: "Keeping up"))
+        #expect(CaptionPerformanceCopy.recognitionSpeed(p50RealTimeFactor: 1.01)
+                == String(localized: "Falling behind"))
+        #expect(CaptionPerformanceCopy.duration(2.44).contains("2.4"))
+        #expect(!CaptionPerformanceCopy.duration(2.44).localizedCaseInsensitiveContains("p50"))
+        #expect(!CaptionPerformanceCopy.recognitionSpeed(p50RealTimeFactor: 0.4)
+            .localizedCaseInsensitiveContains("RTF"))
+        #expect(CaptionPerformanceCopy.audioNotCaptioned(0.02) == String(localized: "None"))
+        #expect(CaptionPerformanceCopy.audioNotCaptioned(1.26).contains("1.3"))
+    }
+
+    @Test("caption latency choice uses plain time, not model jargon")
+    func captionLatencyWording() {
+        #expect(CaptionLatencyCopy.title(chunkMs: 2240) == String(localized: "About 2 seconds"))
+        #expect(CaptionLatencyCopy.title(chunkMs: 1120) == String(localized: "About 1 second"))
+        #expect(CaptionLatencyCopy.title(chunkMs: 0) == String(localized: "About 2 seconds"))
+        let note = CaptionLatencyCopy.missingDownload
+        #expect(!note.localizedCaseInsensitiveContains("tier"))
+        #expect(!note.localizedCaseInsensitiveContains("chunk"))
+        #expect(!note.localizedCaseInsensitiveContains("640"))
+        #expect(!note.localizedCaseInsensitiveContains("RTF"))
+        let pause = CaptionLatencyCopy.pauseLength(milliseconds: 750)
+        #expect(pause.contains("0.75"))
+        #expect(!pause.localizedCaseInsensitiveContains("ms"))
+        #expect(CaptionLatencyCopy.pauseLength(milliseconds: 300).contains("0.3"))
+        #expect(CaptionLatencyCopy.pauseLength(milliseconds: 2000).contains("2.0"))
+        #expect(CaptionLatencyCopy.clearEnabled(showingCaption: false) == false)
+        #expect(CaptionLatencyCopy.clearEnabled(showingCaption: true))
+    }
 }

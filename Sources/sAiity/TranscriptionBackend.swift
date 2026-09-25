@@ -104,6 +104,11 @@ protocol TranscriptionBackend: AnyObject, Sendable {
     /// multilingual Nemotron often simply does not do.
     func flushPending() async
 
+    /// Wait until the engine has processed audio through the supplied sample
+    /// clock watermark. Capture may detect a pause before the recogniser's
+    /// bounded queue has reached that same point.
+    func drain(toAudioSample sample: Int) async
+
     /// Finish a short dictation session and return the engine's authoritative
     /// completed utterance when the backend can provide one. Unlike `stop()`,
     /// this must not emit the returned text through the live caption callback.
@@ -127,6 +132,7 @@ protocol DictationSegmentTranscriber: AnyObject, Sendable {
 
 extension TranscriptionBackend {
     func flushPending() async {}
+    func drain(toAudioSample sample: Int) async {}
     func finishDictation() async -> String? {
         await flushPending()
         await stop()

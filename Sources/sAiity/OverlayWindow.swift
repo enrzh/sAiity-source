@@ -232,15 +232,21 @@ final class BubbleContentView: NSView {
 
             saveButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
             saveButton.centerYAnchor.constraint(equalTo: recordDot.centerYAnchor),
+            saveButton.widthAnchor.constraint(equalToConstant: 16),
+            saveButton.heightAnchor.constraint(equalToConstant: 16),
 
             copyButton.trailingAnchor.constraint(equalTo: saveButton.leadingAnchor,
-                                                  constant: -14),
+                                                  constant: -10),
             copyButton.centerYAnchor.constraint(equalTo: recordDot.centerYAnchor),
+            copyButton.widthAnchor.constraint(equalToConstant: 16),
+            copyButton.heightAnchor.constraint(equalToConstant: 16),
 
             // Immediately left of Copy, in the same right-hand action cluster.
             clearButton.trailingAnchor.constraint(equalTo: copyButton.leadingAnchor,
-                                                  constant: -14),
+                                                  constant: -10),
             clearButton.centerYAnchor.constraint(equalTo: recordDot.centerYAnchor),
+            clearButton.widthAnchor.constraint(equalToConstant: 16),
+            clearButton.heightAnchor.constraint(equalToConstant: 16),
         ])
     }
 
@@ -423,7 +429,6 @@ private final class FlippedDocumentView: NSView {
 }
 
 private final class CaptionRowView: NSView {
-    let speaker = NSTextField(labelWithString: "")
     let original = NSTextField(labelWithString: "")
     let translation = NSTextField(labelWithString: "")
     private var style = CaptionStyle()
@@ -441,21 +446,15 @@ private final class CaptionRowView: NSView {
         // free of Auto Layout also removes a second re-entry point while the
         // scroll document is first being displayed on macOS 27.
         translatesAutoresizingMaskIntoConstraints = true
-        addSubview(speaker)
         addSubview(original)
         addSubview(translation)
-        for text in [speaker, original, translation] {
+        for text in [original, translation] {
             text.alignment = .center
             text.lineBreakMode = .byWordWrapping
             text.cell?.wraps = true
             text.translatesAutoresizingMaskIntoConstraints = true
             text.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         }
-        speaker.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
-        speaker.textColor = .secondaryLabelColor
-        speaker.isHidden = true
-        speaker.setAccessibilityRole(.staticText)
-        speaker.setAccessibilityLabel(String(localized: "Speaker"))
         original.setAccessibilityRole(.staticText)
         original.setAccessibilityLabel(String(localized: "Live caption"))
         translation.setAccessibilityRole(.staticText)
@@ -480,17 +479,6 @@ private final class CaptionRowView: NSView {
                                               width: width,
                                               maxLines: style.original.maxLines)
         var top = bounds.height
-        if !speaker.isHidden {
-            let speakerFont = speaker.font ?? NSFont.systemFont(ofSize: 11)
-            let speakerHeight = ceil(speakerFont.ascender
-                                     - speakerFont.descender
-                                     + speakerFont.leading)
-            speaker.frame = NSRect(x: 0, y: max(0, top - speakerHeight),
-                                   width: width, height: speakerHeight)
-            top -= speakerHeight + 3
-        } else {
-            speaker.frame = .zero
-        }
         original.frame = NSRect(x: 0,
                                 y: max(0, top - originalHeight),
                                 width: width,
@@ -544,8 +532,6 @@ private final class CaptionRowView: NSView {
 
     func set(entry: CaptionHistoryEntry, style: CaptionStyle, staleDim: CGFloat,
              reserveTranslation: Bool) {
-        speaker.stringValue = entry.speakerLabel ?? ""
-        speaker.isHidden = entry.speakerLabel?.isEmpty ?? true
         original.stringValue = entry.original
         translation.stringValue = entry.translation ?? ""
         apply(style: style,
@@ -582,18 +568,16 @@ private final class CaptionRowView: NSView {
                                                      maxLines: style.original.maxLines)
         let original = textHeight(entry.original, font: originalFont,
                                   width: width, maxLines: style.original.maxLines)
-        let speakerHeight: CGFloat = (entry.speakerLabel?.isEmpty ?? true) ? 0 : 18
         guard style.showTranslation,
               reserveTranslation || !(entry.translation ?? "").isEmpty else {
-            return original + speakerHeight + (speakerHeight > 0 ? 3 : 0)
+            return original
         }
         let t = entry.translation ?? " "
         let translationFont = style.translation.fittedFont(for: t,
                                                            width: width,
                                                            minimumSize: 16,
                                                            maxLines: style.translation.maxLines)
-        return speakerHeight + original + (speakerHeight > 0 ? 3 : 0)
-            + CGFloat(style.lineGap)
+        return original + CGFloat(style.lineGap)
             + textHeight(t, font: translationFont, width: width,
                          maxLines: style.translation.maxLines)
     }
@@ -891,6 +875,14 @@ final class OverlayWindow: NSPanel {
     private var shrinkWork: DispatchWorkItem?
     private var allowShrink = false
     private var scrollToLatestPending = false
+    private static let volatileRenderInterval: TimeInterval = 0.1
+    private var renderWork: DispatchWorkItem?
+    private var pendingRenderSentenceID: Int?
+    private var lastRenderAt = Date.distantPast
+    private var volatileSentenceID: Int?
+    #if SAIITY_TEST_HOOKS
+    private var renderPassCount = 0
+    #endif
 
     /// Gated on an actual size change: glass costs more per resize than a
     /// visual-effect view, and captions update several times a second.
@@ -1088,6 +1080,8 @@ final class OverlayWindow: NSPanel {
 #if SAIITY_TEST_HOOKS
     var renderedBubbleStyleForTests: Int { surface.renderedStyle }
     var usesLiquidGlassForTests: Bool { surface.usesLiquidGlassForTests }
+    var renderedStyleForTests: CaptionStyle { effectiveStyle }
+    var renderPassesForTests: Int { renderPassCount }
 #endif
 
     /// Reveal an intentionally enabled bubble even before the first caption
@@ -1161,12 +1155,12 @@ final class OverlayWindow: NSPanel {
 
     /// `text` is shown dimmed while volatile so it is visually obvious the
     /// engine may still revise it.
-    func show(text: String, isFinal: Bool, sentenceID: Int? = nil,
-              speakerLabel: String? = nil) {
+    func show(text: String, isFinal: Bool, sentenceID: Int? = nil) {
         let id = sentenceID ?? history.entries.last?.sentenceID ?? -1
         if !text.isEmpty {
-            history.upsertOriginal(text, sentenceID: id, speakerLabel: speakerLabel)
-            renderHistory(changedSentenceID: id)
+            history.upsertOriginal(text, sentenceID: id)
+            volatileSentenceID = isFinal ? nil : id
+            renderHistory(changedSentenceID: id, immediate: isFinal)
         }
         // effectiveStyle, not CaptionStyle.current: captions update several
         // times a second, and reading the raw style here dropped the
@@ -1181,12 +1175,10 @@ final class OverlayWindow: NSPanel {
 
     /// Replace one completed row without disturbing its translation or the
     /// surrounding history. The caller keeps the source text for fallback.
-    func replaceOriginal(_ text: String, forSentenceID sentenceID: Int,
-                         speakerLabel: String? = nil) {
+    func replaceOriginal(_ text: String, forSentenceID sentenceID: Int) {
         guard !text.isEmpty else { return }
-        history.upsertOriginal(text, sentenceID: sentenceID,
-                               speakerLabel: speakerLabel)
-        renderHistory(changedSentenceID: sentenceID)
+        history.upsertOriginal(text, sentenceID: sentenceID)
+        renderHistory(changedSentenceID: sentenceID, immediate: true)
         presentIfNeeded()
     }
 
@@ -1212,7 +1204,7 @@ final class OverlayWindow: NSPanel {
         if !text.isEmpty {
             history.upsertTranslation(text, forSentenceID: sentenceID, stale: stale)
         }
-        renderHistory(changedSentenceID: text.isEmpty ? nil : sentenceID)
+        renderHistory(changedSentenceID: text.isEmpty ? nil : sentenceID, immediate: true)
     }
 
     /// The source moved on while this translation stayed. Same dimming as
@@ -1224,7 +1216,7 @@ final class OverlayWindow: NSPanel {
 
     func markTranslationStale(forSentenceID sentenceID: Int) {
         history.markTranslationStale(forSentenceID: sentenceID)
-        renderHistory(changedSentenceID: sentenceID)
+        renderHistory(changedSentenceID: sentenceID, immediate: true)
     }
 
     /// Hold a line of space for the translation for as long as translation is
@@ -1237,7 +1229,7 @@ final class OverlayWindow: NSPanel {
     var reservesTranslationRow = false {
         didSet {
             guard reservesTranslationRow != oldValue else { return }
-            renderHistory()
+            renderHistory(immediate: true)
             sizeToFit(immediateShrink: true)
         }
     }
@@ -1245,14 +1237,22 @@ final class OverlayWindow: NSPanel {
     /// Replace the visible history, used by the recent-caption recap and the
     /// settings preview. The live transcript remains the source of truth.
     func showHistory(_ entries: [CaptionHistoryEntry]) {
+        volatileSentenceID = nil
         history.replace(with: entries)
-        renderHistory()
+        renderHistory(immediate: true)
         presentIfNeeded()
     }
 
+    /// True only while a caption row is actually on screen. A hidden bubble,
+    /// or one cleared down to an empty panel, is not showing a caption.
+    var hasVisibleCaption: Bool {
+        !CaptionStyle.current.hidden && !history.entries.isEmpty
+    }
+
     func clearHistory(keepVisible: Bool = false) {
+        volatileSentenceID = nil
         history.clear()
-        renderHistory()
+        renderHistory(immediate: true)
         if keepVisible {
             presentIfNeeded(allowEmpty: true)
         } else {
@@ -1294,7 +1294,32 @@ final class OverlayWindow: NSPanel {
         scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
-    private func renderHistory(changedSentenceID: Int? = nil) {
+    private func renderHistory(changedSentenceID: Int? = nil,
+                               immediate: Bool = false) {
+        if !immediate {
+            pendingRenderSentenceID = changedSentenceID ?? pendingRenderSentenceID
+            renderWork?.cancel()
+            let elapsed = Date().timeIntervalSince(lastRenderAt)
+            let delay = max(0, Self.volatileRenderInterval - elapsed)
+            var work: DispatchWorkItem?
+            work = DispatchWorkItem { [weak self] in
+                guard let self, let work, !work.isCancelled else { return }
+                self.renderWork = nil
+                let pending = self.pendingRenderSentenceID
+                self.pendingRenderSentenceID = nil
+                self.renderHistory(changedSentenceID: pending, immediate: true)
+            }
+            renderWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work!)
+            return
+        }
+        renderWork?.cancel()
+        renderWork = nil
+        pendingRenderSentenceID = nil
+        lastRenderAt = Date()
+        #if SAIITY_TEST_HOOKS
+        renderPassCount += 1
+        #endif
         let visibleIDs = Set(history.entries.map(\.sentenceID))
         let staleRows = rowViews.filter { !visibleIDs.contains($0.key) }
         for (id, row) in staleRows {
@@ -1321,6 +1346,10 @@ final class OverlayWindow: NSPanel {
                             && entry.sentenceID == history.entries.last?.sentenceID)
             }
 
+        }
+        if let volatileSentenceID,
+           let row = rowViews[volatileSentenceID] {
+            row.original.alphaValue = st.original.volatileOpacity
         }
         // Every row is frame-managed, so this is a cheap invalidation rather
         // than an AppKit stack-layout pass that can re-enter on macOS 27.

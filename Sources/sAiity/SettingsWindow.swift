@@ -17,20 +17,7 @@ extension Notification.Name {
     static let saiityDictationSettingChanged = Notification.Name("sAiityDictationSettingChanged")
     static let saiityDictationShortcutRecordingChanged = Notification.Name("sAiityDictationShortcutRecordingChanged")
     static let saiitySelectSettingsPane = Notification.Name("sAiitySelectSettingsPane")
-}
-
-/// Shared so non-UI types can report disk usage honestly.
-enum AppStateSizeHelper {
-    static func folderSize(_ url: URL) -> String? {
-        let fm = FileManager.default
-        guard let e = fm.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey]) else { return nil }
-        var total: Int64 = 0
-        for case let f as URL in e {
-            total += Int64((try? f.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
-        }
-        guard total > 0 else { return nil }
-        return ByteCountFormatter.string(fromByteCount: total, countStyle: .file)
-    }
+    static let saiityToggleSettingsSidebar = Notification.Name("sAiityToggleSettingsSidebar")
 }
 
 // MARK: - Model
@@ -40,7 +27,6 @@ enum AppStateSizeHelper {
 final class AppState {
 
     var sessions: [SessionRef] = []
-    var diskUsage: String?
 
     /// Routed through AppDelegate rather than written directly: enabling
     /// recording has to raise the one-time notice and, if a session is already
@@ -72,6 +58,7 @@ final class AppState {
         didSet {
             guard engine != oldValue else { return }
             ASREngine.selected = engine
+            enforceSettingsHonesty()
             guard let engine else { return }
             NotificationCenter.default.post(name: .saiityEngineChanged, object: nil,
                                             userInfo: ["engine": engine.rawValue,
@@ -122,6 +109,19 @@ final class AppState {
 
     /// Every downloadable asset with its live disk state, from one registry.
     var assets: [AssetStatus] = []
+    /// Inventory and transcript discovery can touch a multi-gigabyte model root.
+    /// Keep that work off the main actor and let pages show their structure while
+    /// the first snapshot arrives.
+    var isModelsLoading = false
+    var isLibraryLoading = false
+    var isRefreshing = false
+    @ObservationIgnored private var modelsLoaded = false
+    @ObservationIgnored private var libraryLoaded = false
+    @ObservationIgnored private var modelRefreshGeneration = 0
+    @ObservationIgnored private var libraryRefreshGeneration = 0
+    @ObservationIgnored private var modelRefreshTask: Task<ModelInventory, Never>?
+    @ObservationIgnored private var libraryRefreshTask: Task<[SessionRef], Never>?
+    @ObservationIgnored private var refreshTask: Task<Void, Never>?
     /// Assets whose files are present but refused to load, by id → reason.
     /// Fed by LoadHealth; the observer keeps an open Models page truthful when
     /// a session fails in the background.
@@ -130,8 +130,13 @@ final class AppState {
 
     @ObservationIgnored private var gapObserver: NSObjectProtocol?
     @ObservationIgnored private var targetObserver: NSObjectProtocol?
+    @ObservationIgnored private var transcriptObserver: NSObjectProtocol?
 
     init() {
+        // Speaker identification was removed from the product. Drop its old
+        // preference so a stale value cannot look like an active hidden mode;
+        // downloaded weights and old transcript files are left untouched.
+        UserDefaults.standard.removeObject(forKey: "speakerLabelsEnabled")
         loadHealthObserver = NotificationCenter.default.addObserver(
             forName: LoadHealth.changed, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in self?.loadFailures = LoadHealth.all }
@@ -148,6 +153,12 @@ final class AppState {
                 guard let self else { return }
                 self.adoptTarget(t)
                 Task { await self.refreshTargetSupport() }
+            }
+        }
+        transcriptObserver = NotificationCenter.default.addObserver(
+            forName: .saiityTranscriptLibraryChanged, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.refreshLibraryAsync(force: true)
             }
         }
         gapObserver = NotificationCenter.default.addObserver(
@@ -168,17 +179,22 @@ final class AppState {
                     fires: fires)
             }
         }
+        enforceSettingsHonesty()
     }
     var ownedTotal: String = "—"
     /// Measured with the same inventory pass as `ownedTotal`, so the storage
     /// button does not rescan the model tree on every SwiftUI update.
     var ownedBytes: Int64 = 0
+    /// Incomplete files from retired engines, kept out of the visible model
+    /// catalogue but included in the safe interrupted-download cleanup.
+    var retiredPartialBytes: Int64 = 0
     /// Bytes under our models root that belong to no known asset.
     var strayTotal: String?
-    /// The single in-flight download, by `ModelAsset.id`. One slot rather than a
-    /// flag per family: the per-family flags never cross-checked each other, so
-    /// two multi-gigabyte downloads could run at once on one connection.
+    /// The single in-flight download started by this settings state, by
+    /// `ModelAsset.id`. Engine preparation also uses the shared coordinator;
+    /// destructive actions re-check that coordinator before touching files.
     var activeDownload: String?
+    var hasActiveDownloads: Bool { activeDownload != nil }
     var downloadProgress: DownloadProgress?
     var modelError: String?
     var translationEngine: TranslationEngine? = TranslationEngine.visibleSelection(TranslationEngine.selected) {
@@ -226,13 +242,6 @@ final class AppState {
         }
     }
 
-    /// Optional local diarization. It is opt-in because it downloads and
-    /// keeps a separate model resident; when off, captions use the original
-    /// single-speaker path with no additional work.
-    var speakerLabelsEnabled = UserDefaults.standard.bool(forKey: "speakerLabelsEnabled") {
-        didSet { UserDefaults.standard.set(speakerLabelsEnabled, forKey: "speakerLabelsEnabled") }
-    }
-
     /// Press-to-talk is separate from live captions. It is enabled by default,
     /// but can be disabled without changing any caption or microphone-mixing
     /// preference.
@@ -255,7 +264,7 @@ final class AppState {
     /// Custom immediately instead of leaving a stale preset badge behind.
     var dictationProfile: DictationProfile {
         get {
-            let streaming = ASREngine(rawValue: UserDefaults.standard.string(forKey: "dictationStreamingEngine") ?? ASREngine.recommended.rawValue) ?? .recommended
+            let streaming = ASREngine.dictationEffective
             if dictationRecognizer == .whisper,
                WhisperDictationBackend.locale == "auto",
                dictationCleanupEnabled { return .accurate }
@@ -305,6 +314,7 @@ final class AppState {
     }
     var dictationCleanupEnabled = UserDefaults.standard.object(forKey: "dictationCleanupEnabled") as? Bool ?? true {
         didSet {
+            enforceSettingsHonesty()
             guard dictationCleanupEnabled != oldValue else { return }
             UserDefaults.standard.set(dictationCleanupEnabled, forKey: "dictationCleanupEnabled")
             NotificationCenter.default.post(name: .saiityDictationSettingChanged, object: nil)
@@ -321,6 +331,7 @@ final class AppState {
     /// target. Off by default because it adds a model step and latency.
     var translateDictation = UserDefaults.standard.bool(forKey: "translateDictation") {
         didSet {
+            enforceSettingsHonesty()
             guard translateDictation != oldValue else { return }
             UserDefaults.standard.set(translateDictation, forKey: "translateDictation")
             NotificationCenter.default.post(name: .saiityDictationSettingChanged, object: nil)
@@ -332,6 +343,7 @@ final class AppState {
         didSet {
             guard dictationTranslateTo != oldValue else { return }
             DictationTargetPreference.save(dictationTranslateTo)
+            enforceSettingsHonesty()
             NotificationCenter.default.post(name: .saiityDictationSettingChanged, object: nil)
         }
     }
@@ -370,23 +382,140 @@ final class AppState {
     /// Caption and dictation bubbles keep separate persisted appearances, even
     /// though they share the same rendering surface.
     var style: CaptionStyle = CaptionStyle.current {
-        didSet { CaptionStyle.current = style }
+        didSet {
+            enforceSettingsHonesty()
+            CaptionStyle.current = style
+        }
     }
     var dictationStyle: CaptionStyle = CaptionStyle.currentDictation {
         didSet { CaptionStyle.currentDictation = dictationStyle }
     }
 
-    func refreshModels() {
-        let inventory = ModelRegistry.inventorySnapshot()
+    private func applyModelInventory(_ inventory: ModelInventory) {
         assets = inventory.assets
         loadFailures = LoadHealth.all
         let total = inventory.ownedBytes
         ownedBytes = total
+        retiredPartialBytes = inventory.retiredPartialBytes
         ownedTotal = total > 0 ? ModelRegistry.format(total) : String(localized: "nothing downloaded")
         let stray = inventory.strayBytes
         // Only worth mentioning once it is a real amount; a few KB of cache
         // metadata is noise.
         strayTotal = stray > 8 << 20 ? ModelRegistry.format(stray) : nil
+        modelsLoaded = true
+        isModelsLoading = false
+        enforceSettingsHonesty()
+    }
+
+    /// Synchronous compatibility hook for small post-mutation refreshes. New
+    /// page presentation should use `refreshModelsAsync()` so the first open
+    /// never blocks the main actor on a large model tree.
+    func refreshModels() {
+        applyModelInventory(ModelRegistry.inventorySnapshot())
+    }
+
+    func refreshModelsAsync(force: Bool = false) async {
+        if modelsLoaded && !force { return }
+        if !force, let task = modelRefreshTask {
+            let generation = modelRefreshGeneration
+            let inventory = await task.value
+            guard generation == modelRefreshGeneration, !Task.isCancelled else { return }
+            applyModelInventory(inventory)
+            return
+        }
+
+        modelRefreshGeneration &+= 1
+        let generation = modelRefreshGeneration
+        isModelsLoading = true
+        let task = Task.detached(priority: .userInitiated) {
+            ModelRegistry.inventorySnapshot()
+        }
+        modelRefreshTask = task
+        let inventory = await task.value
+        guard generation == modelRefreshGeneration else { return }
+        guard !Task.isCancelled else {
+            modelRefreshTask = nil
+            isModelsLoading = false
+            return
+        }
+        modelRefreshTask = nil
+        applyModelInventory(inventory)
+    }
+
+    func refreshLibraryAsync(force: Bool = false) async {
+        if libraryLoaded && !force { return }
+        if !force, let task = libraryRefreshTask {
+            let generation = libraryRefreshGeneration
+            let loadedSessions = await task.value
+            guard generation == libraryRefreshGeneration, !Task.isCancelled else { return }
+            sessions = loadedSessions
+            libraryLoaded = true
+            isLibraryLoading = false
+            return
+        }
+
+        libraryRefreshGeneration &+= 1
+        let generation = libraryRefreshGeneration
+        isLibraryLoading = true
+        let task = Task.detached(priority: .userInitiated) {
+            TranscriptStore.list()
+        }
+        libraryRefreshTask = task
+        let loadedSessions = await task.value
+        guard generation == libraryRefreshGeneration else { return }
+        guard !Task.isCancelled else {
+            libraryRefreshTask = nil
+            isLibraryLoading = false
+            return
+        }
+        libraryRefreshTask = nil
+        sessions = loadedSessions
+        libraryLoaded = true
+        isLibraryLoading = false
+    }
+
+    /// Re-reads the three settings that can claim work this Mac cannot do.
+    /// Writes the corrected values directly because `didSet` does not run for
+    /// assignments made while `AppState` is still initializing.
+    @ObservationIgnored private var enforcingHonesty = false
+
+    func enforceSettingsHonesty() {
+        guard !enforcingHonesty else { return }
+        enforcingHonesty = true
+        defer { enforcingHonesty = false }
+        if translationEngine != TranslationEngine.visibleSelection(translationEngine) {
+            translationEngine = nil
+        }
+        if dictationTranslationEngine != TranslationEngine.visibleSelection(dictationTranslationEngine) {
+            dictationTranslationEngine = nil
+        }
+        let next = SettingsStateHonesty.reconcile(
+            recognition: engine,
+            recommendedRecognitionInstalled: !ASREngine.recommended.needsDownload,
+            showCaptionTranslation: style.showTranslation,
+            captionTarget: translateTo,
+            dictationTranslationEnabled: translateDictation,
+            dictationTarget: dictationTranslateTo,
+            cleanupEnabled: dictationCleanupEnabled,
+            cleanupReady: llmModel?.isDownloaded == true)
+        if engine != next.recognition {
+            engine = next.recognition
+            ASREngine.selected = next.recognition
+        }
+        if style.showTranslation != next.showCaptionTranslation {
+            var corrected = style
+            corrected.showTranslation = next.showCaptionTranslation
+            style = corrected
+            CaptionStyle.current = corrected
+        }
+        if translateDictation != next.dictationTranslationEnabled {
+            translateDictation = next.dictationTranslationEnabled
+            UserDefaults.standard.set(next.dictationTranslationEnabled, forKey: "translateDictation")
+        }
+        if dictationCleanupEnabled != next.cleanupEnabled {
+            dictationCleanupEnabled = next.cleanupEnabled
+            UserDefaults.standard.set(next.cleanupEnabled, forKey: "dictationCleanupEnabled")
+        }
     }
 
     /// The in-flight download, so Cancel can actually cancel it. Before this a
@@ -401,7 +530,7 @@ final class AppState {
            let available = ModelRegistry.availableDiskBytes(),
            available < required {
             modelError = String(localized: "Not enough free space for \(asset.title). Need about \(ModelRegistry.format(required)); only \(ModelRegistry.format(available)) is available.")
-            refreshModels()
+            await refreshModelsAsync(force: true)
             return
         }
         activeDownload = asset.id
@@ -436,7 +565,7 @@ final class AppState {
         downloadTask = nil
         activeDownload = nil
         downloadProgress = nil
-        refreshModels()
+        await refreshModelsAsync(force: true)
     }
 
     /// Delete the damaged files, then fetch fresh — the one recovery path for
@@ -469,6 +598,10 @@ final class AppState {
     func delete(_ asset: ModelAsset) async {
         guard case .remove = asset.removal else { return }
         modelError = nil
+        if await DownloadCoordinator.shared.activeIDs.contains(asset.id) {
+            modelError = String(localized: "A download is still in progress.")
+            return
+        }
         if CaptionSession.shared.isRunning, asset.use.isSelected {
             modelError = String(localized: "\(asset.title) is running the live captions. Stop captions first.")
             return
@@ -484,7 +617,57 @@ final class AppState {
         if !ModelRegistry.remove(asset) {
             modelError = String(localized: "Could not delete \(asset.title).")
         }
-        refreshModels()
+        await refreshModelsAsync(force: true)
+    }
+
+    /// Remove only interrupted download state, leaving completed models alone.
+    /// For each known incomplete asset this removes its incomplete destination
+    /// plus `.part` and `.part.etag`; an installed asset is never included.
+    /// Returns the approximate bytes reclaimed, or nil if the operation was
+    /// refused or any partial could not be removed.
+    @discardableResult
+    func clearInterruptedDownloads(includeRetired: Bool = true) async -> Int64? {
+        modelError = nil
+        let coordinatorIDs = await DownloadCoordinator.shared.activeIDs
+        guard activeDownload == nil, coordinatorIDs.isEmpty else {
+            modelError = String(localized: "A download is still in progress.")
+            return nil
+        }
+        guard !CaptionSession.shared.isRunning else {
+            modelError = String(localized: "Captions are running. Stop them first.")
+            return nil
+        }
+
+        let partials: [AssetStatus] = assets.filter(\.isPartial)
+            + (includeRetired
+                ? ModelRegistry.retiredPartialAssets().map { ModelRegistry.status(of: $0) }
+                : [])
+        guard !partials.isEmpty else { return 0 }
+
+        if partials.contains(where: { $0.asset.use.isSelected }) {
+            guard let delegate = NSApp.delegate as? AppDelegate,
+                  await delegate.prepareForModelCleanup() else {
+                modelError = String(localized: "Stop captions or dictation before clearing this model's files.")
+                return nil
+            }
+            await CaptionSession.shared.releaseEverything()
+        }
+
+        var freed: Int64 = 0
+        var failed = false
+        for status in partials {
+            if ModelRegistry.remove(status.asset) {
+                freed += status.bytesOnDisk
+            } else {
+                failed = true
+            }
+        }
+        await refreshModelsAsync(force: true)
+        guard !failed else {
+            modelError = String(localized: "Some interrupted downloads could not be cleared.")
+            return nil
+        }
+        return freed
     }
 
     /// Remove every model the app downloaded. Returns the bytes freed, or nil if
@@ -492,6 +675,10 @@ final class AppState {
     @discardableResult
     func removeAllDownloads() async -> Int64? {
         modelError = nil
+        guard await DownloadCoordinator.shared.activeIDs.isEmpty else {
+            modelError = String(localized: "A download is still in progress.")
+            return nil
+        }
         guard !CaptionSession.shared.isRunning else {
             modelError = String(localized: "Captions are running. Stop them first.")
             return nil
@@ -499,11 +686,11 @@ final class AppState {
         await CaptionSession.shared.releaseEverything()
         do {
             let freed = try ModelRegistry.removeAllOwned()
-            refreshModels()
+            await refreshModelsAsync(force: true)
             return freed
         } catch {
             modelError = error.localizedDescription
-            refreshModels()
+            await refreshModelsAsync(force: true)
             return nil
         }
     }
@@ -517,6 +704,7 @@ final class AppState {
         didSet {
             guard translateTo != oldValue else { return }
             UserDefaults.standard.set(translateTo, forKey: "translateTo")
+            enforceSettingsHonesty()
             guard !applyingRemoteTarget else { return }
             NotificationCenter.default.post(name: .saiityTranslateTargetChanged, object: nil,
                                             userInfo: ["target": translateTo as Any])
@@ -553,6 +741,7 @@ final class AppState {
     var llmModel: LocalModel? = LocalModel.cleanupSelected {
         didSet {
             guard llmModel != oldValue else { return }
+            enforceSettingsHonesty()
             LocalModel.cleanupSelected = llmModel
             // Writing the preference is not enough: the translator holds an LLM
             // built from the *old* file, so without this the app kept using —
@@ -565,6 +754,22 @@ final class AppState {
     }
 
     func refresh() async {
+        if let task = refreshTask {
+            await task.value
+            return
+        }
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performRefresh()
+        }
+        refreshTask = task
+        await task.value
+        refreshTask = nil
+    }
+
+    private func performRefresh() async {
+        isRefreshing = true
+        defer { isRefreshing = false }
         // Re-read selections from defaults. Without this the window shows
         // whatever was current when the AppState singleton was created, which
         // is one of the ways "selecting a model appears to do nothing".
@@ -575,14 +780,14 @@ final class AppState {
         // Was missing, so a target picked from the menu bar never appeared here.
         adoptTarget(UserDefaults.standard.string(forKey: "translateTo"))
         await refreshTargetSupport()
-        // The three SpeechTranscriber/AssetInventory queries that used to live
-        // here each round-trip to the system speech daemon and took seconds —
-        // that was the whole reason this window opened slowly. With Apple's
-        // engine gone, nothing needs them.
-        refreshModels()
+        // The inventory is cached after its first pass. Model mutations call
+        // `refreshModelsAsync(force: true)` explicitly, while ordinary window
+        // reveals should not walk a multi-gigabyte tree again.
+        await refreshModelsAsync()
+        // Transcript discovery is intentionally deferred until the Transcripts
+        // page is visible. Opening Captions or Models should not walk the
+        // transcript directory at all.
         refreshRunningApps()
-        sessions = TranscriptStore.list()
-        diskUsage = Self.folderSize(TranscriptStore.sessionsDir)
         refreshLaunchAtLogin()
     }
 
@@ -652,11 +857,6 @@ final class AppState {
         NSWorkspace.shared.open(url)
     }
 
-
-    /// Nil when there is nothing stored — ByteCountFormatter renders 0 as
-    /// "Zero KB", which reads like a glitch.
-    static func folderSize(_ url: URL) -> String? { AppStateSizeHelper.folderSize(url) }
-
 }
 
 // MARK: - Window
@@ -704,11 +904,69 @@ extension NSWindow {
         isOpaque = false
         backgroundColor = .clear
     }
+
+    /// Settings uses an opaque semantic base so the system titlebar cannot
+    /// sample a bright window behind it. The content can still use its own
+    /// system materials without turning the window chrome into a see-through
+    /// layer.
+    func makeOpaqueSettingsSurface() {
+        isOpaque = true
+        backgroundColor = .windowBackgroundColor
+    }
+}
+
+@MainActor
+private final class SettingsToolbarTarget: NSObject, NSToolbarDelegate {
+    static let sidebarIdentifier = NSToolbarItem.Identifier("sAiity.sidebar")
+
+    @objc func toggleSidebar() {
+        NotificationCenter.default.post(name: .saiityToggleSettingsSidebar, object: nil)
+    }
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [Self.sidebarIdentifier]
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [Self.sidebarIdentifier]
+    }
+
+    func toolbar(_ toolbar: NSToolbar,
+                 itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
+                 willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+        guard itemIdentifier == Self.sidebarIdentifier else { return nil }
+        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+        let sidebarVisible = UserDefaults.standard.object(forKey: "saiity.settings.sidebarVisible") as? Bool ?? true
+        let label = sidebarVisible ? String(localized: "Hide sidebar") : String(localized: "Show sidebar")
+        item.label = label
+        item.toolTip = label
+        item.image = NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: label)
+        item.isNavigational = true
+        item.target = self
+        item.action = #selector(toggleSidebar)
+        return item
+    }
+}
+
+/// The settings window keeps the standard AppKit title bar and window
+/// controls. The AppKit toolbar owns the sidebar action; the system owns
+/// resizing, minimizing, full screen, and the traffic-light state.
+final class SettingsChromeWindow: NSWindow {}
+
+@MainActor
+private final class SettingsWindowDelegate: NSObject, NSWindowDelegate {
+    func windowDidExitFullScreen(_ notification: Notification) {
+        SettingsWindowController.applyRequestedContentHeight()
+    }
 }
 
 @MainActor
 enum SettingsWindowController {
     private static var window: NSWindow?
+    private static var requestedContentHeight: CGFloat?
+    private static let windowDelegate = SettingsWindowDelegate()
+    private static let toolbarTarget = SettingsToolbarTarget()
+    static let settingsWindowIdentifier = NSUserInterfaceItemIdentifier("saiity.settings")
     /// Shared, so the menu bar can raise a specific sheet in this window.
     static let state = AppState()
     static var selectedPane: SettingsPane = .captions
@@ -717,36 +975,97 @@ enum SettingsWindowController {
         if let w = window {
             NSApp.activate(ignoringOtherApps: true)
             w.makeKeyAndOrderFront(nil)
+            if selectedPane == .library || selectedPane == .models || selectedPane == .transcripts {
+                setContentHeight(600)
+            } else {
+                applyRequestedContentHeight()
+            }
+            applyChrome(to: w)
             Task { await state.refresh() }
             return
         }
-        let w = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 980, height: 680),
+        let w = SettingsChromeWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 860, height: 600),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered, defer: false)
         w.isReleasedWhenClosed = false
+        // Keep the titlebar and window controls on a stable semantic surface;
+        // only the content cards should carry the visual treatment.
+        w.makeOpaqueSettingsSurface()
         let host = NSHostingController(
             rootView: SettingsRootView(state: state,
                                         initialPane: selectedPane)
-                .frame(minWidth: 900, minHeight: 600)
+                .frame(minWidth: 760, minHeight: 420)
                 .background(VibrantBackground()))
         host.view.wantsLayer = true
         host.view.layer?.backgroundColor = .clear
         w.contentViewController = host
-        w.title = "sAiity"
+        w.identifier = settingsWindowIdentifier
+        w.delegate = windowDelegate
+        let toolbar = NSToolbar(identifier: "sAiity.SettingsToolbar")
+        toolbar.displayMode = .iconOnly
+        toolbar.delegate = toolbarTarget
+        toolbar.insertItem(withItemIdentifier: SettingsToolbarTarget.sidebarIdentifier, at: 0)
+        w.toolbar = toolbar
+        // Keep the system titlebar opaque so the window controls sit on a
+        // stable surface instead of showing the settings content through it.
         w.titlebarAppearsTransparent = false
-        // The settings surface owns its navigation. A system toolbar or the
-        // automatic NavigationSplitView toggle can move when macOS changes the
-        // titlebar metrics, and can paint over the page header on macOS 27.
-        w.toolbar = nil
+        w.toolbarStyle = .unified
         w.titleVisibility = .visible
-        w.setContentSize(NSSize(width: 980, height: 680))
-        w.contentMinSize = NSSize(width: 900, height: 600)
-        w.center()
+        w.setContentSize(NSSize(width: 860, height: 600))
+        w.contentMinSize = NSSize(width: 760, height: 420)
         window = w
+        setContentHeight(selectedPane == .library || selectedPane == .models || selectedPane == .transcripts ? 600 : 420)
+        w.center()
         NSApp.activate(ignoringOtherApps: true)
         w.makeKeyAndOrderFront(nil)
+        applyChrome(to: w)
         Task { await state.refresh() }
+    }
+
+    /// The title follows the pane on screen. The legacy Models destination
+    /// maps to the Models page, and the old General destination lives inside Setup.
+    static func applyChrome(to window: NSWindow? = nil) {
+        guard let w = window ?? self.window else { return }
+        w.title = presentedPane.windowTitle
+    }
+
+    static func updateSidebarToolbarLabel(_ sidebarVisible: Bool) {
+        guard let item = window?.toolbar?.items.first(where: {
+            $0.itemIdentifier == SettingsToolbarTarget.sidebarIdentifier
+        }) else { return }
+        let label = sidebarVisible ? String(localized: "Hide sidebar") : String(localized: "Show sidebar")
+        item.label = label
+        item.toolTip = label
+        item.image = NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: label)
+    }
+
+    /// Keep a compact page compact. Expanded settings still get the full
+    /// work surface; a collapsed disclosure should not leave a dead black
+    /// half-window below the primary controls.
+    static func setContentHeight(_ height: CGFloat) {
+        requestedContentHeight = min(max(height, 420), 600)
+        applyRequestedContentHeight()
+    }
+
+    /// Apply the last requested page height once the window is back in a
+    /// normal window state. Full Screen owns geometry while it is active, but
+    /// it should not discard a disclosure choice made there.
+    static func applyRequestedContentHeight() {
+        guard let target = requestedContentHeight, let w = window else { return }
+        guard !w.styleMask.contains(.fullScreen) else { return }
+        let current = w.contentViewController?.view.bounds.height ?? target
+        guard abs(current - target) > 1 else { return }
+        let width = max(w.contentViewController?.view.bounds.width ?? 760, 760)
+        w.setContentSize(NSSize(width: width, height: target))
+    }
+
+    private static var presentedPane: SettingsPane {
+        switch selectedPane {
+        case .models: .library
+        case .general: .setup
+        default: selectedPane
+        }
     }
 
     /// Open the dictation target picker in the pane that owns it. Menu-bar
@@ -775,13 +1094,15 @@ enum SettingsWindowController {
 // MARK: - Views
 
 enum SettingsPane: String, CaseIterable, Hashable, Identifiable {
-    case setup, captions, dictation, library
+    case setup, captions, dictation, library, transcripts
 
     // Legacy destinations remain valid for menu notifications and older tests,
     // but are deliberately not presented as top-level navigation items.
-    case models, transcripts, general
+    case models, general
 
-    static var allCases: [SettingsPane] { [.setup, .captions, .dictation, .library] }
+    static var allCases: [SettingsPane] {
+        [.setup, .captions, .dictation, .library, .transcripts]
+    }
 
     var id: String { rawValue }
     var title: LocalizedStringKey {
@@ -789,10 +1110,21 @@ enum SettingsPane: String, CaseIterable, Hashable, Identifiable {
         case .setup: "Setup"
         case .captions: "Captions"
         case .dictation: "Dictation"
-        case .library: "Library"
+        case .library: "Models"
         case .models: "Models"
         case .transcripts: "Transcripts"
         case .general: "General"
+        }
+    }
+    var windowTitle: String {
+        switch self {
+        case .setup: String(localized: "Setup")
+        case .captions: String(localized: "Captions")
+        case .dictation: String(localized: "Dictation")
+        case .library: String(localized: "Models")
+        case .models: String(localized: "Models")
+        case .transcripts: String(localized: "Transcripts")
+        case .general: String(localized: "General")
         }
     }
     var symbol: String {
@@ -800,7 +1132,7 @@ enum SettingsPane: String, CaseIterable, Hashable, Identifiable {
         case .setup: "checklist"
         case .captions: "captions.bubble"
         case .dictation: "mic"
-        case .library: "books.vertical"
+        case .library: "shippingbox"
         case .models: "shippingbox"
         case .transcripts: "text.document"
         case .general: "gearshape"
@@ -814,10 +1146,9 @@ enum SettingsPane: String, CaseIterable, Hashable, Identifiable {
 struct SettingsRootView: View {
     @Bindable var state: AppState
     @State private var selection: SettingsPane
-    @State private var libraryTab: LibraryTab = .models
-    @State private var sidebarVisible = true
+    @AppStorage("saiity.settings.sidebarVisible") private var sidebarVisible = true
 
-    private let sidebarWidth: CGFloat = 190
+    private let sidebarWidth: CGFloat = 200
 
     init(state: AppState, initialPane: SettingsPane = .captions) {
         self.state = state
@@ -828,41 +1159,43 @@ struct SettingsRootView: View {
         HStack(spacing: 0) {
             if sidebarVisible {
                 VStack(spacing: 0) {
-                    HStack {
-                        Text("Settings")
-                            .font(.headline)
-                        Spacer()
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 14)
-                    .padding(.bottom, 8)
-
                     List(selection: $selection) {
-                        navigationRow(.setup)
-                        navigationRow(.captions)
-                        navigationRow(.dictation)
-                        navigationRow(.library)
+                        ForEach(SettingsPane.allCases) { pane in
+                            navigationRow(pane)
+                        }
                     }
                     .listStyle(.sidebar)
+                    .scrollContentBackground(.hidden)
                 }
                 .frame(width: sidebarWidth)
-                .background(Color(nsColor: .underPageBackgroundColor))
+                .background(.regularMaterial)
             }
 
-            Divider()
+            if sidebarVisible {
+                Divider()
+            }
 
             detailView(for: selection)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(.clear)
+        .onAppear {
+            SettingsWindowController.updateSidebarToolbarLabel(sidebarVisible)
+        }
         .onChange(of: selection) { _, value in
             SettingsWindowController.selectedPane = value
+            if value == .library || value == .models || value == .transcripts {
+                SettingsWindowController.setContentHeight(600)
+            }
+            SettingsWindowController.applyChrome()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .saiityToggleSettingsSidebar)) { _ in
+            sidebarVisible.toggle()
+            SettingsWindowController.updateSidebarToolbarLabel(sidebarVisible)
         }
         .onReceive(NotificationCenter.default.publisher(for: .saiitySelectSettingsPane)) { note in
             guard let raw = note.object as? String,
                   let pane = SettingsPane(rawValue: raw) else { return }
-            if pane == .models { libraryTab = .models }
-            if pane == .transcripts { libraryTab = .transcripts }
             selection = Self.primaryPane(for: pane)
         }
     }
@@ -874,7 +1207,7 @@ struct SettingsRootView: View {
 
     private static func primaryPane(for pane: SettingsPane) -> SettingsPane {
         switch pane {
-        case .models, .transcripts: .library
+        case .models: .library
         case .general: .setup
         default: pane
         }
@@ -884,87 +1217,85 @@ struct SettingsRootView: View {
     private func detailView(for pane: SettingsPane) -> some View {
         switch pane {
         case .setup:
-            SettingsPage(title: pane.title, sidebarVisible: sidebarVisible,
-                         onToggleSidebar: { sidebarVisible.toggle() }) {
-                GeneralView(state: state)
+            SettingsPage(isRefreshing: state.isRefreshing) {
+                GeneralView(state: state) { expanded in
+                    SettingsWindowController.setContentHeight(expanded ? 600 : 420)
+                }
             }
         case .captions:
-            SettingsPage(title: pane.title, sidebarVisible: sidebarVisible,
-                         onToggleSidebar: { sidebarVisible.toggle() }) {
-                CaptionsView(state: state)
+            SettingsPage(isRefreshing: state.isRefreshing) {
+                CaptionsView(state: state) { expanded in
+                    SettingsWindowController.setContentHeight(expanded ? 600 : 420)
+                }
             }
         case .dictation:
-            SettingsPage(title: pane.title, sidebarVisible: sidebarVisible,
-                         onToggleSidebar: { sidebarVisible.toggle() }) {
-                DictationView(state: state)
+            SettingsPage(isRefreshing: state.isRefreshing) {
+                DictationView(state: state) { expanded in
+                    SettingsWindowController.setContentHeight(expanded ? 600 : 420)
+                }
             }
         case .library:
-            SettingsPage(title: pane.title, sidebarVisible: sidebarVisible,
-                         onToggleSidebar: { sidebarVisible.toggle() }) {
-                LibraryView(state: state, tab: $libraryTab)
+            SettingsPage(isRefreshing: state.isRefreshing) {
+                ModelsView(state: state)
             }
-        case .models, .transcripts, .general:
+        case .transcripts:
+            SettingsPage(isRefreshing: state.isRefreshing) {
+                TranscriptsView(state: state)
+                    .task { await state.refreshLibraryAsync() }
+            }
+        case .models, .general:
             EmptyView()
         }
     }
 }
 
 struct SettingsPage<Content: View>: View {
-    let title: LocalizedStringKey
-    let sidebarVisible: Bool
-    let onToggleSidebar: () -> Void
+    let isRefreshing: Bool
     let content: Content
 
-    init(title: LocalizedStringKey,
-         sidebarVisible: Bool = true,
-         onToggleSidebar: @escaping () -> Void = {},
+    init(isRefreshing: Bool = false,
          @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.sidebarVisible = sidebarVisible
-        self.onToggleSidebar = onToggleSidebar
+        self.isRefreshing = isRefreshing
         self.content = content()
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .center, spacing: 14) {
-                Text(title)
-                    .font(.title2.weight(.semibold))
-                Spacer(minLength: 12)
-                Button(action: onToggleSidebar) {
-                    Image(systemName: "sidebar.left")
-                        .frame(width: 28, height: 28)
+        content
+            .frame(maxWidth: 780, maxHeight: .infinity, alignment: .top)
+            .overlay(alignment: .topTrailing) {
+                if isRefreshing {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Refreshing…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.regularMaterial, in: Capsule())
+                    .overlay(Capsule().stroke(Color(nsColor: .separatorColor).opacity(0.35), lineWidth: 0.5))
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Refreshing settings")
+                    .padding(.trailing, 24)
+                    .padding(.top, 16)
                 }
-                .buttonStyle(.borderless)
-                .frame(width: 28, height: 28)
-                .contentShape(Rectangle())
-                .help(sidebarVisible ? "Hide sidebar" : "Show sidebar")
-                .accessibilityLabel(sidebarVisible ? "Hide sidebar" : "Show sidebar")
             }
-            .padding(.horizontal, 30)
-            .padding(.top, 26)
-            .padding(.bottom, 18)
-            Divider()
-            content
-                .frame(maxWidth: 780, maxHeight: .infinity, alignment: .top)
-        }
-        .background(Color(nsColor: .windowBackgroundColor))
-        // Leave a small explicit buffer below the native titlebar/toolbar safe
-        // area. This prevents the macOS 27 unified-titlebar overlap while
-        // keeping the page header visually attached to its content.
-        .safeAreaPadding(.top, 12)
+            .background(.clear)
+            .safeAreaPadding(.top, 20)
     }
 }
 
-/// A consistent full-width setting band used by the settings pages. The
-/// divider separates decisions without turning every group into a nested card.
+/// A consistent grouped surface used by the settings pages. GroupBox supplies
+/// the native macOS hierarchy and appearance states so the page does not need
+/// a second card style of its own.
 struct SettingsSection<Content: View>: View {
     let title: LocalizedStringKey
-    let subtitle: LocalizedStringKey
+    let subtitle: LocalizedStringKey?
     let content: Content
 
     init(title: LocalizedStringKey,
-         subtitle: LocalizedStringKey,
+         subtitle: LocalizedStringKey? = nil,
          @ViewBuilder content: () -> Content) {
         self.title = title
         self.subtitle = subtitle
@@ -972,16 +1303,69 @@ struct SettingsSection<Content: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(title)
-                .font(.headline)
+        GroupBox {
             content
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 4)
+        } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.headline)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
-        .padding(.horizontal, 30)
-        .padding(.vertical, 16)
-        .overlay(alignment: .bottom) {
-            Divider()
+        .groupBoxStyle(.automatic)
+    }
+}
+
+/// A disclosure whose whole header is a real button target. SwiftUI's
+/// macOS `DisclosureGroup` can leave the label inert and make only the tiny
+/// chevron clickable, which is especially easy to miss in a settings page.
+struct SettingsDisclosure<Content: View>: View {
+    @Binding private var isExpanded: Bool
+    let title: LocalizedStringKey
+    private let content: () -> Content
+
+    init(_ title: LocalizedStringKey = "More options",
+         isExpanded: Binding<Bool>,
+         @ViewBuilder content: @escaping () -> Content) {
+        self.title = title
+        self._isExpanded = isExpanded
+        self.content = content
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.body.weight(.medium))
+                        .frame(width: 16, height: 20)
+                        .accessibilityHidden(true)
+                    Text(title)
+                        .font(.body.weight(.medium))
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(title))
+            .accessibilityValue(Text(isExpanded ? "Expanded" : "Collapsed"))
+
+            if isExpanded {
+                content()
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

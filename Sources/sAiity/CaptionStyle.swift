@@ -44,10 +44,10 @@ struct TextStyle: Equatable, Codable, Sendable {
         return cache
     }()
 
-    /// Keep the preset's size for short text, but shrink long spans until the
-    /// configured line budget is usable. The old size slider is intentionally
-    /// no longer exposed: a per-line fit is more predictable than one global
-    /// value for both short and long captions.
+    /// Keep the selected size for short text, but shrink long spans until the
+    /// configured line budget is usable. The setting is a starting size; the
+    /// per-line fit keeps long captions inside the bubble without changing the
+    /// user's chosen scale.
     func fittedFont(for text: String, width: CGFloat, minimumSize: CGFloat,
                     maxLines: Int) -> NSFont {
         let baseSize = max(minimumSize, fontSize)

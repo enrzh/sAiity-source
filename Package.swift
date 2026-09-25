@@ -6,9 +6,9 @@ let package = Package(
     // SpeechAnalyzer / SpeechTranscriber are @available(anyAppleOS 26, *).
     platforms: [.macOS("26.0")],
     dependencies: [
-        // Parakeet + a genuinely streaming Nemotron RNN-T, both CoreML/ANE.
-        // Zero external dependencies of its own, which is why it is preferred
-        // over the MLX route to the same Nemotron checkpoint.
+        // Nemotron is a genuinely streaming RNN-T on CoreML/ANE. The package
+        // also carries the legacy EOU implementation used only by old local
+        // data; the product exposes Nemotron alone.
         .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "0.15.5"),
         // MADLAD-400-3B-MT (T5 seq2seq) on MLX — the only Swift package that
         // compiles a dedicated translation model on this toolchain.
@@ -48,16 +48,12 @@ let package = Package(
                 .product(name: "WhisperKit", package: "WhisperKit"),
             ],
             path: "Sources/sAiity",
-            swiftSettings: [.swiftLanguageMode(.v5)]
-        ),
-        .executableTarget(
-            name: "DiarizationProbe",
-            dependencies: [
-                .product(name: "FluidAudio", package: "FluidAudio"),
-            ],
-            path: "Tools",
-            sources: ["DiarizationProbe.swift"],
-            swiftSettings: [.swiftLanguageMode(.v5)]
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+                // Keep test-only hooks available to local debug builds; release
+                // builds pass no test-hook flags.
+                .define("SAIITY_TEST_HOOKS", .when(configuration: .debug)),
+            ]
         ),
         // Covers the pure logic only — the model registry and the per-engine
         // language mapping. Both are places where a wrong answer is silent:

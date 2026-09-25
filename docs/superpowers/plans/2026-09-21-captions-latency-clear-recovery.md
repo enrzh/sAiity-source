@@ -1,6 +1,10 @@
 # Captions Latency and Clear-Bubble Recovery Plan
 
-> Status: proposed. This plan does not authorize a release, upload, or push.
+> Status: historical plan. This document is retained for context only; it does
+> not authorize a release, upload, or push.
+>
+> Update (2026-09-25): speaker attribution and speaker labels were removed from
+> the product. Speaker-specific measurements and steps below are obsolete.
 
 ## Goal
 
@@ -92,7 +96,7 @@ Files:
 - [ ] Add monotonic timestamps for start request, ASR prepared, backend started,
       capture running, first process, first volatile, and first final.
 - [ ] Keep logs redacted and local. Record engine, tier, translation enabled,
-      speaker labels enabled, cold/warm state, RTF, and peak backlog.
+      cold/warm state, RTF, and peak backlog.
 - [ ] Add a clear-to-next-render timing field without recording audio or text.
 - [ ] Add test hooks for a fake engine so timing and event ordering can be
       tested without model weights.
@@ -165,21 +169,17 @@ Files:
       that the current drain-all behavior increases latency. If it does, use a
       bounded batch while preserving one in-flight processing and sample order.
 
-### 5. Verify translation, speaker labels, and silence interactions
+### 5. Verify translation and silence interactions
 
 Files:
 
 - `Sources/sAiity/AppDelegate.swift`
 - `Sources/sAiity/SystemAudioCapture.swift`
-- `Sources/sAiity/SpeakerDiarizationSession.swift`
 - `Tests/sAiityTests/SpeechGapDetectorTests.swift`
 - `Tests/sAiityTests/StreamingASRBackendTests.swift`
 
 - [ ] Measure captions with translation off, translation on, and translator
       cold/warm. Translation latency must not change first-text timing.
-- [ ] Measure speaker labels off/on. If diarization consumes enough budget to
-      affect RTF, keep it optional and surface the tradeoff rather than silently
-      dropping caption audio.
 - [ ] Confirm silence flush still closes the sentence once, and a clear during
       the 350 ms/80 ms speech-gap flush cannot resurrect stale text.
 - [ ] Confirm a stalled capture stream remains distinguishable from digital
@@ -195,9 +195,8 @@ Files:
 - [ ] Fake-engine tests for first-text ordering, cancellation, bounded backlog,
       and the one-process-in-flight invariant.
 - [ ] Manual matrix: cold/warm Nemotron balanced, Nemotron fast, Parakeet
-      English, translation off/on, speaker labels off/on, digital silence,
-      clear during speech, clear after a final, and clear while translation is
-      pending.
+      English, translation off/on, digital silence, clear during speech, clear
+      after a final, and clear while translation is pending.
 - [ ] Run the repository release test command:
 
       `DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}" xcrun swift test -c release -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS`

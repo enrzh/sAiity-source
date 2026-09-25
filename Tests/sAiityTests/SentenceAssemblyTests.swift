@@ -32,9 +32,9 @@ struct SentenceAssemblyTests {
     func spacelessScripts() {
         #expect(AppDelegate.joinClauses(["这是一个", "测试。"]) == "这是一个测试。")
         #expect(AppDelegate.joinClauses(["これは", "テストです。"]) == "これはテストです。")
-        // A boundary between a spaceless script and Latin still runs on: the
-        // clause break came from inside one sentence, not between two.
-        #expect(AppDelegate.joinClauses(["这是", "Mac"]) == "这是Mac")
+        // A boundary between a spaceless script and Latin gets one readable
+        // separator; only two spaceless-script runs stay tight.
+        #expect(AppDelegate.joinClauses(["这是", "Mac"]) == "这是 Mac")
     }
 
     /// Korean uses Hangul but writes with spaces, so it must not be lumped in

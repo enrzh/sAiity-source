@@ -33,4 +33,19 @@ import Testing
         #expect(LocalLLMTranslator.cleanupUserPrompt(
             "Please use SwiftUI.").contains("SwiftUI"))
     }
+
+    @Test("caption vocabulary preserves exact spelling without inventing terms")
+    func captionSpelling() {
+        let old = UserDefaults.standard.object(forKey: "dictationVocabulary")
+        defer {
+            if let old { UserDefaults.standard.set(old, forKey: "dictationVocabulary") }
+            else { UserDefaults.standard.removeObject(forKey: "dictationVocabulary") }
+        }
+
+        DictationVocabulary.serialized = "SwiftUI, sAiity"
+        #expect(DictationVocabulary.preservingSpelling(in: "I use swiftui with saiity")
+            == "I use SwiftUI with sAiity")
+        #expect(DictationVocabulary.preservingSpelling(in: "unrelated words")
+            == "unrelated words")
+    }
 }

@@ -114,7 +114,7 @@ struct LocalizationTests {
         "String(localized: ", "Text(", "Toggle(", "Button(", "Label(",
         "Section(", "TextField(", "Picker(", "LabeledContent(",
         "LabeledToggle(", "setStatus(", "bullet(", "slider(", ".help(",
-        "ContentUnavailableView(", "Menu(",
+        "ContentUnavailableView(", "Menu(", "SettingsSection(",
         // This codebase's own LocalizedStringKey-typed wrappers. SheetShell's
         // parameters carry a comment explaining that a String there would make
         // the header "silently stop being translated" — exactly the class of
