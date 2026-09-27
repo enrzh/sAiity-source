@@ -117,11 +117,14 @@ import Testing
         let defaults = UserDefaults.standard
         let previousCaption = defaults.data(forKey: CaptionStyle.key)
         let previousDictation = defaults.data(forKey: CaptionStyle.dictationKey)
+        // Restore through the setter, not by writing UserDefaults directly:
+        // the style is cached, and a direct write leaves the cache holding the
+        // width this test just set.
         defer {
-            if let previousCaption { defaults.set(previousCaption, forKey: CaptionStyle.key) }
-            else { defaults.removeObject(forKey: CaptionStyle.key) }
-            if let previousDictation { defaults.set(previousDictation, forKey: CaptionStyle.dictationKey) }
-            else { defaults.removeObject(forKey: CaptionStyle.dictationKey) }
+            if let previousCaption { CaptionStyle.current = try! JSONDecoder().decode(CaptionStyle.self, from: previousCaption) }
+            else { CaptionStyle.current = CaptionStyle() }
+            if let previousDictation { CaptionStyle.currentDictation = try! JSONDecoder().decode(CaptionStyle.self, from: previousDictation) }
+            else { CaptionStyle.currentDictation = CaptionStyle.dictationDefaults }
         }
 
         var caption = CaptionStyle.current

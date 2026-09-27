@@ -1154,7 +1154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Apply the retention policy before anything can list transcripts, so
         // an expired session never appears and then vanishes — then keep
         // applying it, because this app is left running for weeks.
-        TranscriptRetention.sweep()
+        Task { await TranscriptRetention.sweep() }
         TranscriptRetention.startPeriodicSweep()
         // Before anything can allocate: cap MLX's buffer pool, and start
         // listening for the system asking for memory back. See MemoryPolicy —

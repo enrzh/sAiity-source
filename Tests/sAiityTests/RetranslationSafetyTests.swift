@@ -119,14 +119,15 @@ import Testing
                         target: String,
                         notes: Notes? = nil) async -> String? {
         await withCheckedContinuation { continuation in
-            retranslator.run(session: session, target: target,
-                             onProgress: { progress in
-                                 notes?.add(progress.note)
-                             },
-                             onFinish: { continuation.resume(returning: $0) })
+            Task {
+                await retranslator.run(session: session, target: target,
+                                       onProgress: { progress in
+                                           notes?.add(progress.note)
+                                       },
+                                       onFinish: { continuation.resume(returning: $0) })
+            }
         }
     }
-
     // MARK: - The gate
 
     @Test("loading the translator waits for the shared inference gate",

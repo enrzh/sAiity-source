@@ -1645,9 +1645,11 @@ struct TranscriptsView: View {
                         return
                     }
                     TranscriptRetention.days = new
-                    let n = TranscriptRetention.sweep()
-                    retranslateNote = "✓ " + String(localized: "Deleted \(n) transcripts.")
-                    Task { await state.refreshLibraryAsync(force: true) }
+                    Task {
+                        let n = await TranscriptRetention.sweep()
+                        retranslateNote = "✓ " + String(localized: "Deleted \(n) transcripts.")
+                        await state.refreshLibraryAsync(force: true)
+                    }
                 }
             }
 
@@ -1864,16 +1866,18 @@ struct TranscriptsView: View {
     private func startRetranslate(_ s: SessionRef, to code: String) {
         retranslateNote = nil
         retranslating = s
-        retranslator.run(session: s, target: code) { p in
-            retranslateProgress = p
-        } onFinish: { err in
-            retranslateProgress = nil
-            retranslating = nil
-            if let err {
-                retranslateNote = err
-            } else {
-                retranslateNote = "✓ " + String(localized: "Translated into \(AppLanguage(code: code).displayName).")
-                Task { await state.refreshLibraryAsync(force: true) }
+        Task {
+            await retranslator.run(session: s, target: code) { p in
+                retranslateProgress = p
+            } onFinish: { err in
+                retranslateProgress = nil
+                retranslating = nil
+                if let err {
+                    retranslateNote = err
+                } else {
+                    retranslateNote = "✓ " + String(localized: "Translated into \(AppLanguage(code: code).displayName).")
+                    Task { await state.refreshLibraryAsync(force: true) }
+                }
             }
         }
     }
@@ -2188,7 +2192,13 @@ private struct TranscriptViewerSheet: View {
                 }
             }
             .task {
-                segments = TranscriptStore.segments(of: session)
+                // A full read plus a JSON decode per line, off the main actor.
+                // The viewer is a sheet the user can leave open, so a long
+                // session must not freeze the UI on first open.
+                let session = session
+                segments = await Task.detached {
+                    await TranscriptStore.segments(of: session)
+                }.value
             }
         }
     }

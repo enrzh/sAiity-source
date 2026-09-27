@@ -8,14 +8,28 @@ enum DictationVocabulary {
     private static let maxTerms = 50
     private static let maxLength = 64
 
+    /// The normalized terms, kept so a caption chunk does not re-read
+    /// UserDefaults and re-run a regex plus a `folding` per term — up to 50
+    /// terms, several times a second while captions are live. The vocabulary
+    /// only changes through the settings UI, and every writer goes through the
+    /// setter below, which refreshes the cache.
+    private static var cachedTerms: [String]?
+
     static var terms: [String] {
         get {
+            if let cachedTerms { return cachedTerms }
             guard let values = UserDefaults.standard.array(forKey: key) as? [String] else {
                 return []
             }
-            return normalize(values)
+            let normalized = normalize(values)
+            cachedTerms = normalized
+            return normalized
         }
-        set { UserDefaults.standard.set(normalize(newValue), forKey: key) }
+        set {
+            let normalized = normalize(newValue)
+            cachedTerms = normalized
+            UserDefaults.standard.set(normalized, forKey: key)
+        }
     }
 
     static var serialized: String {

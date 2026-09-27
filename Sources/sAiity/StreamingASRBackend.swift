@@ -158,6 +158,9 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
     private let pumpLock = NSLock()
     private var pump: Task<Void, Never>?
     private var wakeContinuation: AsyncStream<Void>.Continuation?
+    /// Waiters in `drain(toAudioSample:)`, keyed on the sample count they are
+    /// waiting for. The pump resumes exactly the ones its progress has satisfied.
+    private var pendingDrainContinuations: [Int: AsyncStream<Void>.Continuation] = [:]
 
     #if SAIITY_TEST_HOOKS
     /// Test-only view of the backlog. The cap is the whole point of `feed`, and
@@ -206,6 +209,11 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
             processing = []
             overflowing = false
             acceptingAudio = false
+            // A drain waiter whose pump has just stopped will never be resumed
+            // by progress. Finish it rather than leaving it suspended.
+            let waiters = pendingDrainContinuations
+            pendingDrainContinuations.removeAll()
+            for (_, continuation) in waiters { continuation.finish() }
         }
     }
 
@@ -326,11 +334,32 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
                             self.processedBatchCount += 1
                             self.processing.removeAll(keepingCapacity: true)
                         }
+                        // A drain waiter is woken by the pump's own progress, not
+                        // by a timer. Resumed outside the lock: finishing a
+                        // continuation can run arbitrary code.
+                        self.resumeSatisfiedDrains()
                     }
                 }
             }
         }
         sessionStarted = true
+    }
+
+    /// Finish every `drain(toAudioSample:)` waiter whose target this batch
+    /// reached. Called once per processed batch, so the common case — nobody
+    /// waiting — is a single locked read of an empty dictionary.
+    private func resumeSatisfiedDrains() {
+        let processed = pendingLock.withLock {
+            processedAudioSamples + droppedPendingSamples
+        }
+        let ready = pendingLock.withLock {
+            pendingDrainContinuations.filter { $0.key <= processed }
+        }
+        guard !ready.isEmpty else { return }
+        for (target, continuation) in ready {
+            pendingLock.withLock { pendingDrainContinuations.removeValue(forKey: target) }
+            continuation.finish()
+        }
     }
 
     /// Cheap and non-blocking: copy the samples out and return. The pump owns
@@ -432,18 +461,31 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
     /// Capture and ASR use different sample rates. AppDelegate converts the
     /// capture watermark before calling this method; waiting here keeps the
     /// engine's single processing pump as the only owner of recogniser state.
+    ///
+    /// The pump is wake-driven, and so is this wait: registering a continuation
+    /// keyed on the target sample count means the caller sleeps until the pump
+    /// reports progress, rather than waking a hundred times a second to ask.
     func drain(toAudioSample sample: Int) async {
         let target = max(0, sample)
-        while !Task.isCancelled {
-            let reached = pendingLock.withLock {
-                // A capped queue may discard old samples while the recogniser
-                // is overloaded. Those samples can no longer be processed, but
-                // their clock still advances; otherwise a gap watermark after
-                // an overload would wait forever.
-                processedAudioSamples + droppedPendingSamples >= target
+        if pendingLock.withLock({ processedAudioSamples + droppedPendingSamples >= target }) {
+            return
+        }
+        let wake = AsyncStream<Void>(bufferingPolicy: .bufferingNewest(1)) { continuation in
+            pendingLock.withLock {
+                // Re-check under the lock: the pump may have advanced between
+                // the check above and now, and registering a continuation the
+                // pump has already passed would wait forever.
+                if processedAudioSamples + droppedPendingSamples >= target {
+                    continuation.finish()
+                    return
+                }
+                pendingDrainContinuations[target] = continuation
             }
-            if reached { return }
-            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        for await _ in wake {
+            if pendingLock.withLock({ processedAudioSamples + droppedPendingSamples >= target }) {
+                return
+            }
         }
     }
 

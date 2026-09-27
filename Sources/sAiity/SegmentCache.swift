@@ -122,7 +122,7 @@ enum TranscriptRetention {
     static func startPeriodicSweep() {
         guard timer == nil else { return }
         let t = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { _ in
-            Task { @MainActor in _ = sweep() }
+            Task { await sweep() }
         }
         t.tolerance = 600      // let the OS coalesce it; nothing here is urgent
         timer = t
@@ -131,15 +131,20 @@ enum TranscriptRetention {
 
     /// Apply the policy. Called at launch, on change, and every six hours.
     ///
-    /// Main-actor because `SessionCatalog` is: the catalogue backs the UI, and
-    /// invalidating it from a background context would race the list the
-    /// Transcripts page is reading.
+    /// The listing, the per-session `meta.json` reads, and the `removeItem` per
+    /// expired session are file I/O that scales with library size, so they run in
+    /// a detached task. Only the cache invalidation afterwards is
+    /// main-actor-shaped, and that is a posted notification plus a lock — both
+    /// safe from any context. The main actor is suspended, not blocked, while
+    /// the detached work runs.
     @MainActor
     @discardableResult
-    static func sweep() -> Int {
+    static func sweep() async -> Int {
         let d = days
         guard d > 0 else { return 0 }
-        let n = TranscriptStore.deleteOlderThan(days: d)
+        let n = await Task.detached {
+            await TranscriptStore.deleteOlderThan(days: d)
+        }.value
         if n > 0 {
             SessionCatalog.invalidate()
             SegmentCache.shared.invalidate()

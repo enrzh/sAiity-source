@@ -184,6 +184,9 @@ actor TranscriptStore {
     private var dir: URL?
     private var meta: SessionMeta?
     private var index = 0
+    /// One encoder for the life of the store. An actor-isolated stored property
+    /// is the only kind that is safe to reuse: no other thread can touch it.
+    private let encoder = JSONEncoder()
 
     var isRecording: Bool { handle != nil }
     var currentLineCount: Int { index }
@@ -242,7 +245,7 @@ actor TranscriptStore {
                           tr: translation, trLoc: translateTo,
                           words: chunk.words.isEmpty ? nil : chunk.words,
                           turn: turn ? true : nil)
-        var data = try JSONEncoder().encode(seg)
+        var data = try encoder.encode(seg)
         data.append(0x0A)
         do {
             try handle.write(contentsOf: data)

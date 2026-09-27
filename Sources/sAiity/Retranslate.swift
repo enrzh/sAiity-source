@@ -95,7 +95,7 @@ final class Retranslator {
     func run(session: SessionRef,
              target: String,
              onProgress: @escaping @MainActor (Progress) -> Void,
-             onFinish: @escaping @MainActor (String?) -> Void) {
+             onFinish: @escaping @MainActor (String?) -> Void) async {
         guard !running else { return }
         guard !CaptionSession.shared.isRunning else {
             onFinish(String(localized: "Stop the captions first — the translator is busy with the live session."))
@@ -103,8 +103,8 @@ final class Retranslator {
         }
         #if SAIITY_TEST_HOOKS
         if let engine = engineOverrideForTests {
-            beginRun(engine: engine, session: session, target: target,
-                     onProgress: onProgress, onFinish: onFinish)
+            await beginRun(engine: engine, session: session, target: target,
+                           onProgress: onProgress, onFinish: onFinish)
             return
         }
         #endif
@@ -129,8 +129,8 @@ final class Retranslator {
             onFinish(String(localized: "No translator chosen. Pick one under Settings → Captions."))
             return
         }
-        beginRun(engine: engine, session: session, target: target,
-                 onProgress: onProgress, onFinish: onFinish)
+        await beginRun(engine: engine, session: session, target: target,
+                      onProgress: onProgress, onFinish: onFinish)
     }
 
     /// The run itself, once an engine exists. Split out so the test seam above
@@ -140,16 +140,22 @@ final class Retranslator {
                           session: SessionRef,
                           target: String,
                           onProgress: @escaping @MainActor (Progress) -> Void,
-                          onFinish: @escaping @MainActor (String?) -> Void) {
+                          onFinish: @escaping @MainActor (String?) -> Void) async {
         running = true
         CaptionSession.shared.setRetranslating(true)
+        // The read is a full-file parse that scales with the session's length.
+        // It happens before the main-actor work, so a multi-hour transcript
+        // costs a detached read rather than a frozen window. Repeat reads are
+        // served by SegmentCache; this is the first one.
+        let segments = await Task.detached {
+            await TranscriptStore.segments(of: session)
+        }.value
         task = Task { @MainActor [weak self] in
             defer {
                 CaptionSession.shared.setRetranslating(false)
                 self?.running = false
                 self?.task = nil
             }
-            let segments = TranscriptStore.segments(of: session)
             guard !segments.isEmpty else {
                 onFinish(String(localized: "That transcript has no lines."))
                 return

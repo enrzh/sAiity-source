@@ -199,15 +199,26 @@ struct CaptionStyle: Equatable, Codable, Sendable {
         hidden = try c.decodeIfPresent(Bool.self, forKey: .hidden) ?? false
     }
 
+    /// The decoded style, kept so the caption render path does not pay a
+    /// UserDefaults round-trip through `cfprefsd` plus a full `JSONDecoder`
+    /// decode several times a second. The value only changes when settings are
+    /// edited, and every production writer goes through the setter below, which
+    /// drops the cache.
+    private static var cachedCurrent: CaptionStyle?
+    private static var cachedDictation: CaptionStyle?
+
     static var current: CaptionStyle {
         get {
+            if let cachedCurrent { return cachedCurrent }
             guard let d = UserDefaults.standard.data(forKey: key),
                   let s = try? JSONDecoder().decode(CaptionStyle.self, from: d) else {
                 return CaptionStyle()
             }
+            cachedCurrent = s
             return s
         }
         set {
+            cachedCurrent = nil
             if let d = try? JSONEncoder().encode(newValue) {
                 UserDefaults.standard.set(d, forKey: key)
             }
@@ -227,6 +238,7 @@ struct CaptionStyle: Equatable, Codable, Sendable {
 
     static var currentDictation: CaptionStyle {
         get {
+            if let cachedDictation { return cachedDictation }
             guard let d = UserDefaults.standard.data(forKey: dictationKey),
                   let s = try? JSONDecoder().decode(CaptionStyle.self, from: d) else {
                 // The old app used the caption style for both surfaces. Carry
@@ -237,11 +249,14 @@ struct CaptionStyle: Equatable, Codable, Sendable {
                 if let data = try? JSONEncoder().encode(migrated) {
                     UserDefaults.standard.set(data, forKey: dictationKey)
                 }
+                cachedDictation = migrated
                 return migrated
             }
+            cachedDictation = s
             return s
         }
         set {
+            cachedDictation = nil
             if let d = try? JSONEncoder().encode(newValue) {
                 UserDefaults.standard.set(d, forKey: dictationKey)
             }
