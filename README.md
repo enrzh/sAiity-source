@@ -165,6 +165,16 @@ Not yet released. These notes are being written ahead of the tag.
 - Dictation cleanup is roughly 78x faster on a short sentence — it was rebuilding
   about thirty regular expressions and three language recognizers on every
   utterance — and caption language analysis about 1.8x faster on a typical line.
+- Exported subtitles are now readable rather than merely short. Cue splitting
+  already kept text under a length budget, but nothing governed *speed*: an
+  83-character sentence spoken in 1.4 seconds exported at 89 characters per
+  second, and its trailing fragment — being small — inherited a proportionally
+  small slice of the same span and lasted 0.135 seconds, which a player draws as
+  a single frame. Translated captions were the worst case at 126 characters per
+  second, because a bilingual cue keeps its raw segment timing. Every cue now
+  stays up long enough to read at 17 characters per second, shares the slack
+  with the cues around it, never overlaps what follows, and leaves speech that
+  was already readable exactly as it was.
 - Long caption lines are scanned for a code-switch on a coarse grid first, which
   keeps the same boundary but does about 1.55x less work.
 - Searching transcripts no longer recomputes its cache accounting on every

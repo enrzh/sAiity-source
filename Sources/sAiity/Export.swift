@@ -82,6 +82,77 @@ enum Export {
                       total / 3600, (total % 3600) / 60, total % 60, min(ms, 999))
     }
 
+    // MARK: - Readability
+
+    /// The shortest a cue may stay on screen.
+    ///
+    /// Without a floor, cues are allocated time in proportion to their
+    /// characters at whatever rate the segment was spoken. Fast speech therefore
+    /// produced genuinely unreadable output: an 83-character sentence in 1.4
+    /// seconds exported as 89 characters per second, and — worse — the trailing
+    /// fragment of a split, being small, inherited a *proportionally* small
+    /// slice of the same span, landing at 0.135 seconds. A player renders that
+    /// as a single frame.
+    static let minimumCueDuration: Double = 1.0
+
+    /// The fastest a viewer is expected to read, in characters per second.
+    ///
+    /// Subtitle practice lands between 17 and 21; the low end is used so the
+    /// correction errs towards leaving a cue up a little longer. A bilingual
+    /// cue counts both lines, because both are on screen at once and both have
+    /// to be read.
+    static let maximumReadingSpeed: Double = 17.0
+
+    /// Extend cues until each is readable, without overlapping what follows.
+    ///
+    /// `limit` is the earliest time the next thing may start — the next segment.
+    /// A cue short of its floor pushes the cues after it later rather than
+    /// stopping at their original start, so the slack is shared instead of all
+    /// landing on the last cue. When nothing needs a floor this is a no-op: a
+    /// cue keeps its own times, and a pause between two cues stays a pause
+    /// rather than being closed up.
+    ///
+    /// If the floors genuinely do not fit before `limit` — a passage spoken far
+    /// too fast, with something important immediately after it — the earlier
+    /// cues are compressed so the later ones can still reach their floor, and
+    /// the overshoot lands on the first cue. That is a deliberate choice: one
+    /// readable cue beats two unreadable ones, and a cue that overlaps its
+    /// successor is rejected outright by some players. When the audio really
+    /// does hold 80 characters in 1.4 seconds, no timing can rescue it — only
+    /// dropping text could, and that is the user's call, not the exporter's.
+    static func applyReadabilityFloor(
+        _ cues: [(t0: Double, t1: Double, text: String)],
+        limit: Double?
+    ) -> [(t0: Double, t1: Double, text: String)] {
+        guard !cues.isEmpty else { return cues }
+        var out: [(t0: Double, t1: Double, text: String)] = []
+        out.reserveCapacity(cues.count)
+        var previousEnd = cues[0].t0
+        for (index, cue) in cues.enumerated() {
+            // Whitespace does not need reading, so it is not counted against the
+            // budget; a cue of "morning." is nine characters, not seventeen.
+            let characters = cue.text.filter { !$0.isWhitespace }.count
+            let floor = max(minimumCueDuration,
+                            Double(characters) / maximumReadingSpeed)
+            let t0 = max(cue.t0, previousEnd)
+            var t1 = max(cue.t1, t0 + floor)
+            // Everything after this still has to fit, and nothing may cross the
+            // next segment's start.
+            if let limit {
+                let remaining = cues.dropFirst(index + 1).reduce(0.0) { sum, later in
+                    sum + max(minimumCueDuration,
+                              Double(later.text.filter { !$0.isWhitespace }.count)
+                                / maximumReadingSpeed)
+                }
+                t1 = min(t1, max(t0 + 0.001, limit - remaining))
+            }
+            t1 = max(t0 + 0.001, t1)
+            out.append((t0, t1, cue.text))
+            previousEnd = t1
+        }
+        return out
+    }
+
     /// Split one final into subtitle cues.
     ///
     /// Word timings are the good case: the engine said when each word was
@@ -317,7 +388,9 @@ enum Export {
     static func srt(_ segments: [Segment]) -> String {
         var out = ""
         var n = 1                       // renumber from 1; never reuse Segment.i
-        for seg in segments {
+        for (index, seg) in segments.enumerated() {
+            // A cue may not run into the next segment's start.
+            let limit = index + 1 < segments.count ? segments[index + 1].t0 : nil
             // A translated segment stays ONE bilingual cue, original over
             // translation — the same pairing txt and Markdown already write.
             // SRT used to be the only export that dropped the translation the
@@ -326,11 +399,20 @@ enum Export {
             // sentence and has no per-word timings to split along, so a split
             // would either repeat it under every part-cue or orphan it on one.
             if let tr = seg.tr, !tr.isEmpty {
-                out += "\(n)\n\(srtTime(seg.t0)) --> \(srtTime(seg.t1))\n\(seg.text)\n\(tr)\n\n"
-                n += 1
+                // It does need the readability floor, though: both lines are on
+                // screen at once, so a fast sentence exported bilingual text
+                // faster than anyone can read it — 126 characters per second in
+                // testing, the worst case in the exporter. Counted as one cue
+                // with both lines, which is what the viewer actually reads.
+                let cue = applyReadabilityFloor(
+                    [(seg.t0, seg.t1, seg.text + "\n" + tr)], limit: limit)
+                for c in cue {
+                    out += "\(n)\n\(srtTime(c.t0)) --> \(srtTime(c.t1))\n\(c.text)\n\n"
+                    n += 1
+                }
                 continue
             }
-            for c in cues(from: seg) {
+            for c in applyReadabilityFloor(cues(from: seg), limit: limit) {
                 out += "\(n)\n\(srtTime(c.t0)) --> \(srtTime(c.t1))\n\(c.text)\n\n"
                 n += 1
             }
@@ -350,12 +432,17 @@ enum Export {
     /// two-line cue, an untranslated one splits along its word timings.
     static func vtt(_ segments: [Segment]) -> String {
         var out = "WEBVTT\n\n"
-        for seg in segments {
+        for (index, seg) in segments.enumerated() {
+            let limit = index + 1 < segments.count ? segments[index + 1].t0 : nil
             if let tr = seg.tr, !tr.isEmpty {
-                out += "\(vttTime(seg.t0)) --> \(vttTime(seg.t1))\n\(seg.text)\n\(tr)\n\n"
+                // Same readability floor as SRT, for the same reason.
+                for c in applyReadabilityFloor(
+                    [(seg.t0, seg.t1, seg.text + "\n" + tr)], limit: limit) {
+                    out += "\(vttTime(c.t0)) --> \(vttTime(c.t1))\n\(c.text)\n\n"
+                }
                 continue
             }
-            for c in cues(from: seg) {
+            for c in applyReadabilityFloor(cues(from: seg), limit: limit) {
                 out += "\(vttTime(c.t0)) --> \(vttTime(c.t1))\n\(c.text)\n\n"
             }
         }
