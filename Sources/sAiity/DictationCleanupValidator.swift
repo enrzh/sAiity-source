@@ -1,7 +1,78 @@
 import Foundation
 import NaturalLanguage
 
+/// Compiled regular expressions, keyed by pattern.
+///
+/// `NSRegularExpression` is immutable and documented as safe to use from
+/// multiple threads, so the only thing to protect is the map itself. Cleanup
+/// runs off the main actor and `validate` is called from more than one task, so
+/// the lock is not optional.
+final class RegexCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [String: NSRegularExpression?] = [:]
+
+    func expression(for pattern: String) -> NSRegularExpression? {
+        lock.lock()
+        defer { lock.unlock() }
+        if let cached = storage[pattern] { return cached }
+        // A pattern that fails to compile is cached as a miss too, so a bad
+        // literal costs one attempt rather than one per call.
+        let compiled = try? NSRegularExpression(pattern: pattern)
+        storage[pattern] = compiled
+        return compiled
+    }
+}
+
+/// `NLLanguageRecognizer` instances, kept for reuse.
+///
+/// Constructing one costs roughly a third of a classify. A single dictation
+/// builds three — once in the deterministic pass to pick the filler and
+/// formatting tables, then once per side in the language check — so the
+/// constructions are worth avoiding.
+///
+/// The class is not documented as thread-safe, so a recognizer is checked out
+/// for the duration of one classification and handed back, rather than shared.
+final class LanguageRecognizerPool: @unchecked Sendable {
+    private let lock = NSLock()
+    private var available: [NLLanguageRecognizer] = []
+
+    func classify(_ text: String) -> NLLanguage? {
+        lock.lock()
+        let recognizer = available.popLast() ?? NLLanguageRecognizer()
+        lock.unlock()
+
+        recognizer.processString(text)
+        let result = recognizer.dominantLanguage
+
+        lock.lock()
+        // A small cap, so a burst of parallel dictations does not turn the pool
+        // into a leak of recognizers that are never needed again.
+        if available.count < 4 { available.append(recognizer) }
+        lock.unlock()
+        return result
+    }
+}
+
 enum DictationCleanupValidator {
+    /// Compiled regular expressions, kept.
+    ///
+    /// `NSRegularExpression(pattern:)` parses and code-generates, which costs far
+    /// more than running the match on a dictation-sized string. A single
+    /// `deterministicCleanup` used to build twenty-odd of them from scratch —
+    /// the spoken-formatting and filler tables alone account for most of that —
+    /// and `normalizeWhitespace` added eight more through Foundation's regex
+    /// options. Every pattern here is a compile-time literal, so the set of
+    /// keys is small and fixed and the hit rate after the first call is total.
+    ///
+    /// This is the whole difference between a dictation-sized string taking
+    /// single-digit milliseconds and taking microseconds.
+    private static let compiled = RegexCache()
+    private static let recognizers = LanguageRecognizerPool()
+
+    private static func expression(_ pattern: String) -> NSRegularExpression? {
+        compiled.expression(for: pattern)
+    }
+
     static func needsModelCleanup(_ value: String, sourceLanguage: String? = nil) -> Bool {
         deterministicOutcome(value, sourceLanguage: sourceLanguage).needsModel
     }
@@ -23,7 +94,9 @@ enum DictationCleanupValidator {
         // clean French, Spanish, or long-tail-language sentence pay for LLM
         // inference even when there was nothing left to fix.
         let repairs = #"(?i)\b(actually|rather|i mean|sorry|no wait|wait|instead|you know|like|well|en fait|je veux dire|non attends|plutôt|désolé|en realidad|quiero decir|no espera|más bien|perdón|in realtà|cioè|no aspetta|piuttosto|scusa|na verdade|quer dizer|não espera|melhor|desculpa|eigenlijk|ik bedoel|nee wacht|liever|właściwie|mam na myśli|nie czekaj|raczej|przepraszam|eigentlich|ich meine|nein|sondern|besser gesagt|warte|oder doch)\b|(?:いや、?待って|つまり|不对|我的意思是|等一下|그러니까|잠깐만)|[—–]"#
-        return (baseline, baseline.range(of: repairs, options: .regularExpression) != nil)
+        guard let regex = expression(repairs) else { return (baseline, false) }
+        let range = NSRange(baseline.startIndex..<baseline.endIndex, in: baseline)
+        return (baseline, regex.firstMatch(in: baseline, range: range) != nil)
     }
 
     /// Applies the speech repairs that should never depend on a small local
@@ -270,8 +343,10 @@ enum DictationCleanupValidator {
             .replacingOccurrences(of: "\r", with: "\n")
         let lines = normalized.split(separator: "\n", omittingEmptySubsequences: false)
             .map { line in
-                String(line)
-                    .replacingOccurrences(of: "[\\t ]+", with: " ", options: .regularExpression)
+                // Cached rather than `replacingOccurrences(options: .regularExpression)`,
+                // which compiles internally on every call — twice per line, four
+                // times per cleanup.
+                replace(String(line), pattern: #"[\t ]+"#, with: " ")
                     .trimmingCharacters(in: .whitespaces)
             }
         return replace(lines.joined(separator: "\n"), pattern: #"\n{3,}"#, with: "\n\n")
@@ -468,9 +543,7 @@ enum DictationCleanupValidator {
     }
 
     private static func detectedLanguage(in text: String) -> String? {
-        let recognizer = NLLanguageRecognizer()
-        recognizer.processString(text)
-        return recognizer.dominantLanguage?.rawValue
+        recognizers.classify(text)?.rawValue
     }
 
     private static func baseLanguage(_ value: String?) -> String? {
@@ -482,7 +555,7 @@ enum DictationCleanupValidator {
     }
 
     private static func replace(_ value: String, pattern: String, with template: String) -> String {
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return value }
+        guard let regex = expression(pattern) else { return value }
         let range = NSRange(value.startIndex..<value.endIndex, in: value)
         return regex.stringByReplacingMatches(in: value, range: range, withTemplate: template)
     }
@@ -494,8 +567,7 @@ enum DictationCleanupValidator {
     private static func isStructuredList(_ text: String) -> Bool {
         let lines = text.split(separator: "\n", omittingEmptySubsequences: true)
         guard lines.count >= 2 else { return false }
-        let pattern = #"^\s*(?:[•*+-]|\d+[.)])\s+\S+"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
+        guard let regex = expression(#"^\s*(?:[•*+-]|\d+[.)])\s+\S+"#) else { return false }
         return lines.allSatisfy { line in
             let value = String(line)
             return regex.firstMatch(in: value,
@@ -517,7 +589,7 @@ enum DictationCleanupValidator {
     /// starts would make those rules reject normal punctuation cleanup.
     private static func protectedTokens(in input: String) -> [String] {
         let pattern = #"(?i)(?:https?://[^\s]+|www\.[^\s]+|[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}|\d+)"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        guard let regex = expression(pattern) else { return [] }
         let range = NSRange(input.startIndex..<input.endIndex, in: input)
         var tokens: [String] = regex.matches(in: input, range: range).compactMap { match -> String? in
             guard let tokenRange = Range(match.range, in: input) else { return nil }
