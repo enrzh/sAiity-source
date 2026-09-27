@@ -80,6 +80,24 @@ final class AppState {
         }
     }
 
+    /// Dictation's Nemotron tier, stored apart from the caption tier.
+    ///
+    /// Sharing one key was the bug: this property's setter is the engine-changed
+    /// path, so choosing a dictation profile posted `saiityEngineChanged` and
+    /// rebuilt the caption backend — press-to-talk silently restarting a live
+    /// caption session, and a "Balanced" caption preference overwritten by a
+    /// "Fast" dictation choice. A dictation change now refreshes dictation's
+    /// runtime and nothing else.
+    var dictationNemotronTier = NemotronEngine.dictationSelectedChunkMs {
+        didSet {
+            guard dictationNemotronTier != oldValue else { return }
+            NemotronEngine.dictationSelectedChunkMs = dictationNemotronTier
+            NotificationCenter.default.post(name: .saiityDictationSettingChanged,
+                                            object: nil,
+                                            userInfo: ["refreshRuntime": true])
+        }
+    }
+
     /// Languages to offer when translating an already-recorded transcript:
     /// the current target first, then recently used ones, then what this Mac
     /// is set up for. Same sources the menu bar draws on, so the two agree.
@@ -270,11 +288,11 @@ final class AppState {
                dictationCleanupEnabled { return .accurate }
             if dictationRecognizer == .streaming,
                streaming == .nemotron,
-               nemotronTier == 1120,
+               dictationNemotronTier == 1120,
                !dictationCleanupEnabled { return .fast }
             if dictationRecognizer == .streaming,
                streaming == .nemotron,
-               nemotronTier == NemotronEngine.chunkMs,
+               dictationNemotronTier == NemotronEngine.chunkMs,
                dictationCleanupEnabled { return .balanced }
             return .custom
         }
@@ -284,12 +302,12 @@ final class AppState {
             case .fast:
                 dictationRecognizer = .streaming
                 UserDefaults.standard.set(ASREngine.nemotron.rawValue, forKey: "dictationStreamingEngine")
-                nemotronTier = 1120
+                dictationNemotronTier = 1120
                 dictationCleanupEnabled = false
             case .balanced:
                 dictationRecognizer = .streaming
                 UserDefaults.standard.set(ASREngine.nemotron.rawValue, forKey: "dictationStreamingEngine")
-                nemotronTier = NemotronEngine.chunkMs
+                dictationNemotronTier = NemotronEngine.chunkMs
                 dictationCleanupEnabled = true
             case .accurate:
                 dictationRecognizer = .whisper
@@ -602,6 +620,15 @@ final class AppState {
             modelError = String(localized: "A download is still in progress.")
             return
         }
+        // A re-translation is a live session with a multi-gigabyte translator
+        // open. It is the mirror of the rule below — that one stops a session
+        // from starting during a re-translation — and it was missing: the
+        // Models page could unlink the weights a running re-translation was
+        // decoding from, which frees nothing and then fails at the next line.
+        if CaptionSession.shared.isRetranslating {
+            modelError = String(localized: "Translating a saved transcript — wait for that to finish, or cancel it")
+            return
+        }
         if CaptionSession.shared.isRunning, asset.use.isSelected {
             modelError = String(localized: "\(asset.title) is running the live captions. Stop captions first.")
             return
@@ -610,9 +637,20 @@ final class AppState {
         // engine has been selected: ASREngine.effective uses the recommended
         // fallback in that state. Release all loaded recognition resources
         // before deletion so the fallback cannot keep the file mapped.
+        //
+        // The parentheses are load-bearing and the line is deliberately not
+        // written as a bare `,`-separated list. Swift would parse the list form
+        // as intended, but a reader — or a port to a language where the list
+        // separator does not exist — reasonably reads it as
+        // `(!running && recognition) || isSelected`, which would release a live
+        // session's caption model out from under it.
         if !CaptionSession.shared.isRunning,
-           asset.family == .recognition || asset.use.isSelected {
+           (asset.family == .recognition || asset.use.isSelected) {
             await CaptionSession.shared.releaseEverything()
+            // Dictation keeps its own prepared backend, which the caption pool
+            // release does not own. Drop it too, or the next dictation press
+            // loads a model whose files are seconds from being unlinked.
+            await (NSApp.delegate as? AppDelegate)?.invalidateDictationBackend()
         }
         if !ModelRegistry.remove(asset) {
             modelError = String(localized: "Could not delete \(asset.title).")
@@ -635,6 +673,13 @@ final class AppState {
         }
         guard !CaptionSession.shared.isRunning else {
             modelError = String(localized: "Captions are running. Stop them first.")
+            return nil
+        }
+        // Same reasoning as `delete`: a re-translation holds the translator
+        // open, and the partial files it needs to fetch again are not ours to
+        // clear underneath it.
+        guard !CaptionSession.shared.isRetranslating else {
+            modelError = String(localized: "Translating a saved transcript — wait for that to finish, or cancel it")
             return nil
         }
 
@@ -681,6 +726,10 @@ final class AppState {
         }
         guard !CaptionSession.shared.isRunning else {
             modelError = String(localized: "Captions are running. Stop them first.")
+            return nil
+        }
+        guard !CaptionSession.shared.isRetranslating else {
+            modelError = String(localized: "Translating a saved transcript — wait for that to finish, or cancel it")
             return nil
         }
         await CaptionSession.shared.releaseEverything()

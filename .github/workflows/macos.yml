@@ -22,14 +22,37 @@ on:
       - "scripts/**"
       - ".github/workflows/macos.yml"
 
+# Read-only by default. This job checks out, builds, and runs the app's own
+# launch smoke test; it needs no repository write and no token to widen itself
+# with, so a compromised build step has nothing to escalate into.
+permissions:
+  contents: read
+
+# One verification per ref. A new push makes the in-flight run's result
+# irrelevant — it is measuring an older commit — so cancel it and spend the
+# minutes on the current one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   verify:
     runs-on: macos-26
+    timeout-minutes: 60
     env:
       DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history, deliberately. build-app.sh stamps CFBundleVersion
+          # from `git rev-list --count HEAD` and the version from
+          # `git describe --tags`; on a depth-1 clone that count is 1, which
+          # build-app.sh's own stamp assertion and verify-release.sh's
+          # "build number was not stamped" check both read as an unstamped
+          # bundle. A shallow checkout does not fail loudly, it just builds an
+          # app that claims to be build 1 forever.
+          fetch-depth: 0
 
       - name: Show toolchain
         run: |
@@ -41,6 +64,19 @@ jobs:
 
       - name: Reject package-lock drift
         run: git diff --exit-code -- Package.resolved
+
+      # SwiftPM's own build products. Keyed on the manifest and the resolved
+      # file, so a manifest change is a cache miss rather than a stale object
+      # graph, and the release configuration is kept separate from any debug
+      # one — they share nothing, and a mixed .build is how a job ends up
+      # testing code it did not compile.
+      - name: Cache SwiftPM build products
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: swiftpm-release-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
+          restore-keys: |
+            swiftpm-release-${{ runner.os }}-
 
       - name: Run release tests
         run: xcrun swift test -c release -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS
@@ -57,6 +93,14 @@ jobs:
           test -x build/sAiity.app/Contents/MacOS/sAiity
           codesign --verify --deep --strict build/sAiity.app
           build/sAiity.app/Contents/MacOS/sAiity --version
+
+      # The step above proves the binary starts and can read its own bundle.
+      # This one launches the app for real: a genuine NSApplication, the real
+      # AppDelegate, the real applicationDidFinishLaunching, one turn of the
+      # run loop, and a window ordered in and out. Everything a menu-bar app
+      # can get wrong while still answering --version.
+      - name: Launch smoke test
+        run: build/sAiity.app/Contents/MacOS/sAiity --selftest
 
       - name: Verify release bundle hardening
         run: ./scripts/verify-release.sh build/sAiity.app

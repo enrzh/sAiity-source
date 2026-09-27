@@ -40,6 +40,62 @@ import Testing
         #expect(report.contains("timing percentiles (recent):"))
     }
 
+    @Test("a persisted history larger than the limit is still served bounded")
+    func persistedHistoryIsBoundedOnRead() throws {
+        Diagnostics.clearRuntimeHistoryForTests()
+        defer { Diagnostics.clearRuntimeHistoryForTests() }
+
+        // Simulates a defaults file written by a build with a larger limit, or
+        // corrupted by a partial write. The reader must not trust it.
+        let oversized = (0..<64).map {
+            DiagnosticsRuntimeTiming(date: Date(), operation: "stale-\($0)",
+                                     seconds: Double($0), cold: nil)
+        }
+        UserDefaults.standard.set(try JSONEncoder().encode(oversized),
+                                  forKey: "saiityRecentRuntimeTimings")
+        // A fresh process would load it lazily; the same must be true here.
+        Diagnostics.dropRuntimeHistoryCacheForTests()
+
+        #expect(Diagnostics.recentTimings.count == 20)
+        #expect(Diagnostics.recentTimings.first?.operation == "stale-63")
+    }
+
+    @Test("a burst of events costs one write, and the last event still lands on disk")
+    func burstIsCoalescedButNotLost() {
+        Diagnostics.clearRuntimeHistoryForTests()
+        defer { Diagnostics.clearRuntimeHistoryForTests() }
+
+        // The timing path fires several times per caption final. It must not do
+        // a UserDefaults round trip per event, and it must not lose the newest
+        // event when it is flushed.
+        for index in 0..<25 {
+            Diagnostics.recordTiming(operation: "captions.visible-lag", seconds: Double(index) / 100)
+        }
+        #expect(Diagnostics.recentTimings.count == 20)
+
+        Diagnostics.flushNow()
+
+        let persisted = UserDefaults.standard.data(forKey: "saiityRecentRuntimeTimings")
+        #expect(persisted != nil)
+        let decoded = try? JSONDecoder().decode(
+            [DiagnosticsRuntimeTiming].self, from: persisted ?? Data())
+        #expect(decoded?.count == 20)
+        #expect(decoded?.last?.seconds == 0.24)
+    }
+
+    @Test("history is readable before any flush, not only afterwards")
+    func readsAreServedFromMemory() {
+        Diagnostics.clearRuntimeHistoryForTests()
+        defer { Diagnostics.clearRuntimeHistoryForTests() }
+
+        Diagnostics.recordTiming(operation: "captions.asr.rtf", seconds: 0.4)
+        Diagnostics.recordFailure(operation: "captions.backend.start", reason: "load failed")
+
+        // No flush, no notification: the settings pages read this directly.
+        #expect(Diagnostics.recentTimings.first?.operation == "captions.asr.rtf")
+        #expect(Diagnostics.latestFailure?.reason == "load failed")
+    }
+
     @Test("timing summaries expose p50 and p95 for recent stages")
     func timingPercentiles() {
         Diagnostics.clearRuntimeHistoryForTests()

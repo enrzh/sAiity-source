@@ -64,25 +64,41 @@ struct TextStyle: Equatable, Codable, Sendable {
             return cached
         }
 
-        var size = baseSize
-        while size > minimumSize {
-            let candidate = NSFont.systemFont(ofSize: size, weight: .init(weight))
-            let rect = (text as NSString).boundingRect(
-                with: NSSize(width: cacheWidth, height: .greatestFiniteMagnitude),
-                options: [.usesLineFragmentOrigin, .usesFontLeading],
-                attributes: [.font: candidate])
-            let lineHeight = candidate.ascender - candidate.descender + candidate.leading
-            let lineCount = max(1, Int(ceil(rect.height / max(1, lineHeight))))
-            if lineCount <= maxLines {
-                Self.fittedFontCache.setObject(candidate, forKey: key)
-                return candidate
+        // Binary search for the largest point size that still fits the line
+        // budget. Stepping down one point at a time cost up to 36 text
+        // measurements per cache miss, on the main actor, up to twice per
+        // caption; the fit predicate is monotonic in the point size, so ~5
+        // measurements find the same answer. Whole points only, so the result
+        // is still a size the user can recognise from the settings slider.
+        let minimum = max(1, Int(minimumSize.rounded()))
+        let maximum = max(minimum, Int(baseSize.rounded()))
+        var low = minimum
+        var high = maximum
+        while low < high {
+            let mid = (low + high + 1) / 2
+            if Self.fits(text: text, width: cacheWidth, maxLines: maxLines,
+                          pointSize: CGFloat(mid), weight: weight) {
+                low = mid
+            } else {
+                high = mid - 1
             }
-            size -= 1
         }
 
-        let minimumFont = NSFont.systemFont(ofSize: minimumSize, weight: .init(weight))
-        Self.fittedFontCache.setObject(minimumFont, forKey: key)
-        return minimumFont
+        let fitted = NSFont.systemFont(ofSize: CGFloat(low), weight: .init(weight))
+        Self.fittedFontCache.setObject(fitted, forKey: key)
+        return fitted
+    }
+
+    private static func fits(text: String, width: CGFloat, maxLines: Int,
+                             pointSize: CGFloat, weight: Double) -> Bool {
+        let candidate = NSFont.systemFont(ofSize: pointSize, weight: .init(weight))
+        let rect = (text as NSString).boundingRect(
+            with: NSSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: candidate])
+        let lineHeight = candidate.ascender - candidate.descender + candidate.leading
+        let lineCount = max(1, Int(ceil(rect.height / max(1, lineHeight))))
+        return lineCount <= maxLines
     }
 
     /// Avoid a one-point grow/shrink oscillation while a live caption is still

@@ -125,6 +125,22 @@ public enum Diagnostics {
     private static let timingKey = "saiityRecentRuntimeTimings"
     private static let historyLimit = 20
 
+    /// These events arrive per caption final, per translation, and per ASR
+    /// metric sample — several per second during a busy session. Persisting and
+    /// broadcasting on every one of them was the cost of a purely
+    /// display-oriented feature: a synchronous UserDefaults round trip on the
+    /// main actor, plus a notification that rebuilt the settings performance
+    /// section. History is now held in memory, persisted on a coalescing timer,
+    /// and the UI is woken at most once per second.
+    private static let flushInterval: TimeInterval = 1.0
+
+    private static var failuresLoaded = false
+    private static var timingsLoaded = false
+    private static var failureStore: [DiagnosticsRuntimeFailure] = []
+    private static var timingStore: [DiagnosticsRuntimeTiming] = []
+    private static var flushTask: Task<Void, Never>?
+    private static var notifyTask: Task<Void, Never>?
+
     private static func read<T: Decodable>(_ type: T.Type, key: String) -> [T] {
         guard let data = UserDefaults.standard.data(forKey: key),
               let values = try? JSONDecoder().decode([T].self, from: data) else {
@@ -138,12 +154,91 @@ public enum Diagnostics {
         UserDefaults.standard.set(data, forKey: key)
     }
 
+    /// Seed the in-memory history from disk on first touch of this run, so a
+    /// restart still shows the previous session's tail. The append paths must go
+    /// through this before writing, or a first event of the run would land in an
+    /// empty array and silently discard everything that was persisted.
+    private static func loadFailures() {
+        guard !failuresLoaded else { return }
+        failureStore = read(DiagnosticsRuntimeFailure.self, key: failureKey)
+        failuresLoaded = true
+    }
+
+    private static func loadTimings() {
+        guard !timingsLoaded else { return }
+        timingStore = read(DiagnosticsRuntimeTiming.self, key: timingKey)
+        timingsLoaded = true
+    }
+
+    private static var storedFailures: [DiagnosticsRuntimeFailure] {
+        loadFailures()
+        return failureStore
+    }
+
+    private static var storedTimings: [DiagnosticsRuntimeTiming] {
+        loadTimings()
+        return timingStore
+    }
+
+    /// Persist and notify at most once per `flushInterval`, so a burst of
+    /// events costs one write and one settings rebuild rather than one each.
+    /// The last event in a burst still reaches disk and the UI, so nothing is
+    /// lost — it is only delayed by at most one interval.
+    private static func scheduleFlushAndNotify() {
+        if flushTask == nil {
+            flushTask = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(Diagnostics.flushInterval))
+                guard !Task.isCancelled else { return }
+                Diagnostics.flush()
+            }
+        }
+        if notifyTask == nil {
+            notifyTask = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(Diagnostics.flushInterval))
+                guard !Task.isCancelled else { return }
+                Diagnostics.announce()
+            }
+        }
+    }
+
+    private static func flush() {
+        flushTask?.cancel()
+        flushTask = nil
+        guard failuresLoaded || timingsLoaded else { return }
+        if failuresLoaded {
+            // Trim on the way out as well as on the way in: this is the only
+            // place the persisted array shrinks, and a file that only ever
+            // grew would carry whatever was there when the limit was raised.
+            if failureStore.count > historyLimit {
+                failureStore.removeFirst(failureStore.count - historyLimit)
+            }
+            write(failureStore, key: failureKey)
+        }
+        if timingsLoaded {
+            if timingStore.count > historyLimit {
+                timingStore.removeFirst(timingStore.count - historyLimit)
+            }
+            write(timingStore, key: timingKey)
+        }
+    }
+
+    private static func announce() {
+        notifyTask?.cancel()
+        notifyTask = nil
+        NotificationCenter.default.post(name: changed, object: nil)
+    }
+
+    /// Newest-first, and already bounded to `historyLimit`. The cap is applied
+    /// on read as well as on write: the in-memory buffer is deliberately
+    /// allowed to run past the limit between flushes, so a reader that skipped
+    /// the suffix would see a history the settings page and the report do not
+    /// agree about.
     public static var recentFailures: [DiagnosticsRuntimeFailure] {
-        Array(read(DiagnosticsRuntimeFailure.self, key: failureKey).reversed())
+        Array(storedFailures.suffix(historyLimit).reversed())
     }
 
     public static var recentTimings: [DiagnosticsRuntimeTiming] {
-        Array(read(DiagnosticsRuntimeTiming.self, key: timingKey).reversed())
+        Array(storedTimings.suffix(historyLimit).reversed())
     }
 
     public static var recentTimingSummaries: [DiagnosticsTimingSummary] {
@@ -158,31 +253,67 @@ public enum Diagnostics {
         let reason = DiagnosticsRedactor.redact(reason)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !operation.isEmpty, !reason.isEmpty else { return }
-        var values = read(DiagnosticsRuntimeFailure.self, key: failureKey)
-        values.append(.init(date: Date(), operation: operation, reason: reason))
-        write(Array(values.suffix(historyLimit)), key: failureKey)
+        loadFailures()
+        failureStore.append(.init(date: Date(), operation: operation, reason: reason))
+        if failureStore.count > historyLimit * 2 {
+            failureStore.removeFirst(failureStore.count - historyLimit)
+        }
         NSLog("sAiity runtime failure: %@ — %@", operation, reason)
-        NotificationCenter.default.post(name: changed, object: nil)
+        scheduleFlushAndNotify()
     }
 
     public static func recordTiming(operation: String, seconds: Double, cold: Bool? = nil) {
         let operation = operation.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !operation.isEmpty, seconds.isFinite, seconds >= 0 else { return }
-        var values = read(DiagnosticsRuntimeTiming.self, key: timingKey)
-        values.append(.init(date: Date(), operation: operation, seconds: seconds, cold: cold))
-        write(Array(values.suffix(historyLimit)), key: timingKey)
-        NotificationCenter.default.post(name: changed, object: nil)
+        loadTimings()
+        timingStore.append(.init(date: Date(), operation: operation, seconds: seconds, cold: cold))
+        if timingStore.count > historyLimit * 2 {
+            timingStore.removeFirst(timingStore.count - historyLimit)
+        }
+        scheduleFlushAndNotify()
+    }
+
+    /// Persist immediately, without broadcasting. Called before producing a
+    /// report so a user attaching a bug report gets the event that just
+    /// happened, not the state as of the last one-second tick. Deliberately
+    /// does not post `changed`: a report is a read, and waking the views that
+    /// are about to be read from would be churn.
+    public static func flushNow() {
+        flush()
     }
 
 #if SAIITY_TEST_HOOKS
     public static func clearRuntimeHistoryForTests() {
+        flushTask?.cancel()
+        notifyTask?.cancel()
+        flushTask = nil
+        notifyTask = nil
+        failureStore = []
+        timingStore = []
+        failuresLoaded = true
+        timingsLoaded = true
         UserDefaults.standard.removeObject(forKey: failureKey)
         UserDefaults.standard.removeObject(forKey: timingKey)
         NotificationCenter.default.post(name: changed, object: nil)
     }
+
+    /// Drop the in-memory cache without touching what is on disk, so a test can
+    /// exercise the path a fresh launch takes. Without this the history can only
+    /// ever be observed through the buffer the current process built.
+    public static func dropRuntimeHistoryCacheForTests() {
+        flushTask?.cancel()
+        notifyTask?.cancel()
+        flushTask = nil
+        notifyTask = nil
+        failureStore = []
+        timingStore = []
+        failuresLoaded = false
+        timingsLoaded = false
+    }
 #endif
 
     public static func report() -> String {
+        flushNow()
         var out: [String] = []
         let info = Bundle.main
         let v = info.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
@@ -191,8 +322,12 @@ public enum Diagnostics {
         out.append("app: \(v) (\(b))")
         out.append("macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)")
         out.append("")
+        // Both tiers, because they are two separate preferences now. A report
+        // naming only one cannot explain why press-to-talk and the caption
+        // bubble behave differently on the same Mac.
         out.append("recognition: \(ASREngine.selected?.rawValue ?? "none selected")"
-                   + " · nemotron tier \(NemotronEngine.selectedChunkMs) ms")
+                   + " · nemotron captions tier \(NemotronEngine.selectedChunkMs) ms"
+                   + " · dictation tier \(NemotronEngine.dictationSelectedChunkMs) ms")
         out.append("translation: \(TranslationEngine.selected?.rawValue ?? "none selected")"
                    + " · cleanup model \(LocalModel.cleanupSelected?.file ?? "—")")
         out.append("mlx metallib: \(MADLADTranslator.hasBundledMetalLibrary ? "present" : "missing")")

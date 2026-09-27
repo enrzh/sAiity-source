@@ -50,6 +50,72 @@ struct WhisperModelCacheTests {
         #expect(await loads.value == 2)
     }
 
+    /// Removal is synchronous and unloading is not, so `forget` is the hook
+    /// that lets a file be deleted without leaving a resident model mapped over
+    /// it. The unload still has to happen — and an idle model has to leave the
+    /// cache immediately, or the next dictation picks up a model whose bytes
+    /// are gone.
+    @Test("forgetting a resident model drops it and unloads it")
+    func forgettingDropsAndUnloads() async throws {
+        let loads = Counter()
+        let unloads = Counter()
+        let cache = WhisperModelCache<String, FakeResource>(idleDuration: .seconds(60)) { key in
+            await loads.increment()
+            return FakeResource(id: key, unloads: unloads)
+        }
+
+        _ = try await cache.withModel(for: "base") { resource in resource.id }
+        #expect(await cache.residentCountForTests == 1)
+
+        await cache.forget("base")
+        #expect(await cache.residentCountForTests == 0)
+        for _ in 0..<100 where await unloads.value == 0 {
+            try await Task.sleep(for: .milliseconds(2))
+        }
+        #expect(await unloads.value == 1, "the resident model was forgotten but never unloaded")
+
+        // And a later acquire loads afresh rather than reusing it.
+        _ = try await cache.withModel(for: "base") { resource in resource.id }
+        #expect(await loads.value == 2)
+    }
+
+    /// A dictation in flight when the file is deleted must finish on the pages
+    /// it already holds, and the model must be gone once it lets go — the same
+    /// contract `invalidate` has, reached without awaiting.
+    @Test("forgetting a model that is in use defers the unload to the last release")
+    func forgettingAnActiveModelDefersTheUnload() async throws {
+        let gate = Gate()
+        let unloads = Counter()
+        let cache = WhisperModelCache<String, FakeResource>(idleDuration: .seconds(60)) { key in
+            FakeResource(id: key, unloads: unloads)
+        }
+
+        let task = Task { try await cache.withModel(for: "base") { _ in await gate.hold() } }
+        for _ in 0..<1000 where await gate.entered == false { await Task.yield() }
+        #expect(await gate.entered)
+
+        await cache.forget("base")
+        // Still in the cache, flagged: unloading now would pull the model out
+        // from under the running decode.
+        #expect(await cache.residentCountForTests == 1)
+        #expect(await unloads.value == 0)
+
+        await gate.release()
+        _ = try await task.value
+        #expect(await unloads.value == 1)
+        #expect(await cache.residentCountForTests == 0)
+    }
+
+    private actor Gate {
+        private(set) var entered = false
+        private var isOpen = false
+        func hold() async {
+            entered = true
+            while !isOpen { await Task.yield() }
+        }
+        func release() { isOpen = true }
+    }
+
     private final class FakeResource: WhisperModelResource, @unchecked Sendable {
         let id: String
         let unloads: Counter

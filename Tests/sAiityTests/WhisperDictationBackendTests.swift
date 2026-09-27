@@ -78,7 +78,7 @@ struct WhisperDictationBackendTests {
         #expect(await events.value == ["download", "setup", "load", "release", "marker"])
     }
 
-    @Test("failed explicit preparation removes final model, marker, and partial so retry can succeed")
+    @Test("failed explicit preparation removes the final model and marker so a retry fetches fresh bytes")
     func failedPreparationCleansAndRetries() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -95,7 +95,11 @@ struct WhisperDictationBackendTests {
             if await attempts.value == 1 { throw TestError.failed }
         })
         do { try await backend.prepareModelForUse(.base); #expect(Bool(false)) } catch { #expect((error as? TestError) == .failed) }
+        // A model that would not load is treated as damaged, and the marker goes
+        // with it: `isReady` must not answer from a marker for bytes that are no
+        // longer on disk.
         #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("whisper-openai_whisper-base").path))
+        #expect(!WhisperDictationBackend.isReady(.base, under: root))
         try await backend.prepareModelForUse(.base)
         #expect(await attempts.value == 2)
         #expect(WhisperDictationBackend.isReady(.base, under: root))
@@ -137,17 +141,203 @@ struct WhisperDictationBackendTests {
         #expect(!(await called.value))
     }
 
-    @Test("cancelled preparation removes only partial state")
-    func cancelledPreparationCleansPartial() async throws {
+    /// The defect this exists for: the staging directory was deleted before
+    /// every attempt and again on the way out of a cancelled one, so an
+    /// interrupted fetch always started from nothing — while the Models page
+    /// told the user Resume "continues where it stopped". It resumes into the
+    /// same directory, because that is where the downloader keeps both the files
+    /// it has finished and the one it was halfway through.
+    @Test("a cancelled transfer keeps its staged bytes and the next attempt resumes into them")
+    func cancelledTransferKeepsResumeState() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let partial = root.appendingPathComponent("whisper-openai_whisper-base.partial")
+        let staging = WhisperDictationBackend.stagingDirectory(for: .base, under: root)
+        let staged = "models/whisperkit-coreml/openai_whisper-base/AudioEncoder.mlmodelc/weights.bin"
+        let attempts = Counter()
+        let destinations = Recorder<URL>()
+        let backend = WhisperDictationBackend(root: root, download: { _, destination, _ in
+            await attempts.increment()
+            await destinations.append(destination)
+            try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+            // Exactly what the Hub downloader leaves behind mid-transfer: a
+            // completed file, and the one it was halfway through.
+            let finished = destination.appendingPathComponent(staged)
+            try FileManager.default.createDirectory(at: finished.deletingLastPathComponent(),
+                                                    withIntermediateDirectories: true)
+            try Data(repeating: 7, count: 4096).write(to: finished)
+            try Data(repeating: 7, count: 512)
+                .write(to: destination.appendingPathComponent(staged + ".incomplete"))
+            if await attempts.value == 1 { throw CancellationError() }
+            let folder = destination.appendingPathComponent("downloaded", isDirectory: true)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            for name in WhisperDictationBackend.ModelChoice.requiredBundles {
+                let bundle = folder.appendingPathComponent(name)
+                try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
+                try Data(repeating: 1, count: 1).write(to: bundle.appendingPathComponent("coremldata.bin"))
+            }
+            return folder
+        })
+
+        do { try await backend.prepareModel(.base); #expect(Bool(false)) }
+        catch { #expect(error is CancellationError) }
+
+        #expect(FileManager.default.fileExists(atPath: staging.path),
+                "the staged bytes were thrown away, so Resume starts from nothing")
+        #expect(FileManager.default.fileExists(atPath: staging.appendingPathComponent(staged).path),
+                "a completed file was discarded")
+        #expect(FileManager.default.fileExists(
+            atPath: staging.appendingPathComponent(staged + ".incomplete").path),
+            "the half-written file is what lets the next attempt resume mid-file")
+        #expect(!WhisperDictationBackend.isDownloaded(.base, under: root),
+                "an interrupted transfer reported a model")
+
+        try await backend.prepareModel(.base)
+        #expect(await attempts.value == 2)
+        // The same directory both times. Two different ones would mean two
+        // separate transfers, which is the whole cost this was meant to remove.
+        #expect(await destinations.values == [staging, staging])
+        #expect(WhisperDictationBackend.isDownloaded(.base, under: root))
+        // A successful install reclaims the staging directory; the bytes now
+        // live in the model folder, and a leftover copy is a silent leak.
+        #expect(!FileManager.default.fileExists(atPath: staging.path))
+        #expect(!FileManager.default.fileExists(
+            atPath: root.appendingPathComponent("whisper-openai_whisper-base.superseded").path))
+    }
+
+    /// Everything went right until the last step, and the last step failed:
+    /// full disk, a permission change, a cancellation delivered at the move.
+    /// The model that was already on disk has to survive that. It used to be
+    /// deleted first, so the failure cost the user a working dictation model
+    /// *and* the transfer.
+    @Test("a transfer that cannot be moved into place leaves the model alone")
+    func failedInstallDoesNotDestroyTheInstalledModel() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let folder = WhisperDictationBackend.modelFolder(for: .base, under: root)
+        // Two of the three bundles: incomplete enough that a fetch is still
+        // attempted, present enough that destroying it would be a real loss.
+        for name in ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc"] {
+            let bundle = folder.appendingPathComponent(name)
+            try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
+            try Data(repeating: 3, count: 64).write(to: bundle.appendingPathComponent("coremldata.bin"))
+        }
         let backend = WhisperDictationBackend(root: root, download: { _, destination, _ in
             try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+            // A path that is not there: the transfer reported success and the
+            // folder is gone by the time the move happens — a deleted staging
+            // tree, a cleanup racing us, a mount that went away.
+            return destination.appendingPathComponent("never-downloaded")
+        })
+
+        await #expect(throws: (any Error).self) { try await backend.prepareModel(.base) }
+
+        for name in ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc"] {
+            #expect(FileManager.default.fileExists(
+                atPath: folder.appendingPathComponent(name).appendingPathComponent("coremldata.bin").path),
+                "\(name) was destroyed by a transfer that never landed")
+        }
+        #expect(!FileManager.default.fileExists(
+            atPath: root.appendingPathComponent("whisper-openai_whisper-base.superseded").path),
+            "a superseded copy was left behind")
+        // And the staged bytes are still there for the next attempt.
+        #expect(FileManager.default.fileExists(
+            atPath: WhisperDictationBackend.stagingDirectory(for: .base, under: root).path))
+    }
+
+    /// The other half: a fetch that does land replaces what was there, in one
+    /// step, with nothing left over. A `.superseded` directory that outlived a
+    /// successful install is a second copy of a multi-hundred-megabyte model.
+    @Test("a completed transfer replaces the old model and leaves no copy behind")
+    func successfulInstallReplacesWhatWasThere() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let folder = WhisperDictationBackend.modelFolder(for: .base, under: root)
+        let stale = folder.appendingPathComponent("MelSpectrogram.mlmodelc/coremldata.bin")
+        try FileManager.default.createDirectory(at: stale.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        try Data(repeating: 3, count: 64).write(to: stale)
+
+        let backend = WhisperDictationBackend(root: root, download: { _, destination, _ in
+            let model = destination.appendingPathComponent("downloaded", isDirectory: true)
+            try FileManager.default.createDirectory(at: model, withIntermediateDirectories: true)
+            for name in WhisperDictationBackend.ModelChoice.requiredBundles {
+                let bundle = model.appendingPathComponent(name)
+                try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
+                try Data(repeating: 9, count: 512).write(to: bundle.appendingPathComponent("coremldata.bin"))
+            }
+            return model
+        })
+
+        try await backend.prepareModel(.base)
+        #expect(WhisperDictationBackend.isDownloaded(.base, under: root))
+        // The new bytes, not the old ones: 512, not 64.
+        let landed = try Data(contentsOf: folder.appendingPathComponent("MelSpectrogram.mlmodelc/coremldata.bin"))
+        #expect(landed.count == 512, "the replaced model kept its old contents")
+        #expect(!FileManager.default.fileExists(
+            atPath: root.appendingPathComponent("whisper-openai_whisper-base.superseded").path))
+        #expect(!FileManager.default.fileExists(atPath: WhisperDictationBackend.stagingDirectory(
+            for: .base, under: root).path))
+    }
+
+    /// Everything the models page's Delete has to take with the model, and the
+    /// one thing it must do before it does: let go of the loaded runtime.
+    @Test("removal takes the model, its staging, a superseded copy and the damage record")
+    func removalTakesEverything() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try makeModel(at: root)
+        let staging = WhisperDictationBackend.stagingDirectory(for: .base, under: root)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        try Data(repeating: 5, count: 128).write(to: staging.appendingPathComponent("half.bin"))
+        let superseded = root.appendingPathComponent("whisper-openai_whisper-base.superseded", isDirectory: true)
+        try FileManager.default.createDirectory(at: superseded, withIntermediateDirectories: true)
+
+        // Written through the raw key because the recording path is gated on the
+        // registry listing the asset as installed, and this test must not need a
+        // real model on the developer's disk to prove the record is cleared.
+        let key = "assetLoadFailures"
+        let saved = UserDefaults.standard.object(forKey: key)
+        UserDefaults.standard.set([AssetID.whisper(.base): "damaged"], forKey: key)
+        defer {
+            if let saved { UserDefaults.standard.set(saved, forKey: key) }
+            else { UserDefaults.standard.removeObject(forKey: key) }
+        }
+        #expect(LoadHealth.reason(for: AssetID.whisper(.base)) == "damaged")
+
+        try await WhisperDictationBackend(root: root).removeModel(.base)
+
+        #expect(!FileManager.default.fileExists(atPath: WhisperDictationBackend.modelFolder(
+            for: .base, under: root).path))
+        #expect(!FileManager.default.fileExists(atPath: staging.path),
+                "the staging directory survived the delete")
+        #expect(!FileManager.default.fileExists(atPath: superseded.path))
+        // A record left behind would badge a model the user has just deleted —
+        // or the next one they fetch from the dictation page — as damaged.
+        #expect(LoadHealth.reason(for: AssetID.whisper(.base)) == nil)
+    }
+
+    private final class Recorder<T>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var storage: [T] = []
+        func append(_ value: T) { lock.withLock { storage.append(value) } }
+        var values: [T] { lock.withLock { storage } }
+    }
+
+    @Test("cancelled preparation keeps the staged bytes for the next attempt")
+    func cancelledPreparationKeepsStagedBytes() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let partial = WhisperDictationBackend.stagingDirectory(for: .base, under: root)
+        let backend = WhisperDictationBackend(root: root, download: { _, destination, _ in
+            try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+            try Data(repeating: 1, count: 32).write(to: destination.appendingPathComponent("half.bin"))
             throw CancellationError()
         })
         do { try await backend.prepareModel(.base); #expect(Bool(false)) } catch { #expect(error is CancellationError) }
-        #expect(!FileManager.default.fileExists(atPath: partial.path))
+        // Kept, because it is the Resume row's content. Cancel is the user
+        // changing their mind, not evidence that the bytes are bad.
+        #expect(FileManager.default.fileExists(atPath: partial.appendingPathComponent("half.bin").path))
+        #expect(!WhisperDictationBackend.isReady(.base, under: root))
     }
 
     @Test("cancellation preserves an existing final model and marker")

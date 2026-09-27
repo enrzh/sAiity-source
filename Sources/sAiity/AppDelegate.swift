@@ -234,6 +234,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var captionEngineForTests: ASREngine { engine }
     var captionPoolPreparedForTests: Bool { asrBackendPool.preparedForTests }
     var captionPoolLeaseForTests: Bool { asrBackendPool.hasActiveLeaseForTests }
+    /// The sentence still being assembled, as the recogniser sees it. Empty once
+    /// it has closed.
+    var pendingSentenceForTests: [String] { sentenceParts }
+    /// Seed that partial sentence the way a real chunk does.
+    func openSentenceForTests(_ parts: [String]) {
+        sentenceParts = parts
+        sentenceStart = 0
+        sentenceEnd = Double(parts.count) * 0.5
+    }
+    /// Close it, exactly as punctuation or teardown would.
+    func closeSentenceForTests() { closeSentence() }
+    /// The lines this session has recorded, whether or not saving is on.
+    var sessionLinesForTests: [Segment] { sessionLines }
+    var pendingTranscriptWritesForTests: Int { pendingTranscriptWrites }
     #endif
     /// The current caption lease. The pool remains the owner of the cached
     /// backend; this is held only between caption start and teardown.
@@ -306,11 +320,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     static func makeDictationStreamingBackend() -> TranscriptionBackend {
         let engine = ASREngine.dictationEffective
         guard engine == .nemotron else { return engine.makeBackend() }
-        let preferredTier = NemotronEngine.selectedChunkMs
+        // Dictation's own tier, not the caption tier. It follows the caption
+        // preference only while it has no choice of its own, and pinning the
+        // adaptive policy to the same value let one surface's setting decide
+        // for the other.
+        let preferredTier = NemotronEngine.dictationSelectedChunkMs
         let installed = Set(NemotronEngine.availableChunkMs.filter {
             NemotronEngine.isDownloaded(chunkMs: $0)
         })
-        let tier = NemotronEngine.hasExplicitChunkSelection
+        let tier = NemotronEngine.hasExplicitDictationChunkSelection
             ? preferredTier
             : ASRAdaptivePolicy.chooseRuntimeTier(preferred: preferredTier,
                                                    available: NemotronEngine.availableChunkMs,
@@ -341,6 +359,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func prepareForModelCleanup() async -> Bool {
         guard state == .idle,
               !dictationController.isBusy,
+              // A re-translation is a live session of its own, holding a
+              // translator this is about to stop and files it is about to
+              // unlink. It reports through the same global flag captions do, so
+              // the check belongs here as much as in the window.
+              !CaptionSession.shared.isRetranslating,
               translatorSwap == nil,
               translatorUsers == 0 else { return false }
         await dictationController.invalidatePreparedBackend()
@@ -357,6 +380,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var activeTranslatorEngine: TranslationEngine?
     private var translatorPreparedTarget: String?
     private let translatorInferenceGate = TranslationInferenceGate()
+    /// The one gate every native translation call passes through, including the
+    /// ones that run with no caption session: dictation's own translation and
+    /// cleanup already do, and re-translating a saved transcript now does too.
+    /// Those three are the only inference in the app, and MADLAD's Metal
+    /// runtime is not safe to overlap — without the gate a re-translation and a
+    /// dictation press could decode on it at the same time.
+    var translationInferenceGate: TranslationInferenceGate { translatorInferenceGate }
     private var translatorReady = false
     private var translationRuntimeFallback = TranslationRuntimeFallback()
     private let translatorIdleEviction = IdleEviction()
@@ -975,6 +1005,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         didSet { UserDefaults.standard.set(translateTo, forKey: "translateTo") }
     }
     private var statusLine = String(localized: "Idle")
+    /// A rebuild was requested and not yet done. Held while the status menu is
+    /// tracking and honoured in `menuDidClose`.
+    private var menuRebuildPending = false
+    private var menuIsTracking = false
     private var showedAnyCaption = false
     private var captionFirstTextLogged = false
     private var captionFirstFinalLogged = false
@@ -1068,6 +1102,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// the previous, so the jsonl's line order matches the spoken order even
     /// when translations finish out of order.
     private var transcriptWriteChain: Task<Void, Never>?
+    /// Links in that chain whose append has not happened yet. The chain itself
+    /// is only cleared on teardown, so it cannot answer "is anything still
+    /// owed to the store?" — and that is precisely the question quitting asks
+    /// before it closes the handle.
+    private var pendingTranscriptWrites = 0
 
     private struct CaptionTranslationKey: Hashable {
         let text: String
@@ -1339,8 +1378,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         let engine = ASREngine.dictationEffective
         if engine == .nemotron {
-            if NemotronEngine.hasExplicitChunkSelection {
-                return NemotronEngine.isDownloaded(chunkMs: NemotronEngine.selectedChunkMs)
+            // Dictation's tier, not the caption tier: readiness for a tier the
+            // dictation path will never load is not readiness.
+            if NemotronEngine.hasExplicitDictationChunkSelection {
+                return NemotronEngine.isDownloaded(chunkMs: NemotronEngine.dictationSelectedChunkMs)
             }
             return NemotronEngine.availableChunkMs.contains {
                 NemotronEngine.isDownloaded(chunkMs: $0)
@@ -1392,6 +1433,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return true
     }
 
+    /// Quitting has to wait for the transcript, and this is the only place it
+    /// can: the process is gone the moment `applicationWillTerminate` returns,
+    /// while a line's append may still be queued.
+    ///
+    /// `.terminateLater` is the AppKit way to say "not yet" — the reply comes
+    /// from the flush itself, once the last sentence is on disk. The previous
+    /// shape could not do this at all: a semaphore wait on the main thread for
+    /// main-actor work, which is either a deadlock or a 2-second freeze.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // A backstop reply, so a flush that somehow never finishes cannot make
+        // the app unquittable — the one failure mode worse than losing a line.
+        let deadline = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(15))
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        Task { @MainActor in
+            await self.flushOnQuit()
+            deadline.cancel()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     /// Close the transcript cleanly on quit, otherwise the last lines are on
     /// disk but meta.json still says the session never ended.
     func applicationWillTerminate(_ note: Notification) {
@@ -1399,13 +1463,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         dictationHotkeyRetryTask?.cancel()
         dictationController.cancel()
         dictationToast.dismiss()
-        guard recordingSince != nil else { return }
+        // The backstop for a quit that never asked: closing the sentence is
+        // idempotent, and `end()` returns on an already-closed handle. The real
+        // flush happens in `applicationShouldTerminate`, which is where the
+        // process can still be held open for it.
+        closeSentence()
         let sem = DispatchSemaphore(value: 0)
         Task.detached {
             try? await TranscriptStore.shared.end()
             sem.signal()
         }
         _ = sem.wait(timeout: .now() + 2)
+    }
+
+    /// Everything a quit owes the transcript: the sentence in progress, the
+    /// write it queues, and the handle.
+    @MainActor
+    func flushOnQuit() async {
+        dictationHotkeyMonitor.stop()
+        dictationHotkeyRetryTask?.cancel()
+        dictationController.cancel()
+        dictationToast.dismiss()
+        // The sentence the recogniser is still assembling at ⌘Q is real speech.
+        // Nothing else ever closes it — `closeSentence()` runs on punctuation, a
+        // speech gap, the length cap, and teardown — so quitting dropped the
+        // last line of every session that ended with the app rather than with
+        // punctuation, even though the words were recognised and on screen.
+        closeSentence()
+        // That sentence queued a transcript write, and the store drops an append
+        // that arrives after `end()`.
+        await drainTranscriptWrites(within: .seconds(2))
+        await endRecording()
+    }
+
+    /// Wait for every queued transcript write to reach the store, or for the
+    /// budget to run out.
+    ///
+    /// `async` is the whole point. Those writes are main-actor work, so a
+    /// synchronous wait on the main thread cannot let them run at all; suspending
+    /// here gives the main actor back exactly long enough. The bound matters
+    /// too: quitting must not hang because one translation is slow.
+    @MainActor
+    func drainTranscriptWrites(within budget: Duration) async {
+        let deadline = ContinuousClock.now + budget
+        while pendingTranscriptWrites > 0, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
     }
 
     private func updateDictationToast(_ phase: DictationPhase) {
@@ -1466,17 +1569,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             self.dictationFeedbackTask = nil
         }
-    }
-
-    private func positionDictationToast() {
-        let mouse = NSEvent.mouseLocation
-        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(mouse) })
-                ?? NSScreen.main
-                ?? NSScreen.screens.first else { return }
-        let frame = screen.visibleFrame
-        let size = dictationToast.frame.size
-        dictationToast.setFrameOrigin(NSPoint(x: frame.midX - size.width / 2,
-                                               y: frame.minY + 80))
     }
 
     // MARK: - Menu
@@ -1577,9 +1669,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Caption text arrives without rebuilding the menu. Refresh Clear when
     /// the menu opens so it is disabled when the bubble has nothing on it.
     func menuWillOpen(_ menu: NSMenu) {
+        // A status change rebuilds the whole menu, including the download
+        // progress ticks that fire several times a second. Doing that while
+        // the menu is tracking dismisses it under the cursor, because
+        // `statusItem.menu = …` replaces the very menu NSStatusItem is showing.
+        // So: coalesce the rebuild, and never replace the menu that is open.
+        menuIsTracking = true
+        menuRebuildPending = false
         guard let item = menu.item(withTag: Self.clearCaptionMenuTag) else { return }
         item.isEnabled = CaptionLatencyCopy.clearEnabled(
             showingCaption: overlay.hasVisibleCaption)
+    }
+
+    /// The rebuild `scheduleMenuRebuild` held back. Doing it here rather than
+    /// waiting for the next status change means the line the user just read was
+    /// not stale, without ever swapping the menu out from under them.
+    func menuDidClose(_ menu: NSMenu) {
+        menuIsTracking = false
+        guard menuRebuildPending else { return }
+        menuRebuildPending = false
+        rebuildMenu()
     }
 
     @objc private func clearCaptionFromMenu(_ sender: Any?) {
@@ -1613,7 +1722,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// the producer.
     private func setStatus(localized text: String) {
         statusLine = text
-        rebuildMenu()
+        scheduleMenuRebuild()
+    }
+
+    /// A model download reports progress several times a second, and each report
+    /// used to build a fresh `NSMenu` and hand it to the status item. That is a
+    /// full menu construction — every item, every localized title, every
+    /// `DateFormatter` for the recording line — several times a second, on the
+    /// main actor, for a string the user can only see by opening the menu.
+    ///
+    /// Two guards. One rebuild per runloop turn, however many reports land in
+    /// it. And none at all while a menu is tracking, because
+    /// `statusItem.menu = …` replaces the very menu NSStatusItem is showing and
+    /// dismisses it under the cursor; the pending flag is honoured in
+    /// `menuDidClose` instead.
+    private func scheduleMenuRebuild() {
+        menuRebuildPending = true
+        guard !menuIsTracking else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.menuRebuildPending, !self.menuIsTracking else { return }
+            self.rebuildMenu()
+        }
     }
 
     /// Prefixed to the status line so "this is being written down" is the first
@@ -1784,6 +1913,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // throw away the whole point of using the app icon.
         img.isTemplate = source == nil
         img.accessibilityDescription = recording ? String(localized: "sAiity, recording") : "sAiity"
+        // There is no status item before launch finishes — the quit flush ends
+        // recording, and ending recording repaints the icon.
+        guard let statusItem else { return }
         statusItem.button?.image = img
     }
 
@@ -2920,7 +3052,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // then its own translation — lines land in claim order however long any
         // individual translation takes, and each still hits disk as soon as it
         // can, preserving the crash-safety of line-at-a-time appends.
+        pendingTranscriptWrites += 1
         transcriptWriteChain = Task { @MainActor [previous = transcriptWriteChain] in
+            // Counted, not chained: `transcriptWriteChain` is only cleared on
+            // teardown, so it cannot say whether a write is still outstanding.
+            // Quitting needs exactly that answer.
+            defer { self.pendingTranscriptWrites -= 1 }
             await previous?.value
             let tr = await translation.value
             if await TranscriptStore.shared.isRecording {

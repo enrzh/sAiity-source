@@ -179,18 +179,24 @@ struct LocalModelTests {
 
     @Test("Nothing is badged in use before it is downloaded")
     func nothingClaimsToBeInUseWhenEmpty() {
-        let asr = UserDefaults.standard.string(forKey: "asrEngine")
-        let mt = UserDefaults.standard.string(forKey: "translationEngine")
-        let gguf = UserDefaults.standard.string(forKey: "qwenModelFile")
-        let cleanup = UserDefaults.standard.string(forKey: "cleanupModelFile")
+        // "Nothing chosen" has to mean nothing on EITHER surface. Recognition
+        // has two independent preferences now — the caption engine and its
+        // Nemotron tier, plus dictation's engine and its own tier — and a Nemotron
+        // tier is badged "in use" when either of them names it. Clearing only
+        // `asrEngine` left a machine that had picked a tier (and a dictation
+        // engine) still looking "in use" to this test, which is not a fresh
+        // install at all.
+        let keys = ["asrEngine", "translationEngine", "qwenModelFile", "cleanupModelFile",
+                    "dictationStreamingEngine", "dictationRecognizer",
+                    NemotronEngine.captionTierKey, NemotronEngine.dictationTierKey]
+        let snapshot = keys.map { ($0, UserDefaults.standard.object(forKey: $0)) }
         defer {
-            UserDefaults.standard.set(asr, forKey: "asrEngine")
-            UserDefaults.standard.set(mt, forKey: "translationEngine")
-            UserDefaults.standard.set(gguf, forKey: "qwenModelFile")
-            cleanup.map { UserDefaults.standard.set($0, forKey: "cleanupModelFile") }
-                ?? UserDefaults.standard.removeObject(forKey: "cleanupModelFile")
+            snapshot.forEach { key, value in
+                if let value { UserDefaults.standard.set(value, forKey: key) }
+                else { UserDefaults.standard.removeObject(forKey: key) }
+            }
         }
-        for k in ["asrEngine", "translationEngine", "qwenModelFile", "cleanupModelFile"] {
+        for k in keys {
             UserDefaults.standard.removeObject(forKey: k)
         }
         // Every registry row, not a sample: the fresh-install lie was two rows

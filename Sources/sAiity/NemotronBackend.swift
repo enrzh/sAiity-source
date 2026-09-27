@@ -36,20 +36,50 @@ final class NemotronEngine: FluidStreamingEngine, @unchecked Sendable {
     /// The tiers FluidAudio actually ships for this model. Anything else 404s.
     static let availableChunkMs = [1120, 2240]
 
+    static let captionTierKey = "nemotronChunkMs"
+    /// Dictation's own tier. A separate key on purpose: picking a dictation
+    /// profile used to write the caption tier, and because a tier is part of
+    /// the engine's identity that posted the engine-changed notification and
+    /// rebuilt the live caption backend — so choosing "Fast" for press-to-talk
+    /// interrupted captions that were already running.
+    static let dictationTierKey = "dictationNemotronChunkMs"
+
     /// The tier the user selected. Persisted; invalid stored values fall back
     /// to the default rather than crashing a download against a bad URL.
     static var selectedChunkMs: Int {
-        get {
-            let v = UserDefaults.standard.integer(forKey: "nemotronChunkMs")
-            return availableChunkMs.contains(v) ? v : chunkMs
-        }
-        set { UserDefaults.standard.set(newValue, forKey: "nemotronChunkMs") }
+        get { Self.storedTier(forKey: Self.captionTierKey) ?? chunkMs }
+        set { UserDefaults.standard.set(newValue, forKey: Self.captionTierKey) }
     }
 
     /// A missing preference means the user has not chosen a tier and adaptive
     /// dictation may select among tiers already on disk.
     static var hasExplicitChunkSelection: Bool {
-        UserDefaults.standard.object(forKey: "nemotronChunkMs") != nil
+        UserDefaults.standard.object(forKey: Self.captionTierKey) != nil
+    }
+
+    /// The tier dictation runs. Its own choice once it has made one; the
+    /// caption tier until then, so an installation that never touched a
+    /// dictation profile behaves exactly as it did before the two separated.
+    static var dictationSelectedChunkMs: Int {
+        get { Self.storedTier(forKey: Self.dictationTierKey) ?? selectedChunkMs }
+        set {
+            guard availableChunkMs.contains(newValue) else { return }
+            UserDefaults.standard.set(newValue, forKey: Self.dictationTierKey)
+        }
+    }
+
+    /// True when dictation's tier is pinned — by its own preference, or because
+    /// it is still following a caption tier the user did choose. Only when
+    /// neither exists may the adaptive policy pick a tier by itself.
+    static var hasExplicitDictationChunkSelection: Bool {
+        UserDefaults.standard.object(forKey: Self.dictationTierKey) != nil
+            || hasExplicitChunkSelection
+    }
+
+    /// A stored tier, or nil when absent or nonsense.
+    private static func storedTier(forKey key: String) -> Int? {
+        let v = UserDefaults.standard.integer(forKey: key)
+        return availableChunkMs.contains(v) ? v : nil
     }
 
     /// This instance's tier — fixed at init, because the tier IS the model: each

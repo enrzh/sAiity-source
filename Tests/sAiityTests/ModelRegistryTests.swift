@@ -17,11 +17,23 @@ struct ModelRegistryTests {
         // unreachable only because the engine picker had a single case.
         let root = ModelRegistry.root.standardizedFileURL
         for asset in ModelRegistry.assets() + ModelRegistry.retiredAssets() {
-            guard case .remove(let url) = asset.removal else { continue }
+            guard case .remove(let url) = asset.removal else {
+                Issue.record("\(asset.id) has no removal path"); continue
+            }
             let target = url.standardizedFileURL
             #expect(target != root, "\(asset.id) would delete the entire models root")
             #expect(target.path.hasPrefix(root.path + "/"),
                     "\(asset.id) removes \(target.path), which is outside the models root")
+            // An asset that stages its transfer must delete the staging with it,
+            // or the row that says "removed" has freed a rounding error.
+            if let staging = asset.storage.staging {
+                let staged = staging.standardizedFileURL
+                #expect(staged != root, "\(asset.id) would delete the entire models root")
+                #expect(staged.path.hasPrefix(root.path + "/"),
+                        "\(asset.id) stages outside the models root: \(staged.path)")
+                #expect(staged != target,
+                        "\(asset.id) removes the same path twice — one of the two is a no-op")
+            }
         }
     }
 
@@ -38,10 +50,15 @@ struct ModelRegistryTests {
         }
         #expect(!ids.contains("asr.parakeetEou"))
         #expect(!ids.contains("mt.hymt2.1.8b.q4"))
-        // Whisper was cut: its translate mode stopped emitting finals ~25 s into
-        // every session. Leaving a registry entry behind would put a 2.9 GB
-        // download back on the Models page with no engine to use it.
-        #expect(!ids.contains { $0.contains("whisper") }, "Whisper was removed; a stale asset remains")
+        // Caption Whisper was cut: its translate mode stopped emitting finals
+        // ~25 s into every session, so a row for it would put a 2.9 GB
+        // download back on the Models page with no engine to use it. The two
+        // DICTATION models are a different engine and are listed, deliberately
+        // narrow: nothing that a Whisper row could revive is back.
+        #expect(!ids.contains { $0.hasPrefix("asr.whisper.large") },
+                "caption Whisper was removed; a stale asset remains")
+        #expect(ids.filter { $0.hasPrefix("asr.whisper.") }.count == 2,
+                "expected exactly the two dictation Whisper models")
         #expect(!ids.contains { $0.contains("diarization") }, "Speaker diarization was removed; a stale asset remains")
         // Apple went the same way: its translator needed no download but could
         // only reach the pairs macOS had, and it kept a whole second code path
@@ -49,6 +66,38 @@ struct ModelRegistryTests {
         #expect(!ids.contains { $0.contains("apple") }, "Apple was removed; a stale asset remains")
         // Cleanup models are catalogued separately from translation engines.
         #expect(ids.filter { $0.hasPrefix("mt.llm.") }.count == LocalModel.all.count)
+    }
+
+    /// The defect this pins: Whisper's dictation models were downloaded into
+    /// the models root by a path no registry asset described, so the page called
+    /// up to 1.5 GB of a model the user had deliberately installed "other
+    /// files" and offered no Download, Resume or Delete for it.
+    @Test("The Whisper dictation models are catalogued, not counted as stray")
+    func whisperDictationModelsAreRegistered() {
+        let ids = ModelRegistry.assets().map(\.id)
+        for choice in WhisperDictationBackend.ModelChoice.allCases {
+            #expect(ids.contains(AssetID.whisper(choice)),
+                    "\(choice.rawValue) has no registry row, so its bytes read as stray")
+        }
+        let whisper = ModelRegistry.assets().filter { $0.id.hasPrefix("asr.whisper.") }
+        #expect(whisper.count == WhisperDictationBackend.ModelChoice.allCases.count)
+        for asset in whisper {
+            #expect(asset.family == .recognition)
+            // A dictation model is not a caption recommendation, and the page
+            // sorts recommended rows to the top of the group.
+            #expect(!asset.recommended, "\(asset.id) claims to be a first download")
+            #expect(asset.install != nil, "\(asset.id) has no Download")
+            #expect(asset.licence != nil, "\(asset.id) does not say whose weights these are")
+            #expect(asset.advertisedBytes ?? 0 > 0, "\(asset.id) does not say what it costs")
+            guard case .stagedDirectory(let final, let staging, let markers) = asset.storage else {
+                Issue.record("\(asset.id) must stage its transfer beside the model"); continue
+            }
+            #expect(final == WhisperDictationBackend.modelFolder(for: .base)
+                     || final == WhisperDictationBackend.modelFolder(for: .small))
+            #expect(staging == WhisperDictationBackend.stagingDirectory(for: .base)
+                     || staging == WhisperDictationBackend.stagingDirectory(for: .small))
+            #expect(markers == WhisperDictationBackend.ModelChoice.requiredBundles)
+        }
     }
 
     @Test("Translation assets keep advanced models out of the primary group")
@@ -107,6 +156,57 @@ struct ModelRegistryTests {
         s = ModelRegistry.status(of: asset)
         #expect(s.isInstalled)
         #expect(!s.isPartial)
+    }
+
+    /// A directory asset that stages its transfer: the half-downloaded bytes
+    /// are part of the asset for measuring, for the row's Resume control, and for
+    /// Delete. Modelling them as somewhere else is how a page can say "no model
+    /// downloaded" while 400 MB sits beside it, and how a Delete can free
+    /// nothing at all.
+    @Test("a staged asset measures, resumes and deletes its staging directory")
+    func stagedDirectoryIsPartOfTheAsset() throws {
+        let base = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("saiity-staged-test-\(UUID().uuidString)")
+        let final = base.appendingPathComponent("model", isDirectory: true)
+        let staging = base.appendingPathComponent("model.partial", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+
+        let unloaded = Flag()
+        let asset = ModelAsset(
+            id: "test.staged", family: .recognition, title: "T", detail: "",
+            recommended: false, licence: nil, advertisedBytes: nil,
+            storage: .stagedDirectory(final: final, staging: staging, markers: ["a.bin"]),
+            removal: .remove(final), use: .never, install: nil,
+            unload: { unloaded.set() })
+
+        var s = ModelRegistry.status(of: asset)
+        #expect(!s.isInstalled)
+        #expect(!s.isPartial)
+        #expect(s.bytesOnDisk == 0)
+
+        // Staged bytes only: a partial worth resuming, measured honestly.
+        try Data(repeating: 0, count: 4096)
+            .write(to: staging.appendingPathComponent("half.bin"))
+        s = ModelRegistry.status(of: asset)
+        #expect(!s.isInstalled, "staged bytes were read as a complete model")
+        #expect(s.isPartial)
+        #expect(s.bytesOnDisk == 4096)
+
+        // Completeness is judged on the model directory alone, and a leftover
+        // staging directory does not stop it being installed.
+        try FileManager.default.createDirectory(at: final, withIntermediateDirectories: true)
+        try Data(repeating: 0, count: 16).write(to: final.appendingPathComponent("a.bin"))
+        s = ModelRegistry.status(of: asset)
+        #expect(s.isInstalled)
+        #expect(!s.isPartial)
+        #expect(s.bytesOnDisk == 4096 + 16)
+
+        #expect(ModelRegistry.remove(asset))
+        #expect(unloaded.value, "the loaded runtime was not released before the delete")
+        #expect(!FileManager.default.fileExists(atPath: final.path))
+        #expect(!FileManager.default.fileExists(atPath: staging.path),
+                "Delete freed the model and left the transfer behind")
     }
 
     @Test("The two Nemotron tiers are independent assets")
@@ -239,11 +339,25 @@ struct DownloadCoordinatorTests {
         #expect(AssetID.madlad == "mt.madlad")
         #expect(AssetID.hyMT2 == "mt.hymt2.1.8b.q4")
         #expect(AssetID.llm(file: "x.gguf") == "mt.llm.x.gguf")
+        #expect(AssetID.whisper(.base) == "asr.whisper.base")
+        #expect(AssetID.whisper(.small) == "asr.whisper.small")
+        #expect(Set(WhisperDictationBackend.ModelChoice.allCases.map(AssetID.whisper)).count == 2,
+                "the two Whisper models must not share an id")
         let ids = Set(ModelRegistry.snapshot().map(\.asset.id))
         #expect(!ids.contains(AssetID.parakeetEou))
         #expect(ids.contains(AssetID.madlad))
         #expect(!ids.contains(AssetID.hyMT2))
+        #expect(ids.contains(AssetID.whisper(.base)))
+        #expect(ids.contains(AssetID.whisper(.small)))
     }
+}
+
+/// A one-way latch, for hooks that have to be observable from a test body.
+private final class Flag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var flag = false
+    var value: Bool { lock.withLock { flag } }
+    func set() { lock.withLock { flag = true } }
 }
 
 private actor Counter {

@@ -433,6 +433,91 @@ import Testing
         window.dismiss()
     }
 
+    @Test("a resting toast is click-through, and arms only over real controls")
+    func restingToastIsClickThrough() {
+        FrameStore.resetDictation()
+        let window = makeWindow()
+        window.setFrame(NSRect(x: 200, y: 200, width: 224, height: 54), display: false)
+
+        window.show(phase: .ready)
+
+        // The whole point: a dictation toast sits on screen for the entire
+        // dictation. If its resting rectangle takes clicks, the user cannot
+        // click the app they are dictating into through it.
+        #expect(window.ignoresMouseEvents)
+
+        let content = window.contentFrameForTests
+        let body = NSPoint(x: content.midX, y: content.minY + 6)
+        let strip = NSPoint(x: content.midX, y: content.maxY - 6)
+        let button = NSPoint(x: window.resetTargetAreaForTests.midX,
+                             y: window.resetTargetAreaForTests.midY)
+
+        window.updateMouseArming(atContentPoint: body)
+        #expect(window.ignoresMouseEvents, "the idle status text must not take clicks")
+        window.updateMouseArming(atContentPoint: strip)
+        #expect(!window.ignoresMouseEvents, "the drag strip must take clicks")
+        window.updateMouseArming(atContentPoint: button)
+        #expect(!window.ignoresMouseEvents, "the reset control must take clicks")
+        window.updateMouseArming(atContentPoint: body)
+        #expect(window.ignoresMouseEvents)
+        window.dismiss()
+        #expect(window.ignoresMouseEvents, "a dismissed toast must go back to resting")
+        FrameStore.resetDictation()
+    }
+
+    @Test("a result's text area takes clicks, the rest of the bubble does not")
+    func resultAreaTakesClicksWhileResting() {
+        FrameStore.resetDictation()
+        let window = makeWindow()
+        window.setFrame(NSRect(x: 200, y: 200, width: 224, height: 54), display: false)
+        window.show(resultText: String(repeating: "A result. ", count: 30),
+                    autoDismissAfter: nil)
+
+        let area = window.resultAreaForTests
+        #expect(area != nil, "a shown result has no clickable area")
+        guard let area, let content = window.contentView else {
+            Issue.record("a shown result has no content view")
+            window.dismiss()
+            return
+        }
+
+        window.updateMouseArming(atContentPoint: NSPoint(x: area.midX, y: area.maxY - 4))
+        #expect(!window.ignoresMouseEvents,
+                "the result text must be reachable, or it cannot be selected")
+
+        // In the bubble's own side padding there is nothing to do, and the panel
+        // must not take that click either.
+        window.updateMouseArming(atContentPoint: NSPoint(x: 6, y: 2))
+        #expect(window.ignoresMouseEvents)
+
+        // And a click inside the text area is a text gesture, not a window drag.
+        let text = content.convert(NSPoint(x: area.midX, y: area.midY), to: nil)
+        #expect(window.claimsTextGesture(atWindowPoint: text))
+        let control = content.convert(
+            NSPoint(x: window.resetTargetAreaForTests.midX,
+                    y: window.resetTargetAreaForTests.midY), to: nil)
+        #expect(!window.claimsTextGesture(atWindowPoint: control),
+                "the reset control is the panel's, not the text view's")
+        window.dismiss()
+        FrameStore.resetDictation()
+    }
+
+    @Test("a long result actually scrolls instead of being clipped")
+    func longResultScrolls() {
+        let window = makeWindow()
+        window.show(resultText: String(repeating: "Long dictated sentence. ", count: 60),
+                    autoDismissAfter: nil)
+
+        #expect(window.resultSelectableForTests)
+        #expect(window.resultScrollableForTests,
+                "the document is as tall as the clip view, so a long result is clipped, not scrollable")
+
+        // A short result is not scrollable — and must not claim to be.
+        window.show(resultText: "Short.", autoDismissAfter: nil)
+        #expect(!window.resultScrollableForTests)
+        window.dismiss()
+    }
+
     @Test("single-line status text uses a visually centered label frame")
     func statusTextFrameIsCentered() {
         let window = makeWindow()

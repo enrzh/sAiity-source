@@ -8,16 +8,35 @@ on:
       - "windows/package/**"
       - ".github/workflows/windows-package.yml"
 
+# Publishing a release asset needs no repository write: upload-artifact posts to
+# the Actions artifact service, not to a git ref. So the token stays read-only.
+permissions:
+  contents: read
+
+# Dispatch runs are deliberate and pushes are not: cancelling on a push would
+# kill a packaging run an operator just started, so in-progress runs are kept
+# and a newer push simply starts its own.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
 jobs:
   package-overlay:
     runs-on: windows-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history, matching the other workflows: the version that goes
+          # into the package is stamped from it.
+          fetch-depth: 0
 
       - name: Install .NET 10
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
+          cache: true
+          cache-dependency-path: windows/spike/OverlaySpike.csproj
 
       - name: Publish self-contained executable
         run: >-

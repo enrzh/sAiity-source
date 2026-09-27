@@ -4,24 +4,30 @@ import Foundation
 // Scriptable export, so transcripts are usable outside the menu:
 //   sAiity --list
 //   sAiity --export srt|md|txt [sessionId]     (default: most recent)
-let args = CommandLine.arguments
-if args.count > 1, args[1].hasPrefix("--") {
-    let sessions = TranscriptStore.list()
-    switch args[1] {
-    case "--version":
+//
+// The dispatch table is `CommandLinePlan`, which is pure and tested. Only
+// --selftest needs the app itself: everything else answers from argv and exits
+// here.
+let plan = CommandLinePlan.parse(CommandLine.arguments)
+var smokeTimeout: TimeInterval?
+if let plan {
+    switch plan {
+    case .version:
         // The git-stamped version from the bundle, or "unbundled" from a bare
         // swift-build binary — a bug report has to be able to name its build.
+        // Nothing else on this path touches AppKit or the transcript store: a
+        // build that prints its version has proved it can start.
         let v = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
         let b = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
         print("sAiity \(v ?? "unbundled") (\(b ?? "0"))")
-    case "--list":
+    case .list:
         let df = ISO8601DateFormatter()
-        for s in sessions {
+        for s in TranscriptStore.list() {
             print("\(s.id)\t\(df.string(from: s.meta.startedAt))\t\(s.meta.locale)\t\(s.meta.lineCount) lines")
         }
-    case "--export":
-        let format = args.count > 2 ? args[2] : "txt"
-        let session = args.count > 3 ? sessions.first { $0.id == args[3] } : sessions.first
+    case .export(let format, let sessionID):
+        let sessions = TranscriptStore.list()
+        let session = sessionID.flatMap { id in sessions.first { $0.id == id } } ?? sessions.first
         guard let session else {
             FileHandle.standardError.write(Data("no such session\n".utf8))
             exit(1)
@@ -33,22 +39,26 @@ if args.count > 1, args[1].hasPrefix("--") {
         case "md":  print(Export.markdown(segs, meta: session.meta, localized: false))
         default:    print(Export.txt(segs))
         }
-    case "--toggle", "--start", "--stop", "--copy":
+    case .openApp(let verb):
         // Routed through the saiity:// scheme so the verb lands in the RUNNING
         // app — this CLI invocation is a separate process with no session of
         // its own. LaunchServices starts the app first if it is not running,
         // which is exactly right for --start and --toggle.
-        let verb = String(args[1].dropFirst(2))
-        guard let url = URL(string: "saiity://\(verb)") else { exit(1) }
+        guard let url = CommandLinePlan.appURL(forVerb: verb) else { exit(1) }
         NSWorkspace.shared.open(url)
         // Give LaunchServices a beat to accept the open before this process
         // exits; exiting immediately can drop the hand-off.
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
-    default:
-        FileHandle.standardError.write(Data("usage: sAiity [--version | --list | --export srt|vtt|md|txt [id] | --toggle | --start | --stop | --copy]\n".utf8))
+    case .launchSmokeTest(let timeout):
+        // The one verb that needs the app itself, so the one verb this block
+        // does not exit on. Armed further down, before app.run(), because
+        // NSApplication posts didFinishLaunching from inside run().
+        smokeTimeout = timeout
+    case .unknown:
+        FileHandle.standardError.write(Data(CommandLinePlan.usage.utf8))
         exit(2)
     }
-    exit(0)
+    if smokeTimeout == nil { exit(0) }
 }
 
 // Registered rather than hardcoded, so an explicit "off" still wins and keeps
@@ -106,4 +116,9 @@ MainActor.assumeIsolated {
     delegateRef = delegate
 }
 app.setActivationPolicy(.accessory)
+
+// Before run(): didFinishLaunching is posted from inside it, so the observer
+// has to exist first. The window-server check runs before any AppKit exists, so
+// a session that cannot host a GUI at all skips instead of failing.
+if let smokeTimeout { LaunchSmokeTest.armOrSkip(timeout: smokeTimeout) }
 app.run()

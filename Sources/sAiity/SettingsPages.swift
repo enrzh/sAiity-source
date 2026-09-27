@@ -1756,7 +1756,12 @@ struct TranscriptsView: View {
                             Text("\(p.note) \(p.done)/\(p.total)")
                                 .font(.caption).foregroundStyle(.secondary)
                             Spacer()
-                            Button("Cancel") { retranslator.cancel() }
+                            // Wait for the unwind, not just the request: plain
+                            // `cancel()` returns while the translator is still
+                            // loaded, which is the window in which a Delete on
+                            // the Models page would unlink the weights a
+                            // decoding thread is still reading.
+                            Button("Cancel") { Task { await retranslator.cancelAndWait() } }
                                 .controlSize(.small)
                         }
                     }

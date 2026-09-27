@@ -88,6 +88,55 @@ extension NSAccessibility.Role {
     static let status = Self(rawValue: "AXStatus")
 }
 
+/// The view inside the glass, and the reason the toast rests click-through.
+///
+/// `ignoresMouseEvents` is a whole-window property, so the toast cannot be
+/// clickable over its result and transparent over the rest of its rectangle: it
+/// is one or the other, everywhere. The same constraint `OverlayWindow` works
+/// under. What makes a per-region answer possible is that an `NSTrackingArea`
+/// keeps firing *while* the window is click-through, so hover is observed for
+/// free and the flag is flipped to `false` only while the cursor is over
+/// something that does something. All the view carries is the events; the
+/// window owns which regions those are, because only it knows whether a result
+/// is on screen.
+private final class DictationToastContentView: NSView {
+    /// The pointer moved to a point in this view's coordinates.
+    var onHover: (@MainActor (NSPoint) -> Void)?
+    /// The pointer left the bubble entirely.
+    var onExit: (@MainActor () -> Void)?
+
+    private var tracking: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        // `.activeAlways` is what makes this fire while the app is inactive —
+        // and while the window itself is click-through. `.inVisibleRect` keeps
+        // the rect right as the bubble changes height for a result.
+        let area = NSTrackingArea(rect: bounds,
+                                  options: [.mouseEnteredAndExited, .mouseMoved,
+                                            .activeAlways, .inVisibleRect],
+                                  owner: self, userInfo: nil)
+        addTrackingArea(area)
+        tracking = area
+    }
+
+    override func mouseEntered(with event: NSEvent) { hover(event) }
+    override func mouseMoved(with event: NSEvent) { hover(event) }
+    override func mouseExited(with event: NSEvent) {
+        // AppKit delivers tracking events on the main thread, so this is a hop
+        // back onto the actor the window lives on rather than a queued callback:
+        // arming that lands a runloop turn late drops the click it was meant to
+        // catch.
+        MainActor.assumeIsolated { onExit?() }
+    }
+
+    private func hover(_ event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        MainActor.assumeIsolated { onHover?(point) }
+    }
+}
+
 @MainActor
 final class DictationToastWindow: NSPanel {
     private static let toastSize = NSSize(width: 224, height: 54)
@@ -96,6 +145,20 @@ final class DictationToastWindow: NSPanel {
     private static let maximumBubbleWidth: CGFloat = 560
     private static let resultMinimumHeight: CGFloat = 54
     private static let resultMaximumHeight: CGFloat = 420
+    /// The strip along the top of the bubble you pick it up by. Same convention
+    /// as the caption bubble: the status text below it stays click-through, so a
+    /// toast parked over a button in the app being dictated into does not eat
+    /// that button's clicks. Kept short deliberately — the compact pill is only
+    /// 54 pt tall, and a generous grab band here would claim the label too.
+    private static let dragStripHeight: CGFloat = 14
+    /// Arm interactivity a few points before the cursor reaches a control: there
+    /// is a measurable race between the mouse-moved event and the click that
+    /// follows it, and arming late drops the first click of a gesture.
+    private static let armSlack: CGFloat = 6
+    /// The reset control's real hit target. Its icon is 16 pt, which is not a
+    /// target, and it is the one control that has to work on the first click.
+    private static let resetButtonTarget = NSSize(width: 28, height: 28)
+
     static var postAccessibility: (Any, NSAccessibility.Notification) -> Void = NSAccessibility.post(element:notification:)
     static let systemAccessibilityPreferences: () -> (Bool, Bool, Bool) = {
         (NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency, NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast)
@@ -112,6 +175,7 @@ final class DictationToastWindow: NSPanel {
     private let resultScrollView = NSScrollView()
     private let resultTextView = NSTextView(frame: .zero)
     private let resetButton = NSButton()
+    private let host = DictationToastContentView()
     private var autoDismissTask: Task<Void, Never>?
     private var presentationGeneration = 0
     private var hasPlacedToast = false
@@ -122,6 +186,15 @@ final class DictationToastWindow: NSPanel {
     private var dragStart: NSPoint?
     private var dragOrigin: NSPoint = .zero
     private var dragging = false
+    /// True while AppKit owns the mouse gesture because a result's text area
+    /// claimed the click. The window must not steal the drag and the up, or
+    /// selecting text is a single click that selects nothing.
+    private var textGestureInFlight = false
+    /// Whether the panel is currently taking clicks, so arming only writes the
+    /// flag on a change.
+    private var mouseArmed = false
+    /// Backs up the hover tracking; see `startArmingTick`.
+    private var armingTimer: Timer?
     var onResetPosition: (() -> Void)?
 #if SAIITY_TEST_HOOKS
     private(set) var orderFrontCallsForTests = 0
@@ -137,7 +210,14 @@ final class DictationToastWindow: NSPanel {
         isOpaque = false
         backgroundColor = .clear
         hasShadow = true
-        ignoresMouseEvents = false
+        // Resting state: click-through. The toast is on screen for the whole
+        // dictation, and a panel that always takes clicks eats them from
+        // whatever the user is dictating into. It arms itself over the strip you
+        // drag it by, the reset control, and — while a result is on screen — the
+        // text you can select. `OverlayWindow` solves the same whole-window
+        // constraint the same way.
+        ignoresMouseEvents = true
+        acceptsMouseMovedEvents = true
         hidesOnDeactivate = false
         isMovable = true
         setAccessibilityRole(.status)
@@ -162,6 +242,14 @@ final class DictationToastWindow: NSPanel {
         resultTextView.textContainerInset = NSSize(width: 4, height: 4)
         resultTextView.textContainer?.lineFragmentPadding = 0
         resultTextView.textContainer?.widthTracksTextView = true
+        // A scroll view can only scroll a document taller than its clip view,
+        // and a text view only grows to its text when the container height is
+        // unbounded. Without this the "scrollable result" was one clipped line
+        // tall whatever the text said, and the longer the dictation the more of
+        // it was simply missing.
+        resultTextView.textContainer?.containerSize = NSSize(width: 0,
+                                                             height: CGFloat.greatestFiniteMagnitude)
+        resultTextView.autoresizingMask = [.width]
         resultTextView.setAccessibilityRole(.staticText)
         resultTextView.setAccessibilityLabel(String(localized: "Dictation result"))
         resultScrollView.documentView = resultTextView
@@ -171,6 +259,7 @@ final class DictationToastWindow: NSPanel {
         resultScrollView.hasVerticalScroller = true
         resultScrollView.autohidesScrollers = true
         resultScrollView.scrollerStyle = .overlay
+        resultScrollView.verticalScrollElasticity = .automatic
         resultScrollView.isHidden = true
         resultScrollView.setAccessibilityRole(.group)
 
@@ -189,7 +278,10 @@ final class DictationToastWindow: NSPanel {
         resetButton.target = self
         resetButton.action = #selector(resetPositionFromButton)
 
-        let host = NSView()
+        host.onHover = { [weak self] point in
+            self?.updateMouseArming(atContentPoint: point)
+        }
+        host.onExit = { [weak self] in self?.armMouseEvents(false) }
         host.addSubview(spinner)
         host.addSubview(resetButton)
         host.addSubview(label)
@@ -417,8 +509,10 @@ final class DictationToastWindow: NSPanel {
     }
     override func mouseDown(with event: NSEvent) {
         let point = contentView?.convert(event.locationInWindow, from: nil) ?? .zero
-        let resetFrame = resetButton.convert(resetButton.bounds, to: contentView)
-        guard !resetFrame.contains(point) else { resetPositionFromButton(); return }
+        // The same padded target the arming uses. Anything the panel claims a
+        // click for has to do something with it, or the ring around the icon
+        // would swallow clicks and start a drag instead.
+        guard !resetTargetArea.contains(point) else { resetPositionFromButton(); return }
         dragging = true
         beginDrag(atScreenPoint: convertPoint(toScreen: event.locationInWindow))
     }
@@ -427,13 +521,152 @@ final class DictationToastWindow: NSPanel {
     }
     override func mouseUp(with event: NSEvent) { if dragging { endDrag() } }
 
+    /// Routing for the left mouse button, which is the only thing the window
+    /// claims for itself.
+    ///
+    /// Dragging and the reset control belong to the panel and are handled here.
+    /// A click on a result's text area does not: selecting text is an AppKit
+    /// gesture that needs the whole down/drag/up sequence delivered to the text
+    /// view, and this override used to swallow all three and start a window drag
+    /// instead — so the result was `isSelectable = true` in name only, with the
+    /// only way to select it being to give up on dragging. Handing the sequence
+    /// to AppKit is what makes the result text and its scroll view behave like
+    /// text and a scroll view.
     override func sendEvent(_ event: NSEvent) {
         switch event.type {
-        case .leftMouseDown: mouseDown(with: event)
-        case .leftMouseDragged: mouseDragged(with: event)
-        case .leftMouseUp: mouseUp(with: event)
-        default: super.sendEvent(event)
+        case .leftMouseDown:
+            let claimed = claimsTextGesture(atWindowPoint: event.locationInWindow)
+            textGestureInFlight = claimed
+            guard claimed else { mouseDown(with: event); return }
+            super.sendEvent(event)
+        case .leftMouseDragged:
+            guard !textGestureInFlight else { super.sendEvent(event); return }
+            mouseDragged(with: event)
+        case .leftMouseUp:
+            defer { textGestureInFlight = false }
+            guard !textGestureInFlight else { super.sendEvent(event); return }
+            mouseUp(with: event)
+        default:
+            super.sendEvent(event)
         }
+    }
+
+    // MARK: - Where the panel takes clicks
+
+    /// The bubble's own rectangle. `NSWindow` has no `bounds` in Swift — a
+    /// window is a `frame` — and every region below is in content coordinates
+    /// anyway, which for this borderless panel is the same rectangle.
+    private var contentBounds: NSRect { contentView?.bounds ?? .zero }
+
+    /// The strip along the top of the bubble, in content coordinates.
+    private var dragRegion: NSRect {
+        let bounds = contentBounds
+        return NSRect(x: 0, y: bounds.height - Self.dragStripHeight,
+                      width: bounds.width, height: Self.dragStripHeight)
+    }
+
+    /// The result's scroll area in content coordinates, or nil when no result is
+    /// on screen.
+    private var resultArea: NSRect? {
+        guard isShowingResult, !resultScrollView.isHidden else { return nil }
+        return resultScrollView.convert(resultScrollView.bounds, to: contentView)
+    }
+
+    private var resetControlArea: NSRect {
+        resetButton.convert(resetButton.bounds, to: contentView)
+    }
+
+    /// The reset control's real hit target: a 16 pt icon is not a 16 pt target.
+    private var resetTargetArea: NSRect {
+        let dx = max(0, (Self.resetButtonTarget.width - resetControlArea.width) / 2)
+        let dy = max(0, (Self.resetButtonTarget.height - resetControlArea.height) / 2)
+        return resetControlArea.insetBy(dx: -dx, dy: -dy)
+    }
+
+    /// Whether a click at a point in the window belongs to the result's text area
+    /// rather than to the panel. The whole routing in `sendEvent` hangs off this
+    /// one answer, so it is named and visible rather than buried in the event
+    /// handler.
+    func claimsTextGesture(atWindowPoint windowPoint: NSPoint) -> Bool {
+        guard let resultArea,
+              let point = contentView?.convert(windowPoint, from: nil) else { return false }
+        return resultArea.contains(point)
+    }
+
+    /// The one arming decision, asked on hover, on presentation, and by tests.
+    func updateMouseArming(atContentPoint point: NSPoint) {
+        guard let inContent = armingPoint(forContentPoint: point),
+              isInteractive(inContent) else {
+            armMouseEvents(false)
+            return
+        }
+        armMouseEvents(true)
+        // An open hand over the drag strip says "you can move this"; the arrow
+        // everywhere else keeps the controls and the text honest.
+        if resetTargetArea.contains(inContent) || !dragRegion.contains(inContent) {
+            NSCursor.arrow.set()
+        } else {
+            NSCursor.openHand.set()
+        }
+    }
+
+    /// The same decision for a point in screen coordinates, for callers with no
+    /// hover event — presentation, mainly. The panel can appear under a cursor
+    /// that never moves, and a click-through panel that swallows nothing is
+    /// right while one that swallows everything is the bug this exists to fix.
+    func updateMouseArming(atScreenPoint point: NSPoint) {
+        updateMouseArming(atContentPoint: host.convert(point, from: nil))
+    }
+
+    /// The same decision, without touching the cursor: for a caller that is not a
+    /// hover, where forcing a cursor under a stationary pointer would be noise.
+    private func arm(atContentPoint point: NSPoint) {
+        guard let inContent = armingPoint(forContentPoint: point) else {
+            armMouseEvents(false)
+            return
+        }
+        armMouseEvents(isInteractive(inContent))
+    }
+
+    private func armingPoint(forContentPoint point: NSPoint) -> NSPoint? {
+        guard contentBounds.height > 0 else { return nil }
+        return contentView?.convert(point, from: host)
+    }
+
+    private func isInteractive(_ point: NSPoint) -> Bool {
+        let slack = Self.armSlack
+        return dragRegion.insetBy(dx: -slack, dy: -slack).contains(point)
+            || resetTargetArea.insetBy(dx: -slack, dy: -slack).contains(point)
+            || (resultArea?.insetBy(dx: -slack, dy: -slack).contains(point) ?? false)
+    }
+
+    /// Hover is the fast path; this is the guarantee behind it.
+    ///
+    /// A tracking area reporting into a window that is itself click-through is
+    /// the one behaviour in here that no unit test can prove — the same thing
+    /// `OverlayWindow` relies on, and if it ever stopped holding, the toast's
+    /// controls would be unreachable rather than merely inconvenient. So the
+    /// arming is re-decided from the pointer a few times a second while the panel
+    /// is up. It costs a rectangle test, and it also covers a `mouseExited` that
+    /// never arrives, which would otherwise leave the panel armed with the cursor
+    /// somewhere else entirely.
+    private func startArmingTick() {
+        guard armingTimer == nil else { return }
+        let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                guard self.isVisible else { self.armMouseEvents(false); return }
+                self.arm(atContentPoint: self.host.convert(NSEvent.mouseLocation, from: nil))
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        armingTimer = timer
+    }
+
+    private func armMouseEvents(_ interactive: Bool) {
+        guard mouseArmed != interactive else { return }
+        mouseArmed = interactive
+        ignoresMouseEvents = !interactive
     }
 
     override var canBecomeKey: Bool { false }
@@ -475,6 +708,17 @@ final class DictationToastWindow: NSPanel {
     var resultTextForTests: String { resultTextView.string }
     var resultFontSizeForTests: CGFloat { resultTextView.font?.pointSize ?? 0 }
     var resultScrollFrameForTests: NSRect { resultScrollView.convert(resultScrollView.bounds, to: contentView) }
+    /// How tall the result text actually is, against the height it is shown in.
+    /// Equal heights mean the "scrollable result" is a clipped one.
+    var resultDocumentHeightForTests: CGFloat { resultTextView.frame.height }
+    var resultClipHeightForTests: CGFloat { resultScrollView.contentView.bounds.height }
+    var resultScrollableForTests: Bool {
+        resultDocumentHeightForTests > resultClipHeightForTests + 0.5
+    }
+    var resultSelectableForTests: Bool { resultTextView.isSelectable }
+    /// The result area in content coordinates, or nil when no result is shown.
+    var resultAreaForTests: NSRect? { resultArea }
+    var resetTargetAreaForTests: NSRect { resetTargetArea }
     private(set) var resetCallbackCountForTests = 0
 #endif
 
@@ -509,7 +753,6 @@ final class DictationToastWindow: NSPanel {
         spinner.stopAnimation(nil)
         spinner.isHidden = true
         resultTextView.string = resultText
-        resultTextView.scrollToBeginningOfDocument(nil)
         applyTextStyle()
         resultScrollView.isHidden = false
         setAccessibilityLabel(String(localized: "Dictation result"))
@@ -542,7 +785,22 @@ final class DictationToastWindow: NSPanel {
         // Resolve the fixed hierarchy before display. This avoids a one-frame
         // stale layout on macOS 27 and keeps production geometry deterministic.
         contentView?.layoutSubtreeIfNeeded()
+        if isShowingResult {
+            // The document has to outgrow its clip view, or "long results scroll"
+            // is a promise the layout never keeps and the tail of a long
+            // dictation is simply not on screen. Measured here rather than in
+            // `show(resultText:)` because the wrap width is only known once the
+            // panel has been sized and laid out.
+            resultTextView.sizeToFit()
+            resultTextView.scrollToBeginningOfDocument(nil)
+        }
         display()
+        // A result changes which parts of the bubble are clickable, so the
+        // arming is re-decided for wherever the pointer happens to be — a panel
+        // that keeps the resting click-through state after growing a text area
+        // would leave the result unselectable until the next hover.
+        updateMouseArming(atScreenPoint: NSEvent.mouseLocation)
+        startArmingTick()
         // `isVisible` can remain true after AppKit has accepted an order request
         // that the window server dropped during launch. Always re-order the panel
         // when its content changes so the ready state is visible over the current
@@ -622,6 +880,14 @@ final class DictationToastWindow: NSPanel {
         waveform.stopAnimating()
         spinner.stopAnimation(nil)
         alphaValue = 1
+        // Back to resting. An ordered-out panel keeps whatever
+        // `ignoresMouseEvents` it was dismissed with, and a hidden panel that is
+        // still armed swallows the first click after it comes back. The tick goes
+        // with it: it exists to answer for a visible panel.
+        armMouseEvents(false)
+        armingTimer?.invalidate()
+        armingTimer = nil
+        textGestureInFlight = false
         orderOut(nil)
     }
 
@@ -629,5 +895,11 @@ final class DictationToastWindow: NSPanel {
         presentationGeneration += 1
         autoDismissTask?.cancel()
         autoDismissTask = nil
+    }
+
+    deinit {
+        // The tick is only needed while the panel is on screen, and it holds a
+        // closure that could otherwise outlive the window it is asking about.
+        armingTimer?.invalidate()
     }
 }

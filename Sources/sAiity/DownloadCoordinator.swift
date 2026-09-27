@@ -140,6 +140,12 @@ enum AssetID {
         chunkMs < NemotronEngine.chunkMs ? "asr.nemotron.fast" : "asr.nemotron"
     }
     static let parakeetEou = "asr.parakeetEou"
+    /// The dictation recognizer's Whisper models. Built from the choice rather
+    /// than spelled out twice, so the registry row and the engine's own
+    /// bookkeeping cannot end up naming the same files differently.
+    static func whisper(_ choice: WhisperDictationBackend.ModelChoice) -> String {
+        "asr.whisper.\(choice.rawValue)"
+    }
     static let madlad = "mt.madlad"
     static let hyMT2 = "mt.hymt2.1.8b.q4"
     static func llm(file: String) -> String { "mt.llm.\(file)" }

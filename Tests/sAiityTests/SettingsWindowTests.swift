@@ -159,7 +159,8 @@ import Testing
     func dictationProfilesApplyWithoutChangingCaptionEngine() {
         let defaults = UserDefaults.standard
         let keys = ["dictationRecognizer", "dictationStreamingEngine", "nemotronChunkMs",
-                    "dictationCleanupEnabled", "whisperDictationLocale", "asrEngine",
+                    "dictationNemotronChunkMs", "asrEngine",
+                    "dictationCleanupEnabled", "whisperDictationLocale",
                     "translateTo", "translateDictation", CaptionStyle.key]
         let snapshot = keys.map { ($0, defaults.object(forKey: $0)) }
         defer {
@@ -173,6 +174,7 @@ import Testing
         defaults.removeObject(forKey: "dictationRecognizer")
         defaults.removeObject(forKey: "dictationStreamingEngine")
         defaults.removeObject(forKey: "nemotronChunkMs")
+        defaults.removeObject(forKey: "dictationNemotronChunkMs")
         defaults.removeObject(forKey: "dictationCleanupEnabled")
         defaults.removeObject(forKey: "whisperDictationLocale")
 
@@ -183,7 +185,7 @@ import Testing
         state.dictationProfile = .fast
         #expect(state.dictationRecognizer == .streaming)
         #expect(defaults.string(forKey: "dictationStreamingEngine") == ASREngine.nemotron.rawValue)
-        #expect(state.nemotronTier == 1120)
+        #expect(state.dictationNemotronTier == 1120)
         #expect(!state.dictationCleanupEnabled)
 
         state.dictationProfile = .accurate
@@ -191,6 +193,131 @@ import Testing
         #expect(WhisperDictationBackend.locale == "auto")
         #expect(state.dictationCleanupEnabled == cleanupReady)
         #expect(ASREngine.selected != .parakeetEou)
+    }
+
+    @Test("a dictation profile never touches the caption tier or restarts captions")
+    func dictationProfileDoesNotChangeCaptionEngine() {
+        let defaults = UserDefaults.standard
+        let keys = ["dictationRecognizer", "dictationStreamingEngine", "nemotronChunkMs",
+                    "dictationNemotronChunkMs", "asrEngine", "dictationCleanupEnabled",
+                    "whisperDictationLocale", CaptionStyle.key]
+        let snapshot = keys.map { ($0, defaults.object(forKey: $0)) }
+        defer {
+            snapshot.forEach { key, value in
+                if let value { defaults.set(value, forKey: key) }
+                else { defaults.removeObject(forKey: key) }
+            }
+        }
+        defaults.set(ASREngine.nemotron.rawValue, forKey: "asrEngine")
+        defaults.set(NemotronEngine.chunkMs, forKey: "nemotronChunkMs")
+        defaults.removeObject(forKey: "dictationNemotronChunkMs")
+        defaults.removeObject(forKey: "dictationRecognizer")
+        defaults.removeObject(forKey: "dictationStreamingEngine")
+        defaults.removeObject(forKey: "dictationCleanupEnabled")
+        defaults.removeObject(forKey: "whisperDictationLocale")
+
+        var engineChanges = 0
+        var dictationChanges = 0
+        let state = AppState()
+        // Observers go in after construction: `AppState.init` reconciles stored
+        // settings and may legitimately post an engine change of its own, which
+        // is not what this test is about.
+        let engineToken = NotificationCenter.default.addObserver(
+            forName: .saiityEngineChanged, object: nil, queue: .main) { _ in
+                engineChanges += 1
+            }
+        let dictationToken = NotificationCenter.default.addObserver(
+            forName: .saiityDictationSettingChanged, object: nil, queue: .main) { _ in
+                dictationChanges += 1
+            }
+        defer {
+            NotificationCenter.default.removeObserver(engineToken)
+            NotificationCenter.default.removeObserver(dictationToken)
+        }
+
+        let captionTierBefore = state.nemotronTier
+        #expect(captionTierBefore == NemotronEngine.chunkMs)
+
+        // Fast is the profile that used to rewrite the shared caption key.
+        state.dictationProfile = .fast
+        #expect(state.dictationNemotronTier == 1120)
+        #expect(defaults.integer(forKey: "nemotronChunkMs") == captionTierBefore)
+        #expect(state.nemotronTier == captionTierBefore)
+        #expect(NemotronEngine.selectedChunkMs == captionTierBefore)
+        // One dictation refresh, and no engine change at all: an
+        // `saiityEngineChanged` here is what stops and rebuilds a live caption
+        // session's backend.
+        #expect(engineChanges == 0)
+        #expect(dictationChanges >= 1)
+
+        state.dictationProfile = .balanced
+        #expect(state.dictationNemotronTier == NemotronEngine.chunkMs)
+        #expect(state.nemotronTier == captionTierBefore)
+        #expect(engineChanges == 0)
+    }
+
+    @Test("dictation's tier is its own preference and follows captions only until it chooses")
+    func dictationTierIsIndependentOfCaptionTier() {
+        let defaults = UserDefaults.standard
+        let keys = [NemotronEngine.captionTierKey, NemotronEngine.dictationTierKey]
+        let snapshot = keys.map { ($0, defaults.object(forKey: $0)) }
+        defer {
+            snapshot.forEach { key, value in
+                if let value { defaults.set(value, forKey: key) }
+                else { defaults.removeObject(forKey: key) }
+            }
+        }
+
+        // Nothing chosen anywhere: both surfaces read the default tier.
+        defaults.removeObject(forKey: NemotronEngine.captionTierKey)
+        defaults.removeObject(forKey: NemotronEngine.dictationTierKey)
+        #expect(NemotronEngine.selectedChunkMs == NemotronEngine.chunkMs)
+        #expect(NemotronEngine.dictationSelectedChunkMs == NemotronEngine.chunkMs)
+        #expect(!NemotronEngine.hasExplicitDictationChunkSelection)
+
+        // A caption choice is inherited by dictation, and counts as an explicit
+        // pin — exactly the behaviour the shared key used to provide.
+        defaults.set(1120, forKey: NemotronEngine.captionTierKey)
+        #expect(NemotronEngine.dictationSelectedChunkMs == 1120)
+        #expect(NemotronEngine.hasExplicitDictationChunkSelection)
+
+        // Dictation's own choice then wins and the caption tier is left alone.
+        NemotronEngine.dictationSelectedChunkMs = NemotronEngine.chunkMs
+        #expect(defaults.integer(forKey: NemotronEngine.dictationTierKey) == NemotronEngine.chunkMs)
+        #expect(defaults.integer(forKey: NemotronEngine.captionTierKey) == 1120)
+        #expect(NemotronEngine.selectedChunkMs == 1120)
+        #expect(NemotronEngine.dictationSelectedChunkMs == NemotronEngine.chunkMs)
+
+        // A tier that is not a real one is refused rather than persisted, so a
+        // later read cannot resolve a download against a 404 URL.
+        NemotronEngine.dictationSelectedChunkMs = 7
+        #expect(NemotronEngine.dictationSelectedChunkMs == NemotronEngine.chunkMs)
+    }
+
+    @Test("a Nemotron tier either surface names counts as in use")
+    func nemotronTierInUseCoversBothSurfaces() {
+        let defaults = UserDefaults.standard
+        let keys = [NemotronEngine.captionTierKey, NemotronEngine.dictationTierKey,
+                    "asrEngine", "dictationStreamingEngine", "dictationRecognizer"]
+        let snapshot = keys.map { ($0, defaults.object(forKey: $0)) }
+        defer {
+            snapshot.forEach { key, value in
+                if let value { defaults.set(value, forKey: key) }
+                else { defaults.removeObject(forKey: key) }
+            }
+        }
+        defaults.set(ASREngine.nemotron.rawValue, forKey: "asrEngine")
+        defaults.set(NemotronEngine.chunkMs, forKey: NemotronEngine.captionTierKey)
+        defaults.set(ASREngine.nemotron.rawValue, forKey: "dictationStreamingEngine")
+        defaults.set(DictationRecognizer.streaming.rawValue, forKey: "dictationRecognizer")
+        defaults.set(1120, forKey: NemotronEngine.dictationTierKey)
+
+        let inUse = AssetUse.whenNemotronTier(chunkMs: 1120)
+        #expect(inUse.isSelected, "the tier dictation runs is not reported as in use")
+        // The tier only the caption side names, too.
+        #expect(AssetUse.whenNemotronTier(chunkMs: NemotronEngine.chunkMs).isSelected)
+        // A third tier that neither names is free to delete.
+        #expect(!AssetUse.whenNemotronTier(chunkMs: 480).isSelected)
     }
 
     @Test("dictation translation is opt-in and persisted")

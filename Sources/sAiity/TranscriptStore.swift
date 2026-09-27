@@ -13,6 +13,39 @@ private struct TranscriptFileStamp: Equatable {
     let size: Int
 }
 
+#if SAIITY_TEST_HOOKS
+/// A disposable library for one test, addressed per task.
+///
+/// The retention policy deletes real directories and takes its age from each
+/// session's own start date, so a test that wants to prove the policy deletes
+/// an old session has to *make* an old one — which against the real library
+/// means calling the sweep on a developer's or a user's actual transcripts. That
+/// is not a risk a test may take: the oldest thing in someone's library is
+/// usually the only record of a conversation nobody else kept.
+///
+/// A task local rather than a stored property, because several suites write
+/// transcripts and they run in parallel: a process-wide switch hands whichever
+/// suite set it last the *other* suite's directory, and the failures that
+/// produces look like transcript corruption.
+enum TranscriptTestLibrary {
+    private static let scopedDirectory = TaskLocal<URL?>(wrappedValue: nil)
+
+    /// The library this task is using, or nil for the real one.
+    static var sessionsDir: URL? { scopedDirectory.wrappedValue }
+
+    /// Create a throwaway library, run `body` against it, and remove it.
+    static func withTemporaryDirectory<T>(
+        _ body: (URL) async throws -> T) async throws -> T {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("saiity-transcript-tests-\(UUID().uuidString)",
+                                    isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        return try await scopedDirectory.withValue(dir) { try await body(dir) }
+    }
+}
+#endif
+
 /// Metadata decoding is cheap for a small library, but the settings window can
 /// ask for the same catalog repeatedly while a recording is being closed. Keep
 /// decoded `meta.json` values keyed by a file stamp so a forced refresh still
@@ -130,7 +163,22 @@ actor TranscriptStore {
                                             in: .userDomainMask)[0]
         return base.appendingPathComponent("de.aiity.saiity", isDirectory: true)
     }
-    static var sessionsDir: URL { root.appendingPathComponent("Sessions", isDirectory: true) }
+
+    #if SAIITY_TEST_HOOKS
+    /// Process-wide variant of `TranscriptTestLibrary.sessionsDir`, for a test
+    /// that cannot wrap its work in the task-local form. A stored switch shared
+    /// by suites that run in parallel is a race, so prefer the task local; this
+    /// exists because the quiet-shutdown suite needs the switch to cover work it
+    /// dispatches itself.
+    nonisolated(unsafe) static var sessionsDirOverride: URL?
+    #endif
+    static var sessionsDir: URL {
+        #if SAIITY_TEST_HOOKS
+        if let scoped = TranscriptTestLibrary.sessionsDir { return scoped }
+        if let processWide = sessionsDirOverride { return processWide }
+        #endif
+        return root.appendingPathComponent("Sessions", isDirectory: true)
+    }
 
     private var handle: FileHandle?
     private var dir: URL?
@@ -139,6 +187,14 @@ actor TranscriptStore {
 
     var isRecording: Bool { handle != nil }
     var currentLineCount: Int { index }
+
+    #if SAIITY_TEST_HOOKS
+    /// The directory of the session being written, straight from the store. A
+    /// test must not reach this by listing `sessionsDir` and taking `[0]` — that
+    /// is a different answer the moment anything else writes into the same
+    /// directory.
+    var currentSessionRefForTests: URL? { dir }
+    #endif
 
     // MARK: - Lifecycle
 
@@ -359,6 +415,17 @@ actor TranscriptStore {
         return list().filter { $0.meta.startedAt < cutoff }
     }
 
+    /// Whether the policy would take this session, on its own dates.
+    ///
+    /// The predicate `sessionsOlderThan` applies, named once so a caller
+    /// checking one session — the settings page counting what "Delete after 30
+    /// days" means for the session in front of the user — cannot disagree with
+    /// the sweep about it.
+    nonisolated static func isExpired(_ session: SessionRef, days: Int) -> Bool {
+        guard days > 0 else { return false }
+        return session.meta.startedAt < Date().addingTimeInterval(-Double(days) * 86_400)
+    }
+
     /// Deletion is real: the directory goes, no tombstone, nothing else refers
     /// to it.
     nonisolated static func delete(_ session: SessionRef) {
@@ -377,73 +444,18 @@ actor TranscriptStore {
     }
 }
 
-/// The session list, remembered.
+/// Broadcasts "the set of stored sessions changed".
 ///
-/// `TranscriptStore.list()` is one `contentsOfDirectory` plus a read and a JSON
-/// decode per session, and the status menu was rebuilding from it on every
-/// status change — which during a model download means several times a second,
-/// synchronously, on the main actor, for as many sessions as the user has ever
-/// recorded.
-///
-/// The cache slots are `Optional` rather than counts on purpose: `Sessions/`
-/// does not exist until the first recording and `list()` returns `[]` for a
-/// missing directory, so a cache that read "empty" as "not computed yet" would
-/// re-scan forever — on exactly the fresh install where the flood is worst.
-///
-/// Invalidation only ever assigns nil; it never re-scans. Two of the four
-/// invalidation points sit inside the teardown that `stopAsync()` awaits, and a
-/// directory scan there would be trading one stall for another.
-///
-/// Not invalidated on `append`: it rewrites `meta.json` only every twentieth
-/// line, so the in-progress session's line count in this list was already
-/// approximate before the cache existed. The live counter the user actually
-/// reads is `recordingLine`, which is computed fresh on every rebuild.
+/// This used to also be a memo of `TranscriptStore.list()`. The menu no longer
+/// lists sessions, so nothing reads the cache and the only work left here is
+/// the notification — which matters, because the transcripts page and the
+/// retention sweep both listen for it. The name is kept because it reads
+/// correctly at every call site and because renaming it would churn four files
+/// to say the same thing.
 @MainActor
 enum SessionCatalog {
-    /// A menu row with its title already rendered, so a rebuild is object
-    /// construction and nothing else — no I/O, no DateFormatter.
-    struct Row: Sendable { let id: String; let title: String }
-
-    private static var cachedSessions: [SessionRef]?
-    private static var cachedRows: [Row]?
-    private static var formatter: DateFormatter?
-
-    static func sessions() -> [SessionRef] {
-        if let cachedSessions { return cachedSessions }
-        let s = TranscriptStore.list()
-        cachedSessions = s
-        return s
-    }
-
-    static func rows(limit: Int) -> [Row] {
-        if let cachedRows { return cachedRows }
-        let df = formatter ?? {
-            let f = DateFormatter()
-            f.dateStyle = .medium
-            f.timeStyle = .short
-            formatter = f
-            return f
-        }()
-        let r = sessions().prefix(limit).map { s -> Row in
-            let mins = Int((s.meta.endedAt ?? s.meta.startedAt)
-                .timeIntervalSince(s.meta.startedAt) / 60)
-            return Row(id: s.id,
-                       title: String(localized: "\(df.string(from: s.meta.startedAt)) · \(s.meta.lineCount) lines · \(mins) min"))
-        }
-        cachedRows = r
-        return r
-    }
-
     /// Call after anything that adds, removes or closes a session.
     static func invalidate() {
-        cachedSessions = nil
-        cachedRows = nil
         NotificationCenter.default.post(name: .saiityTranscriptLibraryChanged, object: nil)
-    }
-
-    /// The rendered titles are locale-dependent; the scan behind them is not.
-    static func invalidateRendering() {
-        cachedRows = nil
-        formatter = nil
     }
 }

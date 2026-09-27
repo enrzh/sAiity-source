@@ -98,6 +98,10 @@ final class AccessibleIconButton: NSImageView {
     /// controls that otherwise rest at alpha 0 until a literal mouse hover.
     var onAccessibilityFocus: (() -> Void)?
 
+    /// The hand-rolled ring. AppKit draws its own for a normal window; a
+    /// `.nonactivatingPanel` gets nothing.
+    private var keyboardFocusRing: CAShapeLayer?
+
     override func accessibilityPerformPress() -> Bool {
         guard let onPress else { return false }
         onPress()
@@ -107,6 +111,49 @@ final class AccessibleIconButton: NSImageView {
     override func setAccessibilityFocused(_ flag: Bool) {
         super.setAccessibilityFocused(flag)
         if flag { onAccessibilityFocus?() }
+    }
+
+    // The bubble window is a `.nonactivatingPanel`, so Full Keyboard Access
+    // never draws a focus ring inside it. Without an explicit ring the controls
+    // are reachable and completely invisible while focused — the same "looks
+    // inert" state ShortcutRecorder had to fix for itself. Drawn on
+    // `viewDidMoveToWindow` and on focus, because AppKit's own ring machinery
+    // never runs for a non-activating panel.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateKeyboardFocusRing()
+    }
+
+    // `becomeFirstResponder`, not `focus(withSender:)`: AppKit removed the
+    // latter from NSView, and this is the call a non-activating panel's full
+    // keyboard access actually makes.
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        updateKeyboardFocusRing()
+        return accepted
+    }
+
+    private var keyboardFocused: Bool { window?.firstResponder === self }
+
+    private func updateKeyboardFocusRing() {
+        guard keyboardFocused else {
+            keyboardFocusRing?.removeFromSuperlayer()
+            keyboardFocusRing = nil
+            return
+        }
+        if keyboardFocusRing != nil { return }
+        let ring = NSBezierPath(roundedRect: bounds.insetBy(dx: -3, dy: -3),
+                                 xRadius: 7, yRadius: 7)
+        let shape = CAShapeLayer()
+        shape.path = ring.cgPath
+        shape.fillColor = NSColor.clear.cgColor
+        shape.strokeColor = NSColor.keyboardFocusIndicatorColor.cgColor
+        shape.lineWidth = 3
+        shape.frame = bounds
+        wantsLayer = true
+        layer?.addSublayer(shape)
+        keyboardFocusRing = shape
+        setAccessibilityFocused(true)
     }
 }
 
@@ -1173,15 +1220,6 @@ final class OverlayWindow: NSPanel {
         presentIfNeeded()
     }
 
-    /// Replace one completed row without disturbing its translation or the
-    /// surrounding history. The caller keeps the source text for fallback.
-    func replaceOriginal(_ text: String, forSentenceID sentenceID: Int) {
-        guard !text.isEmpty else { return }
-        history.upsertOriginal(text, sentenceID: sentenceID)
-        renderHistory(changedSentenceID: sentenceID, immediate: true)
-        presentIfNeeded()
-    }
-
     /// Shown under the original line.
     ///
     /// While translation is switched on the row keeps its height even when it is
@@ -1209,11 +1247,6 @@ final class OverlayWindow: NSPanel {
 
     /// The source moved on while this translation stayed. Same dimming as
     /// `showTranslation(stale: true)` without re-setting the text.
-    func markTranslationStale() {
-        guard let id = history.entries.last?.sentenceID else { return }
-        markTranslationStale(forSentenceID: id)
-    }
-
     func markTranslationStale(forSentenceID sentenceID: Int) {
         history.markTranslationStale(forSentenceID: sentenceID)
         renderHistory(changedSentenceID: sentenceID, immediate: true)
@@ -1359,13 +1392,11 @@ final class OverlayWindow: NSPanel {
         layoutHistory()
         // Let AppKit finish the stack/document layout outside the caption
         // callback. Explicit layout calls can recurse on macOS 27 while the
-        // window server is already laying out.
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.scrollToLatest()
-        }
-        // New captions should keep the newest row in view. The dispatch also
-        // runs after AppKit has updated the document height.
+        // window server is already laying out. One dispatch, one scroll: the
+        // two separate blocks that used to do this ran twice per caption, and
+        // the second was already guarded by `scrollToLatestPending` — so the
+        // first one, the only one that ran on every pass, had nothing to
+        // deduplicate against.
         guard !scrollToLatestPending else { return }
         scrollToLatestPending = true
         DispatchQueue.main.async { [weak self] in

@@ -104,6 +104,35 @@ struct CaptionStyleTests {
         #expect(long.pointSize >= 18)
     }
 
+    @Test("The fitted size is the largest that fits, not merely one that does")
+    func fittedFontPicksTheLargestFittingSize() {
+        let style = TextStyle.original
+        let text = String(repeating: "A long caption that needs to wrap. ", count: 20)
+        let chosen = style.fittedFont(for: text, width: 120, minimumSize: 18, maxLines: 3)
+
+        // The search is a binary search, so the interesting property is not "it
+        // returns something plausible" but "the next size up does not fit" — a
+        // search that converged early would still pass the assertions above.
+        let oneBigger = NSFont.systemFont(ofSize: chosen.pointSize + 1, weight: .init(style.weight))
+        let rect = (text as NSString).boundingRect(
+            with: NSSize(width: 120, height: CGFloat.greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: oneBigger])
+        let lineHeight = oneBigger.ascender - oneBigger.descender + oneBigger.leading
+        let lines = max(1, Int(ceil(rect.height / max(1, lineHeight))))
+        #expect(lines > 3, "a larger size fits, so \(chosen.pointSize) was not the largest")
+    }
+
+    @Test("The fitted size never drops below the configured minimum")
+    func fittedFontRespectsTheMinimum() {
+        var style = TextStyle.original
+        style.fontSize = 22
+        let fitted = style.fittedFont(
+            for: String(repeating: "unbreakable ", count: 400),
+            width: 40, minimumSize: 30, maxLines: 1)
+        #expect(fitted.pointSize >= 30)
+    }
+
     @Test("Font growth has a small settling threshold")
     func fontGrowthIsStabilized() {
         let style = TextStyle.original

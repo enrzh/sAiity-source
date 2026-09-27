@@ -68,7 +68,15 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
     /// separate, much shorter signal on level rather than on exact zero, and it
     /// is what lets a finished sentence be translated the moment the speaker
     /// stops instead of waiting out a time budget.
-    var onSpeechGap: (@Sendable (Range<Int>) -> Void)?
+    ///
+    /// Set from the main actor, read on the capture queue, so the accessors take
+    /// the same lock as the rest of the shared state — a closure is two words
+    /// wide and a torn one is a jump through a stale context.
+    var onSpeechGap: (@Sendable (Range<Int>) -> Void)? {
+        get { lock.withLock { speechGapHandler } }
+        set { lock.withLock { speechGapHandler = newValue } }
+    }
+    private var speechGapHandler: (@Sendable (Range<Int>) -> Void)?
 
     private var stream: SCStream?
     private var converter: AVAudioConverter?
@@ -85,6 +93,9 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
 
     private let lock = NSLock()
     private var lastBufferAt = Date.distantPast
+    /// Consecutive digital-silence frames. Capture queue and `stop()` both write
+    /// it, so it lives under `lock` like everything else the main actor can
+    /// reach.
     private var silentFrames = 0
     private var state: State = .silent
     private var watchdog: DispatchSourceTimer?
@@ -104,15 +115,13 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
     /// speaker leaves at a comma, and "Untertitel für alles, was der Mac
     /// abspielt, direkt auf dem Gerät." was split into three, each translated
     /// without the others.
-    private var gapDetector = SpeechGapDetector(holdFrames: 36_000)
-    /// Mirrors `SpeechGap.enabled`; cached because `classify` runs ~50×/s on
-    /// the capture queue.
-    private var gapEnabled = true
-    /// Quietest RMS seen in the current diagnostic window, and its length.
-    private var rmsFloor: Float = .greatestFiniteMagnitude
-    private var rmsWindowFrames = 0
-    /// Pauses that actually ended a sentence this session. Capture-queue only.
-    private var gapFires = 0
+    ///
+    /// Behind `SpeechGapGate` rather than held here directly, because the
+    /// Pause-length slider reaches this state from the main actor while
+    /// `classify` runs 50×/s on the capture queue, and the gate also owns the
+    /// enabled flag it mirrors from `SpeechGap.enabled` plus the diagnostics
+    /// window and the per-session fire count.
+    private let gapGate = SpeechGapGate(holdFrames: 36_000)
 
     /// Apply the microphone setting to a session that is already running.
     ///
@@ -172,13 +181,13 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
     /// Re-read the speech-gap setting. Called on start, and again whenever the
     /// user moves the slider, so a change lands on the running session instead
     /// of waiting for the next one.
+    ///
+    /// One call, one lock: the flag, the new hold and the reset that discards
+    /// the quiet banked under the old one cannot be seen apart by a capture
+    /// buffer arriving between them.
     func applySpeechGapSettings() {
-        gapEnabled = SpeechGap.enabled
-        gapDetector.holdFrames = SpeechGap.holdFrames(at: Self.streamSampleRate)
-        // Forget both the accumulated quiet — a shortened threshold must not
-        // fire immediately on silence banked under the longer one — and the
-        // learned noise floor, since a new session may be different material.
-        gapDetector.reset()
+        gapGate.apply(enabled: SpeechGap.enabled,
+                      holdFrames: SpeechGap.holdFrames(at: Self.streamSampleRate))
     }
 
     /// SCStream delivers 48 kHz; the gap threshold is measured against the
@@ -297,7 +306,7 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
         }
 
         lock.withLock { lastBufferAt = Date() }
-        gapFires = 0
+        gapGate.reset()
         startWatchdog()
     }
 
@@ -318,6 +327,10 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
             silentFrames = 0
             state = .silent
         }
+        // A finished session's floor, fire count and accumulated quiet are not the
+        // next session's. The stream is already stopped, so no buffer can be in
+        // flight to race this.
+        gapGate.reset()
         // No userInfo = "the session ended, take the readout down".
         DispatchQueue.main.async {
             NotificationCenter.default.post(name: Self.gapDiagnostics, object: nil)
@@ -410,25 +423,36 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
     /// (vDSP over 960 frames) and exact: idle capture measures 0.0, not
     /// near-zero, so this cleanly separates "nothing is playing" from
     /// "something quiet is playing".
+    ///
+    /// Runs on the capture queue ~50×/s, so every field it touches is either
+    /// local to this call or under `lock`/`gapGate`. Each critical section ends
+    /// before the next one starts: `transition` takes `lock` itself, and
+    /// `onSpeechGap` and the diagnostics notification are fired with nothing
+    /// held, so a listener that calls back into capture cannot deadlock.
     private func classify(_ pcm: AVAudioPCMBuffer) {
         guard let ch = pcm.floatChannelData else { return }
+        let frames = Int(pcm.frameLength)
         var peak: Float = 0
         vDSP_maxmgv(ch[0], 1, &peak, vDSP_Length(pcm.frameLength))
 
-        if peak <= Self.silenceEpsilon {
-            silentFrames += Int(pcm.frameLength)
-            if silentFrames >= Self.silenceHoldFrames { transition(to: .silent) }
-        } else {
+        let desired: State? = lock.withLock {
+            if peak <= Self.silenceEpsilon {
+                silentFrames += frames
+                return silentFrames >= Self.silenceHoldFrames ? .silent : nil
+            }
             silentFrames = 0
-            transition(to: .audible)
+            return .audible
         }
+        if let desired { transition(to: desired) }
 
         // Speech gaps, measured independently of the digital-silence state above
         // — quiet is not the same as nothing, and only the former marks the end
         // of a sentence.
         var rms: Float = 0
         vDSP_rmsqv(ch[0], 1, &rms, vDSP_Length(pcm.frameLength))
-        guard gapEnabled else { return }
+        let reading = gapGate.consume(rms: rms, frames: frames,
+                                      sampleRate: Float(Self.streamSampleRate))
+
         // Diagnostics for "it only translates when I stop the video". The gap is
         // measured on the scoped source, so continuously scored material — a
         // film, most anime — can keep the RMS above the threshold through every
@@ -436,43 +460,56 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
         // floor actually reached says whether that is what is happening; it
         // feeds the Settings readout next to the Pause-length slider (always)
         // and the log (verbose builds), rather than leaving it to be guessed at.
-        rmsFloor = min(rmsFloor, rms)
-        rmsWindowFrames += Int(pcm.frameLength)
-        if rmsWindowFrames >= 48_000 * 5 {
-            let floor = rmsFloor
-            let th = gapDetector.currentThreshold
-            let fires = gapFires
+        if let sample = reading.diagnostics {
             if debug {
-                let db = floor > 0 ? 20 * log10(floor) : -.infinity
+                let db = sample.floor > 0 ? 20 * log10(sample.floor) : -.infinity
                 NSLog(String(format:
                     "sAiity gap: quietest RMS in 5s %.5f (%.1f dBFS), adaptive threshold %.5f (%.1f dBFS) — %@",
-                    floor, db, th, 20 * log10(th),
-                    floor < th ? "crosses" : "NEVER crosses"))
+                    sample.floor, db, sample.threshold, 20 * log10(sample.threshold),
+                    sample.floor < sample.threshold ? "crosses" : "NEVER crosses"))
             }
             DispatchQueue.main.async {
                 NotificationCenter.default.post(
                     name: Self.gapDiagnostics, object: nil,
-                    userInfo: ["floor": floor, "threshold": th, "fires": fires])
+                    userInfo: ["floor": sample.floor, "threshold": sample.threshold,
+                               "fires": sample.fires])
             }
-            rmsFloor = .greatestFiniteMagnitude
-            rmsWindowFrames = 0
         }
-        if let event = gapDetector.processEvent(rms: rms,
-                                                 frames: Int(pcm.frameLength),
-                                                 sampleRate: Float(Self.streamSampleRate)) {
-            switch event {
-            case .speechStarted(let range):
-                if debug { NSLog("sAiity speech: started samples=%@", "\(range)") }
-            case .gap(let range):
-                if debug {
-                    NSLog("sAiity gap: FIRED samples=%@ floor %.6f",
-                          "\(range)", gapDetector.noiseFloor)
-                }
-                gapFires += 1
-                onSpeechGap?(range)
+        if let range = reading.speechStarted {
+            if debug { NSLog("sAiity speech: started samples=%@", "\(range)") }
+        }
+        if let range = reading.gap {
+            if debug {
+                NSLog("sAiity gap: FIRED samples=%@ floor %.6f",
+                      "\(range)", reading.noiseFloor)
             }
+            onSpeechGap?(range)
         }
     }
+
+#if SAIITY_TEST_HOOKS
+    /// Cached because a stress test drives this tens of thousands of times.
+    private static let testFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                                  sampleRate: SystemAudioCapture.streamSampleRate,
+                                                  channels: 1, interleaved: false)
+
+    /// Drive `classify` the way the capture callback does, from a buffer built
+    /// here — ScreenCaptureKit cannot be started from a unit test. A constant
+    /// level makes peak and RMS the same value, so one level exercises both the
+    /// digital-silence and the speech-gap half.
+    func classifyForTests(level: Float, frames: Int = 960) {
+        guard let format = Self.testFormat,
+              let buffer = AVAudioPCMBuffer(pcmFormat: format,
+                                            frameCapacity: AVAudioFrameCount(frames)),
+              let samples = buffer.floatChannelData else { return }
+        buffer.frameLength = AVAudioFrameCount(frames)
+        samples[0].update(repeating: level, count: frames)
+        classify(buffer)
+    }
+
+    /// Pauses that closed a sentence since the last `reset`.
+    var gapFireCountForTests: Int { gapGate.fireCount }
+#endif
 
     /// If delivered audio-seconds lag captured audio-seconds, the resampler is
     /// eating audio and the analyzer's clock runs slow — which shows up as

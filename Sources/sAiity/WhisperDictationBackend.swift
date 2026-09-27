@@ -58,6 +58,26 @@ actor WhisperModelCache<Key: Hashable & Sendable, Resource: WhisperModelResource
         await entry.resource.unload()
     }
 
+    /// `invalidate` without the await, for callers that cannot suspend — a
+    /// synchronous file removal, for instance.
+    ///
+    /// Same guarantee: an entry with active users is flagged so the last
+    /// `release` unloads it, and an idle one is unloaded on the cache actor
+    /// while the caller carries on. Nothing is left mapped that a new caller
+    /// could reach.
+    func forget(_ key: Key) {
+        evictionTasks.removeValue(forKey: key)?.cancel()
+        guard var entry = entries[key] else { return }
+        if entry.activeUsers > 0 {
+            entry.invalidated = true
+            entries[key] = entry
+            return
+        }
+        entries.removeValue(forKey: key)
+        let resource = entry.resource
+        Task { await resource.unload() }
+    }
+
 #if SAIITY_TEST_HOOKS
     var residentCountForTests: Int { entries.count }
 #endif
@@ -188,6 +208,22 @@ struct WhisperDictationBackend {
         var description: String { rawValue }
         var folderName: String { "whisper-\(identifier)" }
         var readinessMarkerName: String { ".saiity-ready" }
+        /// The same two words the dictation picker shows, from the catalog.
+        var displayName: String {
+            switch self {
+            case .base: String(localized: "Base")
+            case .small: String(localized: "Small")
+            }
+        }
+        /// Approximate download size, for the Models page. The measured figure
+        /// replaces it the moment the bytes are on disk; this only ever
+        /// previews the cost of pressing Download.
+        var advertisedBytes: Int64 {
+            switch self {
+            case .base: 145 * 1_048_576
+            case .small: 466 * 1_048_576
+            }
+        }
     }
     typealias Download = @Sendable (String, URL, @escaping @Sendable (Progress) -> Void) async throws -> URL
     typealias Prepare = @Sendable (String, URL) async throws -> Void
@@ -236,7 +272,7 @@ struct WhisperDictationBackend {
     private static func folder(_ c: ModelChoice, _ root: URL) -> URL { root.appendingPathComponent(c.folderName, isDirectory: true) }
     private static func required(_ c: ModelChoice, _ root: URL) -> Bool {
         let f = folder(c, root)
-        return ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"].allSatisfy { name in
+        return ModelChoice.requiredBundles.allSatisfy { name in
             let url = f.appendingPathComponent(name)
             guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]),
                   values.isDirectory == true, values.isSymbolicLink != true else { return false }
@@ -249,6 +285,26 @@ struct WhisperDictationBackend {
         }
     }
     static func modelFolder(for c: ModelChoice, under root: URL = ModelRegistry.root) -> URL { folder(c, root) }
+
+    /// Where an interrupted transfer of this model's bytes lives.
+    ///
+    /// A sibling of the model directory with its own extension, so it can never
+    /// be confused for an install: the registry measures it as staging, and
+    /// `prepareModelUnlocked` hands it to the downloader as the cache root.
+    static func stagingDirectory(for c: ModelChoice, under root: URL = ModelRegistry.root) -> URL {
+        root.appendingPathComponent("\(c.folderName).partial", isDirectory: true)
+    }
+
+    /// The bytes are complete on disk, whether or not they have ever been
+    /// loaded. Deliberately weaker than `isReady`, which also requires the
+    /// marker written after a successful load: the Models page's Download
+    /// fetches without loading — a 466 MB load is not what a Download button is
+    /// for — so requiring the marker there would report a finished download as
+    /// partial and offer Resume against bytes that are already complete.
+    static func isDownloaded(_ c: ModelChoice, under root: URL = ModelRegistry.root) -> Bool {
+        required(c, root)
+    }
+
     static func isReady(_ c: ModelChoice, under root: URL = ModelRegistry.root) -> Bool {
         let modelFolder = folder(c, root)
         // The marker is the cheap, authoritative readiness signal. Checking it
@@ -272,44 +328,88 @@ struct WhisperDictationBackend {
                 try Task.checkCancellation()
                 try Data().write(to: folder.appendingPathComponent(c.readinessMarkerName), options: .atomic)
             } catch is CancellationError {
+                // Only the loaded runtime goes. The model files and the
+                // staging directory both stay: a cancelled preparation is the
+                // user changing their mind, not evidence that the bytes on disk
+                // are bad, and the staging directory is what makes the next
+                // attempt cheap.
                 await Self.modelCache.invalidate(Self.cacheKey(c, root))
-                try? FileManager.default.removeItem(at: root.appendingPathComponent("\(c.folderName).partial"))
                 throw CancellationError()
             } catch {
+                // A model that does not load is presumed damaged, so its files
+                // go and the next attempt fetches them again — and does so
+                // cheaply, because the staging directory survived. The
+                // readiness marker goes with them: leaving it behind would let
+                // `isReady` answer from a marker for bytes that are no longer
+                // there.
                 await Self.modelCache.invalidate(Self.cacheKey(c, root))
                 try? FileManager.default.removeItem(at: Self.folder(c, root).appendingPathComponent(c.readinessMarkerName))
                 try? FileManager.default.removeItem(at: Self.folder(c, root))
-                try? FileManager.default.removeItem(at: root.appendingPathComponent("\(c.folderName).partial"))
                 throw error
             }
         }
     }
     private func prepareModelUnlocked(_ c: ModelChoice, _ root: URL, _ progress: @escaping @Sendable (Progress) -> Void) async throws {
-        if Self.required(c, root) { return }
-        let partial = root.appendingPathComponent("\(c.folderName).partial", isDirectory: true)
+        // `isDownloaded`, not `isReady`: the readiness marker is only written
+        // after a successful load, and a model that was downloaded and never
+        // loaded is not a model worth fetching again.
+        if Self.isDownloaded(c, under: root) { return }
+        let staging = Self.stagingDirectory(for: c, under: root)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        try? FileManager.default.removeItem(at: partial)
+        // The staging directory is deliberately left alone by every exit path
+        // here. It is the resume state: WhisperKit's Hub downloader writes each
+        // file to `<file>.incomplete` and moves it into place on completion, so
+        // a directory that already holds half a model is the cheapest possible
+        // starting point for the next attempt. Deleting it made every cancelled
+        // 466 MB fetch cost another 466 MB, and made the Models page's "Resume
+        // continues where it stopped" a lie — the only thing it resumed was the
+        // empty directory.
+        let downloaded = try await self.download(c.identifier, staging, progress)
+        try Task.checkCancellation()
+        try Self.install(downloaded, c, root)
+    }
+
+    /// Move a finished download into place without ever leaving the model
+    /// missing.
+    ///
+    /// The previous version deleted the model directory and *then* moved the
+    /// new one in. Anything that failed in between — a full disk, a permission
+    /// change, a cancellation delivered at the move — left the user with no
+    /// model at all, having paid for the transfer. Instead the old directory is
+    /// renamed out of the way first and renamed back if the new one cannot go
+    /// in, so the worst case is "nothing changed".
+    private static func install(_ downloaded: URL, _ c: ModelChoice, _ root: URL) throws {
+        let fm = FileManager.default
+        let final = folder(c, root)
+        let superseded = root.appendingPathComponent("\(c.folderName).superseded", isDirectory: true)
+        try? fm.removeItem(at: superseded)
+        let hadPrevious = fm.fileExists(atPath: final.path)
+        if hadPrevious { try fm.moveItem(at: final, to: superseded) }
         do {
-            let downloaded = try await self.download(c.identifier, partial, progress)
-            try Task.checkCancellation()
-            try? FileManager.default.removeItem(at: Self.folder(c, root))
-            try FileManager.default.moveItem(at: downloaded, to: Self.folder(c, root))
-            try? FileManager.default.removeItem(at: partial)
-        } catch is CancellationError {
-            try? FileManager.default.removeItem(at: partial)
-            throw CancellationError()
+            try fm.moveItem(at: downloaded, to: final)
         } catch {
-            try? FileManager.default.removeItem(at: partial)
-            try? FileManager.default.removeItem(at: Self.folder(c, root))
+            if hadPrevious { try? fm.moveItem(at: superseded, to: final) }
             throw error
         }
+        // The staging directory only outlives a successful install when the
+        // downloader put the model somewhere else under it (its Hub cache
+        // bookkeeping lives in `.cache`). Reclaim it either way.
+        try? fm.removeItem(at: stagingDirectory(for: c, under: root))
+        try? fm.removeItem(at: superseded)
     }
     func removeModel(_ c: ModelChoice, under root: URL? = nil) async throws {
         let root = root ?? self.root
         let mutex = await Self.mutexes.mutex(for: "\(root.path):\(c.identifier)")
         try await mutex.run {
             await Self.modelCache.invalidate(Self.cacheKey(c, root))
-            for url in [Self.folder(c, root), root.appendingPathComponent("\(c.folderName).partial")] {
+            // Damage recorded against these bytes described these bytes.
+            // Left behind, it would badge a model the user has just deleted —
+            // or one they re-fetched from the dictation page, which does not go
+            // through the registry's clear-on-success — as damaged forever.
+            LoadHealth.clear(AssetID.whisper(c))
+            for url in [Self.folder(c, root),
+                        Self.stagingDirectory(for: c, under: root),
+                        root.appendingPathComponent("\(c.folderName).superseded", isDirectory: true)] {
                 do {
                     try FileManager.default.removeItem(at: url)
                 } catch let error as CocoaError where error.code == .fileNoSuchFile {
@@ -317,6 +417,18 @@ struct WhisperDictationBackend {
                 }
             }
         }
+    }
+
+    /// Drop a loaded model without waiting for the unload.
+    ///
+    /// `ModelRegistry.remove` is synchronous — it has to be, because Settings
+    /// calls it from a button handler — and unloading CoreML models is not.
+    /// Awaiting here would mean leaving bytes mapped under a file the caller
+    /// has just deleted, so this forgets the entry and releases the resource on
+    /// the cache actor instead. A dictation already holding a lease keeps its
+    /// own reference and finishes; nothing new can pick the entry up.
+    static func forgetLoadedModel(_ c: ModelChoice, under root: URL = ModelRegistry.root) {
+        Task { await modelCache.forget(cacheKey(c, root)) }
     }
     func transcribe(samples: [[Float]], locale: Locale, model c: ModelChoice = model) async throws -> String { let o = try Self.decodingOptions(for: locale); let mutex = await Self.mutexes.mutex(for: "\(root.path):\(c.identifier)"); return try await mutex.run { try await self.transcribeHook(c.identifier, Self.folder(c, self.root), samples, o) } }
 
@@ -392,6 +504,58 @@ struct WhisperDictationBackend {
 
     private static func cacheKey(_ c: ModelChoice, _ root: URL) -> WhisperModelCacheKey {
         WhisperModelCacheKey(identifier: c.identifier, folderPath: folder(c, root).path)
+    }
+}
+
+extension WhisperDictationBackend.ModelChoice {
+    /// The three CoreML bundles a WhisperKit model is made of. One list, so the
+    /// registry's completion markers and the engine's own completeness check
+    /// cannot disagree about what a model is.
+    static let requiredBundles = [
+        "MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc",
+    ]
+
+    /// This model's row in the model registry.
+    ///
+    /// `recommended: false` deliberately. Whisper is the *dictation*
+    /// recognizer's alternative, not a better caption engine — the caption
+    /// Whisper was cut, and the Models page sorts recommended rows to the top of
+    /// each group, so claiming it would put a 466 MB dictation model above the
+    /// balanced Nemotron tier that is the right first download for captions.
+    var assetDescriptors: [ModelAsset] {
+        [ModelAsset(
+            id: AssetID.whisper(self),
+            family: .recognition,
+            // Composed from two existing catalog keys rather than one new one:
+            // the catalogue is maintained by hand, and a key added here would
+            // arrive untranslated in four languages. The interpolated form is
+            // also how it has to be written — `String(localized:)` takes no
+            // arguments after the key, so the placeholders have to be inside it
+            // for the extractor to find the "%@ · %@" entry.
+            title: String(localized: "\(String(localized: "Whisper model")) · \(displayName)"),
+            detail: String(localized: "Whisper dictation"),
+            recommended: false,
+            licence: "MIT · huggingface.co/argmaxinc/whisperkit-coreml",
+            advertisedBytes: advertisedBytes,
+            storage: .stagedDirectory(final: WhisperDictationBackend.modelFolder(for: self),
+                                      staging: WhisperDictationBackend.stagingDirectory(for: self),
+                                      markers: Self.requiredBundles),
+            removal: .remove(WhisperDictationBackend.modelFolder(for: self)),
+            use: .whenDictationWhisper(self),
+            // Through the backend, not around it: `prepareModel` holds the same
+            // per-model mutex the dictation path uses, so a Download here
+            // cannot end up writing into the staging directory beside a
+            // preparation the app is already running. It fetches without
+            // loading, like every other Download button — the dictation page is
+            // where the model is warmed.
+            install: { sink in
+                try await WhisperDictationBackend().prepareModel(self) { progress in
+                    sink(DownloadProgress(
+                        fraction: progress.fractionCompleted,
+                        note: String(localized: "Downloading \(displayName)…")))
+                }
+            },
+            unload: { WhisperDictationBackend.forgetLoadedModel(self) })]
     }
 }
 private actor FIFOAsyncMutex {

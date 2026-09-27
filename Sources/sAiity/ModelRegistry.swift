@@ -27,12 +27,34 @@ enum AssetStorage: Sendable {
     /// present for the download to count as complete. Anything less is a
     /// partial download — which is a third state, not a synonym for missing.
     case directory(URL, markers: [String])
+    /// A directory we own, plus the sibling directory an interrupted transfer of
+    /// the same bytes is staged into.
+    ///
+    /// Its own case rather than an extra parameter on `directory`, because the
+    /// staging bytes are the asset's: they are measured with it, deleted with
+    /// it, and the row that offers to resume is describing them. WhisperKit
+    /// stages per-file with resume data, so the half-downloaded directory is
+    /// worth hundreds of megabytes of already-paid-for transfer.
+    case stagedDirectory(final: URL, staging: URL, markers: [String])
     /// A single file. `expectedBytes` nil means the size is genuinely unknown
     /// (a pasted URL whose server sent no Content-Length); completeness then
     /// rests on the downloader's staging, which only ever creates the
     /// destination file once a transfer finished. Comparing against zero
     /// instead would make any one-byte fragment read as complete.
     case file(URL, expectedBytes: Int64?)
+
+    /// The directory an unfinished transfer lives in, if this asset has one.
+    ///
+    /// Deletion has to take it with the asset: a Delete that unlinked only the
+    /// installed directory would free a few megabytes of a 466 MB model, leave
+    /// the rest on disk, and leave the Resume row offering to continue a
+    /// transfer whose files are gone.
+    var staging: URL? {
+        switch self {
+        case .directory, .file: nil
+        case .stagedDirectory(_, let staging, _): staging
+        }
+    }
 }
 
 /// What removing an asset actually means.
@@ -52,16 +74,35 @@ enum AssetUse: Sendable {
     /// One latency tier of the Nemotron model. Only the selected tier counts as
     /// in use — the other is just bytes that can be deleted freely.
     case whenNemotronTier(chunkMs: Int)
+    /// One of the two Whisper models the dictation recognizer can load. Not
+    /// caption recognition — that Whisper was cut — so this names the dictation
+    /// preference and nothing else.
+    case whenDictationWhisper(WhisperDictationBackend.ModelChoice)
     case whenTranslator(TranslationEngine)
     case whenQwenVariant(file: String)
     case whenCleanupModel(file: String)
+
+    /// True when this tier is the one dictation would load, independent of the
+    /// caption tier. The two are separate preferences now; a tier that only one
+    /// of them names is still bytes a running dictation session is mapped to.
+    ///
+    /// Every clause is load-bearing. A *chosen* dictation engine is required,
+    /// because `dictationEffective` answers with the recommended fallback when
+    /// nothing is chosen and would badge a tier "in use" for a path that has
+    /// never run; the streaming recognizer is required because a user on
+    /// Whisper is not about to load Nemotron at all.
+    static func isDictationTier(chunkMs: Int) -> Bool {
+        ASREngine.dictationSelected == .nemotron
+            && DictationRecognizer.selected == .streaming
+            && NemotronEngine.dictationSelectedChunkMs == chunkMs
+    }
 
     var isAdvanced: Bool {
         switch self {
         case .whenTranslator(let engine): return engine.isAdvanced
         case .whenQwenVariant: return true
         case .whenCleanupModel: return false
-        case .never, .whenRecognitionEngine, .whenNemotronTier: return false
+        case .never, .whenRecognitionEngine, .whenNemotronTier, .whenDictationWhisper: return false
         }
     }
 
@@ -73,7 +114,20 @@ enum AssetUse: Sendable {
         case .whenRecognitionEngine(let e):
             return ASREngine.selected == e
         case .whenNemotronTier(let ms):
-            return ASREngine.selected == .nemotron && NemotronEngine.selectedChunkMs == ms
+            // Either surface's choice counts. Two independent preferences now
+            // name a tier, and "in use" has to mean both of them: advertising
+            // the fast tier as free to delete while the dictation profile is on
+            // Fast is how a user deletes the model out from under themselves.
+            return (ASREngine.selected == .nemotron && NemotronEngine.selectedChunkMs == ms)
+                || Self.isDictationTier(chunkMs: ms)
+        case .whenDictationWhisper(let choice):
+            // `DictationRecognizer.selected`, not the `whisperDictationSelected`
+            // flag the setter also writes. That flag is a side effect of the
+            // picker and outlives a change of recognizer, so reading it badges a
+            // model "in use" for a path the app is no longer on — and the two
+            // disagree exactly on the fresh install, where nothing is selected.
+            return DictationRecognizer.selected == .whisper
+                && WhisperDictationBackend.model == choice
         case .whenTranslator(let t):
             return TranslationEngine.selected == t
         case .whenQwenVariant(let f):
@@ -122,6 +176,16 @@ struct ModelAsset: Identifiable, Sendable {
     /// Nil for assets only macOS can install (Apple speech locales and
     /// translation pairs are requested through their own framework flows).
     let install: (@Sendable (@escaping ProgressSink) async throws -> Void)?
+    /// Run by `ModelRegistry.remove` before it unlinks anything, for an asset
+    /// whose runtime can be resident in memory.
+    ///
+    /// Synchronous because removal is: Settings calls it from a button handler,
+    /// and making it `async` to await an unload would have rippled through every
+    /// call site. What it still has to guarantee is that no *later* caller can
+    /// reach a model whose bytes are on their way out — unlinking a file a
+    /// resident CoreML model still has mapped frees nothing, and would leave the
+    /// app holding hundreds of megabytes of a model the user just deleted.
+    var unload: (@Sendable () -> Void)? = nil
 }
 
 /// An asset plus what is actually on disk right now.
@@ -208,7 +272,16 @@ enum ModelRegistry {
         // Translation is MADLAD-only in the product. Keep the local GGUF
         // catalogue for dictation cleanup, but do not expose retired Hy-MT2 or
         // Qwen translation downloads in the Models page.
+        //
+        // The Whisper models are here because the dictation recognizer really
+        // does load them, and until now nothing in the registry admitted it:
+        // they were measured as "other files" — the stray-bytes bucket the
+        // Models page describes as leftovers — while the only controls for them
+        // lived on the Dictation page. One registry means one honest number, one
+        // Download that goes through the same coordinator as everything else,
+        // and one Delete.
         ASREngine.allCases.flatMap(\.assetDescriptors)
+            + WhisperDictationBackend.ModelChoice.allCases.flatMap(\.assetDescriptors)
             + TranslationEngine.userSelectableCases.flatMap(\.assetDescriptors)
             + TranslationEngine.qwen.assetDescriptors
     }
@@ -239,7 +312,11 @@ enum ModelRegistry {
             return NemotronEngine.isDownloaded(chunkMs: NemotronEngine.chunkMs)
         }
         switch asset.storage {
-        case .directory(let dir, let markers):
+        case .directory(let dir, let markers), .stagedDirectory(let dir, _, let markers):
+            // Only the FINAL directory decides completeness. A staging tree can
+            // hold every byte of a model and still be three files short of
+            // being one, and reporting that as installed is how the app loads
+            // models that are not there.
             return markers.allSatisfy {
                 FileManager.default.fileExists(atPath: dir.appendingPathComponent($0).path)
             }
@@ -256,6 +333,16 @@ enum ModelRegistry {
         switch asset.storage {
         case .directory(let dir, _):
             let bytes = byteSize(of: dir)
+            let complete = isInstalled(asset)
+            return AssetStatus(asset: asset, isInstalled: complete,
+                               isPartial: !complete && bytes > 0, bytesOnDisk: bytes)
+
+        case .stagedDirectory(let dir, let staging, _):
+            // Installed bytes plus the transfer still in flight. Reporting only
+            // the final directory is what made an interrupted Whisper fetch read
+            // as "no model, no progress" while most of a 466 MB download sat
+            // beside it — and, with nothing marked partial, no Resume control.
+            let bytes = byteSize(of: dir) + byteSize(of: staging)
             let complete = isInstalled(asset)
             return AssetStatus(asset: asset, isInstalled: complete,
                                isPartial: !complete && bytes > 0, bytesOnDisk: bytes)
@@ -321,6 +408,10 @@ enum ModelRegistry {
     @discardableResult
     static func remove(_ asset: ModelAsset) -> Bool {
         guard case .remove(let url) = asset.removal else { return false }
+        // First, and for the reason on `ModelAsset.unload`: unlinking a file a
+        // resident CoreML model still has mapped frees nothing, and leaves the
+        // app holding hundreds of megabytes of a model the user just deleted.
+        asset.unload?()
         // Whatever damage was recorded belonged to the files now leaving.
         LoadHealth.clear(asset.id)
         // Resume state goes with the asset it belongs to. Deleting a model
@@ -330,6 +421,11 @@ enum ModelRegistry {
         // user has no way to find.
         try? FileManager.default.removeItem(at: url.appendingPathExtension("part"))
         try? FileManager.default.removeItem(at: url.appendingPathExtension("part.etag"))
+        // The same argument for a directory asset, whose staging directory is a
+        // sibling rather than an extension of its path.
+        if let staging = asset.storage.staging {
+            try? FileManager.default.removeItem(at: staging)
+        }
         do {
             try FileManager.default.removeItem(at: url)
             return true

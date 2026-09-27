@@ -123,6 +123,9 @@ import Testing
         var result = DictationTranscriptionResult(regions: [])
         var transcriptionStarted = false
         var blockTranscription = false
+        /// Held open so a test can keep a session genuinely mid-transcription,
+        /// which is the window a second press used to fall into.
+        var transcriptionGate: ContinuationGate?
         var transcriptionError: Error?
         var onChunk: (@Sendable (TranscriptChunk) -> Void)?
         var streamingResult: String?
@@ -151,6 +154,7 @@ import Testing
             receivedSamples = samples
             receivedRegions = regions
             transcriptionStarted = true
+            if let transcriptionGate { await transcriptionGate.wait() }
             if let transcriptionError { throw transcriptionError }
             if blockTranscription {
                 try await Task.sleep(nanoseconds: 60_000_000_000)
@@ -158,6 +162,71 @@ import Testing
             return result
         }
         func detectedLanguage() async -> String? { nil }
+    }
+
+    /// A gate a test opens by hand, so work can be held open without a sleep.
+    final class ContinuationGate: @unchecked Sendable {
+        private var continuation: CheckedContinuation<Void, Never>?
+        private(set) var entered = false
+
+        func wait() async {
+            entered = true
+            await withCheckedContinuation { continuation in
+                self.continuation = continuation
+            }
+        }
+
+        func open() {
+            continuation?.resume()
+            continuation = nil
+        }
+    }
+
+    /// Stands in for the real pool, and records what the controller asked of it.
+    /// A shared backend is leased exclusively, so "who released what, and with
+    /// which intent" is the only way to see a lease being taken away from a
+    /// session that still owns it.
+    @MainActor
+    final class RecordingProvider: ASRBackendProvider {
+        struct Release {
+            let discard: Bool
+            /// True while this provider still considered the backend leased —
+            /// i.e. the release came from a session that did not own it.
+            let whileLeased: Bool
+        }
+
+        let backend: TranscriptionBackend
+        var acquireError: (any Error)?
+        var prepareError: (any Error)?
+        private(set) var prepareCalls = 0
+        private(set) var acquireCalls = 0
+        private(set) var invalidateCalls = 0
+        private(set) var releases: [Release] = []
+        /// A lease this provider hands out to somebody else, to model the
+        /// "someone else is transcribing right now" state.
+        var foreignLease = false
+
+        init(backend: TranscriptionBackend) { self.backend = backend }
+
+        func prepare(locale: Locale,
+                     progress: @escaping @Sendable (String) -> Void) async throws {
+            prepareCalls += 1
+            if let prepareError { throw prepareError }
+        }
+
+        func acquire(locale: Locale,
+                     progress: @escaping @Sendable (String) -> Void) async throws -> TranscriptionBackend {
+            acquireCalls += 1
+            if let acquireError { throw acquireError }
+            return backend
+        }
+
+        func release(_ backend: TranscriptionBackend, discard: Bool) async {
+            releases.append(Release(discard: discard, whileLeased: foreignLease))
+            if !discard { foreignLease = false }
+        }
+
+        func invalidate() async { invalidateCalls += 1 }
     }
 
     final class FakeInserter: DictationTextInsertion {
@@ -988,5 +1057,82 @@ import Testing
         #expect(backends.count == 2)
         #expect(backends[0].stops == 1)
         #expect(backends[1].prepares == 1)
+    }
+
+    @Test("a press during transcription neither starts a session nor discards the live backend")
+    func pressWhilePreviousReleaseIsTranscribingIsRefused() async {
+        let gate = ContinuationGate()
+        let backend = FakeSegmentedBackend(log: EventLog())
+        backend.result = DictationTranscriptionResult(regions: [
+            DictationRegionTranscript(text: "still speaking", language: "en"),
+        ])
+        backend.transcriptionGate = gate
+        let provider = RecordingProvider(backend: backend)
+        let capture = FakeCapture(log: EventLog())
+        capture.samples = [0.4]
+        let inserter = FakeInserter()
+        let controller = DictationController(
+            backendProvider: provider,
+            capture: capture,
+            inserter: inserter,
+            captionsActive: { false })
+
+        controller.press()
+        await controller.waitForWorkForTests()
+        controller.release()
+        for _ in 0..<200 where !gate.entered { await Task.yield() }
+        #expect(gate.entered)
+        #expect(controller.phase == .transcribing)
+        #expect(controller.isFinishing)
+
+        // The microphone is closed by now, so nothing in the old state machine
+        // stopped a second press. It used to start a session, fail to take the
+        // exclusively-leased backend, and discard it on the way out — ending the
+        // utterance the user was in the middle of saying.
+        provider.foreignLease = true
+        controller.press()
+        for _ in 0..<50 { await Task.yield() }
+
+        #expect(controller.phase == .transcribing)
+        #expect(controller.isActive == false)
+        #expect(provider.acquireCalls == 1,
+                "the refused press tried to take the shared backend again")
+        #expect(!provider.releases.contains { $0.whileLeased && $0.discard },
+                "a live lease was discarded by a session that did not own it")
+
+        gate.open()
+        await controller.waitForWorkForTests()
+
+        #expect(inserter.inserted == ["still speaking"])
+        #expect(provider.releases.count == 1)
+        #expect(provider.releases[0].discard == false)
+    }
+
+    @Test("a start that fails without acquiring leaves a shared lease untouched")
+    func failedStartDoesNotDisturbALeaseItDoesNotOwn() async {
+        let backend = FakeSegmentedBackend(log: EventLog())
+        let provider = RecordingProvider(backend: backend)
+        provider.acquireError = ASRBackendPool.Error.busy
+        // Somebody else is mid-session with the one shared backend.
+        provider.foreignLease = true
+        var issues: [String] = []
+        let controller = DictationController(
+            backendProvider: provider,
+            capture: FakeCapture(log: EventLog()),
+            inserter: FakeInserter(),
+            captionsActive: { false },
+            onIssue: { operation, reason in issues.append("\(operation): \(reason)") })
+
+        controller.press()
+        await controller.waitForWorkForTests()
+
+        #expect(provider.acquireCalls == 1)
+        #expect(provider.releases.isEmpty,
+                "a start that acquired nothing still released somebody's backend")
+        #expect(provider.invalidateCalls == 0,
+                "a start that acquired nothing still invalidated the shared pool")
+        #expect(!controller.isActive)
+        #expect(issues.contains { $0.hasPrefix("dictation.start") })
+        #expect(controller.phase == .failure("Speech recognition is already in use."))
     }
 }

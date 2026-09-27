@@ -73,6 +73,10 @@ final class DictationController {
     private var terminal: DictationTerminal = .cancelled
     private var preparationGeneration = 0
     private var backend: TranscriptionBackend?
+    /// The session that owns `backend`. The pool hands out one lease at a time
+    /// but the same object to whoever asks next, so identity alone cannot say
+    /// whose lease a failure path is about to discard.
+    private var backendSession: Int?
     private var preparationTask: Task<Void, Never>?
     private var startupTask: Task<Void, Never>?
     private var releaseTask: Task<Void, Never>?
@@ -93,6 +97,25 @@ final class DictationController {
     }
 
     var isActive: Bool { state.isActive }
+
+    /// True while a previous session still owns work that has not finished:
+    /// transcription, cleanup, translation, insertion.
+    ///
+    /// `state.isActive` is not enough, and the gap was a real one. Releasing the
+    /// key ends the *microphone* session, so a second press during the first
+    /// one's transcription passed `press()`'s guard and started a session that
+    /// shared the same prepared backend. That backend is leased exclusively, so
+    /// the second start failed — and its failure path discarded a backend the
+    /// first session was still transcribing with, ending the utterance the user
+    /// was in the middle of saying.
+    var isFinishing: Bool {
+        switch phase {
+        case .transcribing, .cleaning, .translating, .inserting: return true
+        case .idle, .waitingForInputMonitoring, .preparing, .ready, .starting,
+             .dictating, .limit, .recovery, .result, .failure:
+            return false
+        }
+    }
 
     /// True while dictation still owns work that can touch the translator. The
     /// key is released before transcription and translation finish, so
@@ -238,6 +261,11 @@ final class DictationController {
 
     func press() {
         guard !state.isActive else { return }
+        // One session at a time, all the way through. A press while the
+        // previous release is still transcribing, cleaning, translating or
+        // inserting is not a second recording — it is two sessions contending
+        // for one shared, exclusively-leased backend.
+        guard !isFinishing else { return }
         guard !captionsActive() else {
             phase = .failure(String(localized: "Captions are already running."))
             return
@@ -303,6 +331,10 @@ final class DictationController {
         let active = backend
         preparationTask = nil
         backend = nil
+        // The lease leaves with the reference. Leaving the owner behind would
+        // let a later session match a slot it never filled and release someone
+        // else's backend.
+        backendSession = nil
         phase = .idle
 
         let previousCleanup = cleanupTask
@@ -407,10 +439,14 @@ final class DictationController {
             let acquired = try await backendProvider.acquire(locale: Locale.current,
                                                               progress: progress)
             guard session == generation else {
+                // This lease is unambiguously ours — nothing else can hold the
+                // pool's single active slot — so it can be discarded even
+                // though a newer session exists.
                 await backendProvider.release(acquired, discard: true)
                 return
             }
             backend = acquired
+            backendSession = session
             guard let format = await acquired.inputFormat else {
                 throw BackendError.notPrepared
             }
@@ -441,10 +477,12 @@ final class DictationController {
             }
             phase = state.isActive ? .dictating : .transcribing
         } catch is CancellationError {
-            if let backend { await failStart(backend, session: session, message: nil) }
+            if backendSession == session {
+                await failStart(session: session, message: nil)
+            }
         } catch {
-            if let backend {
-                await failStart(backend, session: session, message: error.localizedDescription)
+            if backendSession == session {
+                await failStart(session: session, message: error.localizedDescription)
             } else if session == generation {
                 _ = drainCapture()
                 state.cancel()
@@ -511,8 +549,7 @@ final class DictationController {
                 let authoritative = await backend.finishDictation()?
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 let text = authoritative.flatMap { $0.isEmpty ? nil : $0 } ?? latestDraftText
-                await backendProvider.release(backend, discard: false)
-                self.backend = nil
+                await releaseOwnedBackend(session: session, discard: false)
                 guard session == generation else { return }
                 await finish(transcription: DictationTranscriptionResult(text: text,
                                                                           language: sourceLanguage),
@@ -528,17 +565,15 @@ final class DictationController {
                 let transcription = try await segmented.transcribeDictation(samples: samples,
                                                                               regions: regions)
                 logDuration("transcription", since: transcriptionStarted)
-                await backendProvider.release(backend, discard: false)
-                self.backend = nil
+                await releaseOwnedBackend(session: session, discard: false)
                 guard session == generation else { return }
                 await finish(transcription: transcription,
                              session: session,
                              fallbackSourceLanguage: Locale.current.identifier(.bcp47))
             } catch is CancellationError {
-                await backendProvider.release(backend, discard: true)
+                await releaseOwnedBackend(session: session, discard: true)
             } catch {
-                await backendProvider.release(backend, discard: true)
-                self.backend = nil
+                await releaseOwnedBackend(session: session, discard: true)
                 guard session == generation else { return }
                 reportIssue("dictation.transcription", error.localizedDescription)
                 phase = .failure(error.localizedDescription)
@@ -550,8 +585,7 @@ final class DictationController {
         let transcriptionStarted = ContinuousClock.now
         let authoritative = await backend.finishDictation()
         logDuration("transcription", since: transcriptionStarted)
-        await backendProvider.release(backend, discard: false)
-        self.backend = nil
+        await releaseOwnedBackend(session: session, discard: false)
         guard session == generation else { return }
 
         await finish(authoritative: authoritative, session: session, sourceLanguage: sourceLanguage)
@@ -697,13 +731,13 @@ final class DictationController {
         onIssue(operation, reason)
     }
 
-    private func failStart(_ backend: TranscriptionBackend,
-                           session: Int,
-                           message: String?) async {
+    private func failStart(session: Int, message: String?) async {
         _ = drainCapture()
-        await backendProvider.release(backend, discard: true)
+        // Only the session that holds the lease may tear it down. A start that
+        // failed *without* acquiring anything must leave the pool alone: the
+        // lease it can see belongs to the session that is still transcribing.
+        await releaseOwnedBackend(session: session, discard: true)
         guard session == generation else { return }
-        self.backend = nil
         state.cancel()
         if let message {
             reportIssue("dictation.start", message)
@@ -711,6 +745,20 @@ final class DictationController {
         } else {
             phase = .idle
         }
+    }
+
+    /// Return the lease, but only if it is still the one `session` took.
+    ///
+    /// The guard is the whole point. `backend` is a single slot shared by every
+    /// generation, and a start that failed while a previous session was still
+    /// finishing used to read the *previous* session's backend out of it and
+    /// discard it — killing an utterance mid-sentence from a keystroke the user
+    /// did not know was a second session.
+    private func releaseOwnedBackend(session: Int, discard: Bool) async {
+        guard let active = backend, backendSession == session else { return }
+        backend = nil
+        backendSession = nil
+        await backendProvider.release(active, discard: discard)
     }
 
     private func drainCapture() -> [Float] {
