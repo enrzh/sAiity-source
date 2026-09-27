@@ -181,20 +181,25 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
     case hyMT2
     case qwen
 
-    /// MADLAD is the complete user-facing translation catalogue. The legacy
-    /// cases below remain representable only for old raw preferences and
-    /// compatibility code; they are intentionally absent from `allCases`.
-    static var allCases: [TranslationEngine] { [.madlad] }
+    /// MADLAD and Hy-MT2 are the user-facing translation catalogue. The local
+    /// LLM case below remains representable only for old raw preferences and
+    /// cleanup compatibility; it is intentionally absent from `allCases`.
+    static var allCases: [TranslationEngine] { [.madlad, .hyMT2] }
 
     /// Keep the normal path deliberately small. The other engines remain
     /// available internally for old preferences and cleanup compatibility, but
     /// never enter a product picker.
     static let primaryCases: [TranslationEngine] = [.madlad]
-    static let advancedCases: [TranslationEngine] = []
-    /// MADLAD is the only translation path exposed in the product. The legacy
-    /// cases remain available internally for old preferences and cleanup
-    /// compatibility, but never appear in a picker.
-    static let userSelectableCases: [TranslationEngine] = [.madlad]
+    /// Not a fallback and not a default: a second opinion for the 37 languages
+    /// Hy-MT2 was trained on, at 40% less disk than MADLAD. It covers far fewer
+    /// languages, so it belongs behind the advanced disclosure rather than
+    /// beside the recommended engine.
+    static let advancedCases: [TranslationEngine] = [.hyMT2]
+    /// The engines a user may pick. MADLAD for coverage, Hy-MT2 for the
+    /// languages it specialises in. The legacy LLM case remains available
+    /// internally for old preferences and cleanup compatibility, but never
+    /// appears in a picker.
+    static let userSelectableCases: [TranslationEngine] = [.madlad, .hyMT2]
 
     static func visibleSelection(_ engine: TranslationEngine?) -> TranslationEngine? {
         guard let engine, userSelectableCases.contains(engine) else { return nil }
@@ -266,7 +271,7 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
         case .madlad:
             return String(localized: "MADLAD-400-3B, a dedicated translation model on MLX. Best quality of the local options and Apache-2.0, so it can ship. 1.86 GB, and about 0.2 seconds per sentence once loaded, measured — the fastest of the downloadable engines, and it only ever translates, so it cannot wander off answering the speaker.")
         case .hyMT2:
-            return String(localized: "Optional specialist for 37 languages. Choose it when you want broader language coverage.")
+            return String(localized: "Hy-MT2-1.8B, a translation specialist that runs on CPU. A second opinion for the 37 languages it was trained on, at 1.1 GB instead of 1.9 GB. Fewer languages than MADLAD, so reach for it when you want the smaller download or prefer its phrasing.")
         case .qwen:
             return String(localized: "Experimental local LLM translation. Useful for cleanup and language experiments, but less predictable than a dedicated translation model. Choose a Qwen, Gemma, or custom GGUF in Models.")
         }

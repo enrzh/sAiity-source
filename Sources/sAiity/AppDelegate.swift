@@ -433,8 +433,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // loading rather than paying for a model already superseded.
             guard generation == self.translatorGeneration else { return }
             var attempted: Set<TranslationEngine> = []
+            let swapTarget = translationTarget(for: scope, requestedTarget: nil)
             while generation == self.translatorGeneration,
-                  let selected = self.selectedTranslationEngine(for: scope),
+                  let selected = self.selectedTranslationEngine(for: scope, target: swapTarget),
                   !attempted.contains(selected) {
                 attempted.insert(selected)
                 self.activeTranslatorEngine = selected
@@ -524,7 +525,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         requestedTarget ?? captionsTarget
     }
 
-    private func selectedTranslationEngine(for scope: TranslationEngineScope) -> TranslationEngine? {
+    /// The engine to run, after quarantine. `target` narrows the fallback: an
+    /// engine that cannot translate into it is not a fallback, it is a different
+    /// failure. See `TranslationRuntimeFallback.resolve`.
+    private func selectedTranslationEngine(for scope: TranslationEngineScope,
+                                           target: String? = nil) -> TranslationEngine? {
         let preferred: TranslationEngine?
         switch scope {
         case .captions:
@@ -543,7 +548,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 ?? TranslationEngine.visibleSelection(TranslationEngine.selected)
                 ?? .recommended
         }
-        return translationRuntimeFallback.resolve(preferred)
+        return translationRuntimeFallback.resolve(preferred, for: target)
     }
 
     private func translationTarget(for scope: TranslationEngineScope,
@@ -572,7 +577,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let target = translationTarget(for: scope, requestedTarget: requestedTarget) else {
             return false
         }
-        guard let selectedEngine = selectedTranslationEngine(for: scope) else {
+        guard let selectedEngine = selectedTranslationEngine(for: scope, target: target) else {
             // A target without a translator: honest, and recoverable in one step.
             setStatus("No translator chosen — pick one in Settings")
             return false
@@ -664,7 +669,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                                         reason: DiagnosticsRedactor.redact(error.localizedDescription))
                 }
             }
-            let fallback = selectedTranslationEngine(for: scope)
+            let fallback = selectedTranslationEngine(for: scope, target: target)
             if allowRuntimeFallback, let fallback, fallback != selectedEngine,
                translatorSwap == nil {
                 activeTranslatorEngine = fallback
@@ -802,7 +807,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Dictation may use a different engine than captions. Switch through
         // the serialized lifecycle before entering native inference, and keep
         // the model resident between regions and presses.
-        guard let desiredEngine = selectedTranslationEngine(for: .dictation) else { return nil }
+        guard let desiredEngine = selectedTranslationEngine(for: .dictation, target: target) else { return nil }
         if activeTranslator == nil || activeTranslatorEngine != desiredEngine {
             swapTranslator(for: .dictation)
         }
@@ -878,7 +883,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // caption/dictation inference can enter while this authoritative result
         // is being assembled.
         translatorIdleEviction.cancel()
-        guard let desiredEngine = selectedTranslationEngine(for: .dictation) else { return nil }
+        guard let desiredEngine = selectedTranslationEngine(for: .dictation, target: target) else { return nil }
         if activeTranslator == nil || activeTranslatorEngine != desiredEngine {
             swapTranslator(for: .dictation)
         }

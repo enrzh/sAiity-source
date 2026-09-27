@@ -346,7 +346,7 @@ import Testing
         #expect(defaults.bool(forKey: "translateDictation") == false)
     }
 
-    @Test("legacy dictation translation engines fall back to MADLAD")
+    @Test("a retired dictation engine falls back, and a supported one is honoured")
     func dictationTranslationEngineIsIndependent() {
         let defaults = UserDefaults.standard
         let keys = ["translationEngine", "dictationTranslationEngine", "asrEngine",
@@ -360,14 +360,23 @@ import Testing
             }
         }
 
+        // The local LLM is still retired, so a stale preference for it must
+        // normalize away and leave dictation following the captions choice.
         defaults.set(TranslationEngine.madlad.rawValue, forKey: "translationEngine")
-        defaults.set(TranslationEngine.hyMT2.rawValue, forKey: "dictationTranslationEngine")
-        let state = AppState()
-        #expect(state.dictationTranslationEngine == nil)
+        defaults.set(TranslationEngine.qwen.rawValue, forKey: "dictationTranslationEngine")
+        let retired = AppState()
+        #expect(retired.dictationTranslationEngine == nil)
         #expect(TranslationEngine.dictationEffective == .madlad)
         // Keep the retired raw value for rollback; the normalized view is what
         // every runtime path consumes.
-        #expect(defaults.string(forKey: "dictationTranslationEngine") == TranslationEngine.hyMT2.rawValue)
+        #expect(defaults.string(forKey: "dictationTranslationEngine") == TranslationEngine.qwen.rawValue)
+
+        // Hy-MT2 is selectable again, so a dictation preference for it is a
+        // real choice rather than a stale one, and it is honoured as written.
+        defaults.set(TranslationEngine.hyMT2.rawValue, forKey: "dictationTranslationEngine")
+        let supported = AppState()
+        #expect(supported.dictationTranslationEngine == .hyMT2)
+        #expect(TranslationEngine.dictationEffective == .hyMT2)
     }
 
     @Test("legacy Qwen translation selections fall back to MADLAD")

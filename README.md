@@ -144,6 +144,15 @@ included in the application bundle.
 
 ## What's new in 2.6.0
 
+- Hy-MT2 is available again as a second translation engine, under Settings →
+  Advanced. It is a translation specialist that runs on CPU: 1.1 GB instead of
+  MADLAD's 1.9 GB, for the 37 languages it was trained on. It is a second
+  opinion rather than a replacement, and if it ever fails at runtime the app
+  falls back to MADLAD automatically — except for Cantonese, which Hy-MT2
+  translates and MADLAD does not, where the app says no translator is available
+  rather than silently producing nothing.
+
+
 Not yet released. These notes are being written ahead of the tag.
 
 - A failed translation no longer looks like a model refusing. Engines reported

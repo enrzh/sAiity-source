@@ -2,10 +2,9 @@ import Foundation
 
 /// How many failures it takes before a translator is written off.
 ///
-/// There is no second engine to fall back to — `TranslationEngine.allCases` is
-/// `[.madlad]` and `TranslationRuntimeFallback.resolve` returns nil for a
-/// quarantined MADLAD — so retiring one is not a graceful degradation, it is
-/// the end of translation for the app's lifetime. A short caption the model
+/// Retiring an engine is close to terminal: `TranslationRuntimeFallback.resolve`
+/// only has somewhere to go when the quarantined one was not MADLAD, so writing
+/// off MADLAD ends translation for the app's lifetime. A short caption the model
 /// declines to translate is ordinary behaviour and must not reach that state on
 /// its own; only sustained failure should.
 struct TranslationFailureBudget: Sendable, Equatable {
@@ -43,7 +42,16 @@ struct TranslationRuntimeFallback: Sendable {
         quarantined.insert(engine)
     }
 
-    func resolve(_ preferred: TranslationEngine?) -> TranslationEngine? {
+    /// The engine to actually run, or nil when there is nothing left to run.
+    ///
+    /// `target` is checked because the two engines do not cover the same
+    /// languages. Hy-MT2 translates Cantonese and MADLAD does not, so an
+    /// unconditional switch would replace a working translator with one that
+    /// declines every line — which looks exactly like the silent failure this
+    /// whole type exists to prevent. Better to report no translator than to
+    /// report one that cannot do the job.
+    func resolve(_ preferred: TranslationEngine?,
+                 for target: String? = nil) -> TranslationEngine? {
         guard let preferred else { return nil }
         guard quarantined.contains(preferred) else { return preferred }
         let fallback: TranslationEngine?
@@ -54,6 +62,9 @@ struct TranslationRuntimeFallback: Sendable {
             fallback = nil
         }
         guard let fallback, !quarantined.contains(fallback) else { return nil }
+        if let target, !LanguageCatalog.supportedCodes(for: fallback).contains(target) {
+            return nil
+        }
         return fallback
     }
 }

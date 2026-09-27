@@ -49,7 +49,9 @@ struct ModelRegistryTests {
             #expect(ids.contains(expected), "missing asset \(expected)")
         }
         #expect(!ids.contains("asr.parakeetEou"))
-        #expect(!ids.contains("mt.hymt2.1.8b.q4"))
+        // Listed again: Hy-MT2 is a selectable engine, so its 1.1 GB download
+        // belongs on the Models page next to MADLAD's 1.9 GB one.
+        #expect(ids.contains("mt.hymt2.1.8b.q4"))
         // Caption Whisper was cut: its translate mode stopped emitting finals
         // ~25 s into every session, so a row for it would put a 2.9 GB
         // download back on the Models page with no engine to use it. The two
@@ -346,7 +348,7 @@ struct DownloadCoordinatorTests {
         let ids = Set(ModelRegistry.snapshot().map(\.asset.id))
         #expect(!ids.contains(AssetID.parakeetEou))
         #expect(ids.contains(AssetID.madlad))
-        #expect(!ids.contains(AssetID.hyMT2))
+        #expect(ids.contains(AssetID.hyMT2))
         #expect(ids.contains(AssetID.whisper(.base)))
         #expect(ids.contains(AssetID.whisper(.small)))
     }
