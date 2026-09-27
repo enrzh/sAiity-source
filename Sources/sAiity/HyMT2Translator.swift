@@ -124,7 +124,7 @@ final class HyMT2Translator: Translating, @unchecked Sendable {
         return llm.output
     }
 
-    func translate(_ text: String, from _: String, to target: String) async -> String? {
+    func translate(_ text: String, from _: String, to target: String) async throws -> String? {
         guard llm != nil,
               let targetName = HyMT2LanguageProvider.nativeCode(for: target) else {
             return nil

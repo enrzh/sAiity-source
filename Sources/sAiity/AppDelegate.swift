@@ -727,10 +727,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         do {
             let out = try await translatorInferenceGate.run {
-                await self.translateCaptionText(text,
-                                                fallbackSource: fallbackSource,
-                                                target: target,
-                                                engine: engine)
+                try await self.translateCaptionText(text,
+                                                     fallbackSource: fallbackSource,
+                                                     target: target,
+                                                     engine: engine)
             }
             // A nil from here is "nothing to translate" (no language spans) or
             // the model declining this line — both routine. Only a throw from
@@ -832,14 +832,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do {
             let started = ContinuousClock.now
             let result: String? = try await translatorInferenceGate.run {
-                await engine.translate(text, from: source, to: target)
+                try await engine.translate(text, from: source, to: target)
             }
             Diagnostics.recordTiming(operation: "translator.inference",
                                      seconds: elapsedSeconds(since: started),
                                      cold: false)
-            if result == nil {
-                retireFailedTranslator(desiredEngine, reason: "dictation inference returned no output")
-            }
+            // No `result == nil` check here. Nil is the model declining this
+            // line, which is routine, and retiring for it was the mirror image
+            // of the caption path's bug: one declined line wrote off the
+            // translator, and MADLAD has no fallback, so translation died for
+            // the rest of the session over one line. A genuine engine failure
+            // now arrives as a throw and is caught below.
             return result
         } catch {
             NSLog("sAiity dictation translation unavailable: \(error.localizedDescription)")
@@ -916,7 +919,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                         TranslationRegion(text: $0.region.text,
                                           source: $0.region.language ?? "auto")
                     }
-                    if let values = await engine.translateRegions(batch, to: target),
+                    if let values = try await engine.translateRegions(batch, to: target),
                        values.count == pending.count {
                         for (item, value) in zip(pending, values) {
                             translated[item.index] = value
@@ -930,9 +933,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 for item in pending where translated[item.index].isEmpty {
                     try Task.checkCancellation()
                     let source = item.region.language ?? "auto"
-                    guard let value = await engine.translate(item.region.text,
-                                                              from: source,
-                                                              to: target) else {
+                    guard let value = try await engine.translate(item.region.text,
+                                                                   from: source,
+                                                                   to: target) else {
                         return nil
                     }
                     translated[item.index] = value
@@ -942,9 +945,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             Diagnostics.recordTiming(operation: "translator.inference",
                                      seconds: elapsedSeconds(since: started),
                                      cold: false)
-            if result == nil {
-                retireFailedTranslator(desiredEngine, reason: "dictation inference returned no output")
-            }
             return result
         } catch is CancellationError {
             return nil
@@ -2927,13 +2927,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func translateCaptionText(_ text: String,
                                       fallbackSource: String,
                                       target: String,
-                                      engine: any Translating) async -> String? {
+                                      engine: any Translating) async throws -> String? {
         let spans = CaptionLanguageSpanDetector.analyze(
             text,
             fallbackLanguage: fallbackSource)
         guard !spans.isEmpty else { return nil }
         guard CaptionLanguageSpanDetector.isMixed(spans) else {
-            return await engine.translate(text, from: fallbackSource, to: target)
+            return try await engine.translate(text, from: fallbackSource, to: target)
         }
 
         var translated = spans.map(\.text)
@@ -2948,7 +2948,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let regions = pending.map {
                 TranslationRegion(text: $0.span.text, source: $0.span.language ?? "auto")
             }
-            if let values = await engine.translateRegions(regions, to: target),
+            if let values = try await engine.translateRegions(regions, to: target),
                values.count == pending.count {
                 for (item, value) in zip(pending, values) where !value.isEmpty {
                     translated[item.index] = value
@@ -2958,9 +2958,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         for item in pending where translated[item.index] == item.span.text {
             guard let source = item.span.language else { continue }
-            guard let value = await engine.translate(item.span.text,
-                                                     from: source,
-                                                     to: target),
+            guard let value = try await engine.translate(item.span.text,
+                                                          from: source,
+                                                          to: target),
                   !value.isEmpty else { continue }
             translated[item.index] = value
         }

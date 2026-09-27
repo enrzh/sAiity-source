@@ -146,25 +146,39 @@ final class MADLADTranslator: Translating, @unchecked Sendable {
     /// overlapping.
     private let lock = NSLock()
 
-    func translate(_ text: String, from source: String, to target: String) async -> String? {
+    func translate(_ text: String, from source: String, to target: String) async throws -> String? {
         guard let t = translator, let native = MADLADLanguageProvider.nativeCode(for: target) else {
             return nil
         }
         // MADLAD infers the source language itself; only the target is given,
         // and it must be the model's own spelling: "zh", never "zh-Hans".
-        return lock.withLock { try? t.translate(text, to: native) }
+        //
+        // A throw propagates. This used to be `try?`, which turned a native
+        // failure into "no output" and then into "the model declined this
+        // line" — the user saw their untranslated caption with no explanation
+        // and no log line, and the engine was never charged for the failure.
+        // Locked by hand rather than with `withLock`, because the body throws and
+        // the `defer` is what guarantees the lock is released on the way out.
+        lock.lock()
+        defer { lock.unlock() }
+        return try t.translate(text, to: native)
     }
 
     /// MADLAD can decode a marked batch in one serialized graph invocation.
     /// The strict marker parser makes this an optimization only: any model
     /// response that edits the framing returns nil and the caller retries the
     /// same regions one by one.
-    func translateRegions(_ regions: [TranslationRegion], to target: String) async -> [String]? {
+    func translateRegions(_ regions: [TranslationRegion], to target: String) async throws -> [String]? {
         guard let t = translator,
               let native = MADLADLanguageProvider.nativeCode(for: target),
               let prompt = TranslationBatchMarkers.encode(regions) else { return nil }
-        let raw = lock.withLock { try? t.translate(prompt, to: native) }
-        guard let raw else { return nil }
+        // A throw propagates for the same reason as in `translate`: a framing
+        // miss is nil and stays nil, but a native failure must not look like
+        // one. The caller falls back to the sequential path on nil, and that
+        // fallback would just throw again.
+        lock.lock()
+        defer { lock.unlock() }
+        let raw = try t.translate(prompt, to: native)
         return TranslationBatchMarkers.decode(raw, count: regions.count)
     }
 
@@ -570,7 +584,7 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
         preparedTarget = target
     }
 
-    func translate(_ text: String, from source: String, to target: String) async -> String? {
+    func translate(_ text: String, from source: String, to target: String) async throws -> String? {
         guard llm != nil else { return nil }
         // Follow the target actually asked for. Like Apple's, this used to use
         // whatever prepare() cached, so changing the target from the menu bar —

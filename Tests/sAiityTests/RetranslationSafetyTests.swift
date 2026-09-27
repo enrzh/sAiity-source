@@ -28,7 +28,10 @@ import Testing
         var prepareError: (any Error)?
         /// Held per line, so a test can keep a run parked inside the gate.
         var beforeTranslate: (@Sendable (String) async -> Void)?
-        var translateResult: @Sendable (String) -> String? = { "[\($0)]" }
+        var translateResult: @Sendable (String) throws -> String? = { "[\($0)]" }
+        /// Thrown instead of returning, to model a native engine failure as
+        /// opposed to the model declining a line.
+        var translateError: (any Error)?
 
         func prepare(from source: String, to target: String,
                      progress: @escaping @Sendable (String) -> Void) async throws {
@@ -36,10 +39,11 @@ import Testing
             if let prepareError { throw prepareError }
         }
 
-        func translate(_ text: String, from source: String, to target: String) async -> String? {
+        func translate(_ text: String, from source: String, to target: String) async throws -> String? {
             translateCalls.append(text)
             await beforeTranslate?(text)
-            return translateResult(text)
+            if let translateError { throw translateError }
+            return try translateResult(text)
         }
 
         func stop() async { stopCalls += 1 }
@@ -312,6 +316,69 @@ import Testing
     /// One test, one window with the global re-translation flag set: the flag
     /// lives on a shared singleton, so three separate tests would mean three
     /// chances to disturb whatever else is running.
+    // MARK: - Declined versus failed
+
+    /// The distinction the `Translating` protocol exists to keep: a nil is the
+    /// model declining one line, a throw is the engine itself failing.
+    ///
+    /// This used to be unobservable, because every engine ended in `try?` and a
+    /// native failure arrived as a nil. On the caption path that meant a Metal
+    /// or decode error surfaced as "the model declined to translate this line" —
+    /// the user saw their untranslated caption with no explanation and no log
+    /// line, and the engine was never charged against the failure budget. On
+    /// the dictation path the mirror image happened: one declined line retired
+    /// the translator, and retiring MADLAD is terminal.
+    @Test("an engine that declines one line still completes the run")
+    func declinedLineCompletesTheRun() async throws {
+        let session = try saveSession(["one", "two", "three"])
+        defer { TranscriptStore.delete(session) }
+
+        let translator = FakeTranslator()
+        translator.translateResult = { text in text == "two" ? nil : "[\(text)]" }
+
+        let retranslator = Retranslator(gate: TranslationInferenceGate())
+        retranslator.engineOverrideForTests = translator
+        let message = await finish(retranslator, session: session, target: "de")
+
+        // Nil is routine: the run reports partial translation rather than
+        // pretending it was cancelled, and the good lines are still written.
+        #expect(message != nil)
+        #expect(!(message ?? "").localizedCaseInsensitiveContains("not been changed"))
+        let stored = TranscriptStore.segments(of: session)
+        #expect(stored[0].tr == "[one]")
+        #expect(stored[1].tr == nil, "the declined line must keep whatever was there")
+        #expect(stored[2].tr == "[three]")
+    }
+
+    @Test("an engine that throws aborts the run and leaves the transcript alone")
+    func thrownInferenceAbortsWithoutWriting() async throws {
+        let session = try saveSession(["one", "two", "three"])
+        defer { TranscriptStore.delete(session) }
+
+        let translator = FakeTranslator()
+        // Fail on the second line, after one has already been translated: a
+        // half-translated transcript is the outcome to avoid.
+        translator.translateResult = { line in
+            if translator.translateCalls.count >= 2 { throw EngineFailure() }
+            return "[\(line)]"
+        }
+
+        let retranslator = Retranslator(gate: TranslationInferenceGate())
+        retranslator.engineOverrideForTests = translator
+        let message = await finish(retranslator, session: session, target: "de")
+
+        // A throw is a failure, not a decline, so the run stops rather than
+        // counting the line and carrying on to the third.
+        #expect(translator.translateCalls.count == 2,
+                "the run kept going after the engine failed")
+        #expect(message != nil, "a failed run must say so rather than reporting plain success")
+        let stored = TranscriptStore.segments(of: session)
+        #expect(stored.allSatisfy { $0.tr == nil },
+                "a failed re-translation must not leave a half-written transcript")
+    }
+
+    struct EngineFailure: Error {}
+
     @Test("destructive model actions refuse while a transcript is being re-translated")
     func destructiveActionsRefuseWhileRetranslating() async throws {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())

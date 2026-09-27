@@ -123,9 +123,9 @@ struct HyMT2TranslationTests {
         let translator = HyMT2Translator()
         do {
             try await translator.prepare(from: "de", to: "en") { _ in }
-            let germanToEnglish = await translator.translate(
+            let germanToEnglish = try await translator.translate(
                 "guten morgen", from: "de", to: "en")
-            let englishToGerman = await translator.translate(
+            let englishToGerman = try await translator.translate(
                 "good morning", from: "en", to: "de")
             await translator.stop()
 

@@ -10,18 +10,34 @@ protocol Translating: AnyObject, Sendable {
     /// Download/load whatever is needed. `progress` reports human-readable state.
     func prepare(from source: String, to target: String,
                  progress: @escaping @Sendable (String) -> Void) async throws
-    /// Nil means "could not translate" — the caller keeps the original line
-    /// rather than showing nothing.
-    func translate(_ text: String, from source: String, to target: String) async -> String?
+    /// Nil means the model *declined* — nothing to translate, or it produced
+    /// nothing usable for this line. That is routine: the caller keeps the
+    /// original line and leaves the engine loaded.
+    ///
+    /// A throw means the engine itself failed — a native error, not a quiet
+    /// answer. These two used to be the same thing, because this returned a
+    /// non-throwing `String?` and every implementation ended in `try?`. So a
+    /// Metal allocation failure, a decode error, or an MLX abort surfaced as
+    /// "the model declined to translate this line", which is the opposite of
+    /// what happened and reads to the user exactly like a model refusing.
+    ///
+    /// It also made the two callers disagree about the same nil: the caption
+    /// path kept the translator loaded forever while the status line claimed
+    /// translation was running, and the dictation path retired the engine on
+    /// the first line the model legitimately declined. Retiring MADLAD is
+    /// terminal — `TranslationRuntimeFallback` has no fallback to offer — so
+    /// both outcomes ended with translation silently dead.
+    func translate(_ text: String, from source: String, to target: String) async throws -> String?
     /// Optional one-call path for several independent regions. Engines that do
-    /// not support strict markers return nil and the caller falls back to the
-    /// existing sequential path.
-    func translateRegions(_ regions: [TranslationRegion], to target: String) async -> [String]?
+    /// not support strict markers return nil, and a malformed marker response is
+    /// also nil — the caller falls back to the sequential path for both. A
+    /// throw keeps its meaning: the engine failed.
+    func translateRegions(_ regions: [TranslationRegion], to target: String) async throws -> [String]?
     func stop() async
 }
 
 extension Translating {
-    func translateRegions(_ regions: [TranslationRegion], to target: String) async -> [String]? {
+    func translateRegions(_ regions: [TranslationRegion], to target: String) async throws -> [String]? {
         nil
     }
 }

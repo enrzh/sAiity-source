@@ -200,16 +200,18 @@ final class Retranslator {
                 }
                 // The gate is what makes this safe to run beside a live
                 // session; a cancelled wait here is a cancel, not a line the
-                // translator declined.
+                // translator declined. A throw from the engine is now also a
+                // genuine failure rather than a decline, and aborts the run
+                // instead of being counted as one declined line.
                 let result: String?
                 do {
                     result = try await infer {
-                        await engine.translate(seg.text, from: source, to: target)
+                        try await engine.translate(seg.text, from: source, to: target)
                     }
                 } catch {
-                    // Cancelled at the gate, or the gate itself failed. Either
-                    // way this run owes the user a whole transcript, not a
-                    // half-translated one.
+                    // Cancelled at the gate, the gate itself failed, or the
+                    // engine failed. Either way this run owes the user a whole
+                    // transcript, not a half-translated one.
                     aborted = true
                     break
                 }
