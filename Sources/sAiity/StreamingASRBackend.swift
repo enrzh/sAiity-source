@@ -374,7 +374,7 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
         }
         guard !ready.isEmpty else { return }
         for (target, continuation) in ready {
-            pendingLock.withLock { pendingDrainContinuations.removeValue(forKey: target) }
+            _ = pendingLock.withLock { pendingDrainContinuations.removeValue(forKey: target) }
             continuation.finish()
         }
     }

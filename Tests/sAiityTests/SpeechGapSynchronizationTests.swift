@@ -27,8 +27,8 @@ struct SpeechGapSynchronizationTests {
     private func speak(_ gate: SpeechGapGate, ms: Int) {
         var i = 0
         while i < ms / 100 {
-            gate.consume(rms: i.isMultiple(of: 2) ? 0.08 : 0.035,
-                         frames: 5 * Self.frames, sampleRate: Self.rate)
+            _ = gate.consume(rms: i.isMultiple(of: 2) ? 0.08 : 0.035,
+                             frames: 5 * Self.frames, sampleRate: Self.rate)
             i += 1
         }
     }
@@ -158,7 +158,7 @@ struct SpeechGapSynchronizationTests {
         capture.async {
             for step in 0..<40_000 {
                 let level: Float = step.isMultiple(of: 3) ? 0.05 : 0.0095
-                gate.consume(rms: level, frames: Self.frames, sampleRate: Self.rate)
+                _ = gate.consume(rms: level, frames: Self.frames, sampleRate: Self.rate)
             }
             done.leave()
         }

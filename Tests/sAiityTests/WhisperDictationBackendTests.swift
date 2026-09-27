@@ -157,7 +157,7 @@ struct WhisperDictationBackendTests {
         let destinations = Recorder<URL>()
         let backend = WhisperDictationBackend(root: root, download: { _, destination, _ in
             await attempts.increment()
-            await destinations.append(destination)
+            destinations.append(destination)
             try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
             // Exactly what the Hub downloader leaves behind mid-transfer: a
             // completed file, and the one it was halfway through.
