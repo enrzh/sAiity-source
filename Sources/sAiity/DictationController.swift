@@ -622,34 +622,35 @@ final class DictationController {
             let cleanupStarted = ContinuousClock.now
             defer { logDuration("cleanup", since: cleanupStarted) }
             phase = .cleaning
-            let value: String?
+            // Both cleanup shapes answer the same question — does this candidate
+            // keep the transcript's meaning? — so they share one validation.
+            // The detailed shape also returns refreshed region metadata, which
+            // is what translation should use; the simple shape has none, so it
+            // leaves the transcription as it was.
+            //
+            // This replaces a version that assigned `value = nil` on the
+            // detailed path and then tested `if let value` below, so with a
+            // detailed handler — which is what production always installs — that
+            // branch was unreachable and the validation was written twice.
+            var candidate: (text: String, transcription: DictationTranscriptionResult)?
             if let detailedCleanup {
-                if let candidate = await detailedCleanup(transcription),
-                   let valid = DictationCleanupValidator.validate(candidate.text,
-                                                                  preserving: text,
-                                                                  sourceLanguage: sourceLanguage,
-                                                                  languageMetadata: metadata) {
-                    output = valid
-                    transcriptionForTranslation = candidate
-                    cleaned = true
-                } else {
-                    cleanupUnavailable = true
+                if let result = await detailedCleanup(transcription) {
+                    candidate = (result.text, result)
                 }
-                value = nil
-            } else {
-                value = await cleanup(text, sourceLanguage)
+            } else if let value = await cleanup(text, sourceLanguage) {
+                candidate = (value, transcription)
             }
-            if !cleaned {
-                if let value,
-                   let valid = DictationCleanupValidator.validate(value,
-                                                                  preserving: text,
-                                                                  sourceLanguage: sourceLanguage,
-                                                                  languageMetadata: metadata) {
-                    output = valid
-                    cleaned = true
-                } else {
-                    cleanupUnavailable = true
-                }
+
+            if let candidate,
+               let valid = DictationCleanupValidator.validate(candidate.text,
+                                                               preserving: text,
+                                                               sourceLanguage: sourceLanguage,
+                                                               languageMetadata: metadata) {
+                output = valid
+                transcriptionForTranslation = candidate.transcription
+                cleaned = true
+            } else {
+                cleanupUnavailable = true
             }
             if cleanupUnavailable {
                 reportIssue("dictation.cleanup", "Cleanup unavailable; original transcript preserved.")

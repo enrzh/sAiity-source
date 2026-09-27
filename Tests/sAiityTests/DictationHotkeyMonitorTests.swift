@@ -11,15 +11,37 @@ import Testing
         #expect(DictationChord(keyCodes: [55, 58, 49]).displayString == "⌘⌥Space")
     }
 
-    @Test("ordinary keys require a modifier so typing cannot trigger dictation")
+    @Test("a chord needs a modifier and a real key, or it fires by accident")
     func chordSafety() {
-        #expect(DictationChord(keyCodes: [59]).isUsable)
-        #expect(DictationChord(keyCodes: [59, 2]).isUsable)
-        #expect(!DictationChord(keyCodes: [2]).isUsable)
+        // Both halves matter, and they stop different accidents. A bare letter
+        // fires while typing; a bare modifier fires on every press of it in
+        // every app, which is what the default used to be.
+        #expect(DictationChord(keyCodes: [59, 2]).isUsable)   // ⌃A
+        #expect(!DictationChord(keyCodes: [2]).isUsable)       // A alone
+        #expect(!DictationChord(keyCodes: [59]).isUsable)      // ⌃ alone
 
         var capture = DictationChordCaptureState()
         #expect(capture.handle(.keyDown(2)) == nil)
         #expect(capture.handle(.keyUp(2)) == nil)
+    }
+
+    @Test("a bare modifier cannot be recorded as the dictation shortcut")
+    func bareModifierIsNotRecordable() {
+        // Pressing and releasing only Control must not become the shortcut.
+        var capture = DictationChordCaptureState()
+        #expect(capture.handle(.flagsChanged(59, isDown: true)) == nil)
+        #expect(capture.handle(.flagsChanged(59, isDown: false)) == nil)
+    }
+
+    @Test("the default shortcut cannot fire on an ordinary key press")
+    func defaultChordIsInertWithoutTheModifier() {
+        // The whole point of the new default: a Control press anywhere must not
+        // start a recording.
+        let chord = DictationChord.defaultControl
+        #expect(chord.isUsable)
+        var state = DictationChordState(chord: chord)
+        #expect(state.handle(.flagsChanged(UInt16(kVK_Control), isDown: true)) == .none)
+        #expect(state.handle(.keyDown(UInt16(kVK_ANSI_A))) == .none)
     }
 
     @Test("a configured chord starts when all keys are pressed and stops when one is released")
@@ -55,9 +77,11 @@ import Testing
         #expect(state.sync(pressed: []) == .stop)
     }
 
-    @Test("the default Control shortcut accepts either physical Control key")
+    @Test("a modifier chord accepts either physical modifier key")
     func controlAlias() {
-        var state = DictationChordState(chord: .defaultControl)
+        // Left and right must be interchangeable, so a user who binds ⌃ uses
+        // whichever Control their hand is on.
+        var state = DictationChordState(chord: DictationChord(keyCodes: [59]))
 
         #expect(state.handle(.flagsChanged(UInt16(kVK_RightControl), isDown: true)) == .start)
         #expect(state.handle(.flagsChanged(UInt16(kVK_RightControl), isDown: false)) == .stop)

@@ -3,15 +3,27 @@ import NaturalLanguage
 
 enum DictationCleanupValidator {
     static func needsModelCleanup(_ value: String, sourceLanguage: String? = nil) -> Bool {
+        deterministicOutcome(value, sourceLanguage: sourceLanguage).needsModel
+    }
+
+    /// The deterministic pass and whether a semantic repair still remains.
+    ///
+    /// Returned together because the deterministic pass is not free — it
+    /// normalises whitespace and rewrites the spoken repairs in every script it
+    /// knows — and every caller that asks `needsModelCleanup` needs that same
+    /// baseline as its fallback. Computing it once is why this is a pair rather
+    /// than two functions.
+    static func deterministicOutcome(_ value: String,
+                                      sourceLanguage: String? = nil) -> (baseline: String, needsModel: Bool) {
         let baseline = deterministicCleanup(value, sourceLanguage: sourceLanguage)
-        guard !baseline.isEmpty else { return false }
+        guard !baseline.isEmpty else { return (baseline, false) }
 
         // The deterministic pass is language-agnostic. Only send text to the
         // model when a semantic repair remains; a language allow-list made every
         // clean French, Spanish, or long-tail-language sentence pay for LLM
         // inference even when there was nothing left to fix.
         let repairs = #"(?i)\b(actually|rather|i mean|sorry|no wait|wait|instead|you know|like|well|en fait|je veux dire|non attends|plutôt|désolé|en realidad|quiero decir|no espera|más bien|perdón|in realtà|cioè|no aspetta|piuttosto|scusa|na verdade|quer dizer|não espera|melhor|desculpa|eigenlijk|ik bedoel|nee wacht|liever|właściwie|mam na myśli|nie czekaj|raczej|przepraszam|eigentlich|ich meine|nein|sondern|besser gesagt|warte|oder doch)\b|(?:いや、?待って|つまり|不对|我的意思是|等一下|그러니까|잠깐만)|[—–]"#
-        return baseline.range(of: repairs, options: .regularExpression) != nil
+        return (baseline, baseline.range(of: repairs, options: .regularExpression) != nil)
     }
 
     /// Applies the speech repairs that should never depend on a small local

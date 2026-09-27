@@ -87,12 +87,14 @@ final class DictationCleanupSession {
             let source = input.languageMetadata.dominantLanguage
                 ?? input.regions.first?.language
             let metadata = input.languageMetadata
-            let baseline = DictationCleanupValidator.deterministicCleanup(input.text,
-                                                                           sourceLanguage: source)
+            // One deterministic pass, not two: the baseline is also what
+            // decides whether the model is needed at all, so asking for both
+            // together is the same work as asking for the answer twice.
+            let outcome = DictationCleanupValidator.deterministicOutcome(
+                input.text, sourceLanguage: source)
+            let baseline = outcome.baseline
             var candidate = baseline
-            if key != nil,
-               DictationCleanupValidator.needsModelCleanup(input.text,
-                                                            sourceLanguage: source) {
+            if key != nil, outcome.needsModel {
                 if model == nil {
                     let loading = ContinuousClock.now
                     model = try await load()
@@ -116,12 +118,18 @@ final class DictationCleanupSession {
             ])
         }
 
-        let modelIndexes = input.regions.indices.filter { index in
+        // Computed once per region and kept, because the loop below needs the
+        // same baseline as its fallback — asking the validator twice meant
+        // running the deterministic pass twice over every region.
+        var baselines: [Int: String] = [:]
+        let modelIndexes: [Int] = input.regions.indices.filter { index in
             guard key != nil else { return false }
             let region = input.regions[index]
-            return DictationCleanupValidator.needsModelCleanup(
+            let outcome = DictationCleanupValidator.deterministicOutcome(
                 region.text,
                 sourceLanguage: region.language == "auto" ? nil : region.language)
+            baselines[index] = outcome.baseline
+            return outcome.needsModel
         }
         if !modelIndexes.isEmpty, model == nil {
             let loading = ContinuousClock.now
@@ -166,7 +174,9 @@ final class DictationCleanupSession {
             try Task.checkCancellation()
             let source = region.language == "auto" ? nil : region.language
             let metadata = DictationLanguageMetadata(regions: [region])
-            let baseline = DictationCleanupValidator.deterministicCleanup(region.text, sourceLanguage: source)
+            let baseline = baselines[index]
+                ?? DictationCleanupValidator.deterministicCleanup(
+                    region.text, sourceLanguage: source)
             var candidate = baseline
             if let value = batched[index] {
                 candidate = value

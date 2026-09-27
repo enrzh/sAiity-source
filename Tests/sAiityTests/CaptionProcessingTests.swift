@@ -42,6 +42,37 @@ struct CaptionProcessingTests {
         #expect(spans.map(\.language) == ["en", "de"])
     }
 
+    @Test("A boundary late in a long sentence is still found")
+    func longSentenceBoundaryIsFound() {
+        // `splitLatin` now checks the 8-character minimum against precomputed
+        // offsets before building a candidate string, and stops at a
+        // near-certain boundary. Both changes are invisible unless a boundary
+        // that sits well past the first few words is still detected — which is
+        // exactly the arithmetic the offsets replaced.
+        let spans = CaptionLanguageSpanDetector.analyze(
+            "We were discussing the roadmap for a while and then "
+            + "wollten wir das Budget verdoppeln",
+            fallbackLanguage: "en")
+
+        #expect(CaptionLanguageSpanDetector.isMixed(spans))
+        #expect(spans.last?.language == "de")
+        #expect(spans.last?.text.contains("Budget") == true)
+        // Nothing is dropped in the process.
+        #expect(spans.map(\.text).joined(separator: " ")
+            .contains("roadmap for a while"))
+    }
+
+    @Test("A single-language sentence is not split by a passing non-Latin word")
+    func singleLanguageSentenceStaysWhole() {
+        // The early exit must not fire on a confident pair of halves that are
+        // both the same language.
+        let spans = CaptionLanguageSpanDetector.analyze(
+            "This is an ordinary English sentence with no other language in it",
+            fallbackLanguage: "en")
+
+        #expect(!CaptionLanguageSpanDetector.isMixed(spans))
+    }
+
     @Test("Mixed script spans retain a readable boundary")
     func mixedScriptLanguageSpans() {
         let spans = CaptionLanguageSpanDetector.analyze(

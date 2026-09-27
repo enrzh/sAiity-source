@@ -260,10 +260,17 @@ final class AppState {
         }
     }
 
-    /// Press-to-talk is separate from live captions. It is enabled by default,
-    /// but can be disabled without changing any caption or microphone-mixing
-    /// preference.
-    var dictationEnabled = UserDefaults.standard.object(forKey: "dictationEnabled") as? Bool ?? true {
+    /// Press-to-talk is separate from live captions, and now starts off.
+    ///
+    /// The event tap is live from launch whenever this is on, which means an
+    /// always-listening global shortcut and a microphone the app can open at any
+    /// moment. That is a decision to make, not a default to inherit — so a
+    /// fresh install opts in, under a chord that cannot fire by accident.
+    ///
+    /// `object(forKey:) as? Bool` is what keeps this from touching anyone who
+    /// has already made the decision: stored `true` stays on, stored `false`
+    /// stays off, and only "never set" becomes off.
+    var dictationEnabled = UserDefaults.standard.object(forKey: "dictationEnabled") as? Bool ?? false {
         didSet {
             guard dictationEnabled != oldValue else { return }
             UserDefaults.standard.set(dictationEnabled, forKey: "dictationEnabled")

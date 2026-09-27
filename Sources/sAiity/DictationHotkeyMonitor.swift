@@ -5,7 +5,19 @@ import CoreGraphics
 struct DictationChord: Codable, Equatable, Sendable {
     let keyCodes: Set<UInt16>
 
-    static let defaultControl = DictationChord(keyCodes: [UInt16(kVK_Control)])
+    /// The chord a fresh install gets.
+    ///
+    /// This used to be a bare Control key, which is not a shortcut so much as a
+    /// foot-gun: the monitor is an event tap that is live from launch, so every
+    /// Control press in every app — every Ctrl-click, every Emacs-style caret
+    /// movement, every app with a Control-based shortcut — opened the microphone
+    /// and started a recording. A real chord with a non-modifier key cannot fire
+    /// by accident.
+    ///
+    /// Installs that already stored a chord keep it. This only decides what
+    /// "the user never chose one" means.
+    static let defaultControl = DictationChord(
+        keyCodes: [UInt16(kVK_Command), UInt16(kVK_Option), UInt16(kVK_Space)])
 
     init(keyCodes: Set<UInt16>) {
         self.keyCodes = keyCodes.isEmpty ? Self.defaultControl.keyCodes : keyCodes
@@ -17,7 +29,16 @@ struct DictationChord: Codable, Equatable, Sendable {
             .joined()
     }
 
-    var isUsable: Bool { keyCodes.contains(where: Self.isModifierKey) }
+    /// A chord has to carry a modifier *and* a real key.
+    ///
+    /// Requiring the modifier stops a bare letter from firing while typing.
+    /// Requiring the non-modifier stops the mirror-image mistake: a bare
+    /// modifier, which fires on every press of it in every app no matter what
+    /// else is being typed.
+    var isUsable: Bool {
+        keyCodes.contains(where: Self.isModifierKey)
+            && keyCodes.contains(where: { !Self.isModifierKey($0) })
+    }
 
     /// A modifier key is displayed without a left/right qualifier, so the
     /// physical key on either side must satisfy the same shortcut.

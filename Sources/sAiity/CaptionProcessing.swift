@@ -192,12 +192,27 @@ enum CaptionLanguageSpanDetector {
             return [(text, reading(of: text)?.language)]
         }
 
+        // Character offsets, so a candidate can be length-checked before either
+        // side is built. The loop below runs once per word, and building both
+        // halves for every one of them was most of this function's cost — the
+        // strings it produced were thrown away by the very next line whenever
+        // the 8-character minimum was not met, which is the common case.
+        var offsets = [Int](repeating: 0, count: words.count + 1)
+        for (index, word) in words.enumerated() {
+            offsets[index + 1] = offsets[index] + word.count + 1  // +1 for the joining space
+        }
+        func characters(in range: Range<Int>) -> Int {
+            offsets[range.upperBound] - offsets[range.lowerBound] - 1
+        }
+
         var candidates: [(index: Int, score: Double, left: Reading, right: Reading)] = []
         for index in 2..<(words.count - 1) {
+            // Neither half may be shorter than 8 characters, so a split that
+            // cannot satisfy that is never worth building — or recognising.
+            guard characters(in: 0..<index) >= 8, characters(in: index..<words.count) >= 8 else { continue }
             let leftText = words[..<index].map(String.init).joined(separator: " ")
             let rightText = words[index...].map(String.init).joined(separator: " ")
-            guard leftText.count >= 8, rightText.count >= 8,
-                  let left = reading(of: leftText),
+            guard let left = reading(of: leftText),
                   let right = reading(of: rightText),
                   TranslationLanguage.baseCode(left.language)
                     != TranslationLanguage.baseCode(right.language) else { continue }
@@ -205,6 +220,11 @@ enum CaptionLanguageSpanDetector {
             // splitting on a single ambiguous loanword.
             let score = left.probability * right.probability
             candidates.append((index, score, left, right))
+            // A near-certain boundary cannot be improved on by scanning the rest
+            // of a long sentence, and this is what bounds the cost of a clause
+            // that code-switches. Below this we keep looking, because that is
+            // where the genuinely ambiguous cases live.
+            if score >= 0.95 { break }
         }
 
         guard let best = candidates.max(by: { $0.score < $1.score }),
