@@ -92,6 +92,9 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
     private var sessionStart = Date()
     private var lastFinalEnd: Double = 0
     private var audioClockEndSamples = 0
+    /// Guards the cue-timing read-modify-write in `stampedFinal`, which is
+    /// reached from both the engine's callback thread and the caller's.
+    private let timingLock = NSLock()
 
     /// A final chunk stamped from the processed-audio clock.
     ///
@@ -102,16 +105,26 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
     /// old wall-clock estimate also drifted when the model backlog changed.
     /// ~14 chars/second is unhurried speech; err long rather than short, since a
     /// subtitle that lingers reads better than one that flashes.
+    ///
+    /// `timingLock` is not optional here. This runs on two different threads:
+    /// the engine's own partial-callback thread (see the `setPartial` closure)
+    /// and the caller of `flushPending` / `transcribeDictation`. Reading
+    /// `lastFinalEnd` and writing the new end must be one step, or two finals
+    /// landing close together can both read the same previous end and emit
+    /// overlapping cues.
     private func stampedFinal(_ text: String) -> TranscriptChunk {
-        let wallNow = Date().timeIntervalSince(sessionStart)
-        let audioNow = pendingLock.withLock {
-            Double(audioClockEndSamples) / max(engine.sampleRate, 1)
+        let range = timingLock.withLock { () -> (start: Double, end: Double) in
+            let wallNow = Date().timeIntervalSince(sessionStart)
+            let audioNow = pendingLock.withLock {
+                Double(audioClockEndSamples) / max(engine.sampleRate, 1)
+            }
+            let now = audioNow > 0 ? audioNow : wallNow
+            let range = CaptionTiming.range(for: text,
+                                            audioEnd: now,
+                                            previousEnd: lastFinalEnd)
+            lastFinalEnd = range.end
+            return range
         }
-        let now = audioNow > 0 ? audioNow : wallNow
-        let range = CaptionTiming.range(for: text,
-                                        audioEnd: now,
-                                        previousEnd: lastFinalEnd)
-        lastFinalEnd = range.end
         return TranscriptChunk(text: text, isFinal: true,
                                start: range.start, end: range.end)
     }
@@ -253,8 +266,12 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
         await engine.reset()
         emit = onChunk
         commitLock.withLock { reconciler.reset(now: Date()) }
-        sessionStart = Date()
-        lastFinalEnd = 0
+        // Same lock as the read-modify-write in `stampedFinal`: a callback from
+        // a previous session can still be in flight when a new one starts.
+        timingLock.withLock {
+            sessionStart = Date()
+            lastFinalEnd = 0
+        }
         pendingLock.withLock {
             pending.removeAll(keepingCapacity: true)
             processing.removeAll(keepingCapacity: true)

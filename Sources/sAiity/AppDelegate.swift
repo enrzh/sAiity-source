@@ -753,6 +753,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// worth keeping, but a single bad inference must not be enough. See
     /// `TranslationFailureBudget` for why retiring MADLAD is terminal.
     private var translatorFailureBudget = TranslationFailureBudget()
+    /// Current wait before the next Input Monitoring retry, and whether the
+    /// "waiting for permission" state has already been shown. See
+    /// `ensureDictationHotkey`.
+    private var dictationHotkeyRetryDelay: Duration = .seconds(2)
+    private var dictationHotkeyWaitingNoticeShown = false
 
     /// Retire a translator after repeated native inference failures. The
     /// current caller still holds its use lease, so teardown waits for that
@@ -1272,6 +1277,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 } else {
                     self.dictationHotkeyRetryTask?.cancel()
                     self.dictationHotkeyRetryTask = nil
+                    // Start from the short interval again next time, and let the
+                    // notice show once more if permission is still missing.
+                    self.dictationHotkeyRetryDelay = .seconds(2)
+                    self.dictationHotkeyWaitingNoticeShown = false
                     // Cancel before the monitor and toast go away, so no
                     // prepared backend survives a user-visible disable action.
                     self.dictationController.cancel()
@@ -1473,21 +1482,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Input Monitoring can become available after launch (for example after
     /// the user accepts the privacy prompt). Keep trying while dictation is on
     /// so the shortcut does not silently depend on reopening sAiity.
+    ///
+    /// The wait is not a fixed two seconds. Each attempt spins up a real thread
+    /// with its own run loop and asks the window server for an event tap, so a
+    /// user who never grants the permission used to pay for that thirty times a
+    /// minute for the life of the app — and a "waiting for permission" toast
+    /// repainting on every one of them. The permission is now checked directly
+    /// first, which is free, and the interval backs off towards two minutes.
     private func ensureDictationHotkey() {
         guard SettingsWindowController.state.dictationEnabled else { return }
         if startDictationHotkey() {
             dictationHotkeyRetryTask?.cancel()
             dictationHotkeyRetryTask = nil
+            dictationHotkeyRetryDelay = .seconds(2)
+            dictationHotkeyWaitingNoticeShown = false
             return
         }
-        dictationController.markWaitingForInputMonitoring()
+        if !dictationHotkeyWaitingNoticeShown {
+            dictationController.markWaitingForInputMonitoring()
+            dictationHotkeyWaitingNoticeShown = true
+        }
         guard dictationHotkeyRetryTask == nil else { return }
+        var delay = dictationHotkeyRetryDelay
         dictationHotkeyRetryTask = Task { @MainActor [weak self] in
             while let self, !Task.isCancelled, SettingsWindowController.state.dictationEnabled {
-                try? await Task.sleep(for: .seconds(2))
+                try? await Task.sleep(for: delay)
                 guard !Task.isCancelled else { return }
+                // Cheap pre-check: skip the thread, the run loop and the tap
+                // request entirely while the permission is known to be absent.
+                guard CGPreflightListenEventAccess() else {
+                    delay = min(delay * 2, .seconds(120))
+                    self.dictationHotkeyRetryDelay = delay
+                    continue
+                }
                 if self.startDictationHotkey() {
                     self.dictationHotkeyRetryTask = nil
+                    self.dictationHotkeyRetryDelay = .seconds(2)
                     return
                 }
             }
