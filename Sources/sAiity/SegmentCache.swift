@@ -23,6 +23,15 @@ final class SegmentCache: @unchecked Sendable {
     private struct Entry {
         let stamp: Stamp
         let segments: [Segment]
+        /// Computed once, on insert.
+        ///
+        /// This used to be recomputed from `segments` on every insert and every
+        /// eviction — a walk over every segment's UTF-8 length. Search stores
+        /// one entry per session per keystroke and evicts as it goes, so a
+        /// sweep over a large library paid that walk once per store *and* once
+        /// per evict, per session. The value cannot change while an entry is in
+        /// the map, because `segments` is a `let`.
+        let cost: Int
     }
 
     private let lock = NSLock()
@@ -39,8 +48,13 @@ final class SegmentCache: @unchecked Sendable {
     /// oldest-first keeps most of the pass. A byte budget rather than a count
     /// is because transcripts differ by orders of magnitude: 400 two-line
     /// sessions are nothing, 400 three-hour ones are not.
-    private static let maxBytes = 32 << 20     // 32 MB of transcript text
+    private static let defaultMaxBytes = 32 << 20     // 32 MB of transcript text
+    private let maxBytes: Int
     private var bytes = 0
+
+    init(maxBytes: Int = SegmentCache.defaultMaxBytes) {
+        self.maxBytes = maxBytes
+    }
 
     /// Rough cost of an entry. Character count is the dominant term and is far
     /// cheaper to compute than anything exact.
@@ -59,15 +73,15 @@ final class SegmentCache: @unchecked Sendable {
         let c = Self.cost(segments)
         lock.withLock {
             if let old = entries[path] {
-                bytes -= Self.cost(old.segments)
+                bytes -= old.cost
                 order.removeAll { $0 == path }
             }
-            entries[path] = Entry(stamp: stamp, segments: segments)
+            entries[path] = Entry(stamp: stamp, segments: segments, cost: c)
             order.append(path)
             bytes += c
-            while bytes > Self.maxBytes, let oldest = order.first {
+            while bytes > maxBytes, let oldest = order.first {
                 order.removeFirst()
-                if let e = entries.removeValue(forKey: oldest) { bytes -= Self.cost(e.segments) }
+                if let e = entries.removeValue(forKey: oldest) { bytes -= e.cost }
             }
         }
     }
@@ -76,7 +90,7 @@ final class SegmentCache: @unchecked Sendable {
     /// or rewritten, so the whole cache does not have to be thrown away.
     func invalidate(path: String) {
         lock.withLock {
-            if let e = entries.removeValue(forKey: path) { bytes -= Self.cost(e.segments) }
+            if let e = entries.removeValue(forKey: path) { bytes -= e.cost }
             order.removeAll { $0 == path }
         }
     }
