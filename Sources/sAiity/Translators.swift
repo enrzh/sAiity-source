@@ -63,8 +63,22 @@ final class MADLADTranslator: Translating, @unchecked Sendable {
     /// common way to lose this resource, so fail before touching MLX and leave
     /// the original caption visible instead of terminating the app.
     static var hasBundledMetalLibrary: Bool {
-        TranslationPreflight.hasBundledMetalLibrary()
+        #if SAIITY_TEST_HOOKS
+        // A test process is not an app: `Bundle.main` is the SwiftPM test
+        // helper inside the toolchain, so the default root is a directory that
+        // has never contained a metallib and the preflight would refuse a run
+        // that is in fact fine. Absent from the shipping binary entirely.
+        if let root = metalLibraryRootOverride {
+            return TranslationPreflight.hasBundledMetalLibrary(resourceRoot: root)
+        }
+        #endif
+        return TranslationPreflight.hasBundledMetalLibrary()
     }
+
+    #if SAIITY_TEST_HOOKS
+    /// Where a real-model test says its metallib is, for the same reason.
+    static var metalLibraryRootOverride: URL?
+    #endif
 
     func prepare(from source: String, to target: String,
                  progress: @escaping @Sendable (String) -> Void) async throws {

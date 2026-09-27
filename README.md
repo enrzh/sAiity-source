@@ -142,6 +142,36 @@ included in the application bundle.
 | Sources/sAiity/OverlayWindow.swift | Caption bubble geometry and presentation |
 | Resources/Localizable.xcstrings | User-facing localization catalog |
 
+## What's new in 2.6.0
+
+Not yet released. These notes are being written ahead of the tag.
+
+- A failed translation no longer looks like a model refusing. Engines reported
+  "declined" and "failed" as the same value, so a native error surfaced as your
+  caption quietly staying untranslated with nothing in the log and translation
+  never being switched off. They are separate now: a real failure is logged and
+  retires a broken engine after three tries in a row, and a line the model
+  declines no longer retires anything. Re-translating a transcript stops on a
+  genuine failure instead of writing a half-translated file.
+- Press-to-talk no longer fires on an ordinary Control press. The default
+  shortcut is now ⌥⌘Space, a chord must contain a real key and not only
+  modifiers, and dictation starts switched off on a new install. Existing
+  installs keep the shortcut and the on/off state they already had.
+- Holding the dictation key past a minute now says the recording was cut, instead
+  of showing "Transcribing" and returning a shorter sentence with no explanation.
+- Loading a model that is deleted mid-dictation no longer leaks it. A load that
+  races the deletion used to displace the in-flight entry, and the model behind
+  it was never unloaded.
+- Dictation cleanup is roughly 78x faster on a short sentence — it was rebuilding
+  about thirty regular expressions and three language recognizers on every
+  utterance — and caption language analysis about 1.8x faster on a typical line.
+- Long caption lines are scanned for a code-switch on a coarse grid first, which
+  keeps the same boundary but does about 1.55x less work.
+- Searching transcripts no longer recomputes its cache accounting on every
+  keystroke, and the cache's eviction policy now has tests.
+- A data race on caption cue timings, and a hotkey permission retry loop that
+  never backed off, are both fixed.
+
 ## What's new in 2.5.5
 
 - Settings is a proper native window: a real sidebar, native toolbar controls,
