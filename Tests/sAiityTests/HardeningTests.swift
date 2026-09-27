@@ -18,6 +18,58 @@ import Testing
         #expect(TranslationPreflight.hasBundledMetalLibrary(resourceRoot: root))
     }
 
+    @Test("one failed inference does not write off the only translator")
+    func singleFailureDoesNotRetire() {
+        // The bug this pins: `try? await … , !out.isEmpty` flattened "threw"
+        // and "returned nothing" together, so a caption like "Hello." that
+        // MADLAD declines to translate quarantined the only selectable engine
+        // — and `resolve` returns nil for a quarantined MADLAD, so translation
+        // was over for the app's lifetime with the status line still claiming
+        // it was running.
+        var budget = TranslationFailureBudget()
+        let first = budget.recordFailure()
+        let second = budget.recordFailure()
+        let third = budget.recordFailure()
+        #expect(!first, "one failure must not retire")
+        #expect(!second, "two must not retire")
+        #expect(third, "sustained failure must retire")
+    }
+
+    @Test("one success clears the failure budget")
+    func successResetsFailureBudget() {
+        var budget = TranslationFailureBudget()
+        _ = budget.recordFailure()
+        _ = budget.recordFailure()
+        budget.recordSuccess()
+        #expect(budget.streak == 0)
+        // The budget is about being broken now, not a lifetime failure count.
+        let afterSuccess = budget.recordFailure()
+        #expect(!afterSuccess, "the count restarted after a success")
+    }
+
+    @Test("retiring restarts the budget so a later failure is judged fresh")
+    func retirementResetsBudget() {
+        var budget = TranslationFailureBudget(threshold: 2)
+        let first = budget.recordFailure()
+        let second = budget.recordFailure()
+        #expect(!first)
+        #expect(second)
+        #expect(budget.streak == 0)
+        let afterRetirement = budget.recordFailure()
+        #expect(!afterRetirement)
+    }
+
+    @Test("the budget always retires eventually")
+    func budgetAlwaysRetires() {
+        // A zero or negative threshold must not produce an engine that can
+        // never be retired — that would restore the original "hammer a broken
+        // engine forever" behaviour.
+        var budget = TranslationFailureBudget(threshold: 0)
+        #expect(budget.threshold == 1)
+        let retired = budget.recordFailure()
+        #expect(retired)
+    }
+
     @Test("a failed specialist translator falls back once and does not loop")
     func translationRuntimeFallback() {
         var state = TranslationRuntimeFallback()

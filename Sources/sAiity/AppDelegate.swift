@@ -692,11 +692,79 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return false
     }
 
-    /// Retire a translator after a native inference returns no result. The
+    /// What one caption translation attempt produced.
+    ///
+    /// The distinction matters: an empty result is ordinary model behaviour
+    /// and must not cost the user their translator, while a thrown error means
+    /// something is actually wrong.
+    private enum CaptionTranslationOutcome {
+        case translated(String)
+        /// The model ran and declined to produce anything for this line.
+        case empty
+        /// The call itself failed — a native error, not a quiet answer.
+        case failed
+    }
+
+    /// One caption translation, with its timing recorded and the three outcomes
+    /// kept apart.
+    ///
+    /// The previous shape was `try? await … , !out.isEmpty`, which flattened
+    /// "threw" and "returned nothing" into one branch and retired the engine for
+    /// both. That is the harshest possible response to a routine result:
+    /// `TranslationRuntimeFallback.resolve` has no fallback to offer once MADLAD
+    /// is quarantined, and MADLAD is the only selectable engine — so a caption
+    /// like "Hello." that the model declines to translate ends translation for
+    /// the whole app lifetime, while the status line still claims it is running.
+    private func runCaptionTranslation(_ text: String,
+                                       fallbackSource: String,
+                                       target: String,
+                                       engine: any Translating) async -> CaptionTranslationOutcome {
+        let started = ContinuousClock.now
+        defer {
+            Diagnostics.recordTiming(operation: "captions.translation",
+                                     seconds: elapsedSeconds(since: started),
+                                     cold: false)
+        }
+        do {
+            let out = try await translatorInferenceGate.run {
+                await self.translateCaptionText(text,
+                                                fallbackSource: fallbackSource,
+                                                target: target,
+                                                engine: engine)
+            }
+            // A nil from here is "nothing to translate" (no language spans) or
+            // the model declining this line — both routine. Only a throw from
+            // the native call counts against the failure budget.
+            guard let out, !out.isEmpty else { return .empty }
+            // A single success clears the budget: the failure budget is about
+            // sustained failure, not a running total across the session.
+            translatorFailureBudget.recordSuccess()
+            return .translated(out)
+        } catch {
+            NSLog("sAiity caption translation failed: %@",
+                  DiagnosticsRedactor.redact(error.localizedDescription))
+            return .failed
+        }
+    }
+
+    /// Consecutive failed inferences before a translator is written off.
+    ///
+    /// The original intent — stop hammering an engine that is not working — is
+    /// worth keeping, but a single bad inference must not be enough. See
+    /// `TranslationFailureBudget` for why retiring MADLAD is terminal.
+    private var translatorFailureBudget = TranslationFailureBudget()
+
+    /// Retire a translator after repeated native inference failures. The
     /// current caller still holds its use lease, so teardown waits for that
     /// lease rather than releasing MLX/llama state from inside inference.
     private func retireFailedTranslator(_ engine: TranslationEngine,
                                          reason: String) {
+        guard translatorFailureBudget.recordFailure() else {
+            NSLog("sAiity translator %@ failed (%d/%d): %@",
+                  engine.rawValue, translatorFailureBudget.streak,
+                  translatorFailureBudget.threshold, reason)
+            return
+        }
         translationRuntimeFallback.quarantine(engine)
         guard activeTranslatorEngine == engine else { return }
         let outgoing = activeTranslator
@@ -2738,24 +2806,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             defer { endTranslatorUse() }
             guard let engine = activeTranslator else { return }
             let engineKind = activeTranslatorEngine
-            let translationStarted = ContinuousClock.now
-            guard let out = try? await translatorInferenceGate.run({
-                await self.translateCaptionText(text,
-                                                fallbackSource: srcCode,
-                                                target: target,
-                                                engine: engine)
-            }), !out.isEmpty else {
-                Diagnostics.recordTiming(operation: "captions.translation",
-                                         seconds: self.elapsedSeconds(since: translationStarted),
-                                         cold: false)
+            let out: String
+            switch await runCaptionTranslation(text, fallbackSource: srcCode,
+                                               target: target, engine: engine) {
+            case .translated(let value):
+                out = value
+            case .empty:
+                // The model had nothing to say about this line. Keep the
+                // original caption and leave the translator loaded.
+                return
+            case .failed:
                 if let engineKind {
-                    retireFailedTranslator(engineKind, reason: "live inference returned no output")
+                    retireFailedTranslator(engineKind, reason: "live inference failed")
                 }
                 return
             }
-            Diagnostics.recordTiming(operation: "captions.translation",
-                                     seconds: self.elapsedSeconds(since: translationStarted),
-                                     cold: false)
             // Same guards as the authoritative path: not across a session
             // boundary, and only under the sentence it translates. The
             // `!sentenceClosed` leg drops a partial that resolves after the
@@ -2986,30 +3051,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 defer { self.endTranslatorUse() }
                 guard let engine = activeTranslator else { return nil }
                 let engineKind = activeTranslatorEngine
-                let translationStarted = ContinuousClock.now
-                // Empty counts as nothing translated. MADLAD returns "" for a
-                // short or noisy caption — it has no emptiness check, unlike
-                // the LLM path's sanitizer — and an empty string is non-nil,
-                // so it would otherwise record a translation that is not there.
-                guard let translated = try? await translatorInferenceGate.run({
-                    await self.translateCaptionText(text,
-                                                    fallbackSource: srcCode,
-                                                    target: target,
-                                                    engine: engine)
-                }), !translated.isEmpty else {
-                    Diagnostics.recordTiming(operation: "captions.translation",
-                                             seconds: self.elapsedSeconds(since: translationStarted),
-                                             cold: false)
+                switch await self.runCaptionTranslation(text, fallbackSource: srcCode,
+                                                        target: target, engine: engine) {
+                case .translated(let translated):
+                    out = translated
+                case .empty:
+                    // Nothing translated, but nothing is broken. The original
+                    // caption stands and the translator stays loaded.
+                    return nil
+                case .failed:
                     if let engineKind {
                         self.retireFailedTranslator(engineKind,
-                                                    reason: "caption inference returned no output")
+                                                    reason: "caption inference failed")
                     }
                     return nil
                 }
-                Diagnostics.recordTiming(operation: "captions.translation",
-                                         seconds: self.elapsedSeconds(since: translationStarted),
-                                         cold: false)
-                out = translated
             }
 
             guard self.sessionGeneration == generation,
