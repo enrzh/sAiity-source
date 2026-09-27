@@ -137,22 +137,24 @@ final class DictationCleanupSession {
             modelCalls = 1
             let requested = modelIndexes.map { input.regions[$0] }
             if let values = await cleanupRegions(requested), values.count == requested.count {
-                var valid = true
                 for (offset, value) in values.enumerated() {
                     let region = requested[offset]
                     let source = region.language == "auto" ? nil : region.language
                     let metadata = DictationLanguageMetadata(regions: [region])
+                    // A region whose output fails validation is simply not
+                    // recorded, so it falls through to the sequential path
+                    // below. The previous code set a `valid` flag, broke out,
+                    // and cleared the whole batch — so one malformed region of
+                    // five sent *all five* back through the model individually:
+                    // one wasted batched call plus five sequential ones. A
+                    // partial batch is still worth far more than none.
                     guard let cleaned = DictationCleanupValidator.validate(
                         value,
                         preserving: region.text,
                         sourceLanguage: source,
-                        languageMetadata: metadata) else {
-                        valid = false
-                        break
-                    }
+                        languageMetadata: metadata) else { continue }
                     batched[modelIndexes[offset]] = cleaned
                 }
-                if !valid { batched.removeAll(keepingCapacity: true) }
             }
             try Task.checkCancellation()
         }

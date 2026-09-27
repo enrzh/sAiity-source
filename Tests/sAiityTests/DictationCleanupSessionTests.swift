@@ -126,6 +126,67 @@ struct DictationCleanupSessionTests {
         await session.invalidate()
     }
 
+    /// A model that answers a batched request, so the partial-batch path is
+    /// reachable. `MockModel` only implements the single-region `cleanup`.
+    @MainActor
+    private final class BatchMockModel {
+        var batchCalls = 0
+        var singleCalls: [String] = []
+        /// One output per region; an empty entry is what a malformed response
+        /// looks like, and `validate` rejects it.
+        var batchOutput: [String]
+
+        init(batchOutput: [String]) {
+            self.batchOutput = batchOutput
+        }
+
+        func load(_ key: String) -> DictationCleanupSession.Model {
+            .init(cleanup: { text, _, _ in
+                self.singleCalls.append(text)
+                // Echo the input. A fallback that changes nothing still
+                // validates, so the test measures model calls, not wording.
+                return text
+            }, cleanupRegions: { _ in
+                self.batchCalls += 1
+                return self.batchOutput
+            }, stop: {})
+        }
+    }
+
+    @Test("one bad region in a batch does not re-run the model for the good ones")
+    func partialBatchIsKept() async {
+        // The bug this pins: a single region failing validation cleared the
+        // whole batch, so every region fell through to its own model call —
+        // one wasted batched call plus N sequential ones. With ~0.5s per call
+        // that is seconds of added latency for a dictation that was already
+        // mostly finished.
+        //
+        // Mixed languages on purpose: the batch path is only reached when
+        // `containsMultipleLanguages` is true, so same-language regions would
+        // quietly test the single joined call instead.
+        let session = DictationCleanupSession(gate: TranslationInferenceGate())
+        let english = "Send the report, I mean the revised one."
+        let german = "Schicke den Bericht, ich meine den revidierten."
+        let mock = BatchMockModel(
+            batchOutput: ["Send the revised one.", ""])  // German entry is invalid
+        let input = DictationTranscriptionResult(regions: [
+            .init(text: english, language: "en-US"),
+            .init(text: german, language: "de-DE"),
+        ])
+        #expect(input.languageMetadata.containsMultipleLanguages,
+                "the batch path needs genuinely mixed languages")
+
+        let result = await session.cleanup(input, modelKey: "1b") { mock.load("1b") }
+
+        #expect(mock.batchCalls == 1, "the batch was tried once")
+        // The English region validated and must not be re-run; only the German
+        // one fell back to a single call.
+        #expect(mock.singleCalls == [german],
+                "the validated region was sent through the model again")
+        #expect(result != nil)
+        await session.invalidate()
+    }
+
     @Test("a changed model key tears down before reloading; invalidation tears down once")
     func changedKeyAndInvalidation() async {
         let session = DictationCleanupSession(gate: TranslationInferenceGate())
