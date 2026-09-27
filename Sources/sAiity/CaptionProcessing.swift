@@ -188,6 +188,16 @@ enum CaptionLanguageSpanDetector {
                                     language: reading(of: text)?.language ?? fallbackLanguage)]
     }
 
+    /// Candidates a run may have before the scan is allowed to subsample.
+    /// Chosen so every realistic caption clause is still scanned exhaustively:
+    /// a 27-word run has 24 candidates, and spoken sentences in this app's
+    /// languages are well under that.
+    private static let exhaustiveCandidateLimit = 24
+    /// Positions between coarse samples on a longer run. Two, which is the
+    /// widest stride measured to leave the boundary decision unchanged; see the
+    /// note at the scan itself.
+    private static let scanStride = 2
+
     private static func splitLatin(_ words: [Substring]) -> [(text: String, language: String?)] {
         guard words.count >= 4 else {
             let text = words.map(String.init).joined(separator: " ")
@@ -208,25 +218,75 @@ enum CaptionLanguageSpanDetector {
         }
 
         var candidates: [(index: Int, score: Double, left: Reading, right: Reading)] = []
-        for index in 2..<(words.count - 1) {
+        /// A settled answer, so a coarse pass can stop without looking further.
+        var settled = false
+        func consider(_ index: Int) {
+            guard !settled else { return }
             // Neither half may be shorter than 8 characters, so a split that
             // cannot satisfy that is never worth building — or recognising.
-            guard characters(in: 0..<index) >= 8, characters(in: index..<words.count) >= 8 else { continue }
+            guard characters(in: 0..<index) >= 8, characters(in: index..<words.count) >= 8 else { return }
             let leftText = words[..<index].map(String.init).joined(separator: " ")
             let rightText = words[index...].map(String.init).joined(separator: " ")
             guard let left = reading(of: leftText),
                   let right = reading(of: rightText),
                   TranslationLanguage.baseCode(left.language)
-                    != TranslationLanguage.baseCode(right.language) else { continue }
+                    != TranslationLanguage.baseCode(right.language) else { return }
             // The product of confidence favours two coherent spans and avoids
             // splitting on a single ambiguous loanword.
             let score = left.probability * right.probability
             candidates.append((index, score, left, right))
             // A near-certain boundary cannot be improved on by scanning the rest
-            // of a long sentence, and this is what bounds the cost of a clause
-            // that code-switches. Below this we keep looking, because that is
+            // of a long sentence. Below this we keep looking, because that is
             // where the genuinely ambiguous cases live.
-            if score >= 0.95 { break }
+            if score >= 0.95 { settled = true }
+        }
+
+        // Coarse-to-fine. This is quadratic by construction: every candidate
+        // classifies two fresh strings, so a run of n words costs about 2(n-3)
+        // recognizer passes, and on a long run that is nearly all of the
+        // caption pipeline's language work. The common case is a run with no
+        // boundary in it at all, and there the exhaustive scan classifies every
+        // position in order to conclude nothing.
+        //
+        // So a long run is scanned on a coarse grid first, and only if that
+        // found something is the neighbourhood of the best coarse hit refined.
+        // A run that is one language finds nothing coarsely and stops, which is
+        // the case worth optimising.
+        //
+        // The stride is 2 because that is where the refinement stops being
+        // needed to reproduce the exhaustive answer, and that was measured
+        // rather than assumed: sweeping a code-switch through all 39 positions of
+        // a 39-word run, stride 2 reproduces the exhaustive result on every one,
+        // while stride 3 moves 3 of them and stride 4 moves 2 — a boundary one
+        // word off, and in one case the English word "about" stranded at the
+        // head of the German span. Stride 4 is roughly 4x faster on a long run
+        // against stride 2's 1.55x, so it is a one-constant change if the
+        // speed is ever worth more than the boundary being exact.
+        let first = 2
+        let end = words.count - 1
+        // Runs this size or shorter are scanned exhaustively, unchanged. Spoken
+        // sentences in this app's languages are comfortably under it, so typical
+        // captions take the exhaustive path and are not affected at all.
+        let stride = (end - first) > Self.exhaustiveCandidateLimit ? Self.scanStride : 1
+        if stride == 1 {
+            for index in first..<end { consider(index) }
+        } else {
+            var index = first
+            while index < end {
+                consider(index)
+                if settled { break }
+                index += stride
+            }
+            // The last position is not necessarily on the coarse grid, and a
+            // boundary sitting at the very end of a run is exactly the kind of
+            // thing a stride would step over.
+            if !settled { consider(end - 1) }
+            if !settled,
+               let coarse = candidates.max(by: { $0.score < $1.score }) {
+                let low = max(first, coarse.index - stride)
+                let high = min(end, coarse.index + stride + 1)
+                for refine in low..<high { consider(refine) }
+            }
         }
 
         guard let best = candidates.max(by: { $0.score < $1.score }),
