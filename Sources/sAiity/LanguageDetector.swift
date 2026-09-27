@@ -67,13 +67,10 @@ struct LanguageDetector {
         guard count >= minCharacters else { return nil }
         let text = window.reversed().joined(separator: " ")
 
-        let r = NLLanguageRecognizer()
-        r.processString(text)
-        guard let dominant = r.dominantLanguage else { return nil }
-        let p = r.languageHypotheses(withMaximum: 1)[dominant] ?? 0
-        guard p >= minProbability else { return nil }
+        guard let hypothesis = LanguageRecognizerPool.shared.classify(text) else { return nil }
+        guard hypothesis.probability >= minProbability else { return nil }
 
-        let code = dominant.rawValue
+        let code = hypothesis.language.rawValue
         if code == candidate {
             agreements += 1
         } else {
@@ -101,12 +98,9 @@ struct LanguageDetector {
                              minimumProbability: Double = 0.80) -> String? {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard value.count >= minimumCharacters else { return nil }
-        let recognizer = NLLanguageRecognizer()
-        recognizer.processString(value)
-        guard let language = recognizer.dominantLanguage else { return nil }
-        let probability = recognizer.languageHypotheses(withMaximum: 1)[language] ?? 0
-        guard probability >= minimumProbability else { return nil }
-        return language.rawValue
+        guard let hypothesis = LanguageRecognizerPool.shared.classify(value),
+              hypothesis.probability >= minimumProbability else { return nil }
+        return hypothesis.language.rawValue
     }
 
     /// The installed transcriber locale that best matches a detected language,

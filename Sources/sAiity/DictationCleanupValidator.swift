@@ -23,36 +23,6 @@ final class RegexCache: @unchecked Sendable {
     }
 }
 
-/// `NLLanguageRecognizer` instances, kept for reuse.
-///
-/// Constructing one costs roughly a third of a classify. A single dictation
-/// builds three — once in the deterministic pass to pick the filler and
-/// formatting tables, then once per side in the language check — so the
-/// constructions are worth avoiding.
-///
-/// The class is not documented as thread-safe, so a recognizer is checked out
-/// for the duration of one classification and handed back, rather than shared.
-final class LanguageRecognizerPool: @unchecked Sendable {
-    private let lock = NSLock()
-    private var available: [NLLanguageRecognizer] = []
-
-    func classify(_ text: String) -> NLLanguage? {
-        lock.lock()
-        let recognizer = available.popLast() ?? NLLanguageRecognizer()
-        lock.unlock()
-
-        recognizer.processString(text)
-        let result = recognizer.dominantLanguage
-
-        lock.lock()
-        // A small cap, so a burst of parallel dictations does not turn the pool
-        // into a leak of recognizers that are never needed again.
-        if available.count < 4 { available.append(recognizer) }
-        lock.unlock()
-        return result
-    }
-}
-
 enum DictationCleanupValidator {
     /// Compiled regular expressions, kept.
     ///
@@ -543,7 +513,7 @@ enum DictationCleanupValidator {
     }
 
     private static func detectedLanguage(in text: String) -> String? {
-        recognizers.classify(text)?.rawValue
+        recognizers.dominantLanguage(text)?.rawValue
     }
 
     private static func baseLanguage(_ value: String?) -> String? {

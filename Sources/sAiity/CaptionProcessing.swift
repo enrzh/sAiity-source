@@ -115,6 +115,8 @@ enum CaptionLanguageSpanDetector {
         return cache
     }()
 
+    private static let recognizers = LanguageRecognizerPool()
+
     static func analyze(_ text: String,
                         fallbackLanguage: String? = nil) -> [CaptionLanguageSpan] {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -252,12 +254,14 @@ enum CaptionLanguageSpanDetector {
         if letters.count < 6 {
             result = lexicalReading(of: text)
         } else {
-            let recognizer = NLLanguageRecognizer()
-            recognizer.processString(text)
-            if let language = recognizer.dominantLanguage {
-                let probability = recognizer.languageHypotheses(withMaximum: 1)[language] ?? 0
-                result = probability >= 0.72
-                    ? Reading(language: language.rawValue, probability: probability)
+            // Pooled. This is the per-candidate-split cost on the caption path,
+            // and the reading cache does not help it: `splitLatin` builds a
+            // distinct string pair for every boundary it considers, so nothing
+            // repeats within a clause.
+            if let hypothesis = recognizers.classify(text) {
+                result = hypothesis.probability >= 0.72
+                    ? Reading(language: hypothesis.language.rawValue,
+                              probability: hypothesis.probability)
                     : lexicalReading(of: text)
             } else {
                 result = lexicalReading(of: text)
