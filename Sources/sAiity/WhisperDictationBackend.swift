@@ -18,15 +18,51 @@ actor WhisperModelCache<Key: Hashable & Sendable, Resource: WhisperModelResource
 
     private struct Entry {
         let resource: Resource
-        var activeUsers = 0
+        var leases: Set<Int> = []
         var evictionToken = UUID()
         var invalidated = false
+    }
+
+    /// A single borrow of a resident model.
+    ///
+    /// The id is what makes releasing correct when the key has been taken over
+    /// by a newer load in the meantime: a release carries its own id, so it is
+    /// routed to whichever record is actually holding it instead of
+    /// decrementing whatever happens to be filed under the key by then.
+    private struct Lease {
+        let id: Int
+        let resource: Resource
+    }
+
+    private enum LeaseHome {
+        case entry(Key)
+        case orphan(Int)
+    }
+
+    /// A resource that a load displaced from `entries` while it was still
+    /// borrowed.
+    ///
+    /// `invalidated` is a promise about the *resource* — it will be unloaded
+    /// exactly once — not about the key it happened to be filed under. A load
+    /// that races an invalidation is entitled to take the key, so the promise
+    /// needs somewhere to live that a key can be taken over without losing it.
+    /// Before this, the displaced entry was dropped from the map, and whoever
+    /// still held it released against the *new* entry instead — so the old
+    /// model was never unloaded at all.
+    private struct Orphan {
+        let resource: Resource
+        var leases: Set<Int>
+        var invalidated: Bool
     }
 
     private let idleDuration: Duration
     private let loader: Loader
     private var entries: [Key: Entry] = [:]
     private var evictionTasks: [Key: Task<Void, Never>] = [:]
+    private var orphans: [Int: Orphan] = [:]
+    private var leaseHome: [Int: LeaseHome] = [:]
+    private var nextLeaseID = 0
+    private var nextOrphanID = 0
 
     init(idleDuration: Duration = .seconds(45), loader: @escaping Loader) {
         self.idleDuration = idleDuration
@@ -35,13 +71,13 @@ actor WhisperModelCache<Key: Hashable & Sendable, Resource: WhisperModelResource
 
     func withModel<T: Sendable>(for key: Key,
                                 operation: @escaping @Sendable (Resource) async throws -> T) async throws -> T {
-        let resource = try await acquire(key)
+        let lease = try await acquire(key)
         do {
-            let value = try await operation(resource)
-            await release(key)
+            let value = try await operation(lease.resource)
+            await release(lease)
             return value
         } catch {
-            await release(key)
+            await release(lease)
             throw error
         }
     }
@@ -49,7 +85,7 @@ actor WhisperModelCache<Key: Hashable & Sendable, Resource: WhisperModelResource
     func invalidate(_ key: Key) async {
         evictionTasks.removeValue(forKey: key)?.cancel()
         guard var entry = entries[key] else { return }
-        if entry.activeUsers > 0 {
+        if !entry.leases.isEmpty {
             entry.invalidated = true
             entries[key] = entry
             return
@@ -68,7 +104,7 @@ actor WhisperModelCache<Key: Hashable & Sendable, Resource: WhisperModelResource
     func forget(_ key: Key) {
         evictionTasks.removeValue(forKey: key)?.cancel()
         guard var entry = entries[key] else { return }
-        if entry.activeUsers > 0 {
+        if !entry.leases.isEmpty {
             entry.invalidated = true
             entries[key] = entry
             return
@@ -79,15 +115,21 @@ actor WhisperModelCache<Key: Hashable & Sendable, Resource: WhisperModelResource
     }
 
 #if SAIITY_TEST_HOOKS
-    var residentCountForTests: Int { entries.count }
+    /// Every loaded model the cache is still responsible for, including ones
+    /// displaced from the key map by a racing load. Counting only `entries`
+    /// would report zero while a model was still resident and owed an unload.
+    var residentCountForTests: Int { entries.count + orphans.count }
 #endif
 
-    private func acquire(_ key: Key) async throws -> Resource {
+    private func acquire(_ key: Key) async throws -> Lease {
         if var entry = entries[key], !entry.invalidated {
-            entry.activeUsers += 1
+            let lease = Lease(id: nextLeaseID, resource: entry.resource)
+            nextLeaseID += 1
+            leaseHome[lease.id] = .entry(key)
+            entry.leases.insert(lease.id)
             entries[key] = entry
             scheduleEviction(for: key, token: entry.evictionToken)
-            return entry.resource
+            return lease
         }
 
         let resource = try await loader(key)
@@ -102,35 +144,70 @@ actor WhisperModelCache<Key: Hashable & Sendable, Resource: WhisperModelResource
         // existing resident resource and release the duplicate immediately.
         if var existing = entries[key], !existing.invalidated {
             await resource.unload()
-            existing.activeUsers += 1
+            let lease = Lease(id: nextLeaseID, resource: existing.resource)
+            nextLeaseID += 1
+            leaseHome[lease.id] = .entry(key)
+            existing.leases.insert(lease.id)
             entries[key] = existing
             scheduleEviction(for: key, token: existing.evictionToken)
-            return existing.resource
+            return lease
+        }
+
+        // The key is ours, but whatever was filed under it may still be
+        // borrowed. Settle its debts before dropping it, or the model behind
+        // them is never unloaded.
+        if let displaced = entries[key] {
+            if displaced.leases.isEmpty {
+                if displaced.invalidated { await displaced.resource.unload() }
+            } else {
+                nextOrphanID += 1
+                orphans[nextOrphanID] = Orphan(resource: displaced.resource,
+                                              leases: displaced.leases,
+                                              invalidated: displaced.invalidated)
+                for id in displaced.leases { leaseHome[id] = .orphan(nextOrphanID) }
+            }
         }
 
         var entry = Entry(resource: resource)
-        entry.activeUsers = 1
+        let lease = Lease(id: nextLeaseID, resource: resource)
+        nextLeaseID += 1
+        leaseHome[lease.id] = .entry(key)
+        entry.leases.insert(lease.id)
         entries[key] = entry
         scheduleEviction(for: key, token: entry.evictionToken)
-        return resource
+        return lease
     }
 
-    private func release(_ key: Key) async {
-        guard var entry = entries[key] else { return }
-        entry.activeUsers = max(0, entry.activeUsers - 1)
-        guard entry.activeUsers == 0 else {
+    private func release(_ lease: Lease) async {
+        switch leaseHome.removeValue(forKey: lease.id) {
+        case .orphan(let id):
+            guard var orphan = orphans[id] else { return }
+            orphan.leases.remove(lease.id)
+            guard orphan.leases.isEmpty else {
+                orphans[id] = orphan
+                return
+            }
+            orphans.removeValue(forKey: id)
+            if orphan.invalidated { await orphan.resource.unload() }
+        case .entry(let key):
+            guard var entry = entries[key] else { return }
+            entry.leases.remove(lease.id)
+            guard entry.leases.isEmpty else {
+                entries[key] = entry
+                return
+            }
+            if entry.invalidated {
+                entries.removeValue(forKey: key)
+                evictionTasks.removeValue(forKey: key)?.cancel()
+                await entry.resource.unload()
+                return
+            }
+            entry.evictionToken = UUID()
             entries[key] = entry
+            scheduleEviction(for: key, token: entry.evictionToken)
+        case nil:
             return
         }
-        if entry.invalidated {
-            entries.removeValue(forKey: key)
-            evictionTasks.removeValue(forKey: key)?.cancel()
-            await entry.resource.unload()
-            return
-        }
-        entry.evictionToken = UUID()
-        entries[key] = entry
-        scheduleEviction(for: key, token: entry.evictionToken)
     }
 
     private func scheduleEviction(for key: Key, token: UUID) {
@@ -146,7 +223,7 @@ actor WhisperModelCache<Key: Hashable & Sendable, Resource: WhisperModelResource
     private func evictIfIdle(_ key: Key, token: UUID) async {
         guard let entry = entries[key],
               entry.evictionToken == token,
-              entry.activeUsers == 0,
+              entry.leases.isEmpty,
               !entry.invalidated else { return }
         entries.removeValue(forKey: key)
         evictionTasks.removeValue(forKey: key)

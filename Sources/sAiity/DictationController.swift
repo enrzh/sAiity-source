@@ -355,7 +355,12 @@ final class DictationController {
         guard session == generation, terminal.accept(.limited) else { return }
         releaseStarted = .now
         state.cancel()
-        phase = .transcribing
+        // Say the recording was cut. This used to go straight to `.transcribing`,
+        // which left `DictationPhase.limit` — and its "Limit reached" wording —
+        // unreachable: a user who held the key past the cap had their audio
+        // truncated with nothing on screen explaining why the result was short.
+        // `finish` moves on to `.transcribing` as soon as it starts working.
+        phase = .limit
         releaseTask = Task { @MainActor [weak self] in await self?.finish(session: session) }
     }
 
@@ -496,6 +501,10 @@ final class DictationController {
 
     private func finish(session: Int) async {
         guard session == generation else { return }
+        // The cap explains itself, then gets out of the way. Only the limited
+        // path needs this — a normal release already said `.transcribing` when
+        // the key came up.
+        if phase == .limit { phase = .transcribing }
         let samples = drainCapture()
         NSLog("sAiity dictation capture: \(samples.count) samples at \(Int(sessionSampleRate)) Hz (\(String(format: "%.2f", Double(samples.count) / sessionSampleRate))s)")
         if sessionUsesWhisper {

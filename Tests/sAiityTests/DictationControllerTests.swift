@@ -323,6 +323,34 @@ import Testing
         #expect(capture.takeCalls == 1)
     }
 
+    @Test("Hitting the duration cap says so instead of silently truncating")
+    func limitIsAnnounced() async {
+        let capture = FakeCapture(log: EventLog())
+        capture.samples = [4]
+        var phases: [DictationPhase] = []
+        let controller = DictationController(
+            makeBackend: { FakeBackend(log: EventLog()) }, capture: capture,
+            inserter: FakeInserter(), captionsActive: { false },
+            dictationUsesWhisper: { true },
+            transcribeWhisper: { _, _ in "truncated" },
+            onPhaseChanged: { phases.append($0) })
+        controller.markReady(); controller.press(); await controller.waitForWorkForTests()
+        for _ in 0..<100 where capture.limitHandler == nil { await Task.yield() }
+        capture.limitHandler?()
+        // The handler hops through a `Task { @MainActor }`, so the phase has to
+        // be given a chance to land before it is read.
+        for _ in 0..<100 { await Task.yield() }
+        await controller.waitForWorkForTests()
+
+        // The recording was cut, so the reason has to be on screen. It used to
+        // go straight to `.transcribing`, which made `DictationPhase.limit` and
+        // its "Limit reached" wording unreachable and left the truncated result
+        // unexplained.
+        #expect(phases.contains(.limit))
+        // ...but it must not be the resting state, or progress looks stuck.
+        #expect(phases.last != .limit)
+    }
+
     @Test("Whisper cancellation drains exactly once")
     func whisperCancellationDrainsOnce() async {
         let capture = FakeCapture(log: EventLog()); capture.samples = [1]

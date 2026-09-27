@@ -106,6 +106,46 @@ struct WhisperModelCacheTests {
         #expect(await cache.residentCountForTests == 0)
     }
 
+    /// The invalidated flag is a promise that the resource behind it gets
+    /// unloaded exactly once, by whoever takes it out of the map. A second
+    /// acquire that arrives before the first lets go must not quietly displace
+    /// that entry, because then the original holder's release finds a different
+    /// entry, decrements *its* count, and the displaced resource is never
+    /// unloaded at all.
+    @Test("an acquire during an in-flight forget does not orphan the old model")
+    func acquireDuringForgetDoesNotOrphan() async throws {
+        let gate = Gate()
+        let unloads = Counter()
+        let cache = WhisperModelCache<String, FakeResource>(idleDuration: .milliseconds(20)) { key in
+            FakeResource(id: key, unloads: unloads)
+        }
+
+        // A dictation in flight, holding the resident model.
+        let first = Task { try await cache.withModel(for: "base") { _ in await gate.hold() } }
+        for _ in 0..<1000 where await gate.entered == false { await Task.yield() }
+        #expect(await gate.entered)
+
+        // The file is deleted underneath it: flagged, still mapped.
+        await cache.forget("base")
+        #expect(await unloads.value == 0)
+
+        // A new caller arrives before the old one has let go, so the load takes
+        // the key and the still-borrowed entry is displaced.
+        _ = try await cache.withModel(for: "base") { resource in resource.id }
+        #expect(await cache.residentCountForTests == 2,
+                "the displaced model is still resident, so it must still be counted")
+
+        await gate.release()
+        _ = try await first.value
+
+        // Both models were loaded and both have to end up unloaded. Before the
+        // fix the displaced one was orphaned: its holder released against the
+        // entry that had taken the key, and nothing was left to unload it.
+        for _ in 0..<200 where await unloads.value < 2 { try await Task.sleep(for: .milliseconds(2)) }
+        #expect(await unloads.value == 2, "a loaded model was orphaned by a concurrent acquire")
+        #expect(await cache.residentCountForTests == 0)
+    }
+
     private actor Gate {
         private(set) var entered = false
         private var isOpen = false
