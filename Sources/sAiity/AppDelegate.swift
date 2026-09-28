@@ -1151,6 +1151,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Also the display cap: past this a sentence is closed rather than left to
     /// grow past what the bubble can show.
+    ///
+    /// This is a *capacity* bound, not a readability target, and the two pull
+    /// against each other. The bubble wraps to four lines, so roughly 220
+    /// characters is what it can show at all. But at the app's unhurried rate of
+    /// 14 characters per second that is close to sixteen seconds of reading,
+    /// delivered over the three or so seconds the sentence took to say — around
+    /// 63 characters per second on screen. The exported subtitle file splits the
+    /// same sentence into readable cues, so the live bubble is the unreadable one.
+    ///
+    /// Lowering this to the export's 84-character cue budget does make each
+    /// caption readable, and costs nothing to implement — but it chops a long
+    /// spoken sentence in half to achieve it, which is a worse outcome than a
+    /// brief one when the sentence is a single thought. The export solves this
+    /// properly by spending *time* rather than *text*: several cues in sequence.
+    /// The live bubble shows one row, so doing that needs the paint deferred
+    /// behind a one-sentence queue — the display advance and the paint are
+    /// coupled, since the advance runs before the new sentence is drawn.
+    /// That is a deliberate lag trade and belongs to whoever ships it, not to a
+    /// constant.
     private static let maxSentenceChars = 220
     private static let sentenceTerminators: Set<Character> = [".", "!", "?", "…", "。", "！", "？"]
     /// Punctuation that says the speaker is mid-thought, so a pause after it is

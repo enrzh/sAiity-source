@@ -67,5 +67,23 @@ struct SentenceAssemblyTests {
                 "a long spoken sentence must fit without being chopped")
         #expect(AppDelegate.maxSentenceCharsForTests <= 400,
                 "past this the bubble cannot show it anyway")
+
+        // The cap is a capacity bound — what the four-line bubble can show — and
+        // it is not a readability target. Those disagree, and the disagreement
+        // is the known live-caption weakness rather than an oversight:
+        //
+        //   220 characters at CaptionTiming's 14/second needs ~15.7s to read,
+        //   and arrives in roughly the 3s the sentence took to speak.
+        //
+        // Lowering it to Export.cueCharacterBudget (84) makes each caption
+        // readable and costs nothing to implement, but chops a long sentence in
+        // half to do it. The export spends *time* instead — several cues in
+        // sequence — which the one-row live bubble cannot do without deferring
+        // the paint behind the display advance.
+        let readingSeconds = Double(AppDelegate.maxSentenceCharsForTests) / 14.0
+        #expect(readingSeconds > 10,
+                "if this ever drops below ~10s the cap and the export budget should be unified")
+        #expect(Export.cueCharacterBudget < AppDelegate.maxSentenceCharsForTests,
+                "the export splits a caption the live bubble shows whole")
     }
 }

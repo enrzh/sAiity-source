@@ -174,6 +174,11 @@ Not yet released. These notes are being written ahead of the tag.
 - Dictation cleanup is roughly 78x faster on a short sentence — it was rebuilding
   about thirty regular expressions and three language recognizers on every
   utterance — and caption language analysis about 1.8x faster on a typical line.
+- The live caption is still capped at what the bubble can show (220 characters
+  over four lines), which is more than is comfortable to read in the few seconds
+  it is on screen. Exported subtitles are the readable form; the live bubble is
+  not, and closing that gap means holding a caption up rather than making it
+  shorter, which is a deliberate lag trade.
 - Exported subtitles are now readable rather than merely short. Cue splitting
   already kept text under a length budget, but nothing governed *speed*: an
   83-character sentence spoken in 1.4 seconds exported at 89 characters per

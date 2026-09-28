@@ -153,6 +153,13 @@ enum Export {
         return out
     }
 
+    /// Characters per cue in an exported subtitle file.
+    ///
+    /// Named rather than left as a default argument so the live caption can
+    /// share it: what you read on screen and what you get in the SRT should be
+    /// the same size, and that is only true if there is one number.
+    static let cueCharacterBudget = 84
+
     /// Split one final into subtitle cues.
     ///
     /// Word timings are the good case: the engine said when each word was
@@ -167,7 +174,8 @@ enum Export {
     /// an estimate, and pretending otherwise would be the same kind of lie in
     /// the other direction — but it is a much smaller one than a 15-second cue.
     static func cues(from seg: Segment,
-                     maxChars: Int = 84, maxDur: Double = 6.0, gap: Double = 0.6)
+                     maxChars: Int = Export.cueCharacterBudget,
+                     maxDur: Double = 6.0, gap: Double = 0.6)
         -> [(t0: Double, t1: Double, text: String)] {
         if let ws = seg.words, !ws.isEmpty {
             return timedCues(from: ws, maxChars: maxChars, maxDur: maxDur, gap: gap)
