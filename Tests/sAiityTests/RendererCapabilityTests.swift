@@ -68,4 +68,28 @@ struct RendererCapabilityTests {
         #expect(distinct.count > 8,
                 "only \(distinct.count) distinct colours — this is the placeholder, not a real render")
     }
+
+    /// Isolates "the Models page has no rows" into "the registry has no rows" or
+    /// "the view never received them".
+    ///
+    /// A first capture of the settings window showed the Models pane with empty
+    /// Recognition and Translation sections, which reads as the app being unable
+    /// to offer a download at all. `ModelRegistry.assets()` is a pure fold over
+    /// three static case lists, so it is either populated or structurally broken —
+    /// and if it is populated, the blank page is the capture harness photographing
+    /// before `AppState.refresh()` lands, not a product defect.
+    @Test("The model registry has rows to show", .timeLimit(.minutes(2)))
+    func registryIsPopulated() {
+        let assets = ModelRegistry.assets()
+        print("REGISTRY rows: \(assets.count)")
+        for asset in assets {
+            print("REGISTRY   \(asset.id)  \(asset.family == .recognition ? "recognition" : "translation")  recommended=\(asset.recommended)")
+        }
+        #expect(assets.count >= 5,
+                "the registry produced \(assets.count) rows; the Models page would be empty")
+        #expect(assets.contains { $0.family == .recognition },
+                "nothing recognisable to download")
+        #expect(assets.contains { $0.family == .translation },
+                "nothing translatable to download")
+    }
 }

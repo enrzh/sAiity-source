@@ -1427,6 +1427,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if TestHooks.openSettings {
             SettingsWindowController.show()
         }
+        // Photographs the settings window from inside the app, which is the only
+        // way to see it without Screen Recording permission. See SelfCapture for
+        // why `screencapture` and `ImageRenderer` are both unusable here.
+        if SelfCapture.directory != nil {
+            Self.scheduleAfterLaunch { SelfCapture.runAfterLaunch() }
+        }
         if TestHooks.preview {
             // The window server can drop an order request made in the first
             // applicationDidFinishLaunching pass. Use the same settled-launch
