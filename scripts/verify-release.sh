@@ -29,8 +29,30 @@ find "$APP/Contents" -type f -name '*.metallib' -size +0c -print -quit | grep -q
     exit 1
 }
 
-if strings "$binary" | grep -Eq 'SAIITY_(AUTOSTART|TEST_HOOKS)'; then
-    echo "FATAL: test-only hooks are present in the release executable." >&2
+# Test-only hooks, checked two ways because they can each be wrong.
+#
+# The plist says what the build *intended*, and the binary says what it
+# *contains*. A build without `SAIITY_TEST_HOOKS` resolves `flag(...)` to a
+# constant `false`, so the optimizer drops the branch and the flag name with it —
+# which means the string really is a usable fingerprint, and really is absent
+# from a clean build.
+#
+# The grep used `grep -q`, and that silently inverted the check: `grep -q` exits on
+# the first match, `strings` then dies with SIGPIPE writing the rest of a 70 MB
+# binary, and `set -o pipefail` turns that into a non-zero pipeline status — so
+# the `if` took the else branch and printed "release verification passed" with the
+# hook sitting right there. A gate that fails open is worse than no gate. `grep -c`
+# reads the whole stream and cannot be killed early, so the status is grep's.
+HOOKS=$(/usr/libexec/PlistBuddy -c "Print :SAIITYTestHooks" "$PLIST" 2>/dev/null || echo "")
+if [ "$HOOKS" = "true" ]; then
+    echo "FATAL: this bundle was built with the test-only hooks." >&2
+    echo "       SAIITY_AUTOSTART starts system-audio capture with no consent." >&2
+    echo "       build-app.sh only omits it for --notarize or --no-test-hooks." >&2
+    exit 1
+fi
+if [ "$(strings "$binary" | grep -cE 'SAIITY_AUTOSTART' || true)" != "0" ]; then
+    echo "FATAL: SAIITY_AUTOSTART is present in the release executable." >&2
+    echo "       The plist does not claim a hook build, so the two disagree." >&2
     exit 1
 fi
 

@@ -40,7 +40,20 @@ GIT_COUNT=$(git rev-list --count HEAD 2>/dev/null || echo "1")
 # certificate to run it with, so the first real release attempt was also the
 # first time this line executed.
 NOTARIZE=0
-for arg in "$@"; do [ "$arg" = "--notarize" ] && NOTARIZE=1; done
+# `--no-test-hooks` builds the bundle exactly as `--notarize` would, minus the
+# upload. There was no way to do that before: the define was tied to
+# notarisation, so the only hook-free build was one that also shipped, and a
+# local "build it like the real thing" bundle was not possible. That matters
+# because the two differ in behaviour — `SAIITY_AUTOSTART` starts system-audio
+# capture with no window and no consent — so a bundle handed to someone to try is
+# not the bundle that would be released.
+CLEAN_BUILD=0
+for arg in "$@"; do
+    case "$arg" in
+        --notarize) NOTARIZE=1; CLEAN_BUILD=1 ;;
+        --no-test-hooks) CLEAN_BUILD=1 ;;
+    esac
+done
 
 SIGN_ID="${SAIITY_SIGN_ID:-}"
 if [ -z "$SIGN_ID" ]; then
@@ -78,7 +91,7 @@ if ! xcrun metal --version >/dev/null 2>&1; then
     exit 1
 fi
 
-if [ "$NOTARIZE" = 1 ]; then
+if [ "$CLEAN_BUILD" = 1 ]; then
     swift build -c release
 else
     swift build -c release -Xswiftc -DSAIITY_TEST_HOOKS
@@ -145,6 +158,21 @@ if [ -f Resources/Localizable.xcstrings ]; then
     xcrun xcstringstool compile Resources/Localizable.xcstrings \
         --output-directory "$APP/Contents/Resources"
     echo "localized: $(ls -d "$APP/Contents/Resources/"*.lproj | wc -l | tr -d ' ') languages"
+fi
+
+# Record whether this bundle carries the test-only environment hooks.
+#
+# `verify-release.sh` used to grep the executable for `SAIITY_AUTOSTART`, which
+# cannot work in either direction: the flag *names* are deliberately outside
+# TestHooks' `#if`, so they are present in a clean build too, and the build
+# define itself leaves no string behind. So the bundle states the fact instead,
+# and the gate reads the plist rather than guessing from a binary.
+if [ "$CLEAN_BUILD" = 1 ]; then
+    /usr/libexec/PlistBuddy -c "Delete :SAIITYTestHooks" \
+        "$APP/Contents/Info.plist" >/dev/null 2>&1 || true
+else
+    /usr/libexec/PlistBuddy -c "Add :SAIITYTestHooks bool true" \
+        "$APP/Contents/Info.plist" >/dev/null 2>&1 || true
 fi
 
 # Stamp the build so a bug report can name it.
