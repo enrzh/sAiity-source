@@ -235,6 +235,12 @@ struct CaptionASRPerformanceTests {
             "audioSeconds": Double(fixture.samples.count) / 16_000,
             "outputChars": snapshot.finalText.count,
             "finalRegions": snapshot.chunks.filter { $0.isFinal }.count,
+            // The transcript itself, not just its score. Two engines can reach
+            // the same WER by failing in opposite ways, and a comparison you
+            // cannot read is a comparison you cannot act on: an engine that
+            // scores well by emitting the reference back, or by going quiet on
+            // one language and loud on another, is not a win.
+            "text": snapshot.finalText,
             "firstVolatileSeconds": snapshot.firstVolatileSeconds ?? NSNull(),
             "firstFinalSeconds": snapshot.firstFinalSeconds ?? NSNull(),
             "finalizationSeconds": finalizationSeconds,
@@ -352,8 +358,19 @@ struct CaptionASRPerformanceTests {
     func installedWhisperTurboBenchmark() async throws {
         let path = try #require(ProcessInfo.processInfo.environment["SAIITY_CAPTION_BENCHMARK_DIR"])
         let inputs = try fixtures(in: URL(fileURLWithPath: path, isDirectory: true))
-        guard WhisperTurboEngine.isDownloaded() else {
-            throw BenchmarkError("Whisper turbo is not installed at \(WhisperTurboEngine.assetDirectory.path)")
+        if !WhisperTurboEngine.isDownloaded() {
+            // Never fetched silently: 626 MB is a real download and a benchmark
+            // that quietly starts one is a benchmark nobody expects to wait for.
+            // Opt in with SAIITY_CAPTION_BENCHMARK_DOWNLOAD=1, which is also
+            // how this model gets onto a machine in the first place — the same
+            // call the Models page's Download button makes.
+            guard ProcessInfo.processInfo.environment["SAIITY_CAPTION_BENCHMARK_DOWNLOAD"] == "1" else {
+                throw BenchmarkError("Whisper turbo is not installed at \(WhisperTurboEngine.assetDirectory.path); "
+                                     + "set SAIITY_CAPTION_BENCHMARK_DOWNLOAD=1 to fetch it")
+            }
+            try await WhisperTurboEngine.downloadWeights { progress in
+                print("SAIITY_CAPTION_BENCHMARK_DOWNLOAD \(progress.fraction.map { String(format: "%.2f", $0) } ?? "?") \(progress.note)")
+            }
         }
         let metrics = MetricsBox()
         try await Self.benchmark(

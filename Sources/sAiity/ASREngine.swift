@@ -5,9 +5,33 @@ import Foundation
 /// read without silently re-entering the product surface.
 enum ASREngine: String, CaseIterable, Sendable {
     case nemotron
-    /// Whisper large-v3-turbo, as a second opinion on quality rather than a
-    /// faster path. Not a fallback: it is chosen deliberately, and it is
-    /// recommended by nothing.
+    /// Whisper large-v3-turbo. **Measured, and not offered.**
+    ///
+    /// It is a real adapter behind the same seam and it transcribes well — fed a
+    /// whole utterance in one pass it returns the sentence correctly, which is
+    /// what the model is capable of. It fails as a *live* caption engine for two
+    /// measured reasons, both recorded in `WhisperTurboEngine`:
+    ///
+    ///   - It is not a streaming decoder. Re-decoding a window every pass gives
+    ///     a real-time factor of **3.6–4.6** — it needs three to five seconds
+    ///     of compute per second of speech, so it structurally cannot keep up
+    ///     with a live meeting. Nemotron measures **0.05**, twenty times faster
+    ///     than real time.
+    ///   - Its cumulative text revises between passes (a comma becomes a
+    ///     period), and `CaptionTranscriptReconciler` accepts a revision only
+    ///     while it still extends what it already committed. One revised
+    ///     character and it goes permanently silent, so the session's remaining
+    ///     speech is dropped. Nemotron's RNN-T output only ever grows, so this
+    ///     never happens to it.
+    ///
+    /// Word error rate followed from that: 0.60 against Nemotron's 0.05 on the
+    /// same three fixtures, almost entirely from *missing* words rather than
+    /// wrong ones.
+    ///
+    /// The case stays so the model keeps a registry row — a 626 MB download the
+    /// user made for this experiment has to be visible and deletable, not
+    /// measured as "other files" — but it is out of the picker, and a stored
+    /// preference for it normalizes to no selection.
     case whisperTurbo
     /// Legacy on-disk value. Keep the raw case so old preferences can be read
     /// and normalized without making it selectable again.
@@ -15,21 +39,15 @@ enum ASREngine: String, CaseIterable, Sendable {
 
     static var allCases: [ASREngine] { [.nemotron, .whisperTurbo] }
 
-    /// The engines a user may pick.
-    static let userSelectableCases: [ASREngine] = [.nemotron, .whisperTurbo]
+    /// The engines a user may pick. Only Nemotron: see `whisperTurbo`.
+    static let userSelectableCases: [ASREngine] = [.nemotron]
 
-    /// Nemotron is the first thing anyone should download: one model, 121
-    /// languages, and a real streaming decoder whose cost tracks the audio it is
-    /// given. Whisper turbo re-decodes a window on every pass to get the same
-    /// effect, so it is a deliberate trade for the languages where Whisper is
-    /// stronger, not an upgrade.
     static let primaryCases: [ASREngine] = [.nemotron]
-    /// Behind the advanced disclosure, for the same reason Hy-MT2 is: a second
-    /// opinion, not a default.
-    static let advancedCases: [ASREngine] = [.whisperTurbo]
+    /// Empty. Kept as a named list so the shape survives the measurement that
+    /// emptied it, and so a future engine has somewhere obvious to go.
+    static let advancedCases: [ASREngine] = []
 
-    /// True for anything that is not the recommended first choice.
-    var isAdvanced: Bool { self != .nemotron }
+    var isAdvanced: Bool { !Self.primaryCases.contains(self) }
 
     static func visibleSelection(_ engine: ASREngine?) -> ASREngine? {
         guard let engine, userSelectableCases.contains(engine) else { return nil }

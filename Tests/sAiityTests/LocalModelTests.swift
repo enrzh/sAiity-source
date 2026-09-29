@@ -163,15 +163,20 @@ struct LocalModelTests {
         #expect(TranslationEngine.effective == TranslationEngine.recommended)
 
         #expect(ASREngine.allCases == [.nemotron, .whisperTurbo])
-        // Two engines are selectable, but exactly one is the first download.
-        // The advanced case is a second opinion behind a disclosure, and if it
-        // ever became the recommendation this test is where that would show.
-        #expect(ASREngine.recommended == .nemotron)
+        // The Whisper turbo case survives so its 626 MB keeps a registry row and
+        // a Delete button, but it is not offered, and a stored preference for it
+        // must normalize away rather than silently select a model the user can
+        // no longer see or change.
+        #expect(!ASREngine.userSelectableCases.contains(.whisperTurbo),
+                "Whisper turbo measured 3.6-4.6x real time and starves the reconciler; it must not be pickable")
+        #expect(ASREngine.visibleSelection(.whisperTurbo) == nil)
+        ASREngine.selected = .whisperTurbo
+        #expect(ASREngine.selected == nil)
+        #expect(UserDefaults.standard.string(forKey: "asrEngine") == nil)
+        #expect(ASREngine.allCases.contains(.whisperTurbo),
+                "the case must stay in allCases or its 626 MB reads as stray bytes")
         #expect(ASREngine.primaryCases == [.nemotron])
-        #expect(ASREngine.advancedCases == [.whisperTurbo])
-        #expect(ASREngine.whisperTurbo.isAdvanced,
-                "the non-default engine belongs behind the advanced disclosure")
-        #expect(!ASREngine.nemotron.isAdvanced)
+        #expect(ASREngine.recommended == .nemotron)
         // The retired engine stays unselectable, and setting it must not fall
         // back to a model the user never chose.
         #expect(ASREngine.visibleSelection(.parakeetEou) == nil)

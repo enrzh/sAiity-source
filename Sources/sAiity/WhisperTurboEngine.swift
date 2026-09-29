@@ -35,6 +35,42 @@ import WhisperKit
 /// context. It is re-decoded every pass and then discarded by timestamp, so the
 /// model is never asked to start a sentence with no acoustic history, and the
 /// discarded words cannot be counted twice.
+///
+/// ## Measured result: do not offer this as a live caption engine
+///
+/// This adapter is correct — fed a whole utterance in one `process()` call it
+/// returns the sentence accurately, and the commit rule is unit-tested against
+/// the boundary cases. The model is not the problem. Two things around it are,
+///
+///   - **It cannot keep up.** Measured on three fixtures against Nemotron on
+///     identical audio: a real-time factor of **3.6–4.6**, meaning three to
+///     five seconds of compute per second of speech. Nemotron measures **0.05** —
+///     twenty times faster than real time. Re-decoding a window every pass is
+///     what buys the commit rule, and that multiplier is the whole cost. A
+///     live meeting cannot be captioned at 4x real time, and no amount of
+///     tuning moves this by an order of magnitude.
+///
+///   - **It starves the reconciler.** This engine's cumulative text *revises*
+///     between passes — a comma becomes a period, a word is re-timed — because
+///     that is what a fixed-receptive-field model does when it sees more audio.
+///     `CaptionTranscriptReconciler.accepts(_:)` admits a revision only while it
+///     still extends what it has already committed, and returns `.none`
+///     otherwise, on the deliberate grounds that a rewriting engine would
+///     otherwise duplicate caption lines. So the first revised character
+///     silences it for the rest of the session and the remaining speech is
+///     dropped without error. Nemotron's RNN-T output only ever grows, so this
+///     never arises for it.
+///
+/// The second is a design incompatibility with a component Nemotron also
+/// depends on, not a bug here. Changing the reconciler to tolerate a revising
+/// engine means changing the path that demonstrably works, for an engine that
+/// cannot caption live audio anyway. So `ASREngine` keeps the case — the 626 MB
+/// needs a registry row so it can be deleted, not measured as stray bytes — but
+/// takes it out of the picker.
+///
+/// The benchmark lives in `CaptionASRPerformanceTests.installedWhisperTurboBenchmark`
+/// and the commit rule in `WhisperTurboEngineTests`, so this stays re-answerable
+/// if either the reconciler or the hardware changes.
 final class WhisperTurboEngine: FluidStreamingEngine, @unchecked Sendable {
     /// Argmax recommends the September 2024 checkpoint for multilingual work —
     /// measurably better than the 2023 v3 on Spanish, Hindi and Korean — and the
@@ -382,9 +418,21 @@ final class WhisperTurboEngine: FluidStreamingEngine, @unchecked Sendable {
     ///
     /// The tail is decoded with no commit horizon: no more audio is coming, so
     /// nothing can revise it, and withholding it would drop real speech.
+    ///
+    /// Only the audio *after* the commit point is decoded. The window still
+    /// holds `leftContextSeconds` of already-committed audio so the live passes
+    /// have history, and decoding that again here would splice the tail onto a
+    /// second copy of the prefix. That is not cosmetic: the pipeline's
+    /// reconciler only accepts a final string that extends the one it already
+    /// committed, so a duplicated prefix makes it reject the whole flush — and
+    /// the last sentence of every session silently never reaches the transcript.
     func finishSession() async -> String? {
         guard let model = lock.withLock({ whisper }) else { return nil }
-        let audio = lock.withLock { window.ordered() }
+        let audio = lock.withLock { () -> [Float] in
+            let all = window.ordered()
+            guard contextSamples < all.count else { return [] }
+            return Array(all[contextSamples...])
+        }
         guard !audio.isEmpty else {
             return lock.withLock { committedText.isEmpty ? nil : committedText }
         }
@@ -417,6 +465,17 @@ final class WhisperTurboEngine: FluidStreamingEngine, @unchecked Sendable {
         lock.withLock { detected }
     }
 }
+
+#if SAIITY_TEST_HOOKS
+extension WhisperTurboEngine {
+    /// Test-only view of the commit state, for the diagnostic that separates
+    /// "the commit rule drops text" from "the incremental path drops text".
+    var debugCommitted: String { lock.withLock { committedText } }
+    var debugVolatile: String { lock.withLock { volatileText } }
+    var debugWindowSeconds: Double { lock.withLock { Double(window.count) / sampleRate } }
+    var debugContextSeconds: Double { lock.withLock { Double(contextSamples) / sampleRate } }
+}
+#endif
 
 /// The set of engines currently holding loaded weights, held weakly.
 private final class ResidentEngines: @unchecked Sendable {
