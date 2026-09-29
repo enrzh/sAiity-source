@@ -32,6 +32,17 @@ enum Onboarding {
         UserDefaults.standard.set(currentVersion, forKey: dismissedKey)
     }
 
+    /// Whether this install has run before, as opposed to being brand new.
+    ///
+    /// Both finishing and dismissing write a version, so either one means the
+    /// user has already been here and made whatever choices 2.5.5 defaulted for
+    /// them. That is the discriminator a migration needs when the preference it
+    /// cares about was never written — see `AppState.resolveDictationEnabled`.
+    static var hasLaunchedBefore: Bool {
+        let d = UserDefaults.standard
+        return d.integer(forKey: completedKey) >= 1 || d.integer(forKey: dismissedKey) >= 1
+    }
+
     /// Where to pick up after a relaunch forced by the permission step. Not on
     /// the @Defaults wrapper: the value is optional, and "no stored value" and
     /// "stored none" must stay distinguishable.

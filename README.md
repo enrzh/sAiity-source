@@ -164,8 +164,9 @@ Not yet released. These notes are being written ahead of the tag.
   genuine failure instead of writing a half-translated file.
 - Press-to-talk no longer fires on an ordinary Control press. The default
   shortcut is now ⌥⌘Space, a chord must contain a real key and not only
-  modifiers, and dictation starts switched off on a new install. Existing
-  installs keep the shortcut and the on/off state they already had.
+  modifiers, and dictation starts switched off on a new install. An install that
+  has run before keeps press-to-talk switched on, because in 2.5.5 it was on by
+  default and those users never wrote a preference for it to be read from.
 - Holding the dictation key past a minute now says the recording was cut, instead
   of showing "Transcribing" and returning a shorter sentence with no explanation.
 - Loading a model that is deleted mid-dictation no longer leaks it. A load that

@@ -260,23 +260,59 @@ final class AppState {
         }
     }
 
-    /// Press-to-talk is separate from live captions, and now starts off.
+    /// Press-to-talk is separate from live captions, and starts off on a fresh
+    /// install.
     ///
     /// The event tap is live from launch whenever this is on, which means an
     /// always-listening global shortcut and a microphone the app can open at any
-    /// moment. That is a decision to make, not a default to inherit — so a
-    /// fresh install opts in, under a chord that cannot fire by accident.
+    /// moment. That is a decision to make, not a default to inherit.
     ///
-    /// `object(forKey:) as? Bool` is what keeps this from touching anyone who
-    /// has already made the decision: stored `true` stays on, stored `false`
-    /// stays off, and only "never set" becomes off.
-    var dictationEnabled = UserDefaults.standard.object(forKey: "dictationEnabled") as? Bool ?? false {
+    /// Migration, which this got wrong first. Reading
+    /// `object(forKey:) as? Bool ?? false` looks safe — a stored `true` stays on
+    /// — but "no stored value" is not one case, it is two. In 2.5.5 dictation was
+    /// **on by default**, so a user who accepted that default never wrote a
+    /// preference at all, and the key is absent for them. They are exactly the
+    /// "never set" branch, so upgrading would have switched their hotkey off
+    /// with nothing on screen to say why. Meanwhile a genuine fresh install
+    /// also has no value, and for that one off is the right answer.
+    ///
+    /// `Onboarding.hasLaunchedBefore` separates them: the onboarding version is
+    /// written both by finishing and by dismissing, so any install that has run
+    /// before has it and a new one does not.
+    var dictationEnabled = AppState.resolveDictationEnabled() {
         didSet {
             guard dictationEnabled != oldValue else { return }
             UserDefaults.standard.set(dictationEnabled, forKey: "dictationEnabled")
             NotificationCenter.default.post(name: .saiityDictationSettingChanged, object: nil)
         }
     }
+    private static let dictationEnabledKey = "dictationEnabled"
+
+    /// Decide press-to-talk once, and write the decision down.
+    ///
+    /// Writing it back matters as much as choosing it: the `didSet` on
+    /// `dictationEnabled` only writes when the value *changes*, so an install
+    /// that resolves to the same value it loaded would never persist anything and
+    /// the next release would face the identical ambiguity. After this runs
+    /// once, the key is always present and always means what it says.
+    ///
+    /// `nonisolated` because it is preference-store arithmetic with no UI in it,
+    /// and because a migration is exactly the sort of thing that must be
+    /// testable without an actor hop.
+    nonisolated static func resolveDictationEnabled() -> Bool {
+        let defaults = UserDefaults.standard
+        if let stored = defaults.object(forKey: dictationEnabledKey) as? Bool {
+            return stored
+        }
+        // 2.5.5 shipped this on by default, so an install that has run before
+        // almost certainly means it and must keep it. A fresh install has not
+        // decided, and off is the right answer for a global microphone shortcut
+        // that is live from launch.
+        let resolved = Onboarding.hasLaunchedBefore
+        defaults.set(resolved, forKey: dictationEnabledKey)
+        return resolved
+    }
+
     var dictationRecognizer: DictationRecognizer = DictationRecognizer.selected {
         didSet {
             guard dictationRecognizer != oldValue else { return }
