@@ -162,7 +162,18 @@ struct LocalModelTests {
         #expect(ASREngine.effective == ASREngine.recommended)
         #expect(TranslationEngine.effective == TranslationEngine.recommended)
 
-        #expect(ASREngine.allCases == [.nemotron])
+        #expect(ASREngine.allCases == [.nemotron, .whisperTurbo])
+        // Two engines are selectable, but exactly one is the first download.
+        // The advanced case is a second opinion behind a disclosure, and if it
+        // ever became the recommendation this test is where that would show.
+        #expect(ASREngine.recommended == .nemotron)
+        #expect(ASREngine.primaryCases == [.nemotron])
+        #expect(ASREngine.advancedCases == [.whisperTurbo])
+        #expect(ASREngine.whisperTurbo.isAdvanced,
+                "the non-default engine belongs behind the advanced disclosure")
+        #expect(!ASREngine.nemotron.isAdvanced)
+        // The retired engine stays unselectable, and setting it must not fall
+        // back to a model the user never chose.
         #expect(ASREngine.visibleSelection(.parakeetEou) == nil)
         ASREngine.selected = .parakeetEou
         #expect(ASREngine.selected == nil)

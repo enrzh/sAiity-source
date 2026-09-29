@@ -70,14 +70,22 @@ struct FloatRingBuffer: Sendable {
         if !keepingCapacity { storage.removeAll(keepingCapacity: false) }
     }
 
-    #if SAIITY_TEST_HOOKS
-    func snapshot() -> [Float] {
+    /// The queued samples in order, without removing them.
+    ///
+    /// A whole-window recogniser needs this: it decodes the buffer in one pass
+    /// and then decides for itself which part of the result has settled, so it
+    /// must not consume the audio in order to read it. `drain` would be wrong
+    /// here — it empties the queue.
+    func ordered() -> [Float] {
         guard count > 0 else { return [] }
         let capacity = storage.count
         let first = min(count, capacity - head)
         return Array(storage[head..<(head + first)])
             + (first < count ? Array(storage[0..<(count - first)]) : [])
     }
+
+    #if SAIITY_TEST_HOOKS
+    func snapshot() -> [Float] { ordered() }
     #endif
 
     private mutating func ensureCapacity(for required: Int) {

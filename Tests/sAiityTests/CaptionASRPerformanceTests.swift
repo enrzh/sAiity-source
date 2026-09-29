@@ -272,6 +272,40 @@ struct CaptionASRPerformanceTests {
         try record(fields)
     }
 
+    /// Pace every fixture through one backend and record the result. Shared by
+    /// both engines so the two are measured the same way: same fixtures, same
+    /// chunking, same WER scorer, same metric set. A comparison where one side
+    /// ran with different settings is not a comparison.
+    private static func benchmark(model: String,
+                                  coldPrepare: @Sendable () async throws -> [String: Any],
+                                  inputs: [Fixture],
+                                  backend: StreamingASRBackend,
+                                  metrics: MetricsBox) async throws {
+        let configuredRuns = Int(ProcessInfo.processInfo.environment["SAIITY_CAPTION_BENCHMARK_RUNS"]
+            ?? "3") ?? 3
+        let runs = min(max(configuredRuns, 1), 10)
+        do {
+            let prepareStart = ContinuousClock.now
+            try await backend.prepare(locale: Locale(identifier: "auto")) { _ in }
+            try record(try await coldPrepare().merging(
+                ["model": model,
+                 "phase": "cold_prepare",
+                 "seconds": durationSeconds(prepareStart.duration(to: .now))],
+                uniquingKeysWith: { _, new in new }))
+            for fixture in inputs {
+                for run in 1...runs {
+                    // Qualified: the loop variable `run` shadows the method.
+                    try await Self.run(fixture, model: model, run: run,
+                                       backend: backend, metrics: metrics)
+                }
+            }
+        } catch {
+            await backend.release()
+            throw error
+        }
+        await backend.release()
+    }
+
     @Test("Installed Nemotron live-caption latency and backlog benchmark",
           .enabled(if: !(ProcessInfo.processInfo.environment["SAIITY_CAPTION_BENCHMARK_DIR"] ?? "").isEmpty))
     func installedNemotronBenchmark() async throws {
@@ -293,33 +327,47 @@ struct CaptionASRPerformanceTests {
 
         let model = "nemotron-\(chunkMs)"
         let metrics = MetricsBox()
-        let engine = InstalledNemotron(directory: directory)
-        let backend = StreamingASRBackend(name: "Nemotron \(chunkMs) caption benchmark",
-                                           engine: engine,
-                                           onMetrics: { metrics.set($0) })
-        do {
-            let prepareStart = ContinuousClock.now
-            try await backend.prepare(locale: Locale(identifier: "auto")) { _ in }
-            try Self.record(["model": model,
-                             "phase": "cold_prepare",
-                             "chunkMs": chunkMs,
-                             "seconds": Self.durationSeconds(prepareStart.duration(to: .now))])
-            let configuredRuns = Int(ProcessInfo.processInfo.environment["SAIITY_CAPTION_BENCHMARK_RUNS"]
-                ?? "3") ?? 3
-            let runs = min(max(configuredRuns, 1), 10)
-            for fixture in inputs {
-                for run in 1...runs {
-                    try await Self.run(fixture,
-                                       model: model,
-                                       run: run,
-                                       backend: backend,
-                                       metrics: metrics)
-                }
-            }
-        } catch {
-            await backend.release()
-            throw error
+        try await Self.benchmark(
+            model: model,
+            coldPrepare: { ["chunkMs": chunkMs] },
+            inputs: inputs,
+            backend: StreamingASRBackend(name: "Nemotron \(chunkMs) caption benchmark",
+                                         engine: InstalledNemotron(directory: directory),
+                                         onMetrics: { metrics.set($0) }),
+            metrics: metrics)
+    }
+
+    /// The same run against Whisper large-v3-turbo, so the two engines can be
+    /// compared on identical audio.
+    ///
+    /// This is the measurement the engine exists for. It is a separate opt-in
+    /// test rather than a flag on the Nemotron one because the 626 MB weights
+    /// are usually not installed, and a benchmark that failed for want of a
+    /// model would take the Nemotron numbers down with it.
+    ///
+    /// Set SAIITY_CAPTION_BENCHMARK_WHISPER=1 alongside the directory.
+    @Test("Installed Whisper turbo live-caption benchmark",
+          .enabled(if: ProcessInfo.processInfo.environment["SAIITY_CAPTION_BENCHMARK_WHISPER"] == "1"
+                   && !(ProcessInfo.processInfo.environment["SAIITY_CAPTION_BENCHMARK_DIR"] ?? "").isEmpty))
+    func installedWhisperTurboBenchmark() async throws {
+        let path = try #require(ProcessInfo.processInfo.environment["SAIITY_CAPTION_BENCHMARK_DIR"])
+        let inputs = try fixtures(in: URL(fileURLWithPath: path, isDirectory: true))
+        guard WhisperTurboEngine.isDownloaded() else {
+            throw BenchmarkError("Whisper turbo is not installed at \(WhisperTurboEngine.assetDirectory.path)")
         }
-        await backend.release()
+        let metrics = MetricsBox()
+        try await Self.benchmark(
+            model: "whisper-\(WhisperTurboEngine.modelIdentifier)",
+            coldPrepare: {
+                ["model": WhisperTurboEngine.modelIdentifier,
+                 "commitHorizonSeconds": WhisperTurboEngine.commitHorizonSeconds,
+                 "leftContextSeconds": WhisperTurboEngine.leftContextSeconds,
+                 "stepSeconds": WhisperTurboEngine.stepSeconds]
+            },
+            inputs: inputs,
+            backend: StreamingASRBackend(name: "Whisper turbo caption benchmark",
+                                         engine: WhisperTurboEngine(),
+                                         onMetrics: { metrics.set($0) }),
+            metrics: metrics)
     }
 }

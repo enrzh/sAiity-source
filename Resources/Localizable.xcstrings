@@ -20100,6 +20100,238 @@
           }
         }
       }
+    },
+    "Whisper turbo": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whisper turbo"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whisper turbo"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whisper turbo"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whisper turbo"
+          }
+        }
+      }
+    },
+    "626 MB. A larger, more widely trained model that is often the more accurate of the two on the languages it is good at, and the only one here that transcribes accented and non-native speech as well as native speech. It is not a streaming model: it re-reads a window of audio every time it produces an update, so it costs more work per second of captions and can fall behind on a fast speaker. It covers fewer languages than Nemotron, and identifies the language from the audio.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "626 MB. Ein größeres, breiter trainiertes Modell, das in den Sprachen, für die es gut ist, oft das Genauere der beiden ist und als einziges hier akzentuiertes und nicht-muttersprachlich gesprochenes ebenso gut transkribiert wie muttersprachliche Rede. Es ist kein Streaming-Modell: Es liest bei jeder Aktualisierung ein Audiofenster erneut, kostet also mehr Rechenzeit pro Sekunde Untertitel und kann bei schnellen Sprechern hinterherhinken. Es deckt weniger Sprachen ab als Nemotron und erkennt die Sprache am Audio."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "626 MB. Un modelo mayor y entrenado con más alcance, que a menudo es el más preciso de los dos en los idiomas que domina, y el único de aquí que transcribe igual de bien el habla acentuada y la de hablantes no nativos que la de un nativo. No es un modelo de streaming: relee una ventana de audio en cada actualización, así que cuesta más trabajo por segundo de subtítulos y puede quedarse atrás con un hablador rápido. Cubre menos idiomas que Nemotron e identifica el idioma a partir del audio."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "626 Mo. Un modèle plus grand et entraîné sur davantage de données, souvent le plus précis des deux dans les langues qu'il maîtrise, et le seul ici à transcrire aussi bien la parole accentuée ou non native que la parole native. Ce n'est pas un modèle en flux : il relit une fenêtre audio à chaque mise à jour, ce qui coûte davantage de calcul par seconde de sous-titres et peut prendre du retard sur une voix rapide. Il couvre moins de langues que Nemotron et identifie la langue à partir de l'audio."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "626 MB。より大きく、幅広い音声で訓練されたモデルで、得意とする言語では2つのうち高い精度が得られます。また、ここにあるモデルの中で、アクセント付きの音声や非ネイティブの音声も、ネイティブの音声と同じ精度で文字起こしできます。ストリーミングモデルではありません。更新のたびに音声の窓を読み直すため、字幕1秒あたりの計算量が多く、速い話し方には追いつかないことがあります。Nemotronより対応言語は少なく、言語は音声から判別します。"
+          }
+        }
+      }
+    },
+    "41 languages · 626 MB · strongest on accented speech": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "41 Sprachen · 626 MB · am stärksten bei akzentuierter Sprache"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "41 idiomas · 626 MB · mejor con habla acentuada"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "41 langues · 626 Mo · le plus juste sur la parole accentuée"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "41言語 · 626 MB · アクセントのある音声に最も強い"
+          }
+        }
+      }
+    },
+    "Whisper large-v3-turbo (on-device)": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whisper large-v3-turbo (auf dem Gerät)"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whisper large-v3-turbo (en el dispositivo)"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whisper large-v3-turbo (sur l'appareil)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whisper large-v3-turbo（オンデバイス）"
+          }
+        }
+      }
+    },
+    "Whisper large-v3 turbo (multilingual)": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whisper large-v3 turbo (mehrsprachig)"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whisper large-v3 turbo (multilingüe)"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whisper large-v3 turbo (multilingue)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whisper large-v3 turbo（多言語）"
+          }
+        }
+      }
+    },
+    "Downloading Whisper turbo…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whisper turbo wird geladen…"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Descargando Whisper turbo…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Téléchargement de Whisper turbo…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whisper turboをダウンロード中…"
+          }
+        }
+      }
+    },
+    "Loading Whisper turbo…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whisper turbo wird geladen…"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cargando Whisper turbo…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chargement de Whisper turbo…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whisper turboを読み込み中…"
+          }
+        }
+      }
+    },
+    "Whisper turbo ready.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whisper turbo ist bereit."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whisper turbo listo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whisper turbo prêt."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whisper turboの準備ができました。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

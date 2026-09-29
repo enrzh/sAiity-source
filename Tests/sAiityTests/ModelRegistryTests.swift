@@ -56,11 +56,17 @@ struct ModelRegistryTests {
         // ~25 s into every session, so a row for it would put a 2.9 GB
         // download back on the Models page with no engine to use it. The two
         // DICTATION models are a different engine and are listed, deliberately
-        // narrow: nothing that a Whisper row could revive is back.
+        // narrow. Whisper large-v3-turbo is a different proposition again — a
+        // 626 MB model behind a working, tested caption engine — and is listed
+        // on purpose. What must not come back is the 2.9 GB one, and its id
+        // prefix is kept clear so this check cannot be quietly satisfied by a
+        // new model that happens to share a name with it.
         #expect(!ids.contains { $0.hasPrefix("asr.whisper.large") },
-                "caption Whisper was removed; a stale asset remains")
+                "the cut caption Whisper is back; a stale asset remains")
         #expect(ids.filter { $0.hasPrefix("asr.whisper.") }.count == 2,
                 "expected exactly the two dictation Whisper models")
+        #expect(ids.contains(AssetID.whisperTurbo),
+                "the caption second opinion needs a row, or its 626 MB reads as stray")
         #expect(!ids.contains { $0.contains("diarization") }, "Speaker diarization was removed; a stale asset remains")
         // Apple went the same way: its translator needed no download but could
         // only reach the pairs macOS had, and it kept a whole second code path

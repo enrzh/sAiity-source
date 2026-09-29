@@ -140,6 +140,14 @@ enum AssetID {
         chunkMs < NemotronEngine.chunkMs ? "asr.nemotron.fast" : "asr.nemotron"
     }
     static let parakeetEou = "asr.parakeetEou"
+    /// The caption engine's second opinion.
+    ///
+    /// Deliberately NOT `asr.whisper.large…`. The registry test uses that
+    /// prefix as its sentinel for the 2.9 GB caption Whisper that was cut, and
+    /// reusing it would quietly disarm the check that the old model has not
+    /// come back. It is also distinct from the dictation `asr.whisper.*` rows,
+    /// so a test walking one of those groups cannot sweep this one up.
+    static let whisperTurbo = "asr.whisperTurbo"
     /// The dictation recognizer's Whisper models. Built from the choice rather
     /// than spelled out twice, so the registry row and the engine's own
     /// bookkeeping cannot end up naming the same files differently.
