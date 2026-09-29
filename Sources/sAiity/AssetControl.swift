@@ -47,7 +47,7 @@ struct AssetControl: View {
                 Button("Re-download") {
                     Task { await state.redownload(status.asset) }
                 }
-                .buttonStyle(.glass)
+                .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(state.activeDownload != nil)
                 .help("Delete the damaged files and fetch \(status.asset.title) again.")
@@ -65,7 +65,7 @@ struct AssetControl: View {
                 Button("Resume") {
                     Task { await state.download(status.asset) }
                 }
-                .buttonStyle(.glass)
+                .buttonStyle(.bordered)
                 .controlSize(prominent ? .regular : .small)
                 .disabled(state.activeDownload != nil)
                 .help("Continue downloading \(status.asset.title) from the saved partial file.")
@@ -85,7 +85,7 @@ struct AssetControl: View {
                    : "Download") {
                 Task { await state.download(status.asset) }
             }
-            .buttonStyle(.glass)
+            .buttonStyle(.bordered)
             .controlSize(prominent ? .regular : .small)
             .disabled(state.activeDownload != nil)
         }

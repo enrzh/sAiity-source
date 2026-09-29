@@ -52,7 +52,7 @@ struct SheetShell<Content: View, HeaderAccessory: View>: View {
                         .keyboardShortcut(.defaultAction)
                 } else {
                     Button(dismissTitle) { dismiss() }
-                        .buttonStyle(.glass)
+                        .buttonStyle(.bordered)
                 }
             }
             .padding(14)

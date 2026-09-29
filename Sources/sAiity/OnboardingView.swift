@@ -436,7 +436,7 @@ struct OnboardingView: View {
             Spacer()
             if model.step != OnboardingStep.allCases.first {
                 Button("Back") { back() }
-                    .buttonStyle(.glass)
+                    .buttonStyle(.bordered)
             }
             Button(model.step == .finish ? "Done" : "Continue") { advance() }
                 .buttonStyle(.glassProminent)

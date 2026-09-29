@@ -83,7 +83,7 @@ struct ModelsView: View {
                                 } label: {
                                     Label("Refresh", systemImage: "arrow.clockwise")
                                 }
-                                .buttonStyle(.glass)
+                                .buttonStyle(.bordered)
                                 .controlSize(.small)
                                 .help("Check downloaded models again")
                             }
@@ -316,7 +316,7 @@ struct DictationView: View {
             }
 
             Button("Manage") { state.showLocalModels = true }
-                .buttonStyle(.glass)
+                .buttonStyle(.bordered)
                 .controlSize(.small)
         }
     }
@@ -472,7 +472,7 @@ struct DictationView: View {
                     Button("Preview") {
                         NotificationCenter.default.post(name: .saiityDictationPreview, object: nil)
                     }
-                    .buttonStyle(.glass)
+                    .buttonStyle(.bordered)
                     Spacer()
                     ResetButton { state.dictationStyle = CaptionStyle.dictationDefaults }
                 }
@@ -569,7 +569,7 @@ struct DictationView: View {
                                      ? Color.secondary : Color.orange)
                 Spacer()
                 Button("Models") { SettingsWindowController.selectModelsPane() }
-                    .buttonStyle(.glass)
+                    .buttonStyle(.bordered)
                     .controlSize(.small)
             }
         }
@@ -611,7 +611,7 @@ struct DictationView: View {
                     .disabled(whisperBusy)
             }
             Button("Models") { openModels() }
-                .buttonStyle(.glass)
+                .buttonStyle(.bordered)
                 .controlSize(.small)
         }
     }
@@ -639,7 +639,7 @@ struct DictationView: View {
                     .foregroundStyle(.secondary)
             } else {
                 Button("Allow…", action: request)
-                    .buttonStyle(.glass)
+                    .buttonStyle(.bordered)
                     .controlSize(.small)
             }
         }
@@ -883,7 +883,7 @@ struct CaptionsView: View {
                     Text(state.engine?.displayName ?? String(localized: "Not set"))
                         .foregroundStyle(state.engine == nil ? .secondary : .primary)
                     Button("Models") { SettingsWindowController.selectModelsPane() }
-                        .buttonStyle(.glass)
+                        .buttonStyle(.bordered)
                         .controlSize(.small)
                 }
                 if let engine = state.engine {
@@ -1062,7 +1062,7 @@ struct CaptionsView: View {
                     Text(SettingsStateHonesty.languageLabel(for: state.engine))
                         .foregroundStyle(.secondary)
                     Button("Models") { SettingsWindowController.selectModelsPane() }
-                        .buttonStyle(.glass)
+                        .buttonStyle(.bordered)
                         .controlSize(.small)
                 }
                 Divider()
@@ -1151,11 +1151,11 @@ struct CaptionsView: View {
                 Button("Preview") {
                     NotificationCenter.default.post(name: .saiityCaptionPreview, object: nil)
                 }
-                .buttonStyle(.glass)
+                .buttonStyle(.bordered)
                 Button("Reset position") {
                     NotificationCenter.default.post(name: .saiityResetBubble, object: nil)
                 }
-                .buttonStyle(.glass)
+                .buttonStyle(.bordered)
                 ResetButton("Reset everything") { state.style = CaptionStyle() }
             }
             .controlSize(.small)
@@ -2114,14 +2114,14 @@ struct GeneralView: View {
                     Onboarding.reset()
                     OnboardingWindowController.shared.show(state: state)
                 }
-                .buttonStyle(.glass)
+                .buttonStyle(.bordered)
                 .controlSize(.small)
                 Text("Walks through permission and models from the start.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             HStack {
                 Button("Save diagnostics…") { Diagnostics.save() }
-                    .buttonStyle(.glass)
+                    .buttonStyle(.bordered)
                     .controlSize(.small)
                 Text("Writes one text file with the app's state and this run's log, for bug reports. Review it before sharing.")
                     .font(.caption).foregroundStyle(.secondary)
