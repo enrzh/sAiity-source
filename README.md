@@ -142,6 +142,26 @@ included in the application bundle.
 | Sources/sAiity/OverlayWindow.swift | Caption bubble geometry and presentation |
 | Resources/Localizable.xcstrings | User-facing localization catalog |
 
+## What's new in 2.6.1
+
+- Qwen3-ASR is a selectable caption engine alongside Nemotron. The language row
+  now reflects what the chosen engine can recognise instead of offering languages
+  the active path cannot.
+- Dictation can show realtime text while you are still speaking on the Streaming
+  path. An optional preference keeps the live draft on even with cleanup or
+  translation in the way, so the raw words appear as they arrive and the finished
+  text replaces them.
+- Cleanup is a model selector with an explicit Off, and dictation finally has its
+  own model picker in Quick controls. The translation engine sits beside the
+  language it translates to; Captions can start from its own pane; realtime text
+  sits with the streaming model it belongs to.
+- The app icon is the Dictus voice mark — three white bars on a blue auto-gradient
+  — rebuilt from a checked-in Icon Composer source so it can be regenerated. Glass
+  stops being the default for every settings row button.
+- The ship DMG keeps its volume icon. Finder was deleting `.VolumeIcon.icns`
+  during the layout AppleScript; both DMG scripts restore it after layout and
+  re-set the custom-icon flag before detach.
+
 ## What's new in 2.6.0
 
 - Hy-MT2 is available again as a second translation engine, under Settings →
@@ -152,8 +172,6 @@ included in the application bundle.
   translates and MADLAD does not, where the app says no translator is available
   rather than silently producing nothing.
 
-
-Not yet released. These notes are being written ahead of the tag.
 
 - A failed translation no longer looks like a model refusing. Engines reported
   "declined" and "failed" as the same value, so a native error surfaced as your
@@ -220,13 +238,14 @@ Not yet released. These notes are being written ahead of the tag.
 
 ## Release
 
-The current signed and notarized release is [sAiity 2.5.5](https://github.com/enrzh/sAiity/releases/tag/v2.5.5).
+The current signed and notarized release is [sAiity 2.6.1](https://github.com/enrzh/sAiity/releases/tag/v2.6.1).
 
-- [Download the DMG](https://github.com/enrzh/sAiity/releases/download/v2.5.5/sAiity-2.5.5.dmg)
-- [Download the ZIP](https://github.com/enrzh/sAiity/releases/download/v2.5.5/sAiity-2.5.5.zip)
+- [Download the DMG](https://github.com/enrzh/sAiity/releases/download/v2.6.1/sAiity-2.6.1.dmg)
+- [Download the ZIP](https://github.com/enrzh/sAiity/releases/download/v2.6.1/sAiity-2.6.1.zip)
 - [Sparkle update feed](https://enrzh.github.io/sAiity/appcast.xml)
 
-This release focuses on faster, more reliable live captions while keeping all
-audio recognition and translation local to the Mac.
+This release adds Qwen3-ASR captions, realtime dictation text, clearer Quick
+controls, the Dictus app icon, and a DMG that keeps its volume icon — still
+fully local recognition and translation on the Mac.
 
 sAiity is part of the [aiity](https://aiity.de) family.
