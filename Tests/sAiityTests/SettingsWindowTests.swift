@@ -195,6 +195,51 @@ import Testing
         #expect(ASREngine.selected != .parakeetEou)
     }
 
+    @Test("dictation chooses its own recognition model and a preset keeps the choice in sync")
+    func dictationModelChoiceIsWritableAndKeptInSync() {
+        let defaults = UserDefaults.standard
+        let keys = ["dictationRecognizer", "dictationStreamingEngine", "asrEngine",
+                    "dictationCleanupEnabled", "dictationNemotronChunkMs", "nemotronChunkMs",
+                    "whisperDictationLocale", CaptionStyle.key]
+        let snapshot = keys.map { ($0, defaults.object(forKey: $0)) }
+        defer {
+            snapshot.forEach { key, value in
+                if let value { defaults.set(value, forKey: key) }
+                else { defaults.removeObject(forKey: key) }
+            }
+        }
+        defaults.set(ASREngine.parakeetEou.rawValue, forKey: "asrEngine")
+        defaults.removeObject(forKey: "dictationStreamingEngine")
+
+        let state = AppState()
+        // No choice of its own yet, so it falls back to the recommendation —
+        // never to the caption engine, which is a separate preference.
+        #expect(state.dictationEngine == nil)
+
+        state.dictationEngine = .qwen17
+        #expect(ASREngine.dictationSelected == .qwen17)
+        #expect(ASREngine.dictationEffective == .qwen17)
+        // Dictation's own key, and the caption one is left alone: this is the
+        // separation the profile tests already depend on.
+        #expect(defaults.string(forKey: "dictationStreamingEngine") == ASREngine.qwen17.rawValue)
+        #expect(ASREngine.selected != .qwen17)
+
+        // A retired value is dropped rather than resurrected, so an old
+        // preference cannot come back through the control.
+        state.dictationEngine = .whisperTurbo
+        #expect(ASREngine.dictationSelected == nil)
+        #expect(ASREngine.dictationEffective == .nemotron)
+        #expect(defaults.object(forKey: "dictationStreamingEngine") == nil)
+
+        // The failure this control was built to avoid: choosing a preset used
+        // to write the key straight to defaults, past the observable, so the
+        // picker kept showing the model the user had just moved away from.
+        state.dictationEngine = .qwen06
+        state.dictationProfile = .fast
+        #expect(state.dictationEngine == .nemotron)
+        #expect(defaults.string(forKey: "dictationStreamingEngine") == ASREngine.nemotron.rawValue)
+    }
+
     @Test("a dictation profile never touches the caption tier or restarts captions")
     func dictationProfileDoesNotChangeCaptionEngine() {
         let defaults = UserDefaults.standard

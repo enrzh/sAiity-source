@@ -386,34 +386,15 @@ struct DictationView: View {
     @ViewBuilder
     private var detailSettings: some View {
         VStack(alignment: .leading, spacing: 14) {
-            SettingsSection(title: "Translation engine",
-                            subtitle: "Choose the local engine used for translated dictation.") {
-                Picker("Translation engine", selection: Binding(
-                    get: { state.dictationTranslationEngine ?? TranslationEngine.dictationEffective },
-                    set: { state.dictationTranslationEngine = $0 })) {
-                    ForEach(TranslationEngine.primaryCases, id: \.self) { engine in
-                        Text("\(engine.displayName) · recommended").tag(engine)
-                    }
-                    ForEach(TranslationEngine.advancedCases, id: \.self) { engine in
-                        Text("\(engine.displayName) · experimental").tag(engine)
-                    }
-                }
-                .pickerStyle(.menu)
-                let engine = state.dictationTranslationEngine ?? TranslationEngine.dictationEffective
-                Text(engine.summary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            // The translation engine moved up to Quick controls, next to the
+            // target it translates into.
 
-            SettingsSection(title: "Recognition",
-                            subtitle: "Choose the fastest local path or Whisper Auto for code-switched dictation.") {
-                Picker("Dictation engine", selection: $state.dictationRecognizer) {
-                    Text("Streaming").tag(DictationRecognizer.streaming)
-                    Text("Whisper Auto").tag(DictationRecognizer.whisper)
-                }
-                .pickerStyle(.segmented)
-
-                if state.dictationRecognizer == .whisper {
+            // Only Whisper Auto's own configuration is here. The path picker
+            // and the streaming model moved up because the model is only
+            // meaningful beside the fork that selects it; leaving either
+            // behind would split one choice across a disclosure boundary.
+            if state.dictationRecognizer == .whisper {
+                SettingsSection(title: "Recognition") {
                     Picker("Whisper model", selection: Binding(
                         get: { WhisperDictationBackend.model },
                         set: { choice in
@@ -432,11 +413,6 @@ struct DictationView: View {
                         }
                     }
                     whisperStatus
-                } else {
-                    LabeledContent("Streaming model") {
-                        Text(verbatim: ASREngine.dictationEffective.displayName)
-                            .foregroundStyle(.secondary)
-                    }
                 }
             }
 
@@ -538,6 +514,48 @@ struct DictationView: View {
                     .foregroundStyle(.secondary)
             }
 
+            // Both controls the Recognition section behind the disclosure used
+            // to hold. The path comes with the model rather than staying put:
+            // the model only decides anything on the Streaming path, so
+            // leaving the fork behind would make this row appear and vanish
+            // with no visible cause on this page.
+            //
+            // `arrow.triangle.branch` marks the fork. `cpu` below is the same
+            // symbol the Captions model row and both translator rows carry,
+            // so every "which model runs this job" control looks alike.
+            HStack {
+                Label("Dictation engine", systemImage: "arrow.triangle.branch")
+                Spacer()
+                Picker("Dictation engine", selection: $state.dictationRecognizer) {
+                    Text("Streaming").tag(DictationRecognizer.streaming)
+                    Text("Whisper Auto").tag(DictationRecognizer.whisper)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+            if state.dictationRecognizer == .streaming {
+                HStack {
+                    Label("Streaming model", systemImage: "cpu")
+                    Spacer()
+                    Picker("Streaming model", selection: $state.dictationEngine) {
+                        Text("Not set").tag(Optional<ASREngine>.none)
+                        ForEach(ASREngine.userSelectableCases, id: \.self) { engine in
+                            Text(verbatim: engine.displayName).tag(Optional(engine))
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .help(state.dictationEngine?.summary ?? ASREngine.recommended.summary)
+                }
+                // Travels with the picker for the same reason it does on the
+                // Captions page: it describes the row directly above.
+                if state.dictationEngine?.needsDownload == true {
+                    Label("Not downloaded yet — see Models.", systemImage: "arrow.down.circle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
+
             Divider()
 
             Toggle("Translate dictated text", isOn: $state.translateDictation)
@@ -555,6 +573,29 @@ struct DictationView: View {
                             .font(.caption2)
                     }
                 }
+            }
+
+            // Beside the target it translates into, mirroring the Captions
+            // page's Translate to / Translate with pair so the two surfaces
+            // are edited the same way. The trade-off between the engines is
+            // too long for a menu item — same call as that row makes — so it
+            // lives in the tooltip and on the Models page.
+            HStack {
+                Label("Translate with", systemImage: "cpu")
+                Spacer()
+                Picker("Translation engine", selection: Binding(
+                    get: { state.dictationTranslationEngine ?? TranslationEngine.dictationEffective },
+                    set: { state.dictationTranslationEngine = $0 })) {
+                    ForEach(TranslationEngine.primaryCases, id: \.self) { engine in
+                        Text("\(engine.displayName) · recommended").tag(engine)
+                    }
+                    ForEach(TranslationEngine.advancedCases, id: \.self) { engine in
+                        Text("\(engine.displayName) · experimental").tag(engine)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .help((state.dictationTranslationEngine ?? TranslationEngine.dictationEffective).summary)
             }
 
             Divider()
@@ -927,39 +968,8 @@ struct CaptionsView: View {
     @ViewBuilder
     private var detailSettings: some View {
         VStack(alignment: .leading, spacing: 14) {
-            SettingsSection(title: "Engine",
-                            subtitle: "Choose the local recognizer.") {
-                HStack {
-                    Label("Recognition", systemImage: "waveform")
-                    Spacer()
-                    Text(state.engine?.displayName ?? String(localized: "Not set"))
-                        .foregroundStyle(state.engine == nil ? .secondary : .primary)
-                    Button("Models") { SettingsWindowController.selectModelsPane() }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                }
-                if let engine = state.engine {
-                    Text(verbatim: engine.shortSummary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .help(engine.summary)
-                    if case .only(let codes) = engine.coverage {
-                        let names = codes.sorted()
-                            .map { Locale.current.localizedString(forLanguageCode: $0) ?? $0 }
-                        Label("Recognises \(names.joined(separator: ", ")) only. Other languages come out as nonsense rather than an error.",
-                              systemImage: "exclamationmark.triangle")
-                            .font(.caption).foregroundStyle(.orange)
-                    }
-                } else {
-                    Label("No recognition model chosen yet. \(ASREngine.recommended.displayName) is the one to start with: it handles any language and identifies it from the audio. Download it under Models.",
-                          systemImage: "sparkles")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                if state.engine?.needsDownload == true {
-                    Label("Not downloaded yet — see Models.", systemImage: "arrow.down.circle")
-                        .font(.caption).foregroundStyle(.orange)
-                }
-            }
+            // The engine picker and its notices moved up to Quick controls.
+            // What is left here is speed, which only applies to one engine.
 
             if state.engine == .nemotron {
                 SettingsSection(title: "Caption speed",
@@ -1094,6 +1104,57 @@ struct CaptionsView: View {
                                                 updated.hidden = !visible
                                                 state.style = updated
                                             }))
+                // The recognizer sits here rather than behind the disclosure for
+                // the same reason the translator does: it is the control that
+                // decides what the row below it reads, and "Language" is a
+                // read-out of this choice. Split across a disclosure boundary the
+                // two disagree whenever the model changes — you would edit one
+                // screen and see the consequence on another.
+                //
+                // `cpu` deliberately repeats the icon the translator row uses.
+                // Both rows pick which model runs a job, and saying so with one
+                // symbol is worth more here than giving every row a unique one.
+                HStack {
+                    Label("Recognition model", systemImage: "cpu")
+                    Spacer()
+                    Picker("Recognition model", selection: $state.engine) {
+                        Text("Not set").tag(Optional<ASREngine>.none)
+                        ForEach(ASREngine.userSelectableCases, id: \.self) { engine in
+                            Text(verbatim: engine.displayName).tag(Optional(engine))
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    // The long version — why one model over another — is too long
+                    // for a menu item and would become an interpolated key
+                    // retranslated in four languages on every word change. It lives
+                    // in the tooltip, on the Models page, and in the caption below.
+                    .help(state.engine?.summary ?? ASREngine.recommended.summary)
+                }
+                // These travel with the picker, not with the disclosure. Each one
+                // describes the state of the choice directly above; leaving them
+                // behind would strand every warning from the control that causes
+                // it, which is the mistake this row is the correction for.
+                if let engine = state.engine {
+                    Text(verbatim: engine.shortSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if case .only(let codes) = engine.coverage {
+                        let names = codes.sorted()
+                            .map { Locale.current.localizedString(forLanguageCode: $0) ?? $0 }
+                        Label("Recognises \(names.joined(separator: ", ")) only. Other languages come out as nonsense rather than an error.",
+                              systemImage: "exclamationmark.triangle")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
+                } else {
+                    Label("No recognition model chosen yet. \(ASREngine.recommended.displayName) is the one to start with: it handles any language and identifies it from the audio. Download it under Models.",
+                          systemImage: "sparkles")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if state.engine?.needsDownload == true {
+                    Label("Not downloaded yet — see Models.", systemImage: "arrow.down.circle")
+                        .font(.caption).foregroundStyle(.orange)
+                }
                 HStack {
                     Label("Language", systemImage: "waveform")
                     Spacer()

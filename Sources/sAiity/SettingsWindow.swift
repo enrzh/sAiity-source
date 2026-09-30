@@ -335,6 +335,30 @@ final class AppState {
         }
     }
 
+    /// Dictation's streaming recognizer, which has always been able to hold a
+    /// model of its own — `dictationStreamingEngine` predates the caption picker —
+    /// but had no control anywhere in the window. The detail section only printed
+    /// the value, so the key was writable from defaults and unwritable from
+    /// Settings: every install stayed on whatever it first resolved to.
+    ///
+    /// Optional for the same reason `engine` is: nil is a real state to show,
+    /// not a value to invent. The setter normalizes through
+    /// `ASREngine.dictationSelected`, which drops a retired or unselectable
+    /// choice rather than letting an old preference come back.
+    var dictationEngine: ASREngine? = ASREngine.dictationSelected {
+        didSet {
+            guard dictationEngine != oldValue else { return }
+            ASREngine.dictationSelected = dictationEngine
+            // refreshRuntime, not the bare post the recognizer uses: the
+            // backend reads `dictationEffective` when it is built, so a model
+            // change that only updated UserDefaults would leave the running
+            // pool on the old model until something else rebuilt it.
+            NotificationCenter.default.post(name: .saiityDictationSettingChanged,
+                                            object: nil,
+                                            userInfo: ["refreshRuntime": true])
+        }
+    }
+
     /// The profile is inferred from the real controls. A manual tweak becomes
     /// Custom immediately instead of leaving a stale preset badge behind.
     var dictationProfile: DictationProfile {
@@ -355,15 +379,19 @@ final class AppState {
         }
         set {
             guard newValue != .custom else { return }
+            // The streaming model goes through `dictationEngine`, never
+            // straight to UserDefaults: that key is what the picker reads, so
+            // writing it behind the observable left the control showing the
+            // model the user had just moved away from.
             switch newValue {
             case .fast:
                 dictationRecognizer = .streaming
-                UserDefaults.standard.set(ASREngine.nemotron.rawValue, forKey: "dictationStreamingEngine")
+                dictationEngine = ASREngine.nemotron
                 dictationNemotronTier = 1120
                 dictationCleanupEnabled = false
             case .balanced:
                 dictationRecognizer = .streaming
-                UserDefaults.standard.set(ASREngine.nemotron.rawValue, forKey: "dictationStreamingEngine")
+                dictationEngine = ASREngine.nemotron
                 dictationNemotronTier = NemotronEngine.chunkMs
                 dictationCleanupEnabled = true
             case .accurate:
@@ -882,6 +910,10 @@ final class AppState {
         engine = ASREngine.selected
         translationEngine = TranslationEngine.visibleSelection(TranslationEngine.selected)
         dictationTranslationEngine = TranslationEngine.visibleSelection(TranslationEngine.dictationSelected)
+        // Same gap as the caption engine: a dictation model chosen elsewhere
+        // (defaults, a preset) has to be re-read or the window shows whatever
+        // was current when AppState was created.
+        dictationEngine = ASREngine.dictationSelected
         llmModel = LocalModel.cleanupSelected
         // Was missing, so a target picked from the menu bar never appeared here.
         adoptTarget(UserDefaults.standard.string(forKey: "translateTo"))
