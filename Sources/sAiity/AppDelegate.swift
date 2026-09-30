@@ -1064,6 +1064,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // out from under a loading engine is exactly as bad as under a
             // running one, so `starting` counts as busy.
             CaptionSession.shared.setRunning(state.isActive)
+            // And the Captions pane's Start/Stop button reads this, so its label
+            // cannot disagree with what the menu bar item says — both come from
+            // here. Hopped to the main actor because this class is not isolated
+            // and `AppState` is; a label settling a turn later is invisible.
+            let active = state.isActive
+            Task { @MainActor in SettingsWindowController.state.isCaptioning = active }
         }
     }
 
@@ -1405,6 +1411,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             Task { @MainActor [weak self] in self?.engineChanged(to: e) }
         }
 
+        // Settings → Captions now offers a Start/Stop control, because that pane
+        // configures captioning but had no way to begin it. Routed to the same
+        // `toggle()` the hot key and the menu bar item use, so there is still one
+        // way in rather than three that can disagree.
+        NotificationCenter.default.addObserver(forName: .saiityToggleCaptions, object: nil,
+                                               queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.toggle() }
+        }
+
         // Nemotron is one multilingual model that identifies the language from
         // audio, so there is no locale to choose and nothing to query. This used
         // to round-trip the system speech daemon on every launch.
@@ -1429,10 +1444,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         // Photographs the settings window from inside the app, which is the only
         // way to see it without Screen Recording permission. See SelfCapture for
-        // why `screencapture` and `ImageRenderer` are both unusable here.
+        // why `screencapture` and `ImageRenderer` are both unusable here. Guarded
+        // because SelfCapture does not exist in a release build.
+        #if SAIITY_TEST_HOOKS
         if SelfCapture.directory != nil {
             Self.scheduleAfterLaunch { SelfCapture.runAfterLaunch() }
         }
+        #endif
         if TestHooks.preview {
             // The window server can drop an order request made in the first
             // applicationDidFinishLaunching pass. Use the same settled-launch

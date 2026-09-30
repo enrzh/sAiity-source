@@ -26,6 +26,19 @@ import Foundation
 /// titlebar and traffic lights are not in the output. Every design decision
 /// under review lives in the content.
 ///
+/// ### What it cannot show
+///
+/// **A prominent button's accent fill.** `.buttonStyle(.borderedProminent)`
+/// captures as an unaccented grey capsule, so a capture makes the app's primary
+/// action look like the quietest control on the pane. Proved by tinting the
+/// button `.red` and getting an identical grey — the fill is not composited, so
+/// this is a limit of `cacheDisplay`, not a defect in the app. Anything drawn as
+/// a material or effect view is affected; plain layer content, including the
+/// accent-coloured shortcut-recorder text, captures correctly.
+///
+/// Check a primary action by running the app. Do not conclude from a capture that
+/// it is quiet.
+///
 /// Compiled out of a release build by `SAIITY_TEST_HOOKS`, like every other hook.
 ///
 /// Usage:

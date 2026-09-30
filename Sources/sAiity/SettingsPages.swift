@@ -738,13 +738,15 @@ private struct DictationShortcutRecorder: NSViewRepresentable {
             NSLayoutConstraint.activate([
                 label.centerXAnchor.constraint(equalTo: centerXAnchor),
                 label.centerYAnchor.constraint(equalTo: centerYAnchor),
-                widthAnchor.constraint(greaterThanOrEqualToConstant: 170),
+                // Fixed, not a minimum. A `greaterThanOrEqualTo` inside an HStack
+                // with a Spacer expanded to fill the row, so the recorder ran to
+                // ~450 pt to hold five characters of key chord. A control the size
+                // of its content is also a control, not a banner.
+                widthAnchor.constraint(equalToConstant: 170),
                 heightAnchor.constraint(equalToConstant: 28),
             ])
             wantsLayer = true
-            layer?.cornerRadius = 8
-            layer?.borderWidth = 0.5
-            layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.45).cgColor
+            layer?.cornerRadius = ShortcutRecorderChrome.cornerRadius
             refresh()
         }
 
@@ -752,10 +754,21 @@ private struct DictationShortcutRecorder: NSViewRepresentable {
         override var acceptsFirstResponder: Bool { true }
 
         func refresh() {
-            label.stringValue = recording ? String(localized: "Press the full chord, then release…") : chord.displayString
-            layer?.backgroundColor = (recording
-                ? NSColor.controlAccentColor.withAlphaComponent(0.25)
-                : NSColor.quaternaryLabelColor).cgColor
+            let assigned = chord.displayString
+            let text = ShortcutRecorderChrome.label(
+                assigned: assigned.isEmpty ? nil : assigned,
+                recording: recording)
+            label.stringValue = recording
+                ? String(localized: "Press the full chord, then release…")
+                : text.text
+            label.textColor = text.isInvitation
+                ? NSColor.controlAccentColor
+                : NSColor.labelColor
+            layer?.backgroundColor = ShortcutRecorderChrome.fill(
+                recording: recording, assigned: !assigned.isEmpty)
+            layer?.borderWidth = ShortcutRecorderChrome.borderWidth(recording: recording)
+            layer?.borderColor = ShortcutRecorderChrome.border(
+                recording: recording, assigned: !assigned.isEmpty)
         }
 
         override func mouseDown(with event: NSEvent) {
@@ -843,6 +856,7 @@ struct CaptionsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
+                primaryAction
                 quickSettings
                 SettingsDisclosure(isExpanded: $showsProcessingDetails) {
                     detailSettings
@@ -869,6 +883,44 @@ struct CaptionsView: View {
             TranslationTargetPicker(state: state,
                                     target: $state.translateTo,
                                     title: "Translate captions to")
+        }
+    }
+
+    /// The pane's primary action: start or stop captioning.
+    ///
+    /// This pane configures captioning and, until it existed, offered no way to
+    /// begin it — so the only routes in were learning the ⌥⌘C chord or finding
+    /// the menu bar item. A settings page for the app's headline feature with no
+    /// button for that feature is the wrong shape, whatever the arguments for
+    /// keeping the menu bar quiet.
+    ///
+    /// Prominent because it is the one primary action here, and sized to its
+    /// content rather than stretched: a full-width button reads as a page banner,
+    /// and this is a control. The label is the same pair of words the menu bar
+    /// uses, from the same session state, so the two can never disagree.
+    private var primaryAction: some View {
+        HStack {
+            Button {
+                NotificationCenter.default.post(name: .saiityToggleCaptions, object: nil)
+            } label: {
+                Label(state.isCaptioning ? "Stop captions" : "Start captions",
+                      systemImage: state.isCaptioning ? "stop.fill" : "captions.bubble.fill")
+                    .frame(minWidth: 132)
+            }
+            // `.borderedProminent`, not `.glassProminent`. Glass is translucent,
+            // so a prominent glass button takes its colour from whatever is
+            // behind it — over this dark settings surface it came out as a quiet
+            // grey capsule, reading *quieter* than the shortcut recorders below.
+            // The one control that starts captioning cannot be the quietest thing
+            // on the pane. This one is accent-filled and unambiguous.
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            Text(state.isCaptioning
+                 ? "Captions are running."
+                 : "Captions run on this Mac. Nothing is uploaded.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
         }
     }
 
@@ -1490,30 +1542,29 @@ private struct ShortcutRecorder: NSViewRepresentable {
             NSLayoutConstraint.activate([
                 label.centerXAnchor.constraint(equalTo: centerXAnchor),
                 label.centerYAnchor.constraint(equalTo: centerYAnchor),
-                widthAnchor.constraint(greaterThanOrEqualToConstant: 130),
+                // See the note on the dictation recorder: fixed, so the control is
+                // the size of a key chord rather than the width of the pane.
+                widthAnchor.constraint(equalToConstant: 130),
                 heightAnchor.constraint(equalToConstant: 28),
             ])
             wantsLayer = true
-            layer?.cornerRadius = 8
-            layer?.borderWidth = 0.5
-            layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.45).cgColor
+            layer?.cornerRadius = ShortcutRecorderChrome.cornerRadius
             refresh()
         }
         required init?(coder: NSCoder) { fatalError() }
 
         func refresh() {
-            if recording {
-                label.stringValue = String(localized: "Press keys…")
-                layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.25).cgColor
-            } else if let s = HotKeyCenter.shortcut(for: action) {
-                label.stringValue = s.displayString
-                layer?.backgroundColor = NSColor.controlBackgroundColor
-                    .withAlphaComponent(0.72).cgColor
-            } else {
-                label.stringValue = String(localized: "Not set")
-                layer?.backgroundColor = NSColor.controlBackgroundColor
-                    .withAlphaComponent(0.72).cgColor
-            }
+            let assigned = HotKeyCenter.shortcut(for: action)?.displayString
+            let text = ShortcutRecorderChrome.label(assigned: assigned, recording: recording)
+            label.stringValue = text.text
+            label.textColor = text.isInvitation
+                ? NSColor.controlAccentColor
+                : NSColor.labelColor
+            layer?.backgroundColor = ShortcutRecorderChrome.fill(
+                recording: recording, assigned: assigned != nil)
+            layer?.borderWidth = ShortcutRecorderChrome.borderWidth(recording: recording)
+            layer?.borderColor = ShortcutRecorderChrome.border(
+                recording: recording, assigned: assigned != nil)
         }
 
         override var acceptsFirstResponder: Bool { true }

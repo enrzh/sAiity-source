@@ -80,11 +80,22 @@ final class HotKeyCenter {
         case recentCaptions
         case clearCaption
 
+        /// The settings row label and the control's accessibility name.
+        ///
+        /// Sentence case, and no slashes. The rest of the settings window labels
+        /// rows in sentence case — "Show the caption bubble", "Translate to" — and
+        /// these five were the only title-cased rows on the pane, sitting directly
+        /// beneath them. A slash also names two actions where there is one: each
+        /// of these records a *single* shortcut that toggles, so "Start / stop
+        /// captions" described something the control cannot do.
+        ///
+        /// Menus keep their own literals in title case, which is correct there, so
+        /// changing this does not touch the menu bar.
         var title: String {
             switch self {
-            case .toggleCaptions: return String(localized: "Start / stop captions")
+            case .toggleCaptions: return String(localized: "Start or stop captions")
             case .copyLastLine:   return String(localized: "Copy the current caption")
-            case .toggleBubble:   return String(localized: "Show / hide the caption bubble")
+            case .toggleBubble:   return String(localized: "Show or hide the caption bubble")
             case .recentCaptions: return String(localized: "Show the last few captions")
             case .clearCaption:   return String(localized: "Clear the caption")
             }

@@ -18,6 +18,12 @@ extension Notification.Name {
     static let saiityDictationShortcutRecordingChanged = Notification.Name("sAiityDictationShortcutRecordingChanged")
     static let saiitySelectSettingsPane = Notification.Name("sAiitySelectSettingsPane")
     static let saiityToggleSettingsSidebar = Notification.Name("sAiityToggleSettingsSidebar")
+    /// Start or stop captioning, from anywhere.
+    ///
+    /// Posted by the Captions pane primary action so it reaches the same
+    /// toggle() the hot key and the menu bar item use, rather than a second
+    /// code path that could quietly drift from the one the hot key drives.
+    static let saiityToggleCaptions = Notification.Name("saiityToggleCaptions")
 }
 
 // MARK: - Model
@@ -133,6 +139,14 @@ final class AppState {
     var isModelsLoading = false
     var isLibraryLoading = false
     var isRefreshing = false
+    /// Whether a caption session is running right now.
+    ///
+    /// Written by the app delegate at every session-state transition. It exists so
+    /// Settings → Captions can offer the app's one primary action with an honest
+    /// label: that pane configures captioning but, until this existed, had no way
+    /// to start it, so the only way in was learning the ⌥⌘C chord or finding the
+    /// menu bar. Mirrors what the menu bar item says, from the same state.
+    var isCaptioning = false
     @ObservationIgnored private var modelsLoaded = false
     @ObservationIgnored private var libraryLoaded = false
     @ObservationIgnored private var modelRefreshGeneration = 0

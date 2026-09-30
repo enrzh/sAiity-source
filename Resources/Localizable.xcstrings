@@ -13668,35 +13668,6 @@
         }
       }
     },
-    "Show / hide the caption bubble": {
-      "extractionState": "manual",
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Untertitelblase ein-/ausblenden"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Mostrar / ocultar la burbuja de subtítulos"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Afficher / masquer la bulle de sous-titres"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "字幕バブルの表示／非表示"
-          }
-        }
-      }
-    },
     "Show the caption bubble": {
       "localizations": {
         "de": {
@@ -13921,35 +13892,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "スペース"
-          }
-        }
-      }
-    },
-    "Start / stop captions": {
-      "extractionState": "manual",
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Untertitel starten / stoppen"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Iniciar / detener subtítulos"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Démarrer / arrêter les sous-titres"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "字幕の開始／停止"
           }
         }
       }
@@ -20329,6 +20271,93 @@
           "stringUnit": {
             "state": "translated",
             "value": "Whisper turboの準備ができました。"
+          }
+        }
+      }
+    },
+    "Start or stop captions": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Untertitel starten oder stoppen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Iniciar o detener subtítulos"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Démarrer ou arrêter les sous-titres"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "字幕の開始または停止"
+          }
+        }
+      }
+    },
+    "Show or hide the caption bubble": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Untertitelblase ein- oder ausblenden"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mostrar u ocultar la burbuja de subtítulos"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Afficher ou masquer la bulle de sous-titres"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "字幕バブルの表示または非表示"
+          }
+        }
+      }
+    },
+    "Click to set": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zum Festlegen klicken"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Haz clic para definir"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cliquez pour définir"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "クリックして設定"
           }
         }
       }
