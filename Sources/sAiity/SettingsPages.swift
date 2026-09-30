@@ -1016,21 +1016,7 @@ struct CaptionsView: View {
 
             if state.translateTo != nil {
                 SettingsSection(title: "Translation details",
-                                subtitle: "Choose the local engine and when translated sentences are produced.") {
-                    Picker("Translation engine", selection: Binding(
-                        get: { state.translationEngine ?? .recommended },
-                        set: { state.translationEngine = $0 })) {
-                        ForEach(TranslationEngine.primaryCases, id: \.self) { e in
-                            Text("\(e.displayName) · recommended").tag(e)
-                        }
-                        ForEach(TranslationEngine.advancedCases, id: \.self) { e in
-                            Text("\(e.displayName) · experimental").tag(e)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    if let t = state.translateTo, !state.targetSupportedByEngine {
-                        TargetUnsupportedNotice(state: state, target: t)
-                    }
+                                subtitle: "Decide when translated sentences are produced.") {
                     Picker("Translation mode", selection: $state.translationTiming) {
                         ForEach(TranslationTiming.allCases, id: \.self) { t in
                             Text(t.displayName).tag(t)
@@ -1146,6 +1132,45 @@ struct CaptionsView: View {
                         Button("Off") { state.translateTo = nil }
                             .controlSize(.small)
                     }
+                }
+                // The engine lives here rather than behind "More options" because
+                // it is the other half of the row above: you pick a target
+                // language, and this decides what translates it. It was buried in
+                // a section called "Translation details" behind a disclosure, so
+                // the two decisions that make a caption appear in another
+                // language sat on different screens, one of them two clicks away.
+                //
+                // Left enabled when no target is chosen. The two engines cover very
+                // different language sets, so the engine is chosen *for* a target
+                // you are about to pick — requiring a target first would invert
+                // that order. It stays available with translation off for the same
+                // reason the "Off" button does: a standing preference, not a
+                // per-session toggle.
+                HStack {
+                    Label("Translate with", systemImage: "cpu")
+                    Spacer()
+                    Picker("Translate with", selection: Binding(
+                        get: { state.translationEngine ?? .recommended },
+                        set: { state.translationEngine = $0 })) {
+                        ForEach(TranslationEngine.userSelectableCases, id: \.self) { e in
+                            Text(e.displayName).tag(e)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    // The real trade-off — 452 languages at 1.9 GB against 37 at
+                    // 1.1 GB — is too long for a menu item, and an interpolated
+                    // localization key for it would need re-translating in four
+                    // languages every time a word changed. It lives in the tooltip,
+                    // the Models page, and the section below.
+                    .help(state.translationEngine?.summary ?? TranslationEngine.recommended.summary)
+                }
+                // This notice warns about the engine-and-target pair, so it belongs
+                // with both of them. It came out of the detail section with the
+                // picker, and leaving it there would strand the warning from the
+                // control that causes it.
+                if let t = state.translateTo, !state.targetSupportedByEngine {
+                    TargetUnsupportedNotice(state: state, target: t)
                 }
             }
 
