@@ -97,6 +97,15 @@ then
     echo "note: Finder layout skipped (Automation permission or timeout); the image still works"
 fi
 
+# Finder deletes .VolumeIcon.icns while it has the disk open — the file is gone
+# after the layout above, and it is NOT copied into the volume's resource fork
+# (that stays 0 bytes), so the volume would ship with a plain disk icon. Put it
+# back only once Finder is done with the disk, and re-set the custom-icon flag
+# so it is honoured on mount. Restore-after, not before: putting it in the stage
+# is what the AppleScript discards.
+cp Resources/AppIcon.icns "$MOUNT/.VolumeIcon.icns" 2>/dev/null || true
+SetFile -a C "$MOUNT" 2>/dev/null || true
+
 sync
 hdiutil detach "$MOUNT" >/dev/null
 hdiutil convert "$RW" -format UDZO -imagekey zlib-level=9 -o "$DMG" >/dev/null
@@ -105,10 +114,14 @@ rm -f "$RW"; rm -rf "$STAGE"
 # No codesign, no notarytool, no stapler: that is the whole difference from
 # scripts/make-dmg.sh, and deliberately the only difference.
 V=$(hdiutil attach -nobrowse -readonly "$DMG" | grep -Eo '/Volumes/.*$' | head -1)
-[ -d "$V/$NAME.app" ] || { echo "FATAL: image mounted without the app"; exit 1; }
+[ -d "$V/$NAME.app" ] || { hdiutil detach "$V" >/dev/null; echo "FATAL: image mounted without the app"; exit 1; }
 codesign --verify --deep --strict "$V/$NAME.app" \
     || { hdiutil detach "$V" >/dev/null; echo "FATAL: app signature broken by the image"; exit 1; }
 [ -L "$V/Applications" ] || echo "note: no Applications symlink"
+# The volume icon is presentation, so a miss is a note rather than a failure —
+# but say it, because Finder removes it silently and nobody notices until the
+# mounted disk shows a generic icon.
+[ -f "$V/.VolumeIcon.icns" ] || echo "note: .VolumeIcon.icns missing; the mounted volume will show a plain disk icon"
 hdiutil detach "$V" >/dev/null
 
 DOWNLOADS="$HOME/Downloads"

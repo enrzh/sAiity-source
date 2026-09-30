@@ -104,6 +104,14 @@ then
     echo "note: Finder layout skipped (Automation permission or timeout); the image still works"
 fi
 
+# Finder deletes .VolumeIcon.icns while it has the disk open — it is gone after
+# the layout above, and it is NOT copied into the volume's resource fork (that
+# stays 0 bytes), so the shipped disk would mount with a plain icon. Restore it
+# only now that Finder is done, and re-set the custom-icon flag it is honoured
+# by. Staging it before hdiutil create is exactly what the AppleScript discards.
+cp Resources/AppIcon.icns "$MOUNT/.VolumeIcon.icns" 2>/dev/null || true
+SetFile -a C "$MOUNT" 2>/dev/null || true
+
 sync
 hdiutil detach "$MOUNT" >/dev/null
 hdiutil convert "$RW" -format UDZO -imagekey zlib-level=9 -o "$DMG" >/dev/null
@@ -128,6 +136,7 @@ V=$(hdiutil attach -nobrowse -readonly "$DMG" | grep -Eo '/Volumes/.*$' | head -
 xcrun stapler validate "$V/$NAME.app"
 spctl --assess --type execute --verbose=2 "$V/$NAME.app"
 [ -L "$V/Applications" ] && echo "drag target present: Applications -> $(readlink "$V/Applications")"
+[ -f "$V/.VolumeIcon.icns" ] || echo "note: .VolumeIcon.icns missing; the mounted volume will show a plain disk icon"
 hdiutil detach "$V" >/dev/null
 
 echo "built: $DMG ($(stat -f%z "$DMG") bytes, notarised + stapled)"
