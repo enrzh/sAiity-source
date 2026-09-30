@@ -85,10 +85,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         },
         dictationUsesWhisper: { DictationRecognizer.selected == .whisper },
         dictationStreamingDraftEnabled: {
+            // Realtime text is the exception to every gate below it. Those
+            // gates exist because a draft that is about to be replaced was
+            // worse than no draft: with cleanup or translation on, the raw
+            // words are not the answer, so Fast — the profile that turns both
+            // off — was the only one allowed to show them. Asking for realtime
+            // text says the opposite: show the raw words arriving, then let
+            // the finished text take their place.
             DictationRecognizer.selected == .streaming
-                && SettingsWindowController.state.dictationProfile == .fast
-                && !SettingsWindowController.state.dictationCleanupEnabled
-                && !SettingsWindowController.state.translateDictation
+                && (SettingsWindowController.state.dictationRealtimeText
+                    || (SettingsWindowController.state.dictationProfile == .fast
+                        && !SettingsWindowController.state.dictationCleanupEnabled
+                        && !SettingsWindowController.state.translateDictation))
         },
         transcribeWhisper: { samples, locale in
             try await WhisperDictationBackend().transcribe(samples: samples, locale: locale)
@@ -1698,6 +1706,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func showDictationDraft(_ text: String) {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         switch dictationController.phase {
+        case .dictating:
+            // Realtime text. Off keeps the old behaviour — nothing on screen
+            // until the recording stops — even though the controller is
+            // already pushing every update. That is deliberate: the controller
+            // reports what it has, and deciding whether it is *shown* belongs
+            // to one place, here.
+            guard SettingsWindowController.state.dictationRealtimeText else { return }
+            // The toast draws either the waveform or the text, never both.
+            // This is the handover the option asks for, and why no layout
+            // change was needed to make it.
+            dictationToast.show(resultText: text, autoDismissAfter: nil)
         case .transcribing, .cleaning, .translating, .inserting:
             dictationToast.show(resultText: text, autoDismissAfter: nil)
         default:

@@ -20746,6 +20746,64 @@
           }
         }
       }
+    },
+    "Realtime text": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Echtzeit-Text"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Texto en tiempo real"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Texte en temps réel"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "リアルタイムテキスト"
+          }
+        }
+      }
+    },
+    "The words appear as they are spoken, and the finished text replaces them when dictation ends.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Worte erscheinen, während gesprochen wird, und der fertige Text ersetzt sie, wenn das Diktat endet."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Las palabras aparecen mientras se habla, y el texto final las reemplaza cuando termina el dictado."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les mots apparaissent au fil de la parole, et le texte final les remplace lorsque la dictée se termine."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "話している間に文字が表示され、音声入力の終了時に完成したテキストに置き換わります。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

@@ -423,6 +423,24 @@ final class AppState {
             NotificationCenter.default.post(name: .saiityDictationSettingChanged, object: nil)
         }
     }
+    /// Show the dictated words while they are still being spoken, and let the
+    /// finished text take their place when the result lands.
+    ///
+    /// A display preference with a real cost. Drafts were gated behind the
+    /// Fast profile because a live draft means the streaming backend runs
+    /// *during* the utterance instead of being deferred to the stop, and Fast
+    /// is the profile that turns cleanup and translation off — the two cases
+    /// where the raw words are not the answer, so showing them was worse than
+    /// showing nothing. Asking for this explicitly inverts that judgement: the
+    /// point is to watch the raw text arrive and then watch the finished text
+    /// replace it.
+    var dictationRealtimeText = UserDefaults.standard.bool(forKey: "dictationRealtimeText") {
+        didSet {
+            guard dictationRealtimeText != oldValue else { return }
+            UserDefaults.standard.set(dictationRealtimeText, forKey: "dictationRealtimeText")
+            NotificationCenter.default.post(name: .saiityDictationSettingChanged, object: nil)
+        }
+    }
     var dictationChord = DictationChord.current {
         didSet {
             guard dictationChord != oldValue else { return }

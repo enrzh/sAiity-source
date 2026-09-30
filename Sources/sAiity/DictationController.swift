@@ -794,6 +794,14 @@ final class DictationController {
             draftVolatileText = chunk.text
         }
         latestDraftText = DictationTranscriptMerger.merge([draftFinalText, draftVolatileText])
+        // Push every update, not only the one handed over at the stop. The
+        // controller reports what it has; whether that reaches the screen is
+        // the phase's and the setting's call in `showDictationDraft`. Withholding
+        // it here would put that decision in two places — and is what kept the
+        // words invisible while they were still being spoken.
+        if !latestDraftText.isEmpty {
+            onDraft(latestDraftText)
+        }
     }
 
     #if SAIITY_TEST_HOOKS

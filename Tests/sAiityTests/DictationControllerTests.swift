@@ -679,6 +679,45 @@ import Testing
         #expect(inserter.inserted == ["Hallo world"])
     }
 
+    @Test("the draft reaches the handler while the words are still being spoken")
+    func draftsArriveDuringDictationNotOnlyAtTheStop() async {
+        let backend = FakeSegmentedBackend(log: EventLog())
+        backend.streamingResult = "Hallo world"
+        let capture = FakeCapture(log: EventLog())
+        capture.samples = [0.4, 0.4, 0.4]
+        let inserter = FakeInserter()
+        var draft = ""
+        let controller = DictationController(
+            makeBackend: { backend },
+            capture: capture,
+            inserter: inserter,
+            captionsActive: { false },
+            onDraft: { draft = $0 },
+            dictationStreamingDraftEnabled: { true })
+
+        controller.press()
+        await controller.waitForWorkForTests()
+        #expect(backend.starts == 1)
+        #expect(controller.phase == .dictating)
+
+        // Still holding the key. If the push only happened in `finish`, the
+        // screen would stay blank for the whole utterance and "realtime text"
+        // would be a setting that changes nothing until you let go — which is
+        // the state the screen was actually in before this.
+        backend.emitDraft(.init(text: "Hallo", isFinal: true))
+        backend.emitDraft(.init(text: "world", isFinal: false))
+        for _ in 0..<100 where draft.isEmpty { await Task.yield() }
+
+        #expect(draft == "Hallo world")
+        #expect(controller.phase == .dictating)
+
+        controller.release()
+        await controller.waitForWorkForTests()
+
+        #expect(draft == "Hallo world")
+        #expect(inserter.inserted == ["Hallo world"])
+    }
+
     @Test("controller cancellation during segmented transcription drops the result")
     func cancellationDuringControllerSegmentation() async {
         let backend = FakeSegmentedBackend(log: EventLog())

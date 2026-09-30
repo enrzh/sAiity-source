@@ -667,6 +667,19 @@ struct DictationView: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
             }
+
+            // Display, and why it sits below the path row rather than above
+            // it: it only exists on Streaming, which has partials to show.
+            // Whisper Auto records the whole utterance before it recognises a
+            // word of it, so there is nothing to display until the result —
+            // and a switch that could not do anything would be worse than one
+            // that is not offered, which is the call the model row above makes
+            // for the same reason.
+            if state.dictationRecognizer == .streaming {
+                Divider()
+                Toggle("Realtime text", isOn: $state.dictationRealtimeText)
+                    .help("The words appear as they are spoken, and the finished text replaces them when dictation ends.")
+            }
         }
     }
 
