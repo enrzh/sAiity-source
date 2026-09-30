@@ -44,6 +44,13 @@ let package = Package(
                 .product(name: "AudioCommon", package: "speech-swift"),
                 .product(name: "LLM", package: "LLM.swift"),
                 .product(name: "MLX", package: "mlx-swift"),
+                // Qwen3-ASR, an Apache-2.0 multilingual recogniser that reports
+                // streaming results as append-only segments rather than a
+                // re-decoded window — the property the caption reconciler needs
+                // and the property Whisper does not have. Pulled in for the probe
+                // in `Qwen3ASRProbeTests`; not yet wired to an engine, so nothing
+                // in the product can reach it.
+                .product(name: "Qwen3ASR", package: "speech-swift"),
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "WhisperKit", package: "WhisperKit"),
             ],
