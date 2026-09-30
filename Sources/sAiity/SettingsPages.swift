@@ -277,10 +277,45 @@ struct DictationView: View {
         LocalModel.all.filter { !$0.isLegacy || $0 == state.llmModel }
     }
 
+    /// What the row displays. Empty is what makes the menu read "Off".
+    ///
+    /// Three states, not two. `enforceSettingsHonesty()` clamps
+    /// `dictationCleanupEnabled` to `llmModel.isDownloaded`, so a model that
+    /// is not on this Mac yet always reads as disabled. Showing "Off" for
+    /// that would swallow the pick the moment it was made — the user would
+    /// choose a model and watch the menu snap back with no explanation. That
+    /// one case shows the model and the download notice instead, which is
+    /// the truth: the choice is stored, it just cannot run yet.
+    private var cleanupDisplayedFile: String {
+        guard let model = state.llmModel else { return "" }
+        if model.isDownloaded, !state.dictationCleanupEnabled { return "" }
+        return model.file
+    }
+
+    /// The picker carries the on/off state as well as the model: "Off" means
+    /// cleanup is off, and picking a model turns it back on.
+    /// `dictationCleanupEnabled` stays a real property — it gates the runtime
+    /// and feeds `dictationProfile` — it just is not a separate control,
+    /// because a switch beside a model menu invites the combination "cleanup
+    /// on, no model", which the runtime then quietly drops back to the
+    /// deterministic pass.
     private var cleanupModelSelection: Binding<String> {
         Binding(
-            get: { state.llmModel?.file ?? "" },
-            set: { file in state.llmModel = cleanupModels.first { $0.file == file } })
+            get: { cleanupDisplayedFile },
+            set: { file in
+                state.llmModel = cleanupModels.first { $0.file == file }
+                state.dictationCleanupEnabled = state.llmModel != nil
+            })
+    }
+
+    /// The tooltip has to exist in every state: `.help("")` puts a blank
+    /// entry in the help menu, and when the row reads "Off" the model note
+    /// would be describing something the row is not showing.
+    private var cleanupHelp: String {
+        guard !cleanupDisplayedFile.isEmpty, let model = state.llmModel else {
+            return String(localized: "Choose a local model to clean up dictated text.")
+        }
+        return model.note
     }
 
     private var whisperReadinessID: String {
@@ -290,14 +325,9 @@ struct DictationView: View {
     @ViewBuilder
     private var cleanupModelControls: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Picker("Dictation cleanup", selection: cleanupModelSelection) {
-                Text("Off").tag("")
-                ForEach(cleanupModels) { model in
-                    Text(model.label).tag(model.file)
-                }
-            }
-            .pickerStyle(.menu)
-
+            // The chooser lives in Quick controls now. What stays here is
+            // what is genuinely a detail: which model this is, whether its
+            // bytes are on this Mac, and the control that fetches them.
             if let model = state.llmModel {
                 HStack(alignment: .top, spacing: 8) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -310,7 +340,13 @@ struct DictationView: View {
                     }
                 }
             } else {
-                Label("Ready", systemImage: "checkmark.circle")
+                // Not "Ready": with the chooser moved out of this section a
+                // bare checkmark no longer has a picker beside it to say what
+                // it is ready *for*, and the truth is that there is no
+                // cleanup model at all. This key was already translated and
+                // had no source use left.
+                Label("Download a compatible local cleanup model under Models.",
+                      systemImage: "arrow.down.circle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -416,8 +452,11 @@ struct DictationView: View {
                 }
             }
 
-            SettingsSection(title: "Cleanup details",
-                            subtitle: "Choose the local cleanup model and protected vocabulary. The everyday on/off switch is on the Dictation page.") {
+            // No subtitle: the chooser is no longer here, so the old
+            // "choose the local cleanup model …" line would be describing
+            // a control that has moved. The vocabulary field keeps its own
+            // caption below.
+            SettingsSection(title: "Cleanup details") {
                 cleanupModelControls
                 TextField("Protected vocabulary (comma separated)", text: $vocabularyText)
                     .textFieldStyle(.roundedBorder)
@@ -600,18 +639,33 @@ struct DictationView: View {
 
             Divider()
 
-            Toggle("Clean up dictated text", isOn: $state.dictationCleanupEnabled)
-                .disabled(state.llmModel?.isDownloaded != true)
+            // One row where there was a switch and a read-only model name.
+            // The name was the same dead end as the two pickers above: it
+            // printed which model cleanup would use and gave no way to change
+            // it, so the only place to choose sat behind the disclosure. The
+            // switch is "Off" in this menu — see `cleanupModelSelection` for
+            // why those are one control rather than two.
             HStack {
-                Label(state.llmModel?.label ?? String(localized: "Not ready"),
-                      systemImage: state.llmModel?.isDownloaded == true
-                          ? "checkmark.circle.fill" : "arrow.down.circle")
-                    .foregroundStyle(state.llmModel?.isDownloaded == true
-                                     ? Color.secondary : Color.orange)
+                Label("Clean up with", systemImage: "cpu")
                 Spacer()
-                Button("Models") { SettingsWindowController.selectModelsPane() }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                Picker("Clean up with", selection: cleanupModelSelection) {
+                    Text("Off").tag("")
+                    ForEach(cleanupModels) { model in
+                        Text(model.label).tag(model.file)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .help(cleanupHelp)
+            }
+            // The one state where the row shows a model that cannot run:
+            // `enforceSettingsHonesty()` has already forced
+            // `dictationCleanupEnabled` false, so without this the row would
+            // read as a live selection that quietly does nothing.
+            if let model = state.llmModel, !model.isDownloaded {
+                Label("Not downloaded yet — see Models.", systemImage: "arrow.down.circle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
             }
         }
     }
