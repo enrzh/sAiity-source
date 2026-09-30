@@ -67,6 +67,8 @@ struct ModelRegistryTests {
                 "expected exactly the two dictation Whisper models")
         #expect(ids.contains(AssetID.whisperTurbo),
                 "the caption second opinion needs a row, or its 626 MB reads as stray")
+        #expect(ids.contains(AssetID.qwen06))
+        #expect(ids.contains(AssetID.qwen17))
         #expect(!ids.contains { $0.contains("diarization") }, "Speaker diarization was removed; a stale asset remains")
         // Apple went the same way: its translator needed no download but could
         // only reach the pairs macOS had, and it kept a whole second code path

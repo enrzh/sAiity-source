@@ -148,6 +148,8 @@ enum AssetID {
     /// come back. It is also distinct from the dictation `asr.whisper.*` rows,
     /// so a test walking one of those groups cannot sweep this one up.
     static let whisperTurbo = "asr.whisperTurbo"
+    static let qwen06 = "asr.qwen3asr.0.6b"
+    static let qwen17 = "asr.qwen3asr.1.7b"
     /// The dictation recognizer's Whisper models. Built from the choice rather
     /// than spelled out twice, so the registry row and the engine's own
     /// bookkeeping cannot end up naming the same files differently.

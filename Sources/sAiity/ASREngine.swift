@@ -33,14 +33,18 @@ enum ASREngine: String, CaseIterable, Sendable {
     /// measured as "other files" — but it is out of the picker, and a stored
     /// preference for it normalizes to no selection.
     case whisperTurbo
+    /// Qwen3-ASR 0.6B, 4-bit. Pause-final captions. See `QwenASREngine`.
+    case qwen06
+    /// Qwen3-ASR 1.7B, 4-bit. Same caption behaviour, larger weights.
+    case qwen17
     /// Legacy on-disk value. Keep the raw case so old preferences can be read
     /// and normalized without making it selectable again.
     case parakeetEou
 
-    static var allCases: [ASREngine] { [.nemotron, .whisperTurbo] }
+    static var allCases: [ASREngine] { [.nemotron, .qwen06, .qwen17, .whisperTurbo] }
 
-    /// The engines a user may pick. Only Nemotron: see `whisperTurbo`.
-    static let userSelectableCases: [ASREngine] = [.nemotron]
+    /// The engines a user may pick. Whisper stays out: see `whisperTurbo`.
+    static let userSelectableCases: [ASREngine] = [.nemotron, .qwen06, .qwen17]
 
     static let primaryCases: [ASREngine] = [.nemotron]
     /// Empty. Kept as a named list so the shape survives the measurement that
@@ -108,6 +112,8 @@ enum ASREngine: String, CaseIterable, Sendable {
         switch self {
         case .nemotron: return String(localized: "Nemotron")
         case .whisperTurbo: return String(localized: "Whisper turbo")
+        case .qwen06: return String(localized: "Qwen3-ASR 0.6B")
+        case .qwen17: return String(localized: "Qwen3-ASR 1.7B")
         case .parakeetEou: return String(localized: "Parakeet")
         }
     }
@@ -118,6 +124,10 @@ enum ASREngine: String, CaseIterable, Sendable {
             return String(localized: "One multilingual model, 634 MB, downloaded once. Its own metadata declares 121 language tags — European, Asian and African — and it identifies the spoken language from audio rather than being told, so there is no per-language switching. Better on noisy and music-backed audio; slightly higher latency.")
         case .whisperTurbo:
             return String(localized: "626 MB. A larger, more widely trained model that is often the more accurate of the two on the languages it is good at, and the only one here that transcribes accented and non-native speech as well as native speech. It is not a streaming model: it re-reads a window of audio every time it produces an update, so it costs more work per second of captions and can fall behind on a fast speaker. It covers fewer languages than Nemotron, and identifies the language from the audio.")
+        case .qwen06:
+            return String(localized: "700 MB. Word error was 0 on the three measured clips, against Nemotron's 0.05 to 0.07, and it still runs faster than realtime. A caption appears when the speaker pauses, or every 10 seconds if they do not. Live partials are not shown: the first partial of each clip ended in a period that was not the sentence, and committing it dropped the rest.")
+        case .qwen17:
+            return String(localized: "2.1 GB. The larger Qwen3-ASR, with the same pause-based captions as the 0.6B. It has not been measured on these clips. Heavier on memory, and slower to load than Nemotron.")
         case .parakeetEou:
             return String(localized: "English only, 437 MB. A fifth of Nemotron's parameters, so it reaches the first word sooner, and it detects the end of an utterance itself, so sentences break where the speaker actually stopped. Pick this if you only caption English; it will produce confident nonsense on anything else.")
         }
@@ -131,6 +141,10 @@ enum ASREngine: String, CaseIterable, Sendable {
             return String(localized: "Multilingual · 634 MB · detects language automatically")
         case .whisperTurbo:
             return String(localized: "41 languages · 626 MB · strongest on accented speech")
+        case .qwen06:
+            return String(localized: "Multilingual · 700 MB · a line when the speaker pauses")
+        case .qwen17:
+            return String(localized: "Multilingual · 2.1 GB · same pause captions, heavier")
         case .parakeetEou:
             return String(localized: "English only · 437 MB · fastest")
         }
@@ -143,6 +157,10 @@ enum ASREngine: String, CaseIterable, Sendable {
             return !NemotronEngine.isDownloaded(chunkMs: NemotronEngine.selectedChunkMs)
         case .whisperTurbo:
             return !WhisperTurboEngine.isDownloaded()
+        case .qwen06:
+            return !QwenASREngine.isDownloaded(.small)
+        case .qwen17:
+            return !QwenASREngine.isDownloaded(.large)
         case .parakeetEou: return !ParakeetEouEngine.isDownloaded()
         }
     }
@@ -152,20 +170,39 @@ enum ASREngine: String, CaseIterable, Sendable {
     /// the answer is "unknown" rather than a guess.
     var coverage: LanguageCoverage {
         switch self {
-        case .nemotron: return .manyDetectedFromAudio
+        case .nemotron, .qwen06, .qwen17: return .manyDetectedFromAudio
         case .whisperTurbo: return .only(WhisperTurboEngine.reliableLanguages)
         case .parakeetEou: return .only(["en"])
         }
     }
 
-    /// True when the engine identifies the spoken language itself, so there is
-    /// no locale for the user to choose.
+    /// True when the engine settles on the spoken language by itself, so there
+    /// is no locale for the user to choose.
     ///
-    /// Whisper reports a language tag from the decode itself, so it qualifies —
-    /// but it is a per-window guess that can change between passes, which is a
-    /// weaker promise than Nemotron's and one the translation path has to be
-    /// able to survive.
-    var identifiesLanguageFromAudio: Bool { self == .nemotron || self == .whisperTurbo }
+    /// Derived from `coverage` rather than listed per case. This is the same
+    /// declaration `canHear` and the Models page read, and maintaining a second
+    /// list beside it is exactly how the two Qwen sizes shipped labelled
+    /// "English only" in Quick controls while the summary underneath promised
+    /// 52 languages — a false statement about which languages this app can
+    /// caption, in the row a user checks to decide that.
+    ///
+    /// Whisper still qualifies through its 41-language set, and it reports a
+    /// language tag from the decode itself — but that tag is a per-window guess
+    /// that can change between passes, a weaker promise than Nemotron's and one
+    /// the translation path has to survive. Parakeet's single English tag is the
+    /// case that means English only.
+    ///
+    /// Capability, not the runtime answer: `QwenASREngine.detectedLanguage()`
+    /// returns nil because this adapter does not surface the model's tag, so the
+    /// app learns the language from the transcript instead. The user still picks
+    /// nothing, which is what this label is for — but see `detectedLanguage()`
+    /// for what that costs the translation path.
+    var identifiesLanguageFromAudio: Bool {
+        switch coverage {
+        case .manyDetectedFromAudio: return true
+        case .only(let codes): return codes.count > 1
+        }
+    }
 
     /// Whether speech in this language would be recognised at all. An
     /// English-only engine pointed at German does not fail — it produces
@@ -187,6 +224,10 @@ enum ASREngine: String, CaseIterable, Sendable {
             return AssetID.nemotron(chunkMs: NemotronEngine.selectedChunkMs)
         case .whisperTurbo:
             return AssetID.whisperTurbo
+        case .qwen06:
+            return AssetID.qwen06
+        case .qwen17:
+            return AssetID.qwen17
         case .parakeetEou:
             return AssetID.parakeetEou
         }
@@ -208,6 +249,16 @@ enum ASREngine: String, CaseIterable, Sendable {
         case .parakeetEou:
             return StreamingASRBackend(name: String(localized: "Parakeet EOU (streaming, on-device)"),
                                        engine: ParakeetEouEngine(),
+                                       onPerformance: onPerformance,
+                                       onMetrics: onMetrics)
+        case .qwen06:
+            return StreamingASRBackend(name: String(localized: "Qwen3-ASR 0.6B (on-device)"),
+                                       engine: QwenASREngine(size: .small),
+                                       onPerformance: onPerformance,
+                                       onMetrics: onMetrics)
+        case .qwen17:
+            return StreamingASRBackend(name: String(localized: "Qwen3-ASR 1.7B (on-device)"),
+                                       engine: QwenASREngine(size: .large),
                                        onPerformance: onPerformance,
                                        onMetrics: onMetrics)
         }
@@ -275,6 +326,10 @@ enum ASREngine: String, CaseIterable, Sendable {
                 // those bytes frees nothing.
                 unload: { WhisperTurboEngine.forgetLoadedModel() })]
 
+        case .qwen06:
+            return [Self.qwenAsset(size: .small, engine: .qwen06)]
+        case .qwen17:
+            return [Self.qwenAsset(size: .large, engine: .qwen17)]
         case .parakeetEou:
             return [ModelAsset(
                 id: AssetID.parakeetEou,
@@ -292,6 +347,26 @@ enum ASREngine: String, CaseIterable, Sendable {
                 use: .whenRecognitionEngine(.parakeetEou),
                 install: { sink in try await ParakeetEouEngine.downloadWeights(progress: sink) })]
         }
+    }
+
+    private static func qwenAsset(size: QwenASREngine.Size, engine: ASREngine) -> ModelAsset {
+        let title = engine.displayName
+        return ModelAsset(
+            id: engine.activeAssetID,
+            family: .recognition,
+            title: title,
+            detail: engine.summary,
+            recommended: false,
+            licence: "Apache-2.0 · huggingface.co/aufklarer",
+            advertisedBytes: size.advertisedBytes,
+            storage: .directory(QwenASREngine.directory(for: size),
+                                markers: ["vocab.json", "saiity-complete"]),
+            removal: .remove(QwenASREngine.directory(for: size)),
+            use: .whenRecognitionEngine(engine),
+            install: { sink in
+                try await QwenASREngine.downloadWeights(size: size, progress: sink)
+            },
+            unload: { QwenASREngine.forgetLoadedModel(size) })
     }
 }
 

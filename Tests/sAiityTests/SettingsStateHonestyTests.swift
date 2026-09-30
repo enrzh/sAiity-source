@@ -74,6 +74,25 @@ import Testing
         #expect(SettingsStateHonesty.languageLabel(for: nil) == "Not set")
         #expect(SettingsStateHonesty.languageLabel(for: .nemotron) == "Auto")
         #expect(SettingsStateHonesty.languageLabel(for: .parakeetEou) == "Auto")
+        // Every selectable engine has to agree with its own coverage row. The
+        // two Qwen sizes were added to `userSelectableCases` without being added
+        // to `identifiesLanguageFromAudio`, so both read "English only" while
+        // declaring 52 languages — the row contradicting the summary under it.
+        #expect(SettingsStateHonesty.languageLabel(for: .qwen06) == "Auto")
+        #expect(SettingsStateHonesty.languageLabel(for: .qwen17) == "Auto")
+    }
+
+    /// The label and the coverage must never disagree for an engine the user
+    /// can actually pick: "English only" beside `manyDetectedFromAudio` is a
+    /// false statement about which languages the app can caption.
+    @Test("no selectable engine is labelled English only while covering every language")
+    func labelAgreesWithCoverage() {
+        for engine in ASREngine.userSelectableCases {
+            if case .manyDetectedFromAudio = engine.coverage {
+                #expect(SettingsStateHonesty.languageLabel(for: engine) == "Auto",
+                        "\(engine) covers many languages but is labelled \(SettingsStateHonesty.languageLabel(for: engine))")
+            }
+        }
     }
 }
 

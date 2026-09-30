@@ -162,7 +162,8 @@ struct LocalModelTests {
         #expect(ASREngine.effective == ASREngine.recommended)
         #expect(TranslationEngine.effective == TranslationEngine.recommended)
 
-        #expect(ASREngine.allCases == [.nemotron, .whisperTurbo])
+        #expect(ASREngine.allCases == [.nemotron, .qwen06, .qwen17, .whisperTurbo])
+        #expect(ASREngine.userSelectableCases == [.nemotron, .qwen06, .qwen17])
         // The Whisper turbo case survives so its 626 MB keeps a registry row and
         // a Delete button, but it is not offered, and a stored preference for it
         // must normalize away rather than silently select a model the user can
@@ -176,6 +177,9 @@ struct LocalModelTests {
         #expect(ASREngine.allCases.contains(.whisperTurbo),
                 "the case must stay in allCases or its 626 MB reads as stray bytes")
         #expect(ASREngine.primaryCases == [.nemotron])
+        #expect(QwenASREngine.extending("", with: "Hello.") == "Hello.")
+        #expect(QwenASREngine.extending("Hello.", with: " Again") == "Hello. Again")
+        #expect(QwenASREngine.extending("Hello.", with: "  ") == "Hello.")
         #expect(ASREngine.recommended == .nemotron)
         // The retired engine stays unselectable, and setting it must not fall
         // back to a model the user never chose.

@@ -20390,6 +20390,333 @@
           }
         }
       }
+    },
+    "Qwen3-ASR 0.6B": {
+      "extractionState": "manual",
+      "shouldTranslate": false
+    },
+    "Qwen3-ASR 1.7B": {
+      "extractionState": "manual",
+      "shouldTranslate": false
+    },
+    "700 MB. Word error was 0 on the three measured clips, against Nemotron's 0.05 to 0.07, and it still runs faster than realtime. A caption appears when the speaker pauses, or every 10 seconds if they do not. Live partials are not shown: the first partial of each clip ended in a period that was not the sentence, and committing it dropped the rest.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "700 MB. Der Wortfehler lag bei den drei gemessenen Clips bei 0, gegenüber 0,05 bis 0,07 bei Nemotron, und es läuft trotzdem schneller als Echtzeit. Eine Zeile erscheint, wenn der Sprecher Pause macht, oder alle 10 Sekunden, wenn nicht. Live-Zwischentexte werden nicht angezeigt: der erste Zwischentext jedes Clips endete mit einem Punkt, der nicht am Satzende stand, und wer ihn übernimmt, verliert den Rest."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "700 MB. El error de palabra fue 0 en las tres grabaciones medidas, frente al 0,05-0,07 de Nemotron, y aun así funciona más rápido que en tiempo real. Una línea aparece cuando el hablante hace una pausa, o cada 10 segundos si no la hace. No se muestran los parciales en vivo: el primer parcial de cada grabación terminaba con un punto que no era el final de la frase, y al confirmarlo se perdía el resto."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "700 Mo. Le taux d'erreur mot était de 0 sur les trois extraits mesurés, contre 0,05 à 0,07 pour Nemotron, et il tourne toujours plus vite que le temps réel. Une ligne s'affiche quand l'orateur fait une pause, ou toutes les 10 secondes sinon. Les fragments en direct ne sont pas affichés : le premier fragment de chaque extrait se terminait par un point qui n'était pas la fin de la phrase, et le valider faisait perdre la suite."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "700 MB。測定した3クリップでの単語誤り率は0で、Nemotronの0.05〜0.07に対して0でした。それでもリアルタイムより速く動作します。話者が区切ると1行表示され、区切らない場合は10秒ごとに表示されます。ライブの途中結果は表示しません。各クリップの最初の途中結果が文末ではない句点で終わり、確定すると残りが失われていました。"
+          }
+        }
+      }
+    },
+    "2.1 GB. The larger Qwen3-ASR, with the same pause-based captions as the 0.6B. It has not been measured on these clips. Heavier on memory, and slower to load than Nemotron.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "2,1 GB. Das größere Qwen3-ASR mit denselben pausenbasierten Zeilen wie das 0,6B. Es wurde auf diesen Clips nicht gemessen. Mehr Speicherbedarf und langsamerer Ladevorgang als Nemotron."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "2,1 GB. El Qwen3-ASR más grande, con las mismas líneas por pausa que el de 0,6B. No se ha medido en estas grabaciones. Usa más memoria y tarda más en cargarse que Nemotron."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "2,1 GB. Le Qwen3-ASR le plus grand, avec les mêmes lignes par pause que la version 0,6B. Il n'a pas été mesuré sur ces extraits. Plus gourmand en mémoire et plus lent à charger que Nemotron."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "2.1 GB。0.6Bと同じ区切りベースの字幕を持つ、より大きなQwen3-ASRです。これらのクリップでは測定していません。Nemotronよりメモリ使用量が多く、読み込みも遅くなります。"
+          }
+        }
+      }
+    },
+    "Multilingual · 700 MB · a line when the speaker pauses": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mehrsprachig · 700 MB · eine Zeile, wenn der Sprecher Pause macht"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Multilingüe · 700 MB · una línea cuando el hablante hace una pausa"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Multilingue · 700 MB · une ligne quand l'orateur fait une pause"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "多言語 · 700 MB · 話者が区切ると1行"
+          }
+        }
+      }
+    },
+    "Multilingual · 2.1 GB · same pause captions, heavier": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mehrsprachig · 2,1 GB · gleiche Pausenzeilen, schwerer"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Multilingüe · 2,1 GB · las mismas líneas por pausa, más pesado"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Multilingue · 2,1 GB · mêmes lignes par pause, plus lourd"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "多言語 · 2.1 GB · 同じ区切りベースの字幕、重い"
+          }
+        }
+      }
+    },
+    "Qwen3-ASR 0.6B (on-device)": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Qwen3-ASR 0.6B (auf dem Gerät)"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Qwen3-ASR 0.6B (en el dispositivo)"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Qwen3-ASR 0.6B (sur l'appareil)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Qwen3-ASR 0.6B（オンデバイス）"
+          }
+        }
+      }
+    },
+    "Qwen3-ASR 1.7B (on-device)": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Qwen3-ASR 1.7B (auf dem Gerät)"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Qwen3-ASR 1.7B (en el dispositivo)"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Qwen3-ASR 1.7B (sur l'appareil)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Qwen3-ASR 1.7B（オンデバイス）"
+          }
+        }
+      }
+    },
+    "Downloading Qwen3-ASR…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Qwen3-ASR wird geladen …"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Descargando Qwen3-ASR…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Téléchargement de Qwen3-ASR…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Qwen3-ASRをダウンロード中…"
+          }
+        }
+      }
+    },
+    "Downloading the voice detector…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sprachdetektor wird geladen …"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Descargando el detector de voz…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Téléchargement du détecteur de voix…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "音声検出器をダウンロード中…"
+          }
+        }
+      }
+    },
+    "Qwen3-ASR downloaded.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Qwen3-ASR heruntergeladen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Qwen3-ASR descargado."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Qwen3-ASR téléchargé."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Qwen3-ASRをダウンロードしました。"
+          }
+        }
+      }
+    },
+    "Loading Qwen3-ASR…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Qwen3-ASR wird vorbereitet …"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cargando Qwen3-ASR…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chargement de Qwen3-ASR…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Qwen3-ASRを読み込み中…"
+          }
+        }
+      }
+    },
+    "Qwen3-ASR ready.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Qwen3-ASR ist bereit."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Qwen3-ASR listo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Qwen3-ASR prêt."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Qwen3-ASRの準備ができました。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
