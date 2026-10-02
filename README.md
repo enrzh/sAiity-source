@@ -179,6 +179,19 @@ included in the application bundle.
 | Sources/sAiity/OverlayWindow.swift | Caption bubble geometry and presentation |
 | Resources/Localizable.xcstrings | User-facing localization catalog |
 
+## What's new in 2.6.2
+
+- Failed caption pumps become terminal instead of silent, so a stuck recognition
+  path surfaces instead of looking healthy with no new text.
+- Qwen3-ASR keeps a fixed PCM bound through silence, and local cleanup/translation
+  share one generation budget with a real deadline.
+- Speaker labels ride confirmed audio only, so provisional segments cannot invent
+  speakers.
+- Translation output is validated the same way on every engine, including
+  mixed-language preservation when translation is off.
+- The release script will not notarize until a clean-source quality matrix clears
+  its accuracy and latency budgets on the verified fixture corpus.
+
 ## What's new in 2.6.1
 
 - Qwen3-ASR is a selectable caption engine alongside Nemotron. The language row
@@ -275,14 +288,14 @@ included in the application bundle.
 
 ## Release
 
-The current signed and notarized release is [sAiity 2.6.1](https://github.com/enrzh/sAiity/releases/tag/v2.6.1).
+The current signed and notarized release is [sAiity 2.6.2](https://github.com/enrzh/sAiity/releases/tag/v2.6.2).
 
-- [Download the DMG](https://github.com/enrzh/sAiity/releases/download/v2.6.1/sAiity-2.6.1.dmg)
-- [Download the ZIP](https://github.com/enrzh/sAiity/releases/download/v2.6.1/sAiity-2.6.1.zip)
+- [Download the DMG](https://github.com/enrzh/sAiity/releases/download/v2.6.2/sAiity-2.6.2.dmg)
+- [Download the ZIP](https://github.com/enrzh/sAiity/releases/download/v2.6.2/sAiity-2.6.2.zip)
 - [Sparkle update feed](https://enrzh.github.io/sAiity/appcast.xml)
 
-This release adds Qwen3-ASR captions, realtime dictation text, clearer Quick
-controls, the Dictus app icon, and a DMG that keeps its volume icon — still
-fully local recognition and translation on the Mac.
+This release tightens recognition and generation bounds, validates translation
+output across engines, and gates notarization on a clean-source quality matrix —
+still fully local recognition and translation on the Mac.
 
 sAiity is part of the [aiity](https://aiity.de) family.
