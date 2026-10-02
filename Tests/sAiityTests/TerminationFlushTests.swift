@@ -66,16 +66,9 @@ import Testing
     @Test("the quit drain lets a queued transcript write reach the store",
           .timeLimit(.minutes(1)))
     func drainLetsAQueuedWriteLand() async throws {
-        let root = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("saiity-terminate-drain-\(UUID().uuidString)")
-        TranscriptStore.sessionsDirOverride = root
-        defer {
-            TranscriptStore.sessionsDirOverride = nil
-            try? FileManager.default.removeItem(at: root)
-        }
-        try await TranscriptStore.shared.begin(locale: "en-US", translateTo: nil)
-
+        try await TranscriptTestLibrary.withTemporaryDirectory { _ in
         let app = AppDelegate()
+        await app.beginRecordingForTests()
         app.openSentenceForTests(["written before quit"])
         app.closeSentenceForTests()
         #expect(app.pendingTranscriptWritesForTests == 1,
@@ -97,6 +90,7 @@ import Testing
                                encoding: .utf8)
         #expect(lines.contains("written before quit"),
                 "the line closed at quit is not in the transcript: \(lines)")
+        }
     }
 
     @Test("the quit drain is bounded and does not wait when nothing is owed",

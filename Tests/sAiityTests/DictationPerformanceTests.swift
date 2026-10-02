@@ -19,11 +19,15 @@ import Testing
         ]
         for model in LocalModel.builtIn {
             if !model.isDownloaded {
+                guard ProcessInfo.processInfo.environment["SAIITY_CLEANUP_BENCHMARK_DOWNLOAD"] == "1" else {
+                    Issue.record("Missing installed cleanup model \(model.file); downloads require explicit opt-in")
+                    continue
+                }
                 try await LocalLLMTranslator.download(model) { _ in }
             }
             let session = DictationCleanupSession(gate: TranslationInferenceGate())
             for mode in ["before", "after"] {
-                for round in 0..<3 {
+                for round in 0..<5 {
                     for (index, fixture) in fixtures.enumerated() {
                         let start = ContinuousClock.now
                         let result: DictationTranscriptionResult?
@@ -47,9 +51,22 @@ import Testing
                                 }, stop: { await translator.stop() })
                             }
                         }
-                        print("CLEANUP_BENCH model=\(model.file) mode=\(mode) round=\(round) fixture=\(index) seconds=\(seconds(start)) outputChars=\(result?.text.count ?? 0) memory=\(MemoryPolicy.describeFootprint())")
+                        print("CLEANUP_BENCH model=\(model.file) mode=\(mode) round=\(round) fixture=\(index) seconds=\(seconds(start)) outputChars=\(result?.text.count ?? 0) memoryBytes=\(MemoryPolicy.physicalFootprint())")
                         #expect(result != nil)
                         #expect(result?.languageMetadata.regionLanguages == fixture.languageMetadata.regionLanguages)
+                        if let result {
+                            #expect(DictationCleanupValidator.validate(result.text, preserving: fixture.text,
+                                languageMetadata: fixture.languageMetadata) != nil)
+                            if index == 0 {
+                                #expect(!result.text.lowercased().contains("um,"))
+                                #expect(!result.text.lowercased().contains("please please"))
+                                #expect(result.text.lowercased().contains("report"))
+                            }
+                            if index == 3 {
+                                #expect(result.text.lowercased().contains("freitag"))
+                                #expect(!result.text.lowercased().contains("morgen"))
+                            }
+                        }
                     }
                 }
             }

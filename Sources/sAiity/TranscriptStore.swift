@@ -64,36 +64,38 @@ private final class TranscriptListCache: @unchecked Sendable {
         defer { lock.unlock() }
 
         var result: [SessionRef] = []
+        var currentKeys = Set<String>()
         result.reserveCapacity(names.count)
         for name in names {
             let url = TranscriptStore.sessionsDir.appendingPathComponent(name, isDirectory: true)
                 .appendingPathComponent("meta.json")
+            let key = url.deletingLastPathComponent().path
+            currentKeys.insert(key)
             let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
             guard let attributes,
                   let modified = attributes[.modificationDate] as? Date else {
-                entries.removeValue(forKey: name)
+                entries.removeValue(forKey: key)
                 continue
             }
             let size = (attributes[.size] as? NSNumber)?.intValue ?? 0
             let stamp = TranscriptFileStamp(modified: modified, size: size)
-            if let cached = entries[name], cached.stamp == stamp {
+            if let cached = entries[key], cached.stamp == stamp {
                 result.append(cached.session)
             } else if let session = load(name) {
-                entries[name] = Entry(stamp: stamp, session: session)
+                entries[key] = Entry(stamp: stamp, session: session)
                 result.append(session)
             } else {
-                entries.removeValue(forKey: name)
+                entries.removeValue(forKey: key)
             }
         }
 
-        let current = Set(names)
-        entries = entries.filter { current.contains($0.key) }
+        entries = entries.filter { currentKeys.contains($0.key) }
         return result
     }
 
     func remove(_ name: String) {
         lock.lock()
-        entries.removeValue(forKey: name)
+        entries.removeValue(forKey: TranscriptStore.sessionsDir.appendingPathComponent(name).path)
         lock.unlock()
     }
 
@@ -117,10 +119,14 @@ struct Segment: Codable, Sendable {
     /// A turn break in the audio clock. Optional so sessions written before
     /// the field decode unchanged.
     var turn: Bool? = nil
-    /// Legacy diarization metadata. It is retained only so an old transcript
-    /// survives a decode/re-encode cycle; the app never creates, displays, or
-    /// exports new speaker labels.
+    /// Anonymous session-local voice id. Old speaker-* metadata still round-
+    /// trips, but only new voice-* evidence is displayed as speaker labels.
     var speaker: String? = nil
+    var overlappingSpeech: Bool? = nil
+
+    var speakerLabel: String? {
+        CaptionSpeakerAnnotation.label(speaker: speaker, overlapping: overlappingSpeech == true)
+    }
 }
 
 struct SessionMeta: Codable, Sendable {
@@ -154,6 +160,21 @@ struct SessionRef: Sendable, Identifiable {
 /// Recording is opt-in and off by default: live captions are ephemeral, a
 /// transcript is a durable record of a conversation other people were part of.
 actor TranscriptStore {
+    struct RecordedSegment: Sendable {
+        let session: URL
+        let index: Int
+    }
+
+    private struct TranslationUpdate: Codable {
+        let translationFor: Int
+        let tr: String
+        let trLoc: String
+    }
+    private struct SpeakerUpdate: Codable {
+        let speakerFor: Int
+        let speaker: String?
+        let overlappingSpeech: Bool
+    }
     static let shared = TranscriptStore()
     private static let listCache = TranscriptListCache()
 
@@ -236,10 +257,12 @@ actor TranscriptStore {
 
     /// Appends one committed line. O(1) — a single write to a long-lived handle,
     /// so a two-hour meeting costs nothing per line.
+    @discardableResult
     func append(_ chunk: TranscriptChunk, locale: String,
                 translation: String?, translateTo: String?,
-                turn: Bool = false) throws {
-        guard let handle else { return }
+                turn: Bool = false) throws -> RecordedSegment? {
+        guard let handle, let directory = dir else { return nil }
+        let recorded = RecordedSegment(session: directory, index: index)
         let seg = Segment(i: index, t0: chunk.start, t1: chunk.end,
                           text: chunk.text, loc: locale,
                           tr: translation, trLoc: translateTo,
@@ -265,6 +288,35 @@ actor TranscriptStore {
                 throw error
             }
         }
+        return recorded
+    }
+
+    /// Source rows are already durable. A late translation only appends a patch
+    /// for that exact session and row, including after recording has closed.
+    func appendTranslation(_ text: String, to recorded: RecordedSegment, target: String) throws {
+        try appendUpdate(TranslationUpdate(translationFor: recorded.index, tr: text, trLoc: target), to: recorded)
+    }
+
+    func appendSpeaker(_ annotation: CaptionSpeakerAnnotation, to recorded: RecordedSegment) throws {
+        try appendUpdate(SpeakerUpdate(speakerFor: recorded.index, speaker: annotation.speaker,
+                                      overlappingSpeech: annotation.overlapping), to: recorded)
+    }
+
+    private func appendUpdate<T: Encodable>(_ update: T, to recorded: RecordedSegment) throws {
+        let file = recorded.session.appendingPathComponent("segments.jsonl")
+        guard recorded.session.deletingLastPathComponent().standardizedFileURL == Self.sessionsDir.standardizedFileURL,
+              FileManager.default.fileExists(atPath: file.path) else { return }
+        var data = try encoder.encode(update)
+        data.append(0x0A)
+        if dir == recorded.session, let handle {
+            try handle.write(contentsOf: data)
+        } else {
+            let patch = try FileHandle(forWritingTo: file)
+            defer { try? patch.close() }
+            try patch.seekToEnd()
+            try patch.write(contentsOf: data)
+        }
+        NotificationCenter.default.post(name: .saiityTranscriptLibraryChanged, object: nil)
     }
 
     func end() throws {
@@ -385,9 +437,22 @@ actor TranscriptStore {
 
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
         let dec = JSONDecoder()
-        let segs: [Segment] = text.split(separator: "\n").compactMap {
-            guard let d = $0.data(using: .utf8) else { return nil }
-            return try? dec.decode(Segment.self, from: d)
+        var segs: [Segment] = []
+        var positions: [Int: Int] = [:]
+        for line in text.split(separator: "\n") {
+            guard let data = line.data(using: .utf8) else { continue }
+            if let segment = try? dec.decode(Segment.self, from: data) {
+                positions[segment.i] = segs.count
+                segs.append(segment)
+            } else if let update = try? dec.decode(TranslationUpdate.self, from: data),
+                      let position = positions[update.translationFor] {
+                segs[position].tr = update.tr
+                segs[position].trLoc = update.trLoc
+            } else if let update = try? dec.decode(SpeakerUpdate.self, from: data),
+                      let position = positions[update.speakerFor] {
+                segs[position].speaker = update.speaker
+                segs[position].overlappingSpeech = update.overlappingSpeech ? true : nil
+            }
         }
         SegmentCache.shared.store(segs, for: url.path, stamp: stamp)
         return segs

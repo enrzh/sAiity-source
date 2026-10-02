@@ -237,10 +237,16 @@ import Testing
         #expect(FrameStore.loadDictation() == nil); window.dismiss()
     }
 
-    @Test func phaseChangesPreserveExactCallerFrame() {
+    @Test func phaseChangesPreserveCallerPositionAndConfiguredSize() {
         let window = makeWindow(); let frame = NSRect(x: 31, y: 42, width: 320, height: 80)
-        window.setFrame(frame, display: false); window.show(phase: .preparing); #expect(window.frame == frame)
-        window.show(phase: .transcribing); #expect(window.frame == frame); window.dismiss()
+        window.setFrame(frame, display: false)
+        for phase in [DictationPhase.preparing, .transcribing] {
+            window.show(phase: phase)
+            #expect(window.frame.origin == frame.origin)
+            #expect(window.frame.height == 54)
+            #expect(window.frame.width == min(560, max(180, CGFloat(CaptionStyle.currentDictation.dictationWidth))))
+        }
+        window.dismiss()
     }
 
     @Test func dragSavesClampedFrameExactlyOnce() {
@@ -433,6 +439,27 @@ import Testing
         #expect(window.frame.height == 54)
         #expect(window.labelVisibleForTests)
         #expect(!window.resultVisibleForTests)
+        window.dismiss()
+    }
+
+    @Test("a saved frame cannot override the current recording preset's size")
+    func savedFramePreservesPositionOnly() {
+        let original = CaptionStyle.currentDictation
+        defer { CaptionStyle.currentDictation = original }
+        let style = BubbleStylePreset.minimal.applying(to: original, context: .dictation)
+        CaptionStyle.currentDictation = style
+        let window = makeWindow()
+        let saved = NSRect(x: 200, y: 200, width: 600, height: 220)
+        window.setFrame(saved, display: false)
+        window.show(phase: .dictating)
+        let compact = window.frame.size
+        #expect(compact.height == 54)
+        #expect(compact.width < saved.width)
+        #expect(window.frame.origin == saved.origin)
+        window.show(resultText: String(repeating: "Long result. ", count: 40), autoDismissAfter: nil)
+        window.show(phase: .dictating)
+        #expect(window.frame.size == compact)
+        #expect(window.waveformVisibleForTests)
         window.dismiss()
     }
 

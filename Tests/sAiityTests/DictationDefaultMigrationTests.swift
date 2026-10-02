@@ -10,7 +10,8 @@ import Testing
 /// a preference. The key is simply absent for them. Reading "absent" as "off"
 /// therefore switched off the hotkey of exactly the users least likely to
 /// notice why, with nothing on screen to say so.
-@Suite("Dictation default migration")
+// Each case snapshots the same process-wide preference keys.
+@Suite("Dictation default migration", .serialized)
 struct DictationDefaultMigrationTests {
     private static let keys = ["dictationEnabled",
                                "onboardingCompletedVersion", "onboardingDismissedVersion"]

@@ -16,6 +16,24 @@ import Testing
         }
     }
 
+    @Test("changing apps during processing copies the result without sending a paste")
+    func focusChangePreventsPaste() {
+        let board = FakePasteboard()
+        var focus = DictationFocusToken(processIdentifier: 1, bundleIdentifier: "test.original")
+        var pastes = 0
+        let inserter = TextInserter(pasteboard: board, accessibilityTrusted: { true },
+            focusedElement: { .init(role: "AXTextArea", value: "", isEditable: true) },
+            sendPaste: { pastes += 1; return true }, currentFocus: { focus })
+        let captured = inserter.captureFocus()
+        #expect(inserter.insert("first", expecting: captured).outcome == .insertedAndCopied)
+        focus = .init(processIdentifier: 2, bundleIdentifier: "test.other")
+        #expect(inserter.insert("keep this", expecting: captured).outcome == .copied)
+        #expect(board.value == "keep this")
+        #expect(pastes == 1)
+        #expect(inserter.insert("unknown focus", expecting: nil).outcome == .copied)
+        #expect(pastes == 1)
+    }
+
     @Test("a focused editable field receives dictation and the clipboard keeps a copy")
     func insertsIntoFocusedEditableFieldAndKeepsCopy() {
         let board = FakePasteboard(value: "previous clipboard")

@@ -5,6 +5,37 @@ import WhisperKit
 @testable import sAiity
 
 @Suite struct DictationTranscriptionTests {
+    @Test("an empty overlapped decode cannot deduplicate a disjoint repetition")
+    func emptyRegionDoesNotInventOverlap() async throws {
+        actor Counter {
+            var count = 0
+            func next() -> Int { defer { count += 1 }; return count }
+        }
+        let counter = Counter()
+        let backend = WhisperDictationBackend(segmentTranscribe: { _, _, _, _ in
+            let index = await counter.next()
+            return .init(text: index == 1 ? "" : "Hello world.", language: "en")
+        })
+        let regions = [
+            DictationSpeechRegion(audioRange: 0..<3, coveredRange: 0..<2),
+            DictationSpeechRegion(audioRange: 2..<5, coveredRange: 2..<4),
+            DictationSpeechRegion(audioRange: 4..<8, coveredRange: 4..<8)
+        ]
+        let result = try await backend.transcribeDictation(samples: Array(repeating: 0.5, count: 8),
+            regions: regions, locale: Locale(identifier: "auto"))
+        #expect(result.text == "Hello world. Hello world.")
+    }
+    @Test("short Latin fillers retain audio tags and Japanese Han-kana is one language")
+    func conservativeLanguageEvidence() {
+        let english = DictationTranscriptionResult(text: "Um, send the report, I mean the revised report.", language: "en")
+        #expect(english.regions.map(\.language) == ["en"])
+        let japanese = DictationTranscriptionResult(text: "日本語の字幕を確認してください。", language: "ja")
+        #expect(japanese.text == "日本語の字幕を確認してください。")
+        #expect(japanese.regions.map(\.language) == ["ja"])
+        #expect(!japanese.languageMetadata.containsMultipleLanguages)
+        let incompatible = DictationTranscriptionResult(text: "これは日本語の文章です。", language: "en")
+        #expect(!incompatible.regions.map(\.language).contains("en"))
+    }
     @Test("silence-only capture does not create an ASR region")
     func silenceOnlyCaptureSkipsDecode() {
         let samples = Array(repeating: Float.zero, count: 16_000 * 3)
@@ -73,9 +104,10 @@ import WhisperKit
         #expect(DictationTranscriptMerger.merge(["I don't know.[BLANK_AUDIO]Do you know me?"]) == "I don't know. Do you know me?")
         #expect(DictationTranscriptMerger.merge(["hello [BLANK_AUDIO], world"]) == "hello, world")
         #expect(DictationTranscriptMerger.merge(["[BLANK_AUDIO]"]) == "")
-        #expect(DictationTranscriptMerger.merge(["hello world", "world again"]) == "hello world again")
+        #expect(DictationTranscriptMerger.merge(["hello world", "world again"], removingAudioOverlap: true) == "hello world again")
         #expect(DictationTranscriptMerger.merge(["你好", "世界"]) == "你好世界")
-        #expect(DictationTranscriptMerger.merge(["你好世界", "世界很好"]) == "你好世界很好")
+        #expect(DictationTranscriptMerger.merge(["你好世界", "世界很好"], removingAudioOverlap: true) == "你好世界很好")
+        #expect(DictationTranscriptMerger.merge(["Very good.", "Very good."]) == "Very good. Very good.")
         #expect(DictationTranscriptMerger.merge(["Hallo", "world"]) == "Hallo world")
         #expect(DictationTranscriptMerger.merge(["你好", "can you check"]) == "你好 can you check")
         #expect(DictationTranscriptMerger.merge(["Ich denke", "we should ship"]) == "Ich denke we should ship")
@@ -103,9 +135,26 @@ import WhisperKit
             .init(text: "你好, can you check das nochmal", language: "zh")
         ])
 
-        #expect(transcription.regions.map(\.language) == ["zh", "en"])
+        #expect(transcription.regions.first?.language == "zh")
+        #expect(transcription.regions.dropFirst().allSatisfy { $0.language != "zh" })
         #expect(transcription.text == "你好, can you check das nochmal")
         #expect(transcription.languageMetadata.containsMultipleLanguages)
+    }
+
+    @Test("overlap metadata preserves disjoint repetition and unknown languages")
+    func overlapMetadataAndUnknownLanguages() {
+        let disjoint = DictationTranscriptionResult(regions: [
+            .init(text: "Very good.", language: "en"), .init(text: "Very good.", language: "en")])
+        #expect(disjoint.text == "Very good. Very good.")
+        let overlap = DictationTranscriptionResult(regions: [
+            .init(text: "hello world", language: "en"),
+            .init(text: "world again", language: "en", overlapsPreviousAudio: true)])
+        #expect(overlap.text == "hello world again")
+        let tied = DictationLanguageMetadata(regions: [
+            .init(text: "Hallo", language: "de"), .init(text: "world", language: "en")])
+        #expect(tied.dominantLanguage == nil)
+        let scripts = DictationTranscriptionResult(text: "Hallo Привет как ваши дела сегодня", language: "de")
+        #expect(scripts.regions.last?.language != "de")
     }
 
     @Test("translation runs batch only adjacent regions with the same language")

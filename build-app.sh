@@ -333,7 +333,14 @@ PLIST_EXEC=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP/Conten
     exit 1
 }
 echo "launch smoke: --version passed"
-./scripts/verify-release.sh "$APP"
+if [ "$CLEAN_BUILD" = 1 ]; then
+    ./scripts/verify-release.sh "$APP"
+else
+    # Local QA intentionally includes hooks; release verification must still
+    # reject them when invoked for an archive or a hook-free build.
+    codesign --verify --deep --strict --verbose=2 "$APP" >/dev/null
+    echo "local build verification passed (test hooks enabled)"
+fi
 echo "built: $APP"
 
 # Notarisation. Requires a Developer ID Application certificate and a stored

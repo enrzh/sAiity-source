@@ -14,6 +14,9 @@ Usage:
 The fixture directory must contain 1...12 mono Float32 16 kHz WAV files and
 manifest.json. Set SAIITY_CAPTION_MATRIX_REQUIRE_MACOS27=1 to require macOS 27
 and Apple Silicon for a release-device run.
+SAIITY_CAPTION_BENCHMARK_MODELS accepts a comma-separated list of nemotron,
+qwen-small, qwen-large, whisper (default: nemotron). Missing weights fail.
+SAIITY_BENCHMARK_INCLUDE_TEXT=1 explicitly enables transcript logging.
 USAGE
 }
 
@@ -79,6 +82,29 @@ case "$wav_count" in
 esac
 
 REPORT_DIR="${SAIITY_CAPTION_MATRIX_OUT:-build/caption-matrix}"
+models="${SAIITY_CAPTION_BENCHMARK_MODELS:-nemotron}"
+case ",$models," in
+    *,,*) echo "FATAL: empty model selection." >&2; exit 1 ;;
+esac
+IFS=',' read -r -a selected_models <<< "$models"
+for model in "${selected_models[@]}"; do
+    case "$model" in
+        nemotron|qwen-small|qwen-large|whisper) ;;
+        *) echo "FATAL: unknown caption benchmark model: $model" >&2; exit 1 ;;
+    esac
+done
+
+# MLX resolves shaders beside the image containing its native code, which in
+# Swift Testing is the xctest image. A preflight override alone cannot fix that.
+skip_build=0
+if [[ ",$models," == *",qwen-"* ]] || [ "${SAIITY_CAPTION_BENCHMARK_TRANSLATION:-off}" = "madlad" ]; then
+    # Use the test build mode once, then preserve the staged resources. Switching
+    # from swift build --build-tests to swift test rebuilds dependencies on Xcode 27.
+    xcrun swift test -c release -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS --list-tests >/dev/null
+    scripts/stage-mlx-metallib.sh
+    export SAIITY_BENCHMARK_RESOURCE_ROOT="$PWD/.build/release/sAiityTests.xctest/Contents/MacOS"
+    skip_build=1
+fi
 mkdir -p "$REPORT_DIR"
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 log="$REPORT_DIR/caption-matrix-$stamp.log"
@@ -94,12 +120,24 @@ meta="$REPORT_DIR/caption-matrix-$stamp.meta"
     echo "chunkMs=${SAIITY_CAPTION_BENCHMARK_CHUNK_MS:-2240}"
     echo "runs=${SAIITY_CAPTION_BENCHMARK_RUNS:-3}"
     echo "realtime=${SAIITY_CAPTION_BENCHMARK_REALTIME:-1}"
+    echo "models=$models"
+    echo "translation=${SAIITY_CAPTION_BENCHMARK_TRANSLATION:-off}"
 } > "$meta"
 
+run_caption_tests() {
+    if [ "$skip_build" = 1 ]; then
+        xcrun swift test -c release -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS \
+            --skip-build --filter CaptionASRPerformanceTests
+    else
+        xcrun swift test -c release -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS \
+            --filter CaptionASRPerformanceTests
+    fi
+}
+
+export SAIITY_CAPTION_BENCHMARK_DIR="$FIXTURES"
+export SAIITY_CAPTION_BENCHMARK_MODELS="$models"
 set +e
-SAIITY_CAPTION_BENCHMARK_DIR="$FIXTURES" \
-    xcrun swift test -c release -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS \
-    --filter CaptionASRPerformanceTests 2>&1 | tee "$log"
+run_caption_tests 2>&1 | tee "$log"
 status=${PIPESTATUS[0]}
 set -e
 [ "$status" -eq 0 ] || {
@@ -112,10 +150,17 @@ result_count=$(grep -c '^SAIITY_CAPTION_BENCHMARK ' "$log" || true)
     echo "FATAL: caption matrix produced no benchmark records; the test was skipped." >&2
     exit 1
 }
-grep -q '"model":"nemotron-' "$log" || {
-    echo "FATAL: Nemotron caption benchmark record is missing." >&2
-    exit 1
-}
+for model in "${selected_models[@]}"; do
+    case "$model" in
+        nemotron) model_prefix="nemotron-" ;;
+        whisper) model_prefix="whisper-" ;;
+        *) model_prefix="$model" ;;
+    esac
+    grep -q "\"model\":\"$model_prefix" "$log" || {
+        echo "FATAL: $model caption benchmark record is missing." >&2
+        exit 1
+    }
+done
 grep -q '"phase":"cold_prepare"' "$log" || {
     echo "FATAL: cold preparation record is missing." >&2
     exit 1

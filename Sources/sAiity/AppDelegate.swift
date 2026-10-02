@@ -6,7 +6,7 @@ import Foundation
 import NaturalLanguage
 import UniformTypeIdentifiers
 
-/// Menu-bar app. No dock icon, no main window — just the caption bar.
+/// Menu-bar app with native setup/settings windows and floating speech bubbles.
 ///
 /// Isolated to the main actor as a whole. Everything here is AppKit or drives
 /// AppKit, and the alternative — a nonisolated class with `assumeIsolated` at
@@ -40,9 +40,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         self?.dictationToast.updateWaveform(levels)
     }
     private var dictationHotkeyRetryTask: Task<Void, Never>?
-    /// Captions and push-to-talk share this one prepared backend. The pool owns
-    /// the warm model; callers hold only a temporary lease while feeding audio.
-    private lazy var asrBackendPool = ASRBackendPool(makeBackend: AppDelegate.makeActiveBackend)
+    /// Each recognition path owns a warm model and leases it while feeding audio.
+    private lazy var captionResources = CaptionSessionResources(makeBackend: AppDelegate.makeActiveBackend)
     private lazy var dictationBackendPool = ASRBackendPool(makeBackend: AppDelegate.makeDictationStreamingBackend)
     private lazy var dictationController: DictationController = {
         let waveformDelivery = self.waveformDelivery
@@ -76,6 +75,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         },
         onResult: { [weak self] result in
             self?.lastDictationResult = result
+            if self?.onboardingTrialModel?.trial == .dictation {
+                self?.onboardingTrialModel?.trialText = result.outputText
+            }
         },
         onDraft: { [weak self] text in
             self?.showDictationDraft(text)
@@ -121,8 +123,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let dictationHotkeyMonitor = DictationHotkeyMonitor()
     private var dictationPrewarmTask: Task<Void, Never>?
     private var lastDictationResult: DictationResultSnapshot?
+    private weak var onboardingTrialModel: OnboardingModel?
+    private var onboardingTrialPreparation: Task<Void, Never>?
     private var dictationFeedbackTask: Task<Void, Never>?
-    private let capture = SystemAudioCapture()
     private var engine = ASREngine.effective
 
     override init() {
@@ -136,6 +139,100 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    func tryOnboarding(_ kind: OnboardingModel.UseCase, model: OnboardingModel) async {
+        if onboardingTrialModel === model, model.trial == kind, model.trialBusy {
+            if kind == .dictation {
+                guard model.trialRecording else { return }
+                model.trialRecording = false
+                dictationController.release()
+            } else {
+                await stopAsync()
+                model.trialBusy = false
+                onboardingTrialModel = nil
+            }
+            return
+        }
+        guard !model.trialBusy else { return }
+        guard state == .idle, !dictationController.isBusy, !CaptionSession.shared.isRetranslating else {
+            model.trialStatus = String(localized: "Stop the current session before trying setup.")
+            return
+        }
+        model.trialText = ""
+        model.trialPermissionPane = nil
+        guard kind == .dictation ? Self.dictationModelIsInstalled() : !(ASREngine.selected?.needsDownload ?? true) else {
+            model.trialStatus = String(localized: "Download the selected recognition model under Setup or Models, then try again.")
+            return
+        }
+        model.trial = kind
+        model.trialBusy = true
+        onboardingTrialModel = model
+        if kind == .captions {
+            guard await ScreenRecordingPermission.probe(), onboardingTrialModel === model else {
+                model.trialBusy = false
+                model.trialStatus = String(localized: "Allow Screen Recording in the Permission step, then try captions again.")
+                model.trialPermissionPane = "Privacy_ScreenCapture"
+                if onboardingTrialModel === model { onboardingTrialModel = nil }
+                return
+            }
+            guard state == .idle, !dictationController.isBusy,
+                  !CaptionSession.shared.isRetranslating else {
+                model.trialBusy = false
+                model.trialStatus = String(localized: "Stop the current session before trying setup.")
+                onboardingTrialModel = nil
+                return
+            }
+            guard !(ASREngine.selected?.needsDownload ?? true) else {
+                model.trialBusy = false
+                model.trialStatus = String(localized: "Download the selected recognition model under Setup or Models, then try again.")
+                onboardingTrialModel = nil
+                return
+            }
+            model.trialStatus = String(localized: "Starting captions — play speech on your Mac.")
+            start()
+        } else {
+            // Permission belongs to the explicit Record action, and cancellation
+            // while the system prompt is open must not start a microphone later.
+            onboardingTrialPreparation = Task { @MainActor [weak self, weak model] in
+                let allowed = await AVCaptureDevice.requestAccess(for: .audio)
+                guard let self, let model, !Task.isCancelled,
+                      self.onboardingTrialModel === model else { return }
+                self.onboardingTrialPreparation = nil
+                guard allowed else {
+                    model.trialBusy = false
+                    model.trialStatus = String(localized: "Allow Microphone access in System Settings → Privacy & Security → Microphone, then try again.")
+                    model.trialPermissionPane = "Privacy_Microphone"
+                    self.onboardingTrialModel = nil
+                    return
+                }
+                guard self.state == .idle, !self.dictationController.isBusy,
+                      !CaptionSession.shared.isRetranslating else {
+                    model.trialBusy = false
+                    model.trialStatus = String(localized: "Stop the current session before trying setup.")
+                    self.onboardingTrialModel = nil
+                    return
+                }
+                guard Self.dictationModelIsInstalled() else {
+                    model.trialBusy = false
+                    model.trialStatus = String(localized: "Download the selected recognition model under Setup or Models, then try again.")
+                    self.onboardingTrialModel = nil
+                    return
+                }
+                self.dictationController.press(previewOnly: true)
+            }
+        }
+    }
+
+    func cancelOnboardingTrial() {
+        onboardingTrialPreparation?.cancel()
+        onboardingTrialPreparation = nil
+        guard let model = onboardingTrialModel else { return }
+        onboardingTrialModel = nil
+        if model.trial == .dictation, model.trialBusy { dictationController.cancel() }
+        if model.trial == .captions, model.trialBusy { stop() }
+        model.trialBusy = false
+        model.trialRecording = false
+    }
+
 #if SAIITY_TEST_HOOKS
     var dictationToastForTests: DictationToastWindow { dictationToast }
     func updateDictationToastForTests(_ phase: DictationPhase) {
@@ -147,24 +244,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         await cleanupDictatedText(DictationTranscriptionResult(text: text, language: sourceLanguage))?.text
     }
 
-    private lazy var dictationCleanupSession = DictationCleanupSession(gate: translatorInferenceGate)
+    private lazy var dictationCleanupSession = DictationCleanupSession(gate: translationRuntime.gate)
 
     private func cleanupDictatedText(_ transcription: DictationTranscriptionResult) async -> DictationTranscriptionResult? {
-        await translatorSwap?.value
-        await waitForTranslatorUsersToFinish()
-        beginTranslatorUse()
-        defer { endTranslatorUse() }
+        await translationRuntime.swap?.value
+        await translationRuntime.waitUntilIdle()
+        translationRuntime.beginUse()
+        defer { translationRuntime.endUse() }
         let selected = LocalModel.cleanupSelected
         let model = LocalModel.isCleanupCompatible(selected) ? selected : nil
         return await dictationCleanupSession.cleanup(transcription, modelKey: model?.file) { [self] in
             // The session owns the native gate here. Waiters/teardown must not
             // recursively enter that gate. Dictation already excludes captions;
             // a warm translator is released before loading the cleanup weights.
-            let outgoing = activeTranslator
-            activeTranslator = nil
-            activeTranslatorEngine = nil
-            translatorPreparedTarget = nil
-            translatorReady = false
+            let outgoing = translationRuntime.take()
             await outgoing?.stop()
             let translator = LocalLLMTranslator()
             do {
@@ -183,14 +276,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     await translator.cleanupRegions(regions)
                 },
                 stop: { await translator.stop() })
-        }
-    }
-
-    /// Model destruction is serialized with native inference.
-    private func stopTranslator(_ translator: Translating?) async {
-        guard let translator else { return }
-        _ = try? await translatorInferenceGate.run {
-            await translator.stop()
         }
     }
 
@@ -240,8 +325,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     #if SAIITY_TEST_HOOKS
     var captionEngineForTests: ASREngine { engine }
-    var captionPoolPreparedForTests: Bool { asrBackendPool.preparedForTests }
-    var captionPoolLeaseForTests: Bool { asrBackendPool.hasActiveLeaseForTests }
+    var captionPoolPreparedForTests: Bool { captionResources.pool.preparedForTests }
+    var captionPoolLeaseForTests: Bool { captionResources.pool.hasActiveLeaseForTests }
     /// The sentence still being assembled, as the recogniser sees it. Empty once
     /// it has closed.
     var pendingSentenceForTests: [String] { sentenceParts }
@@ -253,14 +338,79 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     /// Close it, exactly as punctuation or teardown would.
     func closeSentenceForTests() { closeSentence() }
+    func beginRecordingForTests() async { await beginRecording() }
     /// The lines this session has recorded, whether or not saving is on.
     var sessionLinesForTests: [Segment] { sessionLines }
     var pendingTranscriptWritesForTests: Int { pendingTranscriptWrites }
     #endif
     /// The current caption lease. The pool remains the owner of the cached
     /// backend; this is held only between caption start and teardown.
-    private var captionBackend: TranscriptionBackend?
-    private let captureSink = BackendSink()
+    private var captionSpeakerTimeline = CaptionSpeakerTimeline()
+    private var captionSentenceIDs: [Int: Int] = [:]
+    private var captionRecordedSegments: [Int: TranscriptStore.RecordedSegment] = [:]
+
+    @MainActor private func prepareCaptionSpeakers() {
+        guard CaptionSpeakerTracker.enabled else { return }
+        let generation = sessionGeneration
+        captionResources.speakerPreparation = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let engine = try await Task.detached(priority: .userInitiated) {
+                    try CaptionSpeakerTracker.installedEngine()
+                }.value
+                guard !Task.isCancelled, self.sessionGeneration == generation, self.state.isActive else {
+                    engine.stop()
+                    return
+                }
+                // Load before audio capture starts so the speaker and ASR clocks
+                // both begin at sample zero. A missing model never stops captions.
+                let tracker = CaptionSpeakerTracker(engine: engine, onUpdate: { [weak self] timeline in
+                    Task { @MainActor in
+                        guard let self, self.sessionGeneration == generation,
+                              timeline.confirmedThrough >= self.captionSpeakerTimeline.confirmedThrough else { return }
+                        self.captionSpeakerTimeline = timeline
+                        self.refreshCaptionSpeakers()
+                    }
+                }, onFailure: { [weak self] reason in
+                    Task { @MainActor in
+                        guard let self, self.sessionGeneration == generation else { return }
+                        Diagnostics.recordFailure(operation: "captions.speakers", reason: reason)
+                        self.setStatus("Speaker labels unavailable — captions continue")
+                    }
+                })
+                self.captionResources.speakerTracker = tracker
+                self.captionResources.speakerSink.point(at: tracker)
+            } catch {
+                Diagnostics.recordFailure(operation: "captions.speakers", reason: DiagnosticsRedactor.redact(error.localizedDescription))
+                self.setStatus("Speaker labels unavailable — captions continue")
+            }
+        }
+    }
+
+    @MainActor private func refreshCaptionSpeakers() {
+        for index in sessionLines.indices.reversed() {
+            let line = sessionLines[index]
+            if line.t1 < captionSpeakerTimeline.confirmedThrough - CaptionSpeakerTimeline.retainedSeconds { break }
+            guard let annotation = captionSpeakerTimeline.annotation(start: line.t0, end: line.t1),
+                  line.speaker != annotation.speaker || (line.overlappingSpeech == true) != annotation.overlapping else { continue }
+            sessionLines[index].speaker = annotation.speaker
+            sessionLines[index].overlappingSpeech = annotation.overlapping ? true : nil
+            if let sentenceID = captionSentenceIDs[index] {
+                overlay.showSpeaker(CaptionSpeakerAnnotation.label(speaker: annotation.speaker, overlapping: annotation.overlapping),
+                                    forSentenceID: sentenceID)
+            }
+            if let recorded = captionRecordedSegments[index] { recordSpeaker(annotation, to: recorded) }
+        }
+    }
+
+    @MainActor private func recordSpeaker(_ annotation: CaptionSpeakerAnnotation, to recorded: TranscriptStore.RecordedSegment) {
+        pendingTranscriptWrites += 1
+        Task { @MainActor in
+            defer { self.pendingTranscriptWrites -= 1 }
+            do { try await TranscriptStore.shared.appendSpeaker(annotation, to: recorded) }
+            catch { Diagnostics.recordFailure(operation: "transcript.speaker", reason: DiagnosticsRedactor.redact(error.localizedDescription)) }
+        }
+    }
 
     /// Recognition is always the selected ASR engine.
     ///
@@ -372,34 +522,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
               // unlink. It reports through the same global flag captions do, so
               // the check belongs here as much as in the window.
               !CaptionSession.shared.isRetranslating,
-              translatorSwap == nil,
-              translatorUsers == 0 else { return false }
+              translationRuntime.swap == nil,
+              translationRuntime.users == 0 else { return false }
         await dictationController.invalidatePreparedBackend()
-        let outgoing = activeTranslator
-        activeTranslator = nil
-        activeTranslatorEngine = nil
-        translatorPreparedTarget = nil
-        translatorReady = false
-        await stopTranslator(outgoing)
+        let outgoing = translationRuntime.take()
+        await translationRuntime.stop(outgoing)
         return true
     }
 
-    private var activeTranslator: Translating?
-    private var activeTranslatorEngine: TranslationEngine?
-    private var translatorPreparedTarget: String?
-    private let translatorInferenceGate = TranslationInferenceGate()
+    private let translationRuntime = TranslationRuntime()
     /// The one gate every native translation call passes through, including the
     /// ones that run with no caption session: dictation's own translation and
     /// cleanup already do, and re-translating a saved transcript now does too.
     /// Those three are the only inference in the app, and MADLAD's Metal
     /// runtime is not safe to overlap — without the gate a re-translation and a
     /// dictation press could decode on it at the same time.
-    var translationInferenceGate: TranslationInferenceGate { translatorInferenceGate }
-    private var translatorReady = false
-    private var translationRuntimeFallback = TranslationRuntimeFallback()
-    private let translatorIdleEviction = IdleEviction()
-    private var translatorUsers = 0
-    private var translatorIdleWaiters: [CheckedContinuation<Void, Never>] = []
+    var translationInferenceGate: TranslationInferenceGate { translationRuntime.gate }
 
     /// Serialises translator replacement, and lets a superseded swap bow out.
     ///
@@ -408,8 +546,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// selection — used to fire that off immediately and unserialised, so
     /// clicking through a few languages while one load was in flight started a
     /// fresh multi-gigabyte load per click, each holding its own copy alive.
-    private var translatorSwap: Task<Void, Never>?
-    private var translatorGeneration = 0
 
     /// Release the current translator, then build and prepare its replacement.
     ///
@@ -419,38 +555,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func swapTranslator(for scope: TranslationEngineScope = .captions) {
         captionTranslationTasks.values.forEach { $0.cancel() }
         captionTranslationTasks.removeAll()
-        translatorIdleEviction.cancel()
-        translatorGeneration += 1
-        let generation = translatorGeneration
-        translatorSwap = Task { @MainActor [weak self, previous = translatorSwap] in
+        captionTranslationTargets.removeAll()
+        translationRuntime.idleEviction.cancel()
+        translationRuntime.generation += 1
+        let generation = translationRuntime.generation
+        translationRuntime.swap = Task { @MainActor [weak self, previous = translationRuntime.swap] in
             defer {
-                if let self, self.translatorGeneration == generation {
-                    self.translatorSwap = nil
+                if let self, self.translationRuntime.generation == generation {
+                    self.translationRuntime.swap = nil
                 }
             }
             await previous?.value
             guard let self else { return }
-            await self.waitForTranslatorUsersToFinish()
-            let outgoing = self.activeTranslator
-            self.activeTranslator = nil
-            self.activeTranslatorEngine = nil
-            self.translatorPreparedTarget = nil
-            self.translatorReady = false
-            await self.stopTranslator(outgoing)
+            await self.translationRuntime.waitUntilIdle()
+            let outgoing = self.translationRuntime.take()
+            await self.translationRuntime.stop(outgoing)
             // A newer choice landed while we were releasing. Let that one do the
             // loading rather than paying for a model already superseded.
-            guard generation == self.translatorGeneration else { return }
+            guard generation == self.translationRuntime.generation else { return }
             var attempted: Set<TranslationEngine> = []
             let swapTarget = translationTarget(for: scope, requestedTarget: nil)
-            while generation == self.translatorGeneration,
+            while generation == self.translationRuntime.generation,
                   let selected = self.selectedTranslationEngine(for: scope, target: swapTarget),
                   !attempted.contains(selected) {
                 attempted.insert(selected)
-                self.activeTranslatorEngine = selected
-                self.activeTranslator = selected.makeTranslator()
+                self.translationRuntime.engine = selected
+                self.translationRuntime.active = selected.makeTranslator()
                 _ = await self.prepareTranslatorIfNeeded(scope: scope,
                                                          allowRuntimeFallback: false)
-                if self.translatorReady || self.activeTranslator != nil { return }
+                if self.translationRuntime.ready || self.translationRuntime.active != nil { return }
             }
         }
     }
@@ -459,14 +592,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// session. Used when the system is short of memory.
     @MainActor
     private func unloadTranslator(reason: String) async {
-        translatorIdleEviction.cancel()
-        await waitForTranslatorUsersToFinish()
-        let outgoing = activeTranslator
-        activeTranslator = nil
-        activeTranslatorEngine = nil
-        translatorPreparedTarget = nil
-        translatorReady = false
-        await stopTranslator(outgoing)
+        translationRuntime.idleEviction.cancel()
+        await translationRuntime.waitUntilIdle()
+        let outgoing = translationRuntime.take()
+        await translationRuntime.stop(outgoing)
         MemoryPolicy.releaseCaches()
         NSLog("sAiity memory: released translator (\(reason)) — \(MemoryPolicy.describeFootprint())")
     }
@@ -503,11 +632,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // extra. Shedding it keeps the session alive instead of losing it,
             // and it is said out loud rather than left to look like translation
             // quietly breaking.
-            // `activeTranslator` is non-nil even when no weights are loaded, so
+            // `translationRuntime.active` is non-nil even when no weights are loaded, so
             // readiness is the only honest test of whether there is anything
             // here worth shedding.
-            translatorIdleEviction.cancel()
-            guard translatorReady else {
+            translationRuntime.idleEviction.cancel()
+            guard translationRuntime.ready else {
                 MemoryPolicy.releaseCaches()
                 return
             }
@@ -556,7 +685,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 ?? TranslationEngine.visibleSelection(TranslationEngine.selected)
                 ?? .recommended
         }
-        return translationRuntimeFallback.resolve(preferred, for: target)
+        return translationRuntime.fallback.resolve(preferred, for: target)
     }
 
     private func translationTarget(for scope: TranslationEngineScope,
@@ -581,7 +710,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                            sourceLanguage: String? = nil,
                                            scope: TranslationEngineScope = .captions,
                                            allowRuntimeFallback: Bool = true) async -> Bool {
-        translatorIdleEviction.cancel()
+        translationRuntime.idleEviction.cancel()
         guard let target = translationTarget(for: scope, requestedTarget: requestedTarget) else {
             return false
         }
@@ -590,7 +719,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             setStatus("No translator chosen — pick one in Settings")
             return false
         }
-        guard activeTranslator == nil || activeTranslatorEngine == selectedEngine else {
+        guard translationRuntime.active == nil || translationRuntime.engine == selectedEngine else {
             // A different scoped choice is still in use. Let the caller replace
             // it through the serialized swap path instead of releasing native
             // state during inference.
@@ -599,15 +728,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Preparation also crosses into MLX/llama native state. Hold the same
         // lifetime lease as inference so a target/engine swap cannot release
         // the object while its async load is suspended.
-        beginTranslatorUse()
-        defer { endTranslatorUse() }
-        let generation = translatorGeneration
-        if activeTranslator == nil {
-            activeTranslator = selectedEngine.makeTranslator()
-            activeTranslatorEngine = selectedEngine
+        translationRuntime.beginUse()
+        defer { translationRuntime.endUse() }
+        let generation = translationRuntime.generation
+        if translationRuntime.active == nil {
+            translationRuntime.active = selectedEngine.makeTranslator()
+            translationRuntime.engine = selectedEngine
         }
-        guard let engine = activeTranslator else { return false }
-        if translatorReady && translatorPreparedTarget == target {
+        guard let engine = translationRuntime.active else { return false }
+        if translationRuntime.ready && translationRuntime.preparedTarget == target {
             return true
         }
         // Loading is deferred until a session is actually running, deliberately.
@@ -620,7 +749,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             setStatus("Translation: \(AppLanguage(code: target).displayName) — loads on start")
             return false
         }
-        let coldPrepare = !translatorReady
+        let coldPrepare = !translationRuntime.ready
         let prepareStarted = ContinuousClock.now
         let src = sourceLanguage ?? detectedLanguage ?? locale.identifier(.bcp47)
         NSLog("sAiity translator: selected=\(selectedEngine.rawValue) object=\(engine.name) src=\(src) dst=\(target) scope=\(scope.rawValue)")
@@ -632,7 +761,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // none: it offers "Re-download" for a file that is perfectly fine.
         let assetID = selectedEngine.activeAssetID
         do {
-            try await translatorInferenceGate.run {
+            try await translationRuntime.gate.run {
                 await self.dictationCleanupSession.releaseModel()
                 try await engine.prepare(from: src, to: target) { msg in
                     NSLog("sAiity translator progress: \(msg)")
@@ -642,11 +771,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // A settings change can replace the model while prepare() is
             // suspended. Never mark that stale instance ready or let a caller
             // translate through it after the replacement has started.
-            guard generation == translatorGeneration,
-                  activeTranslatorEngine == selectedEngine,
-                  activeTranslator != nil else { return false }
-            translatorReady = true
-            translatorPreparedTarget = target
+            guard generation == translationRuntime.generation,
+                  translationRuntime.engine == selectedEngine,
+                  translationRuntime.active != nil else { return false }
+            translationRuntime.ready = true
+            translationRuntime.preparedTarget = target
             Diagnostics.recordTiming(operation: "translator.prepare",
                                      seconds: elapsedSeconds(since: prepareStarted),
                                      cold: coldPrepare)
@@ -654,16 +783,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             setStatus("Translating with \(selectedEngine.displayName)")
             return true
         } catch {
-            translatorReady = false
+            translationRuntime.ready = false
             // A native loader can leave a partially constructed model object
             // behind before throwing. Drop it before the next attempt; keeping
             // that object alive is both wasted memory and unsafe for llama/MLX.
-            let failed = activeTranslator
-            activeTranslator = nil
-            activeTranslatorEngine = nil
-            translatorPreparedTarget = nil
-            await stopTranslator(failed)
-            translationRuntimeFallback.quarantine(selectedEngine)
+            let failed = translationRuntime.take()
+            await translationRuntime.stop(failed)
+            translationRuntime.fallback.quarantine(selectedEngine)
             // Bytes on disk that refuse to load are damage worth remembering —
             // the Models page turns this into a "Re-download" the user can
             // actually connect to the error, instead of the same status-line
@@ -679,9 +805,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             let fallback = selectedTranslationEngine(for: scope, target: target)
             if allowRuntimeFallback, let fallback, fallback != selectedEngine,
-               translatorSwap == nil {
-                activeTranslatorEngine = fallback
-                activeTranslator = fallback.makeTranslator()
+               translationRuntime.swap == nil {
+                translationRuntime.engine = fallback
+                translationRuntime.active = fallback.makeTranslator()
                 setStatus("\(selectedEngine.displayName) unavailable — trying \(fallback.displayName)")
                 return await prepareTranslatorIfNeeded(requestedTarget: requestedTarget,
                                                        allowWithoutCaptions: allowWithoutCaptions,
@@ -739,7 +865,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                      cold: false)
         }
         do {
-            let out = try await translatorInferenceGate.run {
+            let out = try await translationRuntime.gate.run {
                 try await self.translateCaptionText(text,
                                                      fallbackSource: fallbackSource,
                                                      target: target,
@@ -751,7 +877,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard let out, !out.isEmpty else { return .empty }
             // A single success clears the budget: the failure budget is about
             // sustained failure, not a running total across the session.
-            translatorFailureBudget.recordSuccess()
+            translationRuntime.failureBudget.recordSuccess()
             return .translated(out)
         } catch {
             NSLog("sAiity caption translation failed: %@",
@@ -765,7 +891,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// The original intent — stop hammering an engine that is not working — is
     /// worth keeping, but a single bad inference must not be enough. See
     /// `TranslationFailureBudget` for why retiring MADLAD is terminal.
-    private var translatorFailureBudget = TranslationFailureBudget()
     /// Current wait before the next Input Monitoring retry, and whether the
     /// "waiting for permission" state has already been shown. See
     /// `ensureDictationHotkey`.
@@ -777,24 +902,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// lease rather than releasing MLX/llama state from inside inference.
     private func retireFailedTranslator(_ engine: TranslationEngine,
                                          reason: String) {
-        guard translatorFailureBudget.recordFailure() else {
+        guard translationRuntime.failureBudget.recordFailure() else {
             NSLog("sAiity translator %@ failed (%d/%d): %@",
-                  engine.rawValue, translatorFailureBudget.streak,
-                  translatorFailureBudget.threshold, reason)
+                  engine.rawValue, translationRuntime.failureBudget.streak,
+                  translationRuntime.failureBudget.threshold, reason)
             return
         }
-        translationRuntimeFallback.quarantine(engine)
-        guard activeTranslatorEngine == engine else { return }
-        let outgoing = activeTranslator
-        activeTranslator = nil
-        activeTranslatorEngine = nil
-        translatorPreparedTarget = nil
-        translatorReady = false
+        translationRuntime.fallback.quarantine(engine)
+        guard translationRuntime.engine == engine else { return }
+        let outgoing = translationRuntime.take()
         NSLog("sAiity translator retired: engine=%@ reason=%@", engine.rawValue, reason)
         Task { @MainActor [weak self, outgoing] in
             guard let self else { return }
-            await self.waitForTranslatorUsersToFinish()
-            await self.stopTranslator(outgoing)
+            await self.translationRuntime.waitUntilIdle()
+            await self.translationRuntime.stop(outgoing)
         }
     }
 
@@ -807,30 +928,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func translateDictatedText(_ text: String,
                                        source: String,
                                        target: String) async -> String? {
-        // A same-language target is a no-op. In particular, do not prepare or
-        // enter MLX for zh -> zh: the transcript is already the requested
-        // output and native initialization is the most failure-prone part.
-        guard !TranslationLanguage.isSame(source, as: target) else { return text }
-        translatorIdleEviction.cancel()
+        // A region's audio language is only a hint; it can contain a switch.
+        guard !TranslationProcedure.isAlreadyInTarget(text, target: target) else { return text }
+        translationRuntime.idleEviction.cancel()
         // Dictation may use a different engine than captions. Switch through
         // the serialized lifecycle before entering native inference, and keep
         // the model resident between regions and presses.
         guard let desiredEngine = selectedTranslationEngine(for: .dictation, target: target) else { return nil }
-        if activeTranslator == nil || activeTranslatorEngine != desiredEngine {
+        if translationRuntime.active == nil || translationRuntime.engine != desiredEngine {
             swapTranslator(for: .dictation)
         }
         // A settings change replaces the translator asynchronously. Do not
         // translate against the old model while that replacement is in flight.
-        let generation = translatorGeneration
-        let swap = translatorSwap
+        let generation = translationRuntime.generation
+        let swap = translationRuntime.swap
         await swap?.value
         // A new swap may have been scheduled while the previous one was
         // finishing. Re-check before acquiring the use lease so that a late
         // dictation cannot race the replacement's prepare/release cycle.
-        guard generation == translatorGeneration else { return nil }
-        beginTranslatorUse()
+        guard generation == translationRuntime.generation else { return nil }
+        translationRuntime.beginUse()
         defer {
-            endTranslatorUse()
+            translationRuntime.endUse()
             scheduleTranslatorEvictionIfIdle()
         }
         guard SettingsWindowController.state.translateDictation,
@@ -841,11 +960,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                               allowWithoutCaptions: true,
                                               sourceLanguage: source,
                                               scope: .dictation),
-              let engine = activeTranslator else { return nil }
+              let engine = translationRuntime.active else { return nil }
         do {
             let started = ContinuousClock.now
-            let result: String? = try await translatorInferenceGate.run {
-                try await engine.translate(text, from: source, to: target)
+            let result: String? = try await translationRuntime.gate.run {
+                try await TranslationProcedure.translate([.init(text: text, source: source)], to: target, engine: engine)
             }
             Diagnostics.recordTiming(operation: "translator.inference",
                                      seconds: elapsedSeconds(since: started),
@@ -856,9 +975,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // translator, and MADLAD has no fallback, so translation died for
             // the rest of the session over one line. A genuine engine failure
             // now arrives as a throw and is caught below.
+            if result != nil { translationRuntime.failureBudget.recordSuccess() }
             return result
         } catch {
             NSLog("sAiity dictation translation unavailable: \(error.localizedDescription)")
+            Diagnostics.recordFailure(operation: "dictation.translation", reason: DiagnosticsRedactor.redact(error.localizedDescription))
+            if let engine = translationRuntime.engine { retireFailedTranslator(engine, reason: "dictation inference failed") }
             return nil
         }
     }
@@ -878,8 +1000,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let runs = transcription.translationRuns
         let regionsNeedingTranslation = runs.filter { region in
-            let source = region.language ?? "auto"
-            return !TranslationLanguage.isSame(source, as: target)
+            !TranslationProcedure.isAlreadyInTarget(region.text, target: target)
         }
         // Every region is already in the requested target language. Preserve
         // the original mixed transcript and keep the translator cold.
@@ -890,17 +1011,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // model cannot be evicted or retargeted between regions, and no other
         // caption/dictation inference can enter while this authoritative result
         // is being assembled.
-        translatorIdleEviction.cancel()
+        translationRuntime.idleEviction.cancel()
         guard let desiredEngine = selectedTranslationEngine(for: .dictation, target: target) else { return nil }
-        if activeTranslator == nil || activeTranslatorEngine != desiredEngine {
+        if translationRuntime.active == nil || translationRuntime.engine != desiredEngine {
             swapTranslator(for: .dictation)
         }
-        let generation = translatorGeneration
-        await translatorSwap?.value
-        guard generation == translatorGeneration else { return nil }
-        beginTranslatorUse()
+        let generation = translationRuntime.generation
+        await translationRuntime.swap?.value
+        guard generation == translationRuntime.generation else { return nil }
+        translationRuntime.beginUse()
         defer {
-            endTranslatorUse()
+            translationRuntime.endUse()
             scheduleTranslatorEvictionIfIdle()
         }
         guard SettingsWindowController.state.translateDictation,
@@ -909,60 +1030,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                                allowWithoutCaptions: true,
                                                sourceLanguage: transcription.languageMetadata.dominantLanguage,
                                                scope: .dictation),
-              let engine = activeTranslator else { return nil }
+              let engine = translationRuntime.active else { return nil }
 
         do {
             let started = ContinuousClock.now
-            let result: String? = try await translatorInferenceGate.run {
-                var translated = Array(repeating: "", count: runs.count)
-                var pending: [(index: Int, region: DictationRegionTranscript)] = []
-                pending.reserveCapacity(runs.count)
-                for (index, region) in runs.enumerated() {
-                    try Task.checkCancellation()
-                    let source = region.language ?? "auto"
-                    if TranslationLanguage.isSame(source, as: target) {
-                        translated[index] = region.text
-                    } else {
-                        pending.append((index, region))
-                    }
-                }
-
-                if pending.count > 1 {
-                    let batch = pending.map {
-                        TranslationRegion(text: $0.region.text,
-                                          source: $0.region.language ?? "auto")
-                    }
-                    if let values = try await engine.translateRegions(batch, to: target),
-                       values.count == pending.count {
-                        for (item, value) in zip(pending, values) {
-                            translated[item.index] = value
-                        }
-                    }
-                }
-
-                // Engines without strict batching, and malformed native batch
-                // responses, use the proven sequential path. This also keeps
-                // Hy-MT2/custom translators correct without special cases.
-                for item in pending where translated[item.index].isEmpty {
-                    try Task.checkCancellation()
-                    let source = item.region.language ?? "auto"
-                    guard let value = try await engine.translate(item.region.text,
-                                                                   from: source,
-                                                                   to: target) else {
-                        return nil
-                    }
-                    translated[item.index] = value
-                }
-                return DictationTranscriptMerger.merge(translated)
+            let result: String? = try await translationRuntime.gate.run {
+                try await TranslationProcedure.translate(runs.map {
+                    .init(text: $0.text, source: $0.language ?? "auto")
+                }, to: target, engine: engine)
             }
             Diagnostics.recordTiming(operation: "translator.inference",
                                      seconds: elapsedSeconds(since: started),
                                      cold: false)
+            if result != nil { translationRuntime.failureBudget.recordSuccess() }
             return result
         } catch is CancellationError {
             return nil
         } catch {
             NSLog("sAiity dictation translation unavailable: \(error.localizedDescription)")
+            Diagnostics.recordFailure(operation: "dictation.translation", reason: DiagnosticsRedactor.redact(error.localizedDescription))
+            if let engine = translationRuntime.engine { retireFailedTranslator(engine, reason: "dictation inference failed") }
             return nil
         }
     }
@@ -972,54 +1059,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
     }
 
-    /// Model loading/release and native inference must never overlap. The
-    /// translator implementations cross into MLX/llama.cpp, where releasing a
-    /// model during an in-flight call can terminate the process instead of
-    /// throwing a Swift error.
-    private func beginTranslatorUse() {
-        translatorUsers += 1
-    }
-
-    private func endTranslatorUse() {
-        guard translatorUsers > 0 else { return }
-        translatorUsers -= 1
-        guard translatorUsers == 0 else { return }
-        let waiters = translatorIdleWaiters
-        translatorIdleWaiters.removeAll(keepingCapacity: true)
-        waiters.forEach { $0.resume() }
-    }
-
-    private func waitForTranslatorUsersToFinish() async {
-        guard translatorUsers > 0 else { return }
-        await withCheckedContinuation { continuation in
-            translatorIdleWaiters.append(continuation)
-        }
-    }
-
     /// Keep a prepared translator warm across a short pause, but do not let an
     /// idle menu-bar app retain gigabytes indefinitely. The eligibility check is
     /// repeated by `IdleEviction` at the deadline, so a late phase transition
     /// cannot unload a translator that became useful again.
     @MainActor
     private func scheduleTranslatorEvictionIfIdle() {
-        guard translatorReady,
+        guard translationRuntime.ready,
               state == .idle,
               !dictationController.isBusy,
-              translatorSwap == nil,
+              translationRuntime.swap == nil,
               !liveTranslationBusy,
               pendingTranslations == 0,
-              translatorUsers == 0 else { return }
-        translatorIdleEviction.schedule(
+              translationRuntime.users == 0 else { return }
+        translationRuntime.idleEviction.schedule(
             after: .seconds(300),
             shouldEvict: { [weak self] in
                 guard let self else { return false }
-                return self.translatorReady
+                return self.translationRuntime.ready
                     && self.state == .idle
                     && !self.dictationController.isBusy
-                    && self.translatorSwap == nil
+                    && self.translationRuntime.swap == nil
                     && !self.liveTranslationBusy
                     && self.pendingTranslations == 0
-                    && self.translatorUsers == 0
+                    && self.translationRuntime.users == 0
             },
             evict: { [weak self] in
                 guard let self else { return }
@@ -1029,16 +1092,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
 #if SAIITY_TEST_HOOKS
     var translatorEvictionScheduledForTests: Bool {
-        translatorIdleEviction.isScheduledForTests
+        translationRuntime.idleEviction.isScheduledForTests
     }
 
-    var translatorReadyForTests: Bool { translatorReady }
+    var translatorReadyForTests: Bool { translationRuntime.ready }
 
     func armTranslatorEvictionForTests(after delay: Duration) {
-        translatorReady = true
-        translatorIdleEviction.schedule(
+        translationRuntime.ready = true
+        translationRuntime.idleEviction.schedule(
             after: delay,
-            shouldEvict: { [weak self] in self?.translatorReady ?? false },
+            shouldEvict: { [weak self] in self?.translationRuntime.ready ?? false },
             evict: { [weak self] in
                 await self?.unloadTranslator(reason: "test idle grace period")
             })
@@ -1068,6 +1131,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var state: SessionState = .idle {
         didSet {
             guard state != oldValue else { return }
+            if state == .idle, let model = onboardingTrialModel, model.trial == .captions {
+                model.trialBusy = false
+                model.trialStatus = model.trialText.isEmpty
+                    ? String(localized: "No speech captured yet. Play speech on your Mac and try again.")
+                    : String(localized: "Captions worked. The trial has stopped.")
+                onboardingTrialModel = nil
+            }
             // The Settings window gates model deletion on this: deleting weights
             // out from under a loading engine is exactly as bad as under a
             // running one, so `starting` counts as busy.
@@ -1083,11 +1153,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// The in-flight start. Held so `stopAsync()` can cancel it and wait for it
     /// to actually leave the engine before tearing anything down.
-    private var sessionTask: Task<Void, Never>?
     /// Coalesces repeated gap callbacks and is cancelled by teardown. The
     /// callback itself runs on the capture queue; only this task touches the
     /// main-actor sentence state.
-    private var speechGapTask: Task<Void, Never>?
 
     private var locale = Locale(identifier: "en-US")
     /// BCP-47, nil = off. Persisted — it was previously an in-memory var, so the
@@ -1213,6 +1281,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// the previous, so the jsonl's line order matches the spoken order even
     /// when translations finish out of order.
     private var transcriptWriteChain: Task<Void, Never>?
+    private var recordingGeneration = 0
     /// Links in that chain whose append has not happened yet. The chain itself
     /// is only cleared on teardown, so it cannot answer "is anything still
     /// owed to the store?" — and that is precisely the question quitting asks
@@ -1231,6 +1300,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// should not invoke the same native model twice.
     private var captionTranslationCache = BoundedCache<CaptionTranslationKey, String>(capacity: 64)
     private var captionTranslationTasks: [Int: Task<String?, Never>] = [:]
+    private var captionTranslationTargets: [Int: String] = [:]
 
     /// How many caption lines may be waiting on the translator at once.
     ///
@@ -1276,7 +1346,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         // The pool owns the backend. The sink stays empty until a caption lease
         // has been acquired, so an idle app cannot keep an ASR model reachable.
-        captureSink.point(at: nil)
+        captionResources.sink.point(at: nil)
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         updateStatusItemIcon()
@@ -1295,7 +1365,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // land on the session the user is watching rather than the next one.
         NotificationCenter.default.addObserver(
             forName: .saiitySpeechGapChanged, object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor [weak self] in self?.capture.applySpeechGapSettings() }
+                Task { @MainActor [weak self] in self?.captionResources.capture.applySpeechGapSettings() }
             }
         rebuildMenu()
         if SettingsWindowController.state.dictationEnabled {
@@ -1352,10 +1422,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                                queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                await self.capture.applyMicSetting()
+                await self.captionResources.capture.applyMicSetting()
                 // Say what happened: turning it off mid-session is exactly
                 // the moment someone wants confirmation that it is off.
-                switch self.capture.micStatus {
+                switch self.captionResources.capture.micStatus {
                 case .off where self.state.isActive:
                     self.setStatus("Microphone released — captions continue from system audio")
                 case .mixing:
@@ -1666,6 +1736,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func updateDictationToast(_ phase: DictationPhase) {
+        if let model = onboardingTrialModel, model.trial == .dictation {
+            switch phase {
+            case .starting, .preparing:
+                model.trialStatus = String(localized: "Preparing dictation")
+            case .dictating:
+                model.trialRecording = true
+                model.trialStatus = String(localized: "Listening — speak, then choose Stop & Transcribe.")
+            case .result:
+                model.trialBusy = false
+                model.trialRecording = false
+                model.trialStatus = String(localized: "Dictation worked. Your result is shown below.")
+                onboardingTrialModel = nil
+            case .failure(let reason), .recovery(let reason):
+                model.trialBusy = false
+                model.trialRecording = false
+                model.trialStatus = reason
+                onboardingTrialModel = nil
+            case .limit:
+                model.trialRecording = false
+                model.trialStatus = String(localized: "Recording limit reached — finishing the result.")
+            case .transcribing, .cleaning, .translating, .inserting:
+                model.trialStatus = String(localized: "Processing on your Mac…")
+            default: break
+            }
+        }
         switch phase {
         case .idle:
             dictationToast.dismiss()
@@ -1978,19 +2073,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func saveSubtitlesTranscript() {
         Task { @MainActor [weak self] in
             guard let self else { return }
-            // Wait for any in-flight translation and ordered store append to
-            // settle, so the library copy contains the final visible state.
-            await self.transcriptWriteChain?.value
-            let segments = self.sessionLines
+            // Freeze the tapped session, including its outstanding translations.
+            // A stop/start during the await must not save a different session.
+            var segments = self.sessionLines
+            let translations = self.captionTranslationTasks
+            let targets = self.captionTranslationTargets
+            let locale = self.locale.identifier(.bcp47)
+            let target = self.translateTo
+            let startedAt = self.subtitleSessionStartedAt ?? Date()
+            for index in segments.indices {
+                if let task = translations[segments[index].i], let text = await task.value {
+                    segments[index].tr = text
+                    segments[index].trLoc = targets[segments[index].i]
+                }
+            }
             guard !segments.isEmpty else {
                 self.setStatus("That transcript has no lines.")
                 return
             }
-            let locale = self.locale.identifier(.bcp47)
-            let target = self.translateTo
-            let startedAt = self.subtitleSessionStartedAt ?? Date()
+            let savedSegments = segments
             let work = Task.detached(priority: .userInitiated) {
-                Result { try TranscriptStore.saveSession(segments, locale: locale,
+                Result { try TranscriptStore.saveSession(savedSegments, locale: locale,
                                                           translateTo: target,
                                                           startedAt: startedAt) }
             }
@@ -2006,26 +2109,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func beginRecording() async {
-        do {
-            try await TranscriptStore.shared.begin(locale: locale.identifier(.bcp47),
-                                                   translateTo: translateTo)
-            SessionCatalog.invalidate()
-            recordingSince = Date()
-            recordedLines = 0
-            overlay.isRecording = true
-            updateStatusItemIcon()
-        } catch {
-            NSLog("sAiity recording failed to start: \(error.localizedDescription)")
-            setStatus("Could not start recording")
+        recordingGeneration += 1
+        let generation = recordingGeneration
+        let locale = locale.identifier(.bcp47)
+        let target = translateTo
+        let task = Task { @MainActor [previous = transcriptWriteChain] in
+            await previous?.value
+            do {
+                try await TranscriptStore.shared.begin(locale: locale, translateTo: target)
+                guard self.recordingGeneration == generation else { return }
+                SessionCatalog.invalidate()
+                recordingSince = Date()
+                recordedLines = 0
+                overlay.isRecording = true
+                updateStatusItemIcon()
+            } catch {
+                NSLog("sAiity recording failed to start: \(error.localizedDescription)")
+                setStatus("Could not start recording")
+            }
         }
+        transcriptWriteChain = task
+        await task.value
     }
 
     private func endRecording() async {
-        try? await TranscriptStore.shared.end()
-        SessionCatalog.invalidate()
-        recordingSince = nil
-        overlay.isRecording = false
-        updateStatusItemIcon()
+        recordingGeneration += 1
+        let generation = recordingGeneration
+        recordingSince = nil // Close admission while accepted writes drain.
+        let task = Task { @MainActor [previous = transcriptWriteChain] in
+            await previous?.value
+            try? await TranscriptStore.shared.end()
+            guard self.recordingGeneration == generation else { return }
+            SessionCatalog.invalidate()
+            recordingSince = nil
+            overlay.isRecording = false
+            updateStatusItemIcon()
+        }
+        transcriptWriteChain = task
+        await task.value
     }
 
     @MainActor
@@ -2105,7 +2226,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Task { @MainActor in
             if state.isActive { await stopAsync() }
             await dictationController.invalidatePreparedBackend()
-            await asrBackendPool.replace(with: Self.makeActiveBackend())
+            await captionResources.pool.replace(with: Self.makeActiveBackend())
             setStatus("Engine: \(new.displayName)")
             if wasRunning, state == .idle { start() }
             rebuildMenu()
@@ -2151,7 +2272,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let recent = sessionLines.suffix(3).enumerated().map { index, segment in
             CaptionHistoryEntry(sentenceID: -1_000_000 - index,
                                  original: segment.text,
-                                 translation: segment.tr)
+                                 translation: segment.tr,
+                                 speakerLabel: segment.speakerLabel)
         }
         guard !recent.isEmpty else { return }
         recentFlashTask?.cancel()
@@ -2278,6 +2400,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if state == .stopping { setStatus("Still stopping — try again in a moment") }
             return
         }
+        guard !dictationController.isBusy else {
+            setStatus("Finish dictation before starting captions")
+            return
+        }
         // The other half of "one translator at a time". Re-translation refuses
         // to start during a session; without this, a session was free to start
         // during a re-translation — the same two multi-gigabyte models in
@@ -2305,21 +2431,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             setStatus("Downloading \(chosen.displayName) before captions can start…")
         }
         state = .starting
-        speechGapTask?.cancel()
-        speechGapTask = nil
-        translatorIdleEviction.cancel()
+        captionResources.gapTask?.cancel()
+        captionResources.gapTask = nil
+        translationRuntime.idleEviction.cancel()
         showedAnyCaption = false
         captionFirstTextLogged = false
         captionFirstFinalLogged = false
-        captionWarmStart = asrBackendPool.isPrepared
+        captionWarmStart = captionResources.pool.isPrepared
         captionStartInstant = .now
         captionCaptureStartedAt = nil
         clearCaptionInstant = nil
         overlay.reservesTranslationRow =
             translateTo != nil && CaptionStyle.current.showTranslation
         sessionLines.removeAll()
+        captionSpeakerTimeline = CaptionSpeakerTimeline()
+        captionSentenceIDs.removeAll()
+        captionRecordedSegments.removeAll()
         captionTranslationTasks.values.forEach { $0.cancel() }
         captionTranslationTasks.removeAll()
+        captionTranslationTargets.removeAll()
         captionTranslationCache.removeAll(keepingCapacity: true)
         subtitleSessionStartedAt = Date()
         pendingTranslations = 0
@@ -2349,22 +2479,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // to whichever model happens to be selected by then.
         let asrAssetID = ASREngine.effective.activeAssetID
 
-        sessionTask = Task { @MainActor [weak self] in
+        captionResources.startTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                let backend = asrBackendPool.currentBackend
+                let backend = captionResources.pool.currentBackend
                 NSLog("sAiity engine: preparing \(backend.name)")
                 let prepareStarted = self.captionStartInstant ?? .now
                 do {
-                    let acquired = try await asrBackendPool.acquire(locale: locale) { [weak self] msg in
+                    let acquired = try await captionResources.pool.acquire(locale: locale) { [weak self] msg in
                         Task { @MainActor [weak self] in
                             guard let self, self.state == .starting else { return }
                             self.setStatus(localized: msg)
                             self.overlay.show(text: msg, isFinal: false)
                         }
                     }
-                    captionBackend = acquired
-                    captureSink.point(at: acquired)
+                    captionResources.backend = acquired
+                    captionResources.sink.point(at: acquired)
+                    let generation = sessionGeneration
+                    acquired.setFailureHandler { [weak self, weak acquired] reason in
+                        Task { @MainActor in
+                            guard let self, let acquired,
+                                  self.sessionGeneration == generation,
+                                  self.captionResources.backend === acquired,
+                                  self.state.isActive else { return }
+                            Diagnostics.recordFailure(operation: "captions.asr", reason: reason)
+                            await self.stopAsync()
+                            self.setStatus("Error: \(reason)")
+                            self.overlay.show(text: reason, isFinal: true)
+                        }
+                    }
                     Diagnostics.recordTiming(operation: "captions.asr.prepare",
                                              seconds: self.elapsedSeconds(since: prepareStarted),
                                              cold: !self.captionWarmStart)
@@ -2396,14 +2539,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 LoadHealth.clear(asrAssetID)
                 try Task.checkCancellation()
 
-                guard let backend = captionBackend,
+                guard let backend = captionResources.backend,
                       let fmt = await backend.inputFormat else {
                     throw BackendError.notPrepared
+                }
+
+                if CaptionSpeakerTracker.enabled, fmt.sampleRate == 16_000 {
+                    prepareCaptionSpeakers()
+                    await captionResources.speakerPreparation?.value
+                    try Task.checkCancellation()
                 }
                 try Task.checkCancellation()
                 captureFormat = fmt
                 let captureStart = ContinuousClock.now
-                try await capture.start(
+                try await captionResources.capture.start(
                     targetFormat: fmt,
                     // Capture the backend we are starting WITH, rather than
                     // reading self.backend on each buffer. This closure runs on
@@ -2412,8 +2561,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     // unsynchronised read/write of a class reference. Binding it
                     // once also guarantees the audio goes to the engine the
                     // stream was configured for.
-                    onBuffer: { [captureSink] buf in
+                    onBuffer: { [captureSink = captionResources.sink, speakerSink = captionResources.speakerSink] buf in
                         captureSink.feed(buf)
+                        speakerSink.feed(buf)
                     },
                     onState: { audio in
                         Task { @MainActor [self] in self.captureStateChanged(audio) }
@@ -2425,7 +2575,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 // Commit on a pause, which is what makes a finished sentence
                 // translate when the speaker stops rather than when a 3.5 s
                 // budget runs out.
-                capture.onSpeechGap = { [weak self] range in
+                captionResources.capture.onSpeechGap = { [weak self] range in
                     Task { @MainActor in self?.scheduleSpeechGapCommit(range) }
                 }
 
@@ -2440,7 +2590,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 // The mic is an addition; its failure is reported, never
                 // propagated — but silently running without it would break
                 // the transcript the user turned it on for.
-                switch capture.micStatus {
+                switch captionResources.capture.micStatus {
                 case .denied:
                     setStatus("Captions run without your microphone — allow sAiity under System Settings → Privacy & Security → Microphone")
                 case .failed:
@@ -2469,6 +2619,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 NSLog("sAiity engine: start cancelled during download")
             } catch {
                 let msg = error.localizedDescription
+                let trial = onboardingTrialModel?.trial == .captions ? onboardingTrialModel : nil
                 // Claim the teardown before the first await. `state` is only
                 // touched on the main actor, so this pair is atomic against
                 // stopAsync — whichever gets here first owns it, and the other
@@ -2476,7 +2627,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 let ownsTeardown = (state == .starting)
                 if ownsTeardown { state = .stopping }
                 // The failure most likely on a first run — Screen Recording not
-                // granted, thrown from capture.start — happens AFTER prepare and
+                // granted, thrown from captionResources.capture.start — happens AFTER prepare and
                 // start have both succeeded, so the model is loaded and the pump
                 // is looping. Setting .idle and returning left both running with
                 // the menu claiming there was no session.
@@ -2484,6 +2635,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     await releaseSessionResources()
                     state = .idle
                 }
+                trial?.trialBusy = false
+                trial?.trialStatus = msg
                 // The bubble can be switched off entirely (Settings → Captions),
                 // and a bare "Error" in the menu is then the only thing a failed
                 // first download says. Put the reason where it is always visible.
@@ -2510,9 +2663,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// again while the previous watermark is still draining; the newest gap is
     /// the only boundary worth committing.
     private func scheduleSpeechGapCommit(_ range: Range<Int>) {
-        speechGapTask?.cancel()
+        captionResources.gapTask?.cancel()
         let generation = sessionGeneration
-        speechGapTask = Task { @MainActor [weak self] in
+        captionResources.gapTask = Task { @MainActor [weak self] in
             await self?.commitAtSpeechGap(range, generation: generation)
         }
     }
@@ -2524,7 +2677,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// the model is faster or slower than the balanced tier.
     private func commitAtSpeechGap(_ range: Range<Int>, generation: Int) async {
         guard state == .running, generation == sessionGeneration else { return }
-        guard let backend = captionBackend else { return }
+        guard let backend = captionResources.backend else { return }
         let sampleRate = await backend.inputFormat?.sampleRate ?? 16_000
         let target = Int(ceil(Double(range.upperBound)
                               / SystemAudioCapture.streamSampleRate
@@ -2618,16 +2771,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // if we tore down here without waiting it would resume afterwards and
         // bring the audio stream up behind our back — capture running with the
         // menu reading "Start captions".
-        sessionTask?.cancel()
-        await sessionTask?.value
-        sessionTask = nil
+        captionResources.startTask?.cancel()
+        await captionResources.startTask?.value
+        captionResources.startTask = nil
 
         // A translator swap is fired and forgotten from the notification, so it
         // can be mid-load right now and would otherwise finish onto a session
         // that no longer exists.
-        translatorSwap?.cancel()
-        await translatorSwap?.value
-        translatorSwap = nil
+        translationRuntime.swap?.cancel()
+        await translationRuntime.swap?.value
+        translationRuntime.swap = nil
 
         // Order inside: backend.stop() emits whatever was still volatile, and
         // closeSentence() catches the sentence it lands in, so the last thing
@@ -2648,32 +2801,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     ///
     /// Split out of `stopAsync()` so the failed-start path can share it. The
     /// property that makes that safe is what it does NOT do: it never touches
-    /// `sessionTask`. Calling `stopAsync()` from inside the start Task would
-    /// make that task await its own `sessionTask?.value` and never return.
+    /// `captionResources.startTask`. Calling `stopAsync()` from inside the start Task would
+    /// make that task await its own `captionResources.startTask?.value` and never return.
     ///
-    /// Every step is safe on a session that never got that far — `capture.stop()`
+    /// Every step is safe on a session that never got that far — `captionResources.capture.stop()`
     /// nils a stream that was never created, `backend.stop()` no-ops on a nil
     /// pump, `TranscriptStore.end()` returns on a nil handle — which is why the
     /// two callers can both run it without coordinating.
     @MainActor
     private func releaseSessionResources() async {
-        speechGapTask?.cancel()
-        speechGapTask = nil
-        await capture.stop()
-        // Stop delivering audio before returning the lease. Otherwise a capture
-        // callback racing teardown can feed a backend that the pool has already
-        // marked idle.
-        captureSink.point(at: nil)
-        if let backend = captionBackend {
-            await backend.stop()
-            await asrBackendPool.release(backend, discard: false)
-            captionBackend = nil
+        if let timeline = await captionResources.stopAudio() {
+            captionSpeakerTimeline = timeline
+            refreshCaptionSpeakers()
         }
         closeSentence()
         if await TranscriptStore.shared.isRecording {
             await transcriptWriteChain?.value
         }
-        transcriptWriteChain = nil
         await endRecording()
         MemoryPolicy.releaseCaches()
         NSLog("sAiity memory: session released — \(MemoryPolicy.describeFootprint())")
@@ -2683,8 +2827,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @MainActor
     private func releaseModels() async {
         await stopAsync()
+        // A second deletion request can arrive while stopAsync is already in
+        // .stopping. Wait for the optional native owner too before unlinking.
+        captionResources.speakerSink.point(at: nil)
+        captionResources.speakerPreparation?.cancel()
+        await captionResources.speakerPreparation?.value
+        await captionResources.speakerTracker?.stop()
         await dictationController.invalidatePreparedBackend()
-        await asrBackendPool.replace(with: AppDelegate.makeActiveBackend())
+        await captionResources.pool.replace(with: AppDelegate.makeActiveBackend())
         await unloadTranslator(reason: "model deletion")
         await dictationCleanupSession.invalidate()
     }
@@ -2709,7 +2859,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .silent:
             // Utterance boundary: commit the volatile tail so it reaches the
             // transcript and the translator.
-            if let backend = captionBackend {
+            if let backend = captionResources.backend {
                 Task { await backend.flushPending() }
             }
             setStatus("Listening · nothing is playing")
@@ -2732,6 +2882,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // After committing a sentence the engine often emits a lone "." as the
         // start of the next one; showing that would blank the bar to a dot.
         guard text.rangeOfCharacter(from: .alphanumerics) != nil else { return }
+        if let model = onboardingTrialModel, model.trial == .captions {
+            model.trialText = text
+            model.trialStatus = String(localized: "Captions worked. Keep playing speech or choose Stop Captions.")
+        }
         if let startedAt = subtitleSessionStartedAt {
             let elapsed = captionCaptureStartedAt.map { elapsedSeconds(since: $0) }
                 ?? Date().timeIntervalSince(startedAt)
@@ -2863,7 +3017,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard sentenceID == displayLifecycle.sentenceID,
               !displayLifecycle.sentenceClosed,
               !displayLifecycle.isCleared(sentenceID),
-              translateTo != nil, translatorReady,
+              translateTo != nil, translationRuntime.ready,
               CaptionStyle.current.showTranslation else { return }
         // The close path skips lines already in the target language; making
         // the same call about the same text here keeps live mode from filling
@@ -2899,10 +3053,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
                 scheduleTranslatorEvictionIfIdle()
             }
-            beginTranslatorUse()
-            defer { endTranslatorUse() }
-            guard let engine = activeTranslator else { return }
-            let engineKind = activeTranslatorEngine
+            translationRuntime.beginUse()
+            defer { translationRuntime.endUse() }
+            guard let engine = translationRuntime.active else { return }
+            let engineKind = translationRuntime.engine
             let out: String
             switch await runCaptionTranslation(text, fallbackSource: srcCode,
                                                target: target, engine: engine) {
@@ -2970,16 +3124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// so short lines never skip.
     private func alreadyInTargetLanguage(_ text: String) -> Bool {
         guard text.count >= 12, let target = translateTo else { return false }
-        let fallback = LanguageDetector.languageCode(in: text)
-            ?? detectedLanguage
-            ?? locale.identifier(.bcp47)
-        let spans = CaptionLanguageSpanDetector.analyze(text,
-                                                         fallbackLanguage: fallback)
-        guard !spans.isEmpty else { return false }
-        return spans.allSatisfy { span in
-            guard let language = span.language else { return false }
-            return TranslationLanguage.isSame(language, as: target)
-        }
+        return TranslationProcedure.isAlreadyInTarget(text, target: target)
     }
 
     private func captionSourceLanguage(for text: String) -> String {
@@ -3000,38 +3145,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             fallbackLanguage: fallbackSource)
         guard !spans.isEmpty else { return nil }
         guard CaptionLanguageSpanDetector.isMixed(spans) else {
-            return try await engine.translate(text, from: fallbackSource, to: target)
+            return try await TranslationProcedure.translate([.init(text: text, source: fallbackSource)],
+                to: target, engine: engine)
         }
 
-        var translated = spans.map(\.text)
-        var pending: [(index: Int, span: CaptionLanguageSpan)] = []
-        for (index, span) in spans.enumerated() {
-            guard let source = span.language else { continue }
-            if TranslationLanguage.isSame(source, as: target) { continue }
-            pending.append((index, span))
-        }
-
-        if pending.count > 1 {
-            let regions = pending.map {
-                TranslationRegion(text: $0.span.text, source: $0.span.language ?? "auto")
-            }
-            if let values = try await engine.translateRegions(regions, to: target),
-               values.count == pending.count {
-                for (item, value) in zip(pending, values) where !value.isEmpty {
-                    translated[item.index] = value
-                }
-            }
-        }
-
-        for item in pending where translated[item.index] == item.span.text {
-            guard let source = item.span.language else { continue }
-            guard let value = try await engine.translate(item.span.text,
-                                                          from: source,
-                                                          to: target),
-                  !value.isEmpty else { continue }
-            translated[item.index] = value
-        }
-        return CaptionTextMerger.join(translated)
+        return try await TranslationProcedure.translate(spans.map {
+            .init(text: $0.text, source: $0.language ?? "auto")
+        }, to: target, engine: engine)
     }
 
     private func emitSentence(_ text: String, chunk: TranscriptChunk, sentenceID: Int) {
@@ -3053,7 +3173,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // owns any later switch.
             Task { @MainActor [weak self] in
                 guard let self, self.detectedLanguage == nil,
-                      let backend = self.captionBackend,
+                      let backend = self.captionResources.backend,
                       let audio = await backend.detectedLanguage() else { return }
                 let code = audio.split(separator: "-").first.map(String.init) ?? audio
                 self.detectedLanguage = code
@@ -3084,18 +3204,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // target changed from the menu bar mid-flight could translate a line
         // into one language and record another.
         let target = translateTo
-        let translationEngine = activeTranslatorEngine ?? TranslationEngine.effective
-        let translationGeneration = translatorGeneration
+        let translationEngine = translationRuntime.engine ?? TranslationEngine.effective
+        let translationGeneration = translationRuntime.generation
 
-        // Backpressure: see maxPendingTranslations. `translatorReady` is in the
+        // Backpressure: see maxPendingTranslations. `translationRuntime.ready` is in the
         // test as well, so a line is not queued against a translator that has
         // not loaded — it kept a slot and produced nothing.
-        let translating = wantsTranslation && translatorReady
+        let translating = wantsTranslation && translationRuntime.ready
             && pendingTranslations < Self.maxPendingTranslations
         if translating {
             pendingTranslations += 1
         } else if wantsTranslation {
-            NSLog("sAiity translate: skipped, ready=\(translatorReady), \(pendingTranslations) queued")
+            NSLog("sAiity translate: skipped, ready=\(translationRuntime.ready), \(pendingTranslations) queued")
         }
 
         // A turn break when ≥2 s of audio-clock silence sits between this
@@ -3119,6 +3239,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                     tr: nil, trLoc: nil,
                                     words: chunk.words.isEmpty ? nil : chunk.words,
                                     turn: turn ? true : nil))
+        captionSentenceIDs[idx] = sentenceID
+        refreshCaptionSpeakers()
 
         // Translate concurrently; the result is patched in by index.
         let translation: Task<String?, Never> = Task { @MainActor in
@@ -3130,11 +3252,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if self.sessionGeneration == generation {
                     self.pendingTranslations -= 1
                     self.captionTranslationTasks[idx] = nil
+                    self.captionTranslationTargets[idx] = nil
                 }
                 self.scheduleTranslatorEvictionIfIdle()
             }
             guard self.sessionGeneration == generation,
-                  self.translatorGeneration == translationGeneration,
+                  self.translationRuntime.generation == translationGeneration,
                   let target else { return nil }
 
             let out: String
@@ -3144,10 +3267,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 // save the translation on disk while leaving the live row stale.
                 out = cachedTranslation
             } else {
-                self.beginTranslatorUse()
-                defer { self.endTranslatorUse() }
-                guard let engine = activeTranslator else { return nil }
-                let engineKind = activeTranslatorEngine
+                self.translationRuntime.beginUse()
+                defer { self.translationRuntime.endUse() }
+                guard let engine = translationRuntime.active else { return nil }
+                let engineKind = translationRuntime.engine
                 switch await self.runCaptionTranslation(text, fallbackSource: srcCode,
                                                         target: target, engine: engine) {
                 case .translated(let translated):
@@ -3166,13 +3289,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
 
             guard self.sessionGeneration == generation,
-                  self.translatorGeneration == translationGeneration else { return nil }
+                  self.translationRuntime.generation == translationGeneration else { return nil }
             if cachedTranslation == nil {
                 self.captionTranslationCache[translationKey] = out
             }
             if TestHooks.verboseLogging, cachedTranslation == nil {
                 NSLog("sAiity translated engine=%@ chars=%d target=%@",
-                      activeTranslatorEngine?.rawValue ?? "unknown", out.count, target)
+                      translationRuntime.engine?.rawValue ?? "unknown", out.count, target)
             }
             if idx < self.sessionLines.count {
                 self.sessionLines[idx].tr = out
@@ -3198,34 +3321,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             return out
         }
-        if translating { captionTranslationTasks[idx] = translation }
+        if translating {
+            captionTranslationTasks[idx] = translation
+            captionTranslationTargets[idx] = target
+        }
 
-        // The on-disk store is append-only, so ORDER at the write is what makes
-        // exports correct. Chain the writes: each link awaits the previous one,
-        // then its own translation — lines land in claim order however long any
-        // individual translation takes, and each still hits disk as soon as it
-        // can, preserving the crash-safety of line-at-a-time appends.
+        // Persist original speech in order without waiting for native translation.
+        // A separate append-only patch carries the translation by session/row.
         pendingTranscriptWrites += 1
-        transcriptWriteChain = Task { @MainActor [previous = transcriptWriteChain] in
-            // Counted, not chained: `transcriptWriteChain` is only cleared on
-            // teardown, so it cannot say whether a write is still outstanding.
-            // Quitting needs exactly that answer.
+        let recordSource = recordingSince != nil
+        let recordingLocale = srcCode
+        let recording = Task { @MainActor [previous = transcriptWriteChain] () -> TranscriptStore.RecordedSegment? in
             defer { self.pendingTranscriptWrites -= 1 }
             await previous?.value
-            let tr = await translation.value
-            if await TranscriptStore.shared.isRecording {
-                // Same rule on disk: the target is recorded only when there is a
-                // translation to attach it to. This path never saw `translating`
-                // at all, so it was the one that always claimed one.
+            if recordSource {
                 do {
-                    try await TranscriptStore.shared.append(
-                        chunk, locale: self.locale.identifier(.bcp47),
-                        translation: tr,
-                        translateTo: tr == nil ? nil : target,
+                    let recorded = try await TranscriptStore.shared.append(
+                        chunk, locale: recordingLocale,
+                        translation: nil, translateTo: nil,
                         turn: turn)
-                    self.recordedLines += 1
+                    if recorded != nil { self.recordedLines += 1 }
+                    if let recorded, self.sessionGeneration == generation {
+                        self.captionRecordedSegments[idx] = recorded
+                        let line = self.sessionLines[idx]
+                        if line.speaker != nil || line.overlappingSpeech == true {
+                            self.recordSpeaker(.init(speaker: line.speaker, overlapping: line.overlappingSpeech == true), to: recorded)
+                        }
+                    }
+                    return recorded
                 } catch {
                     self.transcriptRecordingFailed(error)
+                }
+            }
+            return nil
+        }
+        transcriptWriteChain = Task { _ = await recording.value }
+        if translating {
+            pendingTranscriptWrites += 1
+            Task { @MainActor in
+                defer { self.pendingTranscriptWrites -= 1 }
+                guard let recorded = await recording.value,
+                      let out = await translation.value, let target else { return }
+                do {
+                    try await TranscriptStore.shared.appendTranslation(out, to: recorded, target: target)
+                } catch {
+                    Diagnostics.recordFailure(operation: "transcript.translation", reason: DiagnosticsRedactor.redact(error.localizedDescription))
                 }
             }
         }

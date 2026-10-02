@@ -13,6 +13,70 @@ import Testing
 /// transcripts in parallel must not be able to see — or delete — this one's.
 @MainActor
 struct TranscriptStoreTests {
+    @Test("library cache keys include the session path, not just its timestamp name")
+    func libraryRootsDoNotShareCachedSessions() async throws {
+        try await withTemporaryLibrary { _ in
+            let segments = [Segment(i: 0, t0: 0, t1: 1, text: "Hello", loc: "en", tr: nil, trLoc: nil, words: nil)]
+            let started = Date(timeIntervalSince1970: 1_000)
+            let first = try TranscriptStore.saveSession(segments, locale: "en", translateTo: nil, startedAt: started)
+            let firstMeta = first.url.appendingPathComponent("meta.json")
+            try FileManager.default.setAttributes([.modificationDate: started], ofItemAtPath: firstMeta.path)
+            #expect(TranscriptStore.list().first?.url == first.url)
+            try await withTemporaryLibrary { _ in
+                let second = try TranscriptStore.saveSession(segments, locale: "en", translateTo: nil, startedAt: started)
+                let secondMeta = second.url.appendingPathComponent("meta.json")
+                try Data(contentsOf: firstMeta).write(to: secondMeta)
+                try FileManager.default.setAttributes([.modificationDate: started], ofItemAtPath: secondMeta.path)
+                #expect(TranscriptStore.list().first?.url == second.url)
+            }
+            #expect(TranscriptStore.list().first?.url == first.url)
+        }
+    }
+    @Test("late speaker labels patch their original session and survive export/reopening")
+    func lateSpeakerPatches() async throws {
+        try await withTemporaryLibrary { _ in
+            let store = TranscriptStore()
+            try await store.begin(locale: "en", translateTo: "de")
+            let recorded = try #require(try await store.append(chunk("Hello", 0, 1), locale: "en", translation: nil, translateTo: nil))
+            try await store.end()
+            let first = try #require(TranscriptStore.list().first { $0.url == recorded.session })
+            try await store.begin(locale: "en", translateTo: nil)
+            try await store.append(chunk("New session", 0, 1), locale: "en", translation: nil, translateTo: nil)
+            try await store.appendSpeaker(.init(speaker: "voice-2", overlapping: false), to: recorded)
+            try await store.appendTranslation("Hallo", to: recorded, target: "de")
+            let lines = TranscriptStore.segments(of: first)
+            #expect(lines.first?.speaker == "voice-2")
+            #expect(lines.first?.tr == "Hallo")
+            #expect(Export.txt(lines).contains("[Speaker 2] Hello"))
+            #expect(first.meta.lineCount == 1)
+            try await store.appendSpeaker(.init(speaker: nil, overlapping: true), to: recorded)
+            #expect(TranscriptStore.segments(of: first).first?.overlappingSpeech == true)
+            #expect(TranscriptStore.segments(of: first).first?.speaker == nil)
+            try await store.end()
+            let second = try #require(TranscriptStore.list().first { $0.url != recorded.session })
+            #expect(TranscriptStore.segments(of: second).first?.speaker == nil)
+        }
+    }
+    @Test("original rows survive pending translation and patches target the original closed session")
+    func independentTranslationPatches() async throws {
+        try await withTemporaryLibrary { _ in
+            let store = TranscriptStore()
+            try await store.begin(locale: "de", translateTo: "en")
+            let first = try #require(try await store.append(chunk("Erste Zeile", 0, 1), locale: "de", translation: nil, translateTo: nil))
+            try await store.end()
+            let old = try #require(TranscriptStore.list().first { $0.url == first.session })
+            #expect(TranscriptStore.segments(of: old).map(\.text) == ["Erste Zeile"])
+            try await store.begin(locale: "de", translateTo: "fr")
+            let next = try #require(try await store.append(chunk("Neue Sitzung", 0, 1), locale: "de", translation: nil, translateTo: nil))
+            try await store.appendTranslation("First line", to: first, target: "en")
+            #expect(TranscriptStore.segments(of: old).map(\.tr) == ["First line"])
+            try await store.end()
+            let latest = try #require(TranscriptStore.list().first { $0.url == next.session })
+            #expect(TranscriptStore.segments(of: latest).map(\.tr) == [nil])
+            #expect(latest.meta.lineCount == 1)
+            #expect(Export.srt(TranscriptStore.segments(of: old)).contains("First line"))
+        }
+    }
 
     /// Run `body` against a throwaway library.
     ///

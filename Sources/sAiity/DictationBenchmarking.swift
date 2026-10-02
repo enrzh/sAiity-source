@@ -34,11 +34,29 @@ struct DictationBenchmarkManifest: Codable, Equatable, Sendable {
 }
 
 enum DictationBenchmarkScorer {
+    struct Errors: Equatable, Sendable {
+        var substitutions = 0
+        var deletions = 0
+        var insertions = 0
+        var total: Int { substitutions + deletions + insertions }
+    }
+
+    static func wordErrors(reference: String, hypothesis: String) -> Errors {
+        alignment(tokens(reference), tokens(hypothesis))
+    }
+
+    static func characterErrorRate(reference: String, hypothesis: String) -> Double {
+        let left = reference.lowercased().filter { $0.isLetter || $0.isNumber }.map(String.init)
+        let right = hypothesis.lowercased().filter { $0.isLetter || $0.isNumber }.map(String.init)
+        guard !left.isEmpty else { return right.isEmpty ? 0 : 1 }
+        return Double(alignment(left, right).total) / Double(left.count)
+    }
+
     static func wordErrorRate(reference: String, hypothesis: String) -> Double {
         let referenceTokens = tokens(reference)
         let hypothesisTokens = tokens(hypothesis)
         guard !referenceTokens.isEmpty else { return hypothesisTokens.isEmpty ? 0 : 1 }
-        return Double(editDistance(referenceTokens, hypothesisTokens)) / Double(referenceTokens.count)
+        return Double(alignment(referenceTokens, hypothesisTokens).total) / Double(referenceTokens.count)
     }
 
     /// Compares normalized region language sequences without treating a
@@ -99,16 +117,19 @@ enum DictationBenchmarkScorer {
         }
     }
 
-    private static func editDistance(_ lhs: [String], _ rhs: [String]) -> Int {
-        var previous = Array(0...rhs.count)
+    private static func alignment(_ lhs: [String], _ rhs: [String]) -> Errors {
+        var previous = (0...rhs.count).map { Errors(insertions: $0) }
         for (row, left) in lhs.enumerated() {
-            var current = [row + 1]
+            var current = [Errors(deletions: row + 1)]
             current.reserveCapacity(rhs.count + 1)
             for (column, right) in rhs.enumerated() {
-                let substitution = previous[column] + (left == right ? 0 : 1)
-                let insertion = current[column] + 1
-                let deletion = previous[column + 1] + 1
-                current.append(min(substitution, insertion, deletion))
+                var substitution = previous[column]
+                if left != right { substitution.substitutions += 1 }
+                var insertion = current[column]
+                insertion.insertions += 1
+                var deletion = previous[column + 1]
+                deletion.deletions += 1
+                current.append([substitution, insertion, deletion].min { $0.total < $1.total }!)
             }
             previous = current
         }

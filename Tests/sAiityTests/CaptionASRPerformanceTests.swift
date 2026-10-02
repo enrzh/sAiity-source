@@ -10,6 +10,10 @@ import Testing
 /// backlog describe the live caption path, not a burst-decoding stress test.
 @Suite(.serialized)
 struct CaptionASRPerformanceTests {
+    private static func requested(_ name: String) -> Bool {
+        let models = ProcessInfo.processInfo.environment["SAIITY_CAPTION_BENCHMARK_MODELS"] ?? "nemotron"
+        return models.split(separator: ",").contains(Substring(name))
+    }
     private struct BenchmarkError: Error, CustomStringConvertible {
         let description: String
         init(_ description: String) { self.description = description }
@@ -29,7 +33,7 @@ struct CaptionASRPerformanceTests {
         let firstFinalSeconds: Double?
 
         var finalText: String {
-            CaptionTextMerger.join(chunks.filter { $0.isFinal }.map(\.text))
+            chunks.filter { $0.isFinal }.reduce("") { CaptionTextMerger.concatenate($0, $1.text) }
         }
     }
 
@@ -39,9 +43,20 @@ struct CaptionASRPerformanceTests {
         private var chunks: [TranscriptChunk] = []
         private var firstVolatile: Double?
         private var firstFinal: Double?
+        private let translator: (any Translating)?
+        private let target: String
+        private let gate = TranslationInferenceGate()
+        private var translationTasks: [Task<Void, Never>] = []
+        private var pendingTranslations = 0
+        private var skippedTranslations = 0
+        private var translationFailures = 0
+        private var translatedLines = 0
+        private var gateWaitSeconds = 0.0
 
-        init(started: ContinuousClock.Instant) {
+        init(started: ContinuousClock.Instant, translator: (any Translating)?, target: String) {
             self.started = started
+            self.translator = translator
+            self.target = target
         }
 
         func append(_ chunk: TranscriptChunk) {
@@ -55,7 +70,31 @@ struct CaptionASRPerformanceTests {
                 } else {
                     firstVolatile = firstVolatile ?? seconds
                 }
+                if chunk.isFinal, let translator {
+                    guard pendingTranslations < 4 else { skippedTranslations += 1; return }
+                    pendingTranslations += 1
+                    let queued = ContinuousClock.now
+                    translationTasks.append(Task { [self] in
+                        defer { lock.withLock { pendingTranslations -= 1 } }
+                        do {
+                            let output = try await gate.run { [self] in
+                                let wait = Self.seconds(queued.duration(to: .now))
+                                lock.withLock { gateWaitSeconds += wait }
+                                return try await translator.translate(text,
+                                    from: LanguageDetector.languageCode(in: text) ?? "auto", to: target)
+                            }
+                            lock.withLock { if output != nil { translatedLines += 1 } else { skippedTranslations += 1 } }
+                        } catch { lock.withLock { translationFailures += 1 } }
+                    })
+                }
             }
+        }
+
+        func translationMetrics() async -> [String: Any] {
+            let tasks = lock.withLock { translationTasks }
+            for task in tasks { await task.value }
+            return lock.withLock { ["translatedLines": translatedLines, "translationSkipped": skippedTranslations,
+                                    "translationFailures": translationFailures, "translationGateWaitSeconds": gateWaitSeconds] }
         }
 
         func snapshot() -> Snapshot {
@@ -175,6 +214,8 @@ struct CaptionASRPerformanceTests {
         return buffer
     }
 
+    static func audioBufferForDictation(_ samples: ArraySlice<Float>) -> AVAudioPCMBuffer { audioBuffer(samples) }
+
     private static func durationSeconds(_ duration: Duration) -> Double {
         let components = duration.components
         return Double(components.seconds)
@@ -207,9 +248,10 @@ struct CaptionASRPerformanceTests {
                             model: String,
                             run: Int,
                             backend: StreamingASRBackend,
-                            metrics: MetricsBox) async throws {
+                            metrics: MetricsBox,
+                            translator: (any Translating)?, target: String) async throws {
         let started = ContinuousClock.now
-        let observation = Observation(started: started)
+        let observation = Observation(started: started, translator: translator, target: target)
         metrics.reset()
         try await backend.start { observation.append($0) }
         do {
@@ -235,21 +277,28 @@ struct CaptionASRPerformanceTests {
             "audioSeconds": Double(fixture.samples.count) / 16_000,
             "outputChars": snapshot.finalText.count,
             "finalRegions": snapshot.chunks.filter { $0.isFinal }.count,
-            // The transcript itself, not just its score. Two engines can reach
-            // the same WER by failing in opposite ways, and a comparison you
-            // cannot read is a comparison you cannot act on: an engine that
-            // scores well by emitting the reference back, or by going quiet on
-            // one language and loud on another, is not a win.
-            "text": snapshot.finalText,
+            "physicalMemoryBytes": MemoryPolicy.physicalFootprint(),
             "firstVolatileSeconds": snapshot.firstVolatileSeconds ?? NSNull(),
             "firstFinalSeconds": snapshot.firstFinalSeconds ?? NSNull(),
             "finalizationSeconds": finalizationSeconds,
             "elapsedSeconds": durationSeconds(started.duration(to: .now)),
         ]
+        let translationMetrics = await observation.translationMetrics()
+        fields.merge(translationMetrics, uniquingKeysWith: { _, new in new })
+        fields["translationDrainSeconds"] = durationSeconds(stopStarted.duration(to: .now)) - finalizationSeconds
+        fields["translationEngine"] = ProcessInfo.processInfo.environment["SAIITY_CAPTION_BENCHMARK_TRANSLATION"] ?? "off"
+        if translationMetrics["translationFailures"] as? Int != 0 {
+            throw BenchmarkError("\(fixture.name): native translation failed")
+        }
+        if ProcessInfo.processInfo.environment["SAIITY_BENCHMARK_INCLUDE_TEXT"] == "1" {
+            fields["text"] = snapshot.finalText
+        }
         if let expectedText = fixture.expectedText {
             let wer = DictationBenchmarkScorer.wordErrorRate(reference: expectedText,
                                                               hypothesis: snapshot.finalText)
             fields["wer"] = wer
+            fields["cer"] = DictationBenchmarkScorer.characterErrorRate(reference: expectedText, hypothesis: snapshot.finalText)
+            fields["missingWords"] = DictationBenchmarkScorer.wordErrors(reference: expectedText, hypothesis: snapshot.finalText).deletions
             if let maxWER = fixture.maxWER, wer > maxWER {
                 throw BenchmarkError("\(fixture.name): \(model) WER \(wer) exceeds max \(maxWER)")
             }
@@ -290,30 +339,62 @@ struct CaptionASRPerformanceTests {
         let configuredRuns = Int(ProcessInfo.processInfo.environment["SAIITY_CAPTION_BENCHMARK_RUNS"]
             ?? "3") ?? 3
         let runs = min(max(configuredRuns, 1), 10)
+        let target = ProcessInfo.processInfo.environment["SAIITY_CAPTION_BENCHMARK_TARGET"] ?? "de"
+        let translator: (any Translating)?
+        if ProcessInfo.processInfo.environment["SAIITY_CAPTION_BENCHMARK_TRANSLATION"] == "madlad" {
+            MADLADTranslator.metalLibraryRootOverride = URL(fileURLWithPath:
+                ProcessInfo.processInfo.environment["SAIITY_BENCHMARK_RESOURCE_ROOT"]
+                ?? "\(FileManager.default.currentDirectoryPath)/.build/release/sAiityTests.xctest/Contents/MacOS")
+        }
+        defer { MADLADTranslator.metalLibraryRootOverride = nil }
+        switch ProcessInfo.processInfo.environment["SAIITY_CAPTION_BENCHMARK_TRANSLATION"] ?? "off" {
+        case "off": translator = nil
+        case "hy-mt2":
+            guard HyMT2Translator.isDownloaded else {
+                throw BenchmarkError("Installed Hy-MT2 required; downloads disabled")
+            }
+            translator = HyMT2Translator()
+        case "madlad":
+            guard MADLADTranslator.isDownloaded(), MADLADTranslator.hasBundledMetalLibrary else {
+                throw BenchmarkError("Installed MADLAD and test-bundle Metal resources required; downloads disabled")
+            }
+            translator = MADLADTranslator()
+        default: throw BenchmarkError("Unsupported caption benchmark translation engine")
+        }
         do {
+            if let translator {
+                let start = ContinuousClock.now
+                try await translator.prepare(from: "auto", to: target) { _ in }
+                try record(["model": model, "phase": "translation_prepare",
+                            "seconds": durationSeconds(start.duration(to: .now)),
+                            "physicalMemoryBytes": MemoryPolicy.physicalFootprint()])
+            }
             let prepareStart = ContinuousClock.now
             try await backend.prepare(locale: Locale(identifier: "auto")) { _ in }
             try record(try await coldPrepare().merging(
                 ["model": model,
                  "phase": "cold_prepare",
+                 "physicalMemoryBytes": MemoryPolicy.physicalFootprint(),
                  "seconds": durationSeconds(prepareStart.duration(to: .now))],
                 uniquingKeysWith: { _, new in new }))
             for fixture in inputs {
                 for run in 1...runs {
                     // Qualified: the loop variable `run` shadows the method.
                     try await Self.run(fixture, model: model, run: run,
-                                       backend: backend, metrics: metrics)
+                                       backend: backend, metrics: metrics, translator: translator, target: target)
                 }
             }
         } catch {
             await backend.release()
+            await translator?.stop()
             throw error
         }
         await backend.release()
+        await translator?.stop()
     }
 
     @Test("Installed Nemotron live-caption latency and backlog benchmark",
-          .enabled(if: !(ProcessInfo.processInfo.environment["SAIITY_CAPTION_BENCHMARK_DIR"] ?? "").isEmpty))
+          .enabled(if: requested("nemotron") && !(ProcessInfo.processInfo.environment["SAIITY_CAPTION_BENCHMARK_DIR"] ?? "").isEmpty))
     func installedNemotronBenchmark() async throws {
         let path = try #require(ProcessInfo.processInfo.environment["SAIITY_CAPTION_BENCHMARK_DIR"])
         let inputs = try fixtures(in: URL(fileURLWithPath: path, isDirectory: true))
@@ -343,6 +424,26 @@ struct CaptionASRPerformanceTests {
             metrics: metrics)
     }
 
+    @Test("Installed production Qwen caption adapter",
+          .enabled(if: !(ProcessInfo.processInfo.environment["SAIITY_CAPTION_BENCHMARK_DIR"] ?? "").isEmpty
+                && (requested("qwen-small") || requested("qwen-large"))))
+    func installedQwenBenchmark() async throws {
+        let path = try #require(ProcessInfo.processInfo.environment["SAIITY_CAPTION_BENCHMARK_DIR"])
+        let inputs = try fixtures(in: URL(fileURLWithPath: path, isDirectory: true))
+        let resources = URL(fileURLWithPath: ProcessInfo.processInfo.environment["SAIITY_BENCHMARK_RESOURCE_ROOT"]
+            ?? "\(FileManager.default.currentDirectoryPath)/.build/release/sAiityTests.xctest/Contents/MacOS", isDirectory: true)
+        for size in [QwenASREngine.Size.small, .large] where Self.requested("qwen-\(size.rawValue)") {
+            guard QwenASREngine.isDownloaded(size) else {
+                throw BenchmarkError("Missing installed production Qwen \(size.rawValue); downloads are disabled")
+            }
+            let metrics = MetricsBox()
+            try await Self.benchmark(model: "qwen-\(size.rawValue)", coldPrepare: { [:] }, inputs: inputs,
+                backend: StreamingASRBackend(name: "Qwen caption benchmark",
+                    engine: QwenASREngine(size: size, resourceRoot: resources), onMetrics: { metrics.set($0) }),
+                metrics: metrics)
+        }
+    }
+
     /// The same run against Whisper large-v3-turbo, so the two engines can be
     /// compared on identical audio.
     ///
@@ -353,7 +454,7 @@ struct CaptionASRPerformanceTests {
     ///
     /// Set SAIITY_CAPTION_BENCHMARK_WHISPER=1 alongside the directory.
     @Test("Installed Whisper turbo live-caption benchmark",
-          .enabled(if: ProcessInfo.processInfo.environment["SAIITY_CAPTION_BENCHMARK_WHISPER"] == "1"
+          .enabled(if: (requested("whisper") || ProcessInfo.processInfo.environment["SAIITY_CAPTION_BENCHMARK_WHISPER"] == "1")
                    && !(ProcessInfo.processInfo.environment["SAIITY_CAPTION_BENCHMARK_DIR"] ?? "").isEmpty))
     func installedWhisperTurboBenchmark() async throws {
         let path = try #require(ProcessInfo.processInfo.environment["SAIITY_CAPTION_BENCHMARK_DIR"])

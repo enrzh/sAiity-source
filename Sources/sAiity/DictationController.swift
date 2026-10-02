@@ -20,6 +20,8 @@ extension DictationMicrophoneCapture: DictationAudioCapture {}
 
 @MainActor
 protocol DictationTextInsertion: AnyObject {
+    func captureFocus() -> DictationFocusToken?
+    func insert(_ text: String, expecting expected: DictationFocusToken?) -> TextInsertionResult
     func insert(_ text: String) -> TextInsertionResult
 }
 
@@ -82,6 +84,8 @@ final class DictationController {
     private var releaseTask: Task<Void, Never>?
     private var cleanupTask: Task<Void, Never>?
     private var sessionUsesWhisper = false
+    private var sessionIsTrial = false
+    private var sessionFocus: DictationFocusToken?
     private var sessionUsesStreamingDraft = false
     private var sessionLocale = Locale.current
     private var sessionSampleRate = 16_000.0
@@ -259,7 +263,7 @@ final class DictationController {
         phase = .waitingForInputMonitoring
     }
 
-    func press() {
+    func press(previewOnly: Bool = false) {
         guard !state.isActive else { return }
         // One session at a time, all the way through. A press while the
         // previous release is still transcribing, cleaning, translating or
@@ -272,6 +276,8 @@ final class DictationController {
         }
         guard state.begin() else { return }
 
+        sessionIsTrial = previewOnly
+        sessionFocus = previewOnly ? nil : inserter.captureFocus()
         generation += 1
         let session = generation
         sessionUsesWhisper = dictationUsesWhisper()
@@ -452,6 +458,14 @@ final class DictationController {
             }
             backend = acquired
             backendSession = session
+            acquired.setFailureHandler { [weak self] reason in
+                Task { @MainActor in
+                    guard let self, session == self.generation else { return }
+                    self.cancel()
+                    self.reportIssue("dictation.transcription", reason)
+                    self.phase = .failure(reason)
+                }
+            }
             guard let format = await acquired.inputFormat else {
                 throw BackendError.notPrepared
             }
@@ -553,18 +567,6 @@ final class DictationController {
                 if !latestDraftText.isEmpty {
                     onDraft(latestDraftText)
                 }
-                let sourceLanguage = await backend.detectedLanguage()
-                    ?? Locale.current.identifier(.bcp47)
-                let authoritative = await backend.finishDictation()?
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                let text = authoritative.flatMap { $0.isEmpty ? nil : $0 } ?? latestDraftText
-                await releaseOwnedBackend(session: session, discard: false)
-                guard session == generation else { return }
-                await finish(transcription: DictationTranscriptionResult(text: text,
-                                                                          language: sourceLanguage),
-                             session: session,
-                             fallbackSourceLanguage: sourceLanguage)
-                return
             }
             do {
                 let regions = segmenter.segment(samples, sampleRate: sessionSampleRate)
@@ -708,7 +710,13 @@ final class DictationController {
                                          wasTranslated: translated,
                                          languageMetadata: resultMetadata,
                                          cleanupUnavailable: cleanupUnavailable))
-        let result = inserter.insert(output)
+        // Setup trials use the complete pipeline without touching another app
+        // or replacing the person's clipboard.
+        if sessionIsTrial {
+            phase = .result(String(localized: "Trial complete"))
+            return
+        }
+        let result = inserter.insert(output, expecting: sessionFocus)
         if let releaseStarted { logDuration("release-to-insert", since: releaseStarted) }
         switch result.outcome {
         case .insertedAndCopied:
@@ -766,6 +774,7 @@ final class DictationController {
     /// did not know was a second session.
     private func releaseOwnedBackend(session: Int, discard: Bool) async {
         guard let active = backend, backendSession == session else { return }
+        active.setFailureHandler(nil)
         backend = nil
         backendSession = nil
         await backendProvider.release(active, discard: discard)

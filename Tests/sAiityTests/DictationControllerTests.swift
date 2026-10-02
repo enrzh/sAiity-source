@@ -231,6 +231,13 @@ import Testing
 
     final class FakeInserter: DictationTextInsertion {
         var inserted: [String] = []
+        var focus = DictationFocusToken(processIdentifier: 1, bundleIdentifier: "test.original")
+        var expectedFocus: DictationFocusToken?
+        func captureFocus() -> DictationFocusToken? { focus }
+        func insert(_ text: String, expecting expected: DictationFocusToken?) -> TextInsertionResult {
+            expectedFocus = expected
+            return insert(text)
+        }
 
         func insert(_ text: String) -> TextInsertionResult {
             inserted.append(text)
@@ -267,6 +274,72 @@ import Testing
                                                          .init(text: "hello from dictation", language: "en")
                                                      ])))
         #expect(controller.phase == .result("Copied to Clipboard"))
+    }
+
+    @Test("setup trial processes cleanup and translation without insertion, and normal dictation still inserts")
+    func trialDoesNotInsert() async {
+        let backend = FakeBackend(log: EventLog())
+        let capture = FakeCapture(log: EventLog())
+        let inserter = FakeInserter()
+        var output = ""
+        let controller = DictationController(makeBackend: { backend }, capture: capture,
+            inserter: inserter, captionsActive: { false },
+            translationConfiguration: { .init(enabled: true, target: "de") },
+            translate: { _, _, _ in "Hallo aus dem Test." },
+            cleanupConfiguration: { .init(enabled: true) },
+            cleanup: { text, _ in text + "." }, onResult: { output = $0.outputText })
+        controller.press(previewOnly: true)
+        await controller.waitForWorkForTests()
+        controller.release()
+        await controller.waitForWorkForTests()
+        #expect(output == "Hallo aus dem Test.")
+        #expect(inserter.inserted.isEmpty)
+        #expect(controller.phase == .result("Trial complete"))
+        controller.press()
+        await controller.waitForWorkForTests()
+        controller.release()
+        await controller.waitForWorkForTests()
+        #expect(inserter.inserted == ["Hallo aus dem Test."])
+    }
+
+    @Test("insertion uses the app captured at press, not the app focused after processing")
+    func focusIsCapturedBeforeProcessing() async {
+        let backend = FakeBackend(log: EventLog())
+        let inserter = FakeInserter()
+        let original = inserter.focus
+        let controller = DictationController(makeBackend: { backend }, capture: FakeCapture(log: EventLog()),
+            inserter: inserter, captionsActive: { false })
+        controller.press()
+        await controller.waitForWorkForTests()
+        inserter.focus = .init(processIdentifier: 2, bundleIdentifier: "test.other")
+        controller.release()
+        await controller.waitForWorkForTests()
+        #expect(inserter.expectedFocus == original)
+    }
+
+    @Test("closing a trial while transcription is pending cannot deliver a late result")
+    func cancelledTrialDoesNotDeliver() async {
+        let backend = FakeSegmentedBackend(log: EventLog())
+        backend.result = .init(text: "late result", language: "en")
+        let gate = ContinuationGate()
+        backend.transcriptionGate = gate
+        let capture = FakeCapture(log: EventLog())
+        capture.samples = Array(repeating: 0.2, count: 16_000)
+        let inserter = FakeInserter()
+        var results = 0
+        let controller = DictationController(makeBackend: { backend }, capture: capture,
+            inserter: inserter, captionsActive: { false }, onResult: { _ in results += 1 })
+        controller.press(previewOnly: true)
+        await controller.waitForWorkForTests()
+        controller.release()
+        for _ in 0..<1_000 where !gate.entered { await Task.yield() }
+        #expect(gate.entered)
+        controller.cancel()
+        gate.open()
+        await controller.waitForWorkForTests()
+        #expect(results == 0)
+        #expect(inserter.inserted.isEmpty)
+        #expect(capture.stopped)
     }
 
     @Test("Whisper dictation transcribes only after capture release")
@@ -647,10 +720,11 @@ import Testing
         #expect(inserter.inserted == ["Ich denke we should ship"])
     }
 
-    @Test("fast streaming dictation flushes the warm session instead of replaying audio")
+    @Test("realtime previews do not replace authoritative segmented dictation")
     func fastStreamingDictationUsesDraftSession() async {
         let backend = FakeSegmentedBackend(log: EventLog())
         backend.streamingResult = "Hallo world"
+        backend.result = .init(regions: [.init(text: "Guten Tag", language: "de"), .init(text: "world", language: "en")])
         let capture = FakeCapture(log: EventLog())
         capture.samples = [0.4, 0.4, 0.4]
         let inserter = FakeInserter()
@@ -674,15 +748,16 @@ import Testing
         await controller.waitForWorkForTests()
 
         #expect(draft == "Hallo world")
-        #expect(backend.finishDictationCalls == 1)
-        #expect(!backend.transcriptionStarted)
-        #expect(inserter.inserted == ["Hallo world"])
+        #expect(backend.finishDictationCalls == 0)
+        #expect(backend.transcriptionStarted)
+        #expect(inserter.inserted == ["Guten Tag world"])
     }
 
     @Test("the draft reaches the handler while the words are still being spoken")
     func draftsArriveDuringDictationNotOnlyAtTheStop() async {
         let backend = FakeSegmentedBackend(log: EventLog())
         backend.streamingResult = "Hallo world"
+        backend.result = .init(text: "Hallo world", language: "en")
         let capture = FakeCapture(log: EventLog())
         capture.samples = [0.4, 0.4, 0.4]
         let inserter = FakeInserter()

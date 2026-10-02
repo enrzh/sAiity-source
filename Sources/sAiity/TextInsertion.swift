@@ -96,15 +96,18 @@ final class TextInserter {
     private let accessibilityTrusted: @MainActor () -> Bool
     private let focusedElement: @MainActor () -> TextInsertionTarget?
     private let sendPaste: @MainActor () -> Bool
+    private let currentFocus: @MainActor () -> DictationFocusToken?
 
     init(pasteboard: any DictationPasteboard = SystemDictationPasteboard(),
          accessibilityTrusted: @escaping @MainActor () -> Bool = AXIsProcessTrusted,
          focusedElement: @escaping @MainActor () -> TextInsertionTarget? = TextInserter.currentFocusedElement,
-         sendPaste: @escaping @MainActor () -> Bool = TextInserter.postPaste) {
+         sendPaste: @escaping @MainActor () -> Bool = TextInserter.postPaste,
+         currentFocus: @escaping @MainActor () -> DictationFocusToken? = TextInserter.currentFocusToken) {
         self.pasteboard = pasteboard
         self.accessibilityTrusted = accessibilityTrusted
         self.focusedElement = focusedElement
         self.sendPaste = sendPaste
+        self.currentFocus = currentFocus
     }
 
     /// The frontmost app right now, for `captureFocus()`.
@@ -117,7 +120,7 @@ final class TextInserter {
     /// Record which app the user was in when dictation started. Call this at the
     /// press, not at the insertion.
     func captureFocus() -> DictationFocusToken? {
-        Self.currentFocusToken()
+        currentFocus()
     }
 
     /// Insert dictated text, but only into the app that was focused when
@@ -125,7 +128,7 @@ final class TextInserter {
     /// the text is still copied — it is just not pasted somewhere they did not
     /// ask for.
     func insert(_ text: String, expecting expected: DictationFocusToken?) -> TextInsertionResult {
-        if let expected, !Self.isStillFrontmost(expected) {
+        guard let expected, isStillFrontmost(expected) else {
             let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
             _ = pasteboard.setString(cleaned)
             return TextInsertionResult(outcome: .copied)
@@ -133,8 +136,8 @@ final class TextInserter {
         return insert(text)
     }
 
-    private static func isStillFrontmost(_ token: DictationFocusToken) -> Bool {
-        guard let current = currentFocusToken() else { return false }
+    private func isStillFrontmost(_ token: DictationFocusToken) -> Bool {
+        guard let current = currentFocus() else { return false }
         if current.processIdentifier != token.processIdentifier { return false }
         // Some apps expose no bundle identifier; the process identity is enough
         // in that case, and requiring both would reject perfectly good targets.

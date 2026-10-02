@@ -141,6 +141,8 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
     private var droppedPendingSamples = 0
     private var overloadEvents = 0
     private var processingErrorCount = 0
+    private var processingFailed = false
+    private var failureHandler: (@Sendable (String) -> Void)?
     private var acceptingAudio = true
     /// True while the backlog is over its cap, so the log records the onset
     /// rather than one line per audio callback, fifty times a second.
@@ -173,13 +175,14 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
     private var wakeContinuation: AsyncStream<Void>.Continuation?
     /// Waiters in `drain(toAudioSample:)`, keyed on the sample count they are
     /// waiting for. The pump resumes exactly the ones its progress has satisfied.
-    private var pendingDrainContinuations: [Int: AsyncStream<Void>.Continuation] = [:]
+    private var pendingDrainContinuations: [Int: [AsyncStream<Void>.Continuation]] = [:]
 
     #if SAIITY_TEST_HOOKS
     /// Test-only view of the backlog. The cap is the whole point of `feed`, and
     /// an unbounded queue is invisible from the outside until the machine runs
     /// out of memory — which is exactly how it was found.
     var pendingSampleCountForTests: Int { pendingLock.withLock { pending.count } }
+    var audioClockEndForTests: Int { pendingLock.withLock { audioClockEndSamples } }
     #endif
 
     /// Cancel the running pump and wait for it to actually leave the engine.
@@ -217,17 +220,18 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
         logAndResetPerformance()
         // Not `keepingCapacity`: a stopped session should not retain its
         // high-water audio allocation while the loaded model remains cached.
-        pendingLock.withLock {
+        let waiters = pendingLock.withLock { () -> [AsyncStream<Void>.Continuation] in
             pending.removeAll(keepingCapacity: false)
             processing = []
             overflowing = false
             acceptingAudio = false
             // A drain waiter whose pump has just stopped will never be resumed
             // by progress. Finish it rather than leaving it suspended.
-            let waiters = pendingDrainContinuations
+            let waiters = pendingDrainContinuations.values.flatMap { $0 }
             pendingDrainContinuations.removeAll()
-            for (_, continuation) in waiters { continuation.finish() }
+            return waiters
         }
+        for continuation in waiters { continuation.finish() }
     }
 
     init(name: String,
@@ -244,6 +248,27 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
 
     var inputFormat: AVAudioFormat? {
         get async { format }
+    }
+
+    func setFailureHandler(_ handler: (@Sendable (String) -> Void)?) {
+        pendingLock.withLock { failureHandler = handler }
+    }
+
+    private func processingDidFail(_ error: Error) {
+        let (handler, waiters) = pendingLock.withLock {
+            processingErrorCount += 1
+            processingFailed = true
+            acceptingAudio = false
+            processing.removeAll(keepingCapacity: false)
+            pending.removeAll(keepingCapacity: false)
+            let waiters = pendingDrainContinuations.values.flatMap { $0 }
+            pendingDrainContinuations.removeAll()
+            return (failureHandler, waiters)
+        }
+        let reason = DiagnosticsRedactor.redact(error.localizedDescription)
+        NSLog("sAiity ASR processing failed for %@: %@", name, reason)
+        handler?(reason)
+        for continuation in waiters { continuation.finish() }
     }
 
     func prepare(locale: Locale, progress: @escaping @Sendable (String) -> Void) async throws {
@@ -282,6 +307,7 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
             droppedPendingSamples = 0
             overloadEvents = 0
             processingErrorCount = 0
+            processingFailed = false
             audioClockEndSamples = 0
             acceptingAudio = true
         }
@@ -316,6 +342,9 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
                             self.pending.drain(upTo: self.processingBatchSamples(
                                 pendingSamples: self.pending.count),
                                                into: &self.processing)
+                            // Capture this clock with the batch under one lock;
+                            // later drops belong to the next batch, not this one.
+                            self.audioClockEndSamples = self.processedAudioSamples + self.droppedPendingSamples + self.processing.count
                             return !self.processing.isEmpty
                         }
                         guard hasBatch else {
@@ -323,22 +352,12 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
                             break
                         }
                         let batchSamples = self.processing.count
-                        self.pendingLock.withLock {
-                            self.audioClockEndSamples = self.processedAudioSamples + batchSamples
-                        }
                         let started = ContinuousClock.now
                         do {
                             try await self.engine.process(self.processing)
-                        } catch is CancellationError {
-                            self.pendingLock.withLock {
-                                self.processing.removeAll(keepingCapacity: true)
-                            }
-                            return
                         } catch {
-                            NSLog("sAiity ASR processing failed for \(self.name): \(error.localizedDescription)")
-                            self.pendingLock.withLock {
-                                self.processingErrorCount += 1
-                                self.processing.removeAll(keepingCapacity: true)
+                            if !Task.isCancelled {
+                                self.processingDidFail(error)
                             }
                             return
                         }
@@ -373,9 +392,9 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
             pendingDrainContinuations.filter { $0.key <= processed }
         }
         guard !ready.isEmpty else { return }
-        for (target, continuation) in ready {
+        for (target, continuations) in ready {
             _ = pendingLock.withLock { pendingDrainContinuations.removeValue(forKey: target) }
-            continuation.finish()
+            for continuation in continuations { continuation.finish() }
         }
     }
 
@@ -467,6 +486,7 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
     /// Without this, speech that never gets sentence punctuation from the engine
     /// stays volatile forever and never reaches the transcript or the translator.
     func flushPending() async {
+        guard !pendingLock.withLock({ processingFailed }) else { return }
         // Scoped `withLock` rather than lock/unlock: the manual pair is
         // unavailable from an async context and becomes a hard error under the
         // Swift 6 language mode. Scoping it also makes it impossible to acquire
@@ -484,7 +504,7 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
     /// reports progress, rather than waking a hundred times a second to ask.
     func drain(toAudioSample sample: Int) async {
         let target = max(0, sample)
-        if pendingLock.withLock({ processedAudioSamples + droppedPendingSamples >= target }) {
+        if pendingLock.withLock({ !acceptingAudio || processingFailed || processedAudioSamples + droppedPendingSamples >= target }) {
             return
         }
         let wake = AsyncStream<Void>(bufferingPolicy: .bufferingNewest(1)) { continuation in
@@ -492,11 +512,11 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
                 // Re-check under the lock: the pump may have advanced between
                 // the check above and now, and registering a continuation the
                 // pump has already passed would wait forever.
-                if processedAudioSamples + droppedPendingSamples >= target {
+                if !acceptingAudio || processingFailed || processedAudioSamples + droppedPendingSamples >= target {
                     continuation.finish()
                     return
                 }
-                pendingDrainContinuations[target] = continuation
+                pendingDrainContinuations[target, default: []].append(continuation)
             }
         }
         for await _ in wake {
@@ -517,6 +537,7 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
         await engine.setPartial { _ in }
 
         var transcripts: [DictationRegionTranscript] = []
+        var previousTranscriptEnd = 0
         do {
             for region in regions {
                 try Task.checkCancellation()
@@ -528,7 +549,9 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
                     .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 let language = await engine.detectedLanguage()
                 if !text.isEmpty {
-                    transcripts.append(DictationRegionTranscript(text: text, language: language))
+                    transcripts.append(DictationRegionTranscript(text: text, language: language,
+                        overlapsPreviousAudio: previousTranscriptEnd > region.audioRange.lowerBound))
+                    previousTranscriptEnd = region.audioRange.upperBound
                 }
                 // Keep the reset explicit even though finish() currently clears
                 // the manager. This is the invariant that protects the next
@@ -546,7 +569,7 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
     /// completion through the caption callback.
     func finishDictation() async -> String? {
         await stopPumpAndClearPending()
-        let full = sessionStarted ? await engine.finishSession() : nil
+        let full = sessionStarted && !pendingLock.withLock({ processingFailed }) ? await engine.finishSession() : nil
         await engine.reset()
         sessionStarted = false
         emit = nil
@@ -560,7 +583,7 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
         // crashed here with the same "Can't remove more items than it has" trap.
         await stopPumpAndClearPending()
 
-        if sessionStarted {
+        if sessionStarted && !pendingLock.withLock({ processingFailed }) {
             // finish() returns the WHOLE session transcript; emit only what has
             // not already been committed, or the last line is duplicated.
             if let full = await engine.finishSession() {

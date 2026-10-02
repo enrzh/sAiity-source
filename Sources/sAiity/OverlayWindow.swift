@@ -477,6 +477,7 @@ private final class FlippedDocumentView: NSView {
 
 private final class CaptionRowView: NSView {
     let original = NSTextField(labelWithString: "")
+    private let speaker = NSTextField(labelWithString: "")
     let translation = NSTextField(labelWithString: "")
     private var style = CaptionStyle()
     private var originalPointSize: CGFloat?
@@ -495,6 +496,12 @@ private final class CaptionRowView: NSView {
         translatesAutoresizingMaskIntoConstraints = true
         addSubview(original)
         addSubview(translation)
+        addSubview(speaker)
+        speaker.font = .systemFont(ofSize: 12, weight: .medium)
+        speaker.textColor = .secondaryLabelColor
+        speaker.alignment = .center
+        speaker.isHidden = true
+        speaker.setAccessibilityRole(.staticText)
         for text in [original, translation] {
             text.alignment = .center
             text.lineBreakMode = .byWordWrapping
@@ -526,6 +533,10 @@ private final class CaptionRowView: NSView {
                                               width: width,
                                               maxLines: style.original.maxLines)
         var top = bounds.height
+        if !speaker.isHidden {
+            speaker.frame = NSRect(x: 0, y: max(0, top - 18), width: width, height: 16)
+            top -= 20
+        }
         original.frame = NSRect(x: 0,
                                 y: max(0, top - originalHeight),
                                 width: width,
@@ -566,6 +577,8 @@ private final class CaptionRowView: NSView {
         self.style = style
         original.font = style.original.font
         original.textColor = style.original.color
+        speaker.textColor = style.original.color
+        speaker.alphaValue = style.original.opacity * 0.75
         original.alphaValue = style.original.opacity
         original.maximumNumberOfLines = style.original.maxLines
         translation.font = style.translation.font
@@ -579,6 +592,8 @@ private final class CaptionRowView: NSView {
 
     func set(entry: CaptionHistoryEntry, style: CaptionStyle, staleDim: CGFloat,
              reserveTranslation: Bool) {
+        speaker.stringValue = entry.speakerLabel ?? ""
+        speaker.isHidden = entry.speakerLabel == nil
         original.stringValue = entry.original
         translation.stringValue = entry.translation ?? ""
         apply(style: style,
@@ -615,6 +630,7 @@ private final class CaptionRowView: NSView {
                                                      maxLines: style.original.maxLines)
         let original = textHeight(entry.original, font: originalFont,
                                   width: width, maxLines: style.original.maxLines)
+            + (entry.speakerLabel == nil ? 0 : 20)
         guard style.showTranslation,
               reserveTranslation || !(entry.translation ?? "").isEmpty else {
             return original
@@ -1243,6 +1259,11 @@ final class OverlayWindow: NSPanel {
             history.upsertTranslation(text, forSentenceID: sentenceID, stale: stale)
         }
         renderHistory(changedSentenceID: text.isEmpty ? nil : sentenceID, immediate: true)
+    }
+
+    func showSpeaker(_ label: String?, forSentenceID sentenceID: Int) {
+        history.setSpeaker(label, forSentenceID: sentenceID)
+        renderHistory(changedSentenceID: sentenceID, immediate: true)
     }
 
     /// The source moved on while this translation stayed. Same dimming as

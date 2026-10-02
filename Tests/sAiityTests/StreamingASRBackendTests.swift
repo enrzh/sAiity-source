@@ -4,6 +4,23 @@ import Testing
 @testable import sAiity
 
 @Suite struct StreamingASRBackendTests {
+    @Test("dropped backlog does not shift captions onto another speaker's audio")
+    func capturedClockIncludesDroppedAudio() async throws {
+        let engine = RecordingEngine()
+        let backend = StreamingASRBackend(name: "Clock", engine: engine)
+        try await backend.prepare(locale: .init(identifier: "auto")) { _ in }
+        try await backend.start { _ in }
+        let format = try #require(await backend.inputFormat)
+        let count = 16_000 * 60
+        let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(count)))
+        buffer.frameLength = AVAudioFrameCount(count)
+        buffer.floatChannelData![0].update(repeating: 0.2, count: count)
+        backend.feed(buffer)
+        await backend.drain(toAudioSample: count)
+        #expect(engine.processedSamples.count < count)
+        #expect(backend.audioClockEndForTests == count)
+        await backend.release()
+    }
     final class FakeEngine: FluidStreamingEngine, @unchecked Sendable {
         let sampleRate = 16_000.0
         var loads = 0
@@ -262,6 +279,34 @@ import Testing
 
         #expect(metrics.value?.processingErrorCount == 1)
         #expect(metrics.value?.processedAudioSamples == 0)
+        await backend.release()
+    }
+
+    @Test("fatal processing closes admission and releases every pending drain")
+    func failureClosesAudioAndUnblocksAllDrains() async throws {
+        struct Failed: Error {}
+        let engine = FakeEngine()
+        engine.processError = Failed()
+        engine.finishResult = "unfinished draft"
+        let failed = LockedFlag()
+        let backend = StreamingASRBackend(name: "Test", engine: engine)
+        backend.setFailureHandler { _ in failed.set() }
+        try await backend.prepare(locale: .init(identifier: "en")) { _ in }
+        try await backend.start { _ in }
+        let format = try #require(await backend.inputFormat)
+        let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1_600))
+        buffer.frameLength = 1_600
+        async let first: Void = backend.drain(toAudioSample: 1_600)
+        async let second: Void = backend.drain(toAudioSample: 1_600)
+        backend.feed(buffer)
+        await first
+        await second
+        for _ in 0..<1_000 where !failed.value { await Task.yield() }
+        #expect(failed.value)
+        backend.feed(buffer)
+        #expect(backend.pendingSampleCountForTests == 0)
+        #expect(await backend.finishDictation() == nil)
+        #expect(engine.finishCalls == 0)
         await backend.release()
     }
 

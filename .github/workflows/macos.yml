@@ -4,6 +4,8 @@ on:
   push:
     paths:
       - "Sources/**"
+      - "Vendor/**"
+      - "docs/benchmarks/release-quality.json"
       - "Tests/**"
       - "Resources/**"
       - "Package.swift"
@@ -14,6 +16,8 @@ on:
   pull_request:
     paths:
       - "Sources/**"
+      - "Vendor/**"
+      - "docs/benchmarks/release-quality.json"
       - "Tests/**"
       - "Resources/**"
       - "Package.swift"
@@ -55,9 +59,12 @@ jobs:
           fetch-depth: 0
 
       - name: Show toolchain
+        id: toolchain
         run: |
           xcodebuild -version
           swift --version
+          fingerprint=$({ xcodebuild -version; xcrun swift --version; xcrun --sdk macosx --show-sdk-version; } | shasum -a 256 | cut -d ' ' -f 1)
+          echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
 
       - name: Resolve the locked package graph
         run: xcrun swift package resolve
@@ -74,18 +81,18 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .build
-          key: swiftpm-release-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
+          key: swiftpm-release-${{ runner.os }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
           restore-keys: |
-            swiftpm-release-${{ runner.os }}-
+            swiftpm-release-${{ runner.os }}-${{ steps.toolchain.outputs.fingerprint }}-
 
       - name: Run release tests
         run: xcrun swift test -c release -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS
 
-      - name: Build release binary
-        run: xcrun swift build -c release
+      - name: Check release quality gate
+        run: python3 Tests/release_quality_test.py
 
       - name: Assemble signed app bundle
-        run: ./build-app.sh
+        run: ./build-app.sh --no-test-hooks
 
       - name: Smoke-test app bundle
         run: |

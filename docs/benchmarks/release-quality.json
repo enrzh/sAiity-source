@@ -1,0 +1,14 @@
+{
+  "minimumRuns": 5,
+  "requiredCategories": ["german", "english", "mixed", "noise", "technical"],
+  "models": {
+    "warm_segmented_decode": ["nemotron-2240", "whisper-base"],
+    "warm_live_stream": ["nemotron-2240"],
+    "release_to_insertion": ["nemotron-2240"]
+  },
+  "limits": {
+    "warm_segmented_decode": {"wer": 0.25, "missingWords": 2, "realTimeFactor": 1.0},
+    "warm_live_stream": {"wer": 0.25, "missingWords": 2, "firstVolatileSeconds": 5.0, "firstFinalSeconds": 8.0, "finalizationSeconds": 5.0, "droppedAudioSeconds": 0.0},
+    "release_to_insertion": {"wer": 0.25, "missingWords": 2, "seconds": 8.0}
+  }
+}

@@ -80,6 +80,9 @@ protocol TranscriptionBackend: AnyObject, Sendable {
     /// Begin streaming. `onChunk` is called on an arbitrary task.
     func start(onChunk: @escaping @Sendable (TranscriptChunk) -> Void) async throws
 
+    /// Fatal processing failures are reported once for the current session.
+    func setFailureHandler(_ handler: (@Sendable (String) -> Void)?)
+
     /// Feed captured audio, already converted to `inputFormat`.
     ///
     /// Synchronous on purpose. Capture delivers ~50 buffers a second, and an
@@ -131,6 +134,7 @@ protocol DictationSegmentTranscriber: AnyObject, Sendable {
 }
 
 extension TranscriptionBackend {
+    func setFailureHandler(_ handler: (@Sendable (String) -> Void)?) {}
     func flushPending() async {}
     func drain(toAudioSample sample: Int) async {}
     func finishDictation() async -> String? {

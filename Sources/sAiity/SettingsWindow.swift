@@ -251,6 +251,13 @@ final class AppState {
         }
     }
 
+    var identifyCaptionSpeakers = CaptionSpeakerTracker.enabled {
+        didSet {
+            guard identifyCaptionSpeakers != oldValue else { return }
+            UserDefaults.standard.set(identifyCaptionSpeakers, forKey: CaptionSpeakerTracker.preferenceKey)
+        }
+    }
+
     /// Capture scope: one app's audio, or nil for the whole mix. Applies when
     /// captions next start.
     var captureApp: String? = CaptureScope.appBundleID {

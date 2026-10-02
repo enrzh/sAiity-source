@@ -18,7 +18,7 @@ enum Export {
 
     static func txt(_ segments: [Segment]) -> String {
         segments.map { seg in
-            var line = seg.text
+            var line = labelled(seg.text, for: seg)
             if let tr = seg.tr, !tr.isEmpty { line += "\n\(tr)" }
             // A turn break reads as a paragraph break — the silence was real,
             // the paragraph is how text spells it.
@@ -54,7 +54,7 @@ enum Export {
             // reader sees the floor change hands without anyone claiming to
             // know whose it became.
             if seg.turn == true { out += "---\n\n" }
-            out += "**\(clock(seg.t0))** \(seg.text)\n"
+            out += "**\(clock(seg.t0))** \(labelled(seg.text, for: seg))\n"
             if let tr = seg.tr, !tr.isEmpty { out += "> \(tr)\n" }
             out += "\n"
         }
@@ -413,14 +413,15 @@ enum Export {
                 // testing, the worst case in the exporter. Counted as one cue
                 // with both lines, which is what the viewer actually reads.
                 let cue = applyReadabilityFloor(
-                    [(seg.t0, seg.t1, seg.text + "\n" + tr)], limit: limit)
+                    [(seg.t0, seg.t1, labelled(seg.text, for: seg) + "\n" + tr)], limit: limit)
                 for c in cue {
                     out += "\(n)\n\(srtTime(c.t0)) --> \(srtTime(c.t1))\n\(c.text)\n\n"
                     n += 1
                 }
                 continue
             }
-            for c in applyReadabilityFloor(cues(from: seg), limit: limit) {
+            let labelledCues = cues(from: seg).map { (t0: $0.t0, t1: $0.t1, text: labelled($0.text, for: seg)) }
+            for c in applyReadabilityFloor(labelledCues, limit: limit) {
                 out += "\(n)\n\(srtTime(c.t0)) --> \(srtTime(c.t1))\n\(c.text)\n\n"
                 n += 1
             }
@@ -445,16 +446,23 @@ enum Export {
             if let tr = seg.tr, !tr.isEmpty {
                 // Same readability floor as SRT, for the same reason.
                 for c in applyReadabilityFloor(
-                    [(seg.t0, seg.t1, seg.text + "\n" + tr)], limit: limit) {
+                    [(seg.t0, seg.t1, labelled(seg.text, for: seg) + "\n" + tr)], limit: limit) {
                     out += "\(vttTime(c.t0)) --> \(vttTime(c.t1))\n\(c.text)\n\n"
                 }
                 continue
             }
-            for c in applyReadabilityFloor(cues(from: seg), limit: limit) {
+            let labelledCues = cues(from: seg).map { (t0: $0.t0, t1: $0.t1, text: labelled($0.text, for: seg)) }
+            for c in applyReadabilityFloor(labelledCues, limit: limit) {
                 out += "\(vttTime(c.t0)) --> \(vttTime(c.t1))\n\(c.text)\n\n"
             }
         }
         return out
+    }
+
+    private static func labelled(_ text: String, for segment: Segment) -> String {
+        guard let label = CaptionSpeakerAnnotation.label(speaker: segment.speaker,
+            overlapping: segment.overlappingSpeech == true, localized: false) else { return text }
+        return "[\(label)] \(text)"
     }
 
     // MARK: - Saving

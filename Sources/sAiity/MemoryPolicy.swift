@@ -1,5 +1,6 @@
 import Dispatch
 import Foundation
+import Darwin
 import MLX
 
 /// What the app is allowed to keep in RAM, and when it has to give it back.
@@ -140,6 +141,18 @@ enum MemoryPolicy {
         guard let f = footprint() else { return "MLX not loaded" }
         func mb(_ b: Int) -> String { "\(b / (1 << 20)) MB" }
         return "active \(mb(f.active)), cached \(mb(f.cache)), peak \(mb(f.peak))"
+    }
+
+    /// Activity Monitor's memory figure, including compressed native/GPU pages.
+    static func physicalFootprint() -> UInt64 {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        return result == KERN_SUCCESS ? info.phys_footprint : 0
     }
 
     // MARK: - System memory pressure

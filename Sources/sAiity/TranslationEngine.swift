@@ -49,6 +49,56 @@ struct TranslationRegion: Equatable, Sendable {
     let source: String
 }
 
+/// Shared by captions and dictation. Unknown or mixed source text must reach
+/// automatic translation; one source-language hint cannot skip an entire line.
+enum TranslationProcedure {
+    static func isAlreadyInTarget(_ text: String, target: String) -> Bool {
+        // A high-confidence dominant reading can hide a short foreign word
+        // ("Can you bitte send it today?"). Such words must reach translation.
+        let protected = DictationVocabulary.termsPresent(in: text)
+        let words = text.split(whereSeparator: { !$0.isLetter }).map(String.init)
+        if words.contains(where: { word in
+            guard word.count >= 4, !protected.contains(word),
+                  let reading = LanguageRecognizerPool.shared.classify(word), reading.probability >= 0.9 else { return false }
+            return !TranslationLanguage.isSame(reading.language.rawValue, as: target)
+        }) { return false }
+        let spans = CaptionLanguageSpanDetector.analyze(text)
+        guard !spans.isEmpty, !CaptionLanguageSpanDetector.isMixed(spans),
+              let reading = LanguageRecognizerPool.shared.classify(text), reading.probability >= 0.9,
+              TranslationLanguage.isSame(reading.language.rawValue, as: target) else { return false }
+        return spans.allSatisfy { TranslationLanguage.isSame($0.language ?? "und", as: target) }
+    }
+
+    static func translate(_ regions: [TranslationRegion], to target: String,
+                          engine: any Translating) async throws -> String? {
+        var output = Array<String?>(repeating: nil, count: regions.count)
+        var pending: [Int] = []
+        for index in regions.indices {
+            if isAlreadyInTarget(regions[index].text, target: target) { output[index] = regions[index].text }
+            else { pending.append(index) }
+        }
+        if pending.count > 1,
+           let batch = try await engine.translateRegions(pending.map { regions[$0] }, to: target),
+           batch.count == pending.count {
+            for (index, text) in zip(pending, batch) where !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                output[index] = text
+            }
+        }
+        for index in pending where output[index] == nil {
+            try Task.checkCancellation()
+            let region = regions[index]
+            guard let text = try await engine.translate(region.text, from: region.source, to: target),
+                  !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                NSLog("sAiity translation: incomplete region output, original preserved")
+                return nil
+            }
+            output[index] = text
+        }
+        try Task.checkCancellation()
+        return regions.isEmpty ? nil : output.compactMap { $0 }.reduce("") { CaptionTextMerger.concatenate($0, $1) }
+    }
+}
+
 /// Marker framing for a batched native translation. The parser is deliberately
 /// strict: a malformed or reordered response is a batch miss, never a reason
 /// to put marker text on the user's clipboard.
@@ -129,9 +179,15 @@ actor TranslationInferenceGate {
 
     func run<T: Sendable>(_ operation: @escaping @Sendable () async throws -> T) async throws -> T {
         let previous = tail
+        let queuedAt = ContinuousClock.now
         let current = Task { () throws -> T in
             await previous?.value
             try Task.checkCancellation()
+            let waited = queuedAt.duration(to: .now).components
+            Task { @MainActor in
+                Diagnostics.recordTiming(operation: "translator.gate-wait",
+                    seconds: Double(waited.seconds) + Double(waited.attoseconds) / 1e18, cold: false)
+            }
             return try await operation()
         }
         tail = Task {
@@ -173,9 +229,8 @@ enum TranslationTiming: String, CaseIterable, Sendable {
 
 /// Which translator to use.
 ///
-/// MADLAD is the supported translation path. The raw Hy-MT2 and local-LLM
-/// cases remain internal so old preferences and cleanup models can be read
-/// safely; neither can enter a user-facing engine catalogue.
+/// MADLAD is the recommendation; Hy-MT2 is a selectable alternative. The raw
+/// local-LLM case remains internal for old preferences and cleanup models.
 enum TranslationEngine: String, CaseIterable, Sendable, Codable {
     case madlad
     case hyMT2

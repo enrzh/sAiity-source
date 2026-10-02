@@ -63,7 +63,7 @@ enum DictationCleanupValidator {
         // model when a semantic repair remains; a language allow-list made every
         // clean French, Spanish, or long-tail-language sentence pay for LLM
         // inference even when there was nothing left to fix.
-        let repairs = #"(?i)\b(actually|rather|i mean|sorry|no wait|wait|instead|you know|like|well|en fait|je veux dire|non attends|plutôt|désolé|en realidad|quiero decir|no espera|más bien|perdón|in realtà|cioè|no aspetta|piuttosto|scusa|na verdade|quer dizer|não espera|melhor|desculpa|eigenlijk|ik bedoel|nee wacht|liever|właściwie|mam na myśli|nie czekaj|raczej|przepraszam|eigentlich|ich meine|nein|sondern|besser gesagt|warte|oder doch)\b|(?:いや、?待って|つまり|不对|我的意思是|等一下|그러니까|잠깐만)|[—–]"#
+        let repairs = #"(?i)\b(i mean|no wait|je veux dire|non attends|quiero decir|no espera|no aspetta|quer dizer|não espera|ik bedoel|nee wacht|mam na myśli|nie czekaj|ich meine|besser gesagt|oder doch)\b|[,;—–]\s*(?:actually|rather|sorry|no|nein|instead|eigentlich|sondern|warte|plutôt|désolé|más bien|perdón|piuttosto|scusa|melhor|desculpa|liever|raczej|przepraszam)\b|(?:いや、?待って|不对|我的意思是|等一下|잠깐만)"#
         guard let regex = expression(repairs) else { return (baseline, false) }
         let range = NSRange(baseline.startIndex..<baseline.endIndex, in: baseline)
         return (baseline, regex.firstMatch(in: baseline, range: range) != nil)
@@ -162,7 +162,7 @@ enum DictationCleanupValidator {
             ]
         }
         for (pattern, replacement) in lineBreaks {
-            text = replace(text, pattern: pattern, with: replacement)
+            text = replaceFormatting(text, pattern: pattern, with: replacement)
         }
 
         let punctuation: [(String, String)]
@@ -227,9 +227,32 @@ enum DictationCleanupValidator {
             ]
         }
         for (pattern, replacement) in punctuation {
-            text = replace(text, pattern: pattern, with: replacement)
+            text = replaceFormatting(text, pattern: pattern, with: replacement)
         }
         return text
+    }
+
+    /// A named word or a noun phrase is not a spoken formatting command.
+    private static func replaceFormatting(_ value: String, pattern: String, with replacement: String) -> String {
+        guard let regex = expression(pattern) else { return value }
+        let range = NSRange(value.startIndex..<value.endIndex, in: value)
+        let result = NSMutableString(string: value)
+        let determiners: Set<String> = ["a", "an", "the", "this", "that", "my", "your", "word", "term", "symbol",
+            "ein", "eine", "einen", "einem", "einer", "der", "die", "das", "wort", "zeichen",
+            "un", "une", "le", "la", "el", "una", "il", "um", "uma", "o"]
+        for match in regex.matches(in: value, range: range).reversed() {
+            guard let span = Range(match.range, in: value) else { continue }
+            let before = value[..<span.lowerBound]
+            let after = value[span.upperBound...]
+            let previous = before.split(whereSeparator: { $0.isWhitespace || $0.isPunctuation }).suffix(2)
+            let next = after.split(whereSeparator: { $0.isWhitespace || $0.isPunctuation }).first?.lowercased()
+            let literal = previous.contains { determiners.contains($0.lowercased()) }
+                || ["of", "von", "de", "train", "lasted", "is", "was", "ist"].contains(next ?? "")
+                || before.filter { $0 == "\"" }.count % 2 == 1
+            guard !literal else { continue }
+            result.replaceCharacters(in: match.range, with: replacement)
+        }
+        return result as String
     }
 
     private static func removeFillers(_ value: String, language: String?) -> String {
@@ -347,6 +370,7 @@ enum DictationCleanupValidator {
         let paragraphs = text.components(separatedBy: "\n\n").filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         guard allowParagraphs || paragraphs.count <= 1 || isStructuredList(text) else { return nil }
         if let input {
+            guard meaningTokens(in: input).isSubset(of: meaningTokens(in: text)) else { return nil }
             let inputWords = words(in: input)
             let outputWords = words(in: text)
             if inputWords.count >= 8, outputWords.count < max(3, inputWords.count / 4) { return nil }
@@ -568,5 +592,21 @@ enum DictationCleanupValidator {
         tokens.append(contentsOf: DictationVocabulary.termsPresent(in: input))
         var seen = Set<String>()
         return tokens.filter { seen.insert($0.lowercased()).inserted }
+    }
+
+    private static func meaningTokens(in text: String) -> Set<String> {
+        let pattern = #"(?i)\b(?:not|never|no|nein|nicht|kein(?:e|en|em|er|es)?|don't|can't|won't|isn't|wasn't|shouldn't|couldn't|maybe|perhaps|possibly|might|vielleicht|eventuell|wahrscheinlich|nunca|jamais|pas|quizá|forse)\b|(?:不|没|ない|않|못)"#
+        guard let regex = expression(pattern) else { return [] }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return Set(regex.matches(in: text, range: range).compactMap { match in
+            guard let span = Range(match.range, in: text) else { return nil }
+            let token = text[span].lowercased()
+            // An isolated correction marker can disappear; an assertion cannot.
+            if ["no", "nein"].contains(token),
+               text[..<span.lowerBound].trimmingCharacters(in: .whitespaces).last == "," {
+                return nil
+            }
+            return token
+        })
     }
 }

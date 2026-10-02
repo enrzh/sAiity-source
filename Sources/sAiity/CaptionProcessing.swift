@@ -6,6 +6,14 @@ import NaturalLanguage
 /// live caption window, so a simple longest-overlap scan is predictable and
 /// easier to audit than a fuzzy matcher.
 enum CaptionTextMerger {
+    /// Adjacent, disjoint speech must keep intentional repetition.
+    static func concatenate(_ left: String, _ right: String) -> String {
+        let lhs = normalize(left)
+        let rhs = normalize(right)
+        guard let last = lhs.last else { return rhs }
+        guard let first = rhs.first else { return lhs }
+        return lhs + separator(after: last, before: first) + rhs
+    }
     static func join(_ parts: [String]) -> String {
         var result = ""
         result.reserveCapacity(parts.reduce(0) { $0 + $1.utf8.count })
@@ -47,7 +55,7 @@ enum CaptionTextMerger {
         value.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
     }
 
-    private static func separator(after left: Character, before right: Character) -> String {
+    static func separator(after left: Character, before right: Character) -> String {
         if left.isWhitespace || right.isWhitespace { return "" }
         if ".,!?;:%)]}，。！？、；：…".contains(right) { return "" }
         if "([{「『".contains(left) { return "" }

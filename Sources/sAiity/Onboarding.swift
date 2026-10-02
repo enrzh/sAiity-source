@@ -75,7 +75,7 @@ enum OnboardingStep: String, CaseIterable {
         case .setup: return String(localized: "Setup")
         case .purpose: return String(localized: "Setup")
         case .models: return String(localized: "Setup")
-        case .finish: return String(localized: "Ready")
+        case .finish: return String(localized: "Try it out")
         }
     }
 }

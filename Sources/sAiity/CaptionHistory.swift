@@ -7,13 +7,15 @@ struct CaptionHistoryEntry: Equatable, Sendable {
     var original: String
     var translation: String?
     var translationIsStale = false
+    var speakerLabel: String? = nil
 
     init(sentenceID: Int, original: String, translation: String? = nil,
-         translationIsStale: Bool = false) {
+         translationIsStale: Bool = false, speakerLabel: String? = nil) {
         self.sentenceID = sentenceID
         self.original = original
         self.translation = translation
         self.translationIsStale = translationIsStale
+        self.speakerLabel = speakerLabel
     }
 }
 
@@ -55,6 +57,11 @@ struct CaptionHistory: Equatable, Sendable {
         guard let index = entries.firstIndex(where: { $0.sentenceID == sentenceID }),
               entries[index].translation != nil else { return }
         entries[index].translationIsStale = true
+    }
+
+    mutating func setSpeaker(_ label: String?, forSentenceID sentenceID: Int) {
+        guard let index = entries.firstIndex(where: { $0.sentenceID == sentenceID }) else { return }
+        entries[index].speakerLabel = label
     }
 
     mutating func replace(with newEntries: [CaptionHistoryEntry]) {

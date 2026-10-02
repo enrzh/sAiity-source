@@ -8,7 +8,7 @@ to the app that currently has focus.
 
 **No account. No API key. No audio leaves the Mac.**
 
-- Native SwiftUI/AppKit app for macOS 26 on Apple Silicon
+- Native SwiftUI/AppKit app for macOS 26 or later on Apple Silicon
 - Streaming captions from system audio
 - Optional translation below the original caption
 - Local transcripts with SRT, WebVTT, Markdown, and text export
@@ -17,16 +17,37 @@ to the app that currently has focus.
   speaking when possible, and always remains on the clipboard. Password fields
   are refused, as they are by macOS dictation
 - German, English, French, Spanish, and Japanese interface localizations
-- No Windows release target. The repository carries Windows packaging and
-  overlay-build workflows, but no published Windows binary
+- macOS is the supported release target. Windows code is an experimental
+  overlay prototype; its build/package workflows run only by manual dispatch
 
 ## Translation
 
-MADLAD-400-3B is the translation engine. It covers a broad range of languages
-and runs on-device.
+MADLAD-400-3B is the recommended translation engine for broad language coverage
+and runs locally through MLX. Hy-MT2 is an alternative local CPU engine for its
+37 supported languages. Captions and dictation have independent engine and
+target-language choices. A failed engine can fall back only to an installed,
+compatible alternative; otherwise the original text remains available.
+
+Mixed-language dictation keeps each spoken language when translation is off.
+Enabling translation asks for the entire message in the chosen target language.
+Cleanup fixes wording in place; it does not request translation.
 
 Models are downloaded on first use and stored locally. The app does not ship
 model weights.
+
+## Setup
+
+Choose captions, dictation or both, download the offered recognition model,
+and grant the permissions for that feature. Nemotron is the recommended
+multilingual recognition path. Qwen3-ASR is an optional alternative; Whisper
+is available for press-to-talk dictation. Model cleanup is optional and uses
+the compatible local model selected on the Dictation page.
+
+The final setup step offers an optional real trial. **Try Dictation** records
+a short sentence and shows the processed result inside setup without pasting
+or replacing the clipboard. **Try Captions** captures speech played on the Mac
+through the normal caption pipeline. Stop the trial, or close setup, to end
+capture. Setup can be reopened from General settings.
 
 ## Dictation
 
@@ -64,21 +85,21 @@ the application identity, not to a bare SwiftPM executable.
 
     ./build-app.sh
     ./build-app.sh --install
+    ./build-app.sh --no-test-hooks
     ./build-app.sh --notarize
 
-These three are different products, and the difference matters when a check
-fails:
+Choose the build mode for the verification you need:
 
 | Command | Test hooks | Signature | For |
 | --- | --- | --- | --- |
 | `./build-app.sh` | compiled in | best available, else ad-hoc | local development |
+| `./build-app.sh --no-test-hooks` | compiled out | best available, else ad-hoc | release-mode local/CI verification |
 | `./build-app.sh --notarize` | compiled out | requires Developer ID | a release |
 
-`verify-release.sh` rejects a binary that still carries the test hooks, so it
-only passes for a `--notarize` build. That is deliberate: the hooks exist to
-start system-audio capture from a script with no UI and no consent, which is
-reasonable while developing and not a thing to notarise. Run the release
-checks against a notarised bundle.
+`verify-release.sh` rejects test hooks and checks the bundle's version, native
+resources and code signature. It accepts either build without test hooks;
+it does not prove notarization. A distributable release additionally requires
+Developer ID signing, notarization and stapling through `--notarize`.
 
 Both build paths need a full git checkout, not a shallow one. The version stamp
 comes from `git describe --tags` and the build number from
@@ -95,7 +116,10 @@ exists — run:
 It exits 0 on success, 1 if a check failed, and 70 if the launch never
 finished. Over a plain ssh session, where there is no window server to launch
 a GUI into, it reports a skip and exits 0. CI runs this after assembling the
-bundle.
+bundle. The smoke test also presents all four bubble presets, clears and resumes
+caption content, switches a dictation result back to its compact recording view,
+and lays out the setup trial for each use case. It captures no audio and restores
+the settings it temporarily exercises.
 
 The release test command is:
 
@@ -114,6 +138,17 @@ time factor, WER, and language-span preservation. It never downloads weights
 and fails when the benchmark test is skipped. Release bundles are checked with
 `scripts/verify-release.sh`; generated Sparkle feeds are checked against their
 ZIP with `scripts/validate-appcast.sh`.
+
+The release workflow requires a verified local corpus and checks accuracy,
+language preservation and warm latency budgets before notarizing or tagging:
+
+    SAIITY_RELEASE_FIXTURES=/absolute/verified-fixtures scripts/quality-matrix.sh
+
+`scripts/release.sh <version>` runs this gate automatically. Missing recordings,
+reference text, model weights, speech categories or benchmark records fail the
+gate. See [the corpus and acceptance criteria](docs/benchmarks/README.md) and
+[the signed-app checklist](docs/release-checklist.md). These checks are local;
+they do not download models or send recordings anywhere.
 
 For a real-time live-caption regression run, use the same fixture format with
 `scripts/caption-matrix.sh`. It records first volatile/final caption latency,
@@ -137,6 +172,8 @@ included in the application bundle.
 | Sources/sAiity/Translators.swift | MADLAD and local-LLM translation lifecycle |
 | Sources/sAiity/HyMT2Translator.swift | Hy-MT2 model template, language set, and generation |
 | Sources/sAiity/DictationController.swift | Press-to-talk dictation lifecycle |
+| Sources/sAiity/CaptionSessionResources.swift | Caption audio delivery and pooled backend lease |
+| Sources/sAiity/TranslationRuntime.swift | Resident translator, native serialization and lifetime leases |
 | Sources/sAiity/DictationToastWindow.swift | Dictation status surface above other apps |
 | Sources/sAiity/TranscriptStore.swift | Local transcript storage and retention |
 | Sources/sAiity/OverlayWindow.swift | Caption bubble geometry and presentation |

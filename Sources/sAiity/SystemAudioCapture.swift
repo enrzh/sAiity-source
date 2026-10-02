@@ -185,9 +185,9 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
     /// One call, one lock: the flag, the new hold and the reset that discards
     /// the quiet banked under the old one cannot be seen apart by a capture
     /// buffer arriving between them.
-    func applySpeechGapSettings() {
-        gapGate.apply(enabled: SpeechGap.enabled,
-                      holdFrames: SpeechGap.holdFrames(at: Self.streamSampleRate))
+    func applySpeechGapSettings(enabled: Bool = SpeechGap.enabled, holdFrames: Int? = nil) {
+        gapGate.apply(enabled: enabled,
+                      holdFrames: holdFrames ?? SpeechGap.holdFrames(at: Self.streamSampleRate))
     }
 
     /// SCStream delivers 48 kHz; the gap threshold is measured against the

@@ -42,10 +42,13 @@ final class DictationCleanupSession {
         }
         do {
             return try await gate.run { [self] in
-                try await process(input, key: key, load: load)
+                try await LocalGeneration.$deadline.withValue(.now.advanced(by: .seconds(15))) {
+                    try await process(input, key: key, load: load)
+                }
             }
         } catch {
-            NSLog("sAiity cleanup unavailable: %@", error.localizedDescription)
+            Diagnostics.recordFailure(operation: "dictation.cleanup", reason: "model unavailable or cancelled")
+            NSLog("sAiity cleanup unavailable: %@", DiagnosticsRedactor.redact(error.localizedDescription))
             return nil
         }
     }
@@ -70,10 +73,13 @@ final class DictationCleanupSession {
         let start = ContinuousClock.now
         var modelCalls = 0
         var loadSeconds = 0.0
+        var skipped = 0
+        var accepted = 0
+        var rejected = 0
         defer {
             let elapsed = start.duration(to: .now).components
-            NSLog("sAiity cleanup: regions=%d modelCalls=%d load=%.3fs total=%.3fs",
-                  input.regions.count, modelCalls, loadSeconds,
+            NSLog("sAiity cleanup: regions=%d modelCalls=%d skipped=%d accepted=%d rejected=%d load=%.3fs total=%.3fs",
+                  input.regions.count, modelCalls, skipped, accepted, rejected, loadSeconds,
                   Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18)
         }
         if modelKey != key { await releaseModel() }
@@ -112,6 +118,9 @@ final class DictationCleanupSession {
                 ?? DictationCleanupValidator.validate(baseline,
                     preserving: input.text, sourceLanguage: source, languageMetadata: metadata)
                 ?? input.text
+            if modelCalls == 0 { skipped += 1 }
+            else if cleaned == candidate { accepted += 1 }
+            else { rejected += 1 }
             let language = source ?? input.regions.first?.language
             return DictationTranscriptionResult(regions: [
                 .init(text: cleaned, language: language)
@@ -190,6 +199,9 @@ final class DictationCleanupSession {
                 ?? DictationCleanupValidator.validate(baseline,
                     preserving: region.text, sourceLanguage: source, languageMetadata: metadata)
                 ?? region.text
+            if !modelIndexSet.contains(index) { skipped += 1 }
+            else if cleaned == candidate { accepted += 1 }
+            else { rejected += 1 }
             regions.append(.init(text: cleaned, language: region.language))
         }
         let result = DictationTranscriptionResult(regions: regions)

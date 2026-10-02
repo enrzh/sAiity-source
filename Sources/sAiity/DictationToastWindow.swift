@@ -434,7 +434,6 @@ final class DictationToastWindow: NSPanel {
     func show(phase: DictationPhase, autoDismissAfter: Duration?) {
         let p = phase.toastPresentation
         let frame = self.frame
-        let wasShowingResult = isShowingResult
         let visibleFrame = placementVisibleFrame
         let needsPlacement = !hasPlacedToast &&
             (frame.width <= 1 || frame.height <= 1 ||
@@ -447,14 +446,9 @@ final class DictationToastWindow: NSPanel {
         }
         hasPlacedToast = true
         if !needsPlacement || FrameStore.loadDictation() != nil {
-            if wasShowingResult {
-                // Result text may have made the panel taller. Keep its screen
-                // position when returning to a compact status, but do not
-                // restore the stale result height.
-                setFrameOrigin(frame.origin)
-            } else {
-                setFrame(frame, display: false)
-            }
+            // Remember position only. Reapplying a saved size undoes the
+            // current preset and can resurrect a previous result's height.
+            setFrameOrigin(frame.origin)
         }
         setAccessibilityValue(p.value)
         setAccessibilityLabel(p.label)

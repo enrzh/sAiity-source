@@ -43,7 +43,7 @@ enum TranslationOutputValidator {
         text = text.replacingOccurrences(
             of: "^\\s*(Translation|Übersetzung|Output)\\s*[:：]\\s*",
             with: "", options: [.regularExpression, .caseInsensitive])
-        text = text.replacingOccurrences(of: "\\s*\\n+\\s*", with: " ",
+        text = text.replacingOccurrences(of: "[ \\t]+", with: " ",
                                          options: .regularExpression)
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.count > 2,
@@ -57,24 +57,55 @@ enum TranslationOutputValidator {
             return reject("empty")
         }
         let ratio = Double(text.count) / Double(max(input.count, 1))
-        guard ratio > 0.15, ratio < 4.0 else {
+        guard ratio >= 0.05, ratio < 5.0 else {
             return reject(String(format: "length ratio %.2f", ratio))
         }
-        if text.compare(input, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame {
+        let echo = text.compare(input, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+        if echo && !permitsEcho(input, target: target) && !TranslationProcedure.isAlreadyInTarget(input, target: target) {
             return reject("echoed input", retryable: true)
         }
 
+        guard numbers(in: input).isSubset(of: numbers(in: text)) else {
+            return reject("changed numeric content")
+        }
+
         let wanted = target.split(separator: "-").first.map(String.init) ?? target
-        if text.count >= 12, recognizableLanguages.contains(wanted) {
-            let recognizer = NLLanguageRecognizer()
-            recognizer.processString(text)
-            if let language = recognizer.dominantLanguage?.rawValue {
+        if !echo, text.count >= 24, recognizableLanguages.contains(wanted),
+           let reading = LanguageRecognizerPool.shared.classify(text), reading.probability >= 0.95 {
+                let language = reading.language.rawValue
                 let received = language.split(separator: "-").first.map(String.init) ?? language
                 guard received == wanted else {
                     return reject("got \(received), want \(wanted)", retryable: true)
                 }
-            }
         }
         return .ok(text)
+    }
+
+    private static let expressions = RegexCache()
+
+    private static func permitsEcho(_ input: String, target: String) -> Bool {
+        let value = input.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        if value.lowercased() == "ok" { return true }
+        if value.lowercased() == "no", ["en", "es", "it"].contains(TranslationLanguage.baseCode(target)) { return true }
+        if DictationVocabulary.termsPresent(in: input).contains(value) { return true }
+        if value.first?.isUppercase == true, !value.contains(where: { $0.isWhitespace }) {
+            let tagger = NLTagger(tagSchemes: [.nameType])
+            tagger.string = value
+            if tagger.tag(at: value.startIndex, unit: .word, scheme: .nameType).0 == .personalName { return true }
+        }
+        let pattern = #"^(?:[A-Z0-9_./+\-]+|[A-Za-z]*[a-z][A-Z][A-Za-z]*|https?://\S+|[^\s]+@[^\s]+)$"#
+        guard let regex = expressions.expression(for: pattern) else { return false }
+        return regex.firstMatch(in: value, range: NSRange(value.startIndex..<value.endIndex, in: value)) != nil
+    }
+
+    private static func numbers(in value: String) -> Set<String> {
+        guard let regex = expressions.expression(for: #"[+\-]?\p{Nd}+(?:[.,]\p{Nd}+)*"#) else { return [] }
+        let range = NSRange(value.startIndex..<value.endIndex, in: value)
+        return Set(regex.matches(in: value, range: range).compactMap { match in
+            guard let span = Range(match.range, in: value) else { return nil }
+            return value[span].map { character in
+                character.wholeNumberValue.map(String.init) ?? (character == "+" || character == "-" ? String(character) : "")
+            }.joined()
+        })
     }
 }

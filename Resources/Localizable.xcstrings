@@ -1,6 +1,1039 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "For everyday dictation, hold %@ while speaking, then release.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Halte beim alltäglichen Diktieren %@ während des Sprechens gedrückt und lasse dann los."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Para el dictado diario, mantén pulsado %@ mientras hablas y suéltalo al terminar."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pour dicter au quotidien, maintenez %@ pendant que vous parlez, puis relâchez."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通常の音声入力では、話している間 %@ を押し続け、話し終わったら離してください。"
+          }
+        }
+      }
+    },
+    "Try it out": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ausprobieren"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pruébalo"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Essayez"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "試してみる"
+          }
+        }
+      }
+    },
+    "An optional check before you finish setup.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ein optionaler Test vor dem Abschluss der Einrichtung."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Una prueba opcional antes de terminar la configuración."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un essai facultatif avant de terminer la configuration."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設定を完了する前に、任意のテストを行えます。"
+          }
+        }
+      }
+    },
+    "Try Dictation": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diktat ausprobieren"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Probar dictado"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Essayer la dictée"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "音声入力を試す"
+          }
+        }
+      }
+    },
+    "Stop & Transcribe": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stoppen & transkribieren"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Detener y transcribir"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arrêter et transcrire"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "停止して文字起こし"
+          }
+        }
+      }
+    },
+    "Try Captions": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Untertitel ausprobieren"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Probar subtítulos"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Essayer les sous-titres"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "字幕を試す"
+          }
+        }
+      }
+    },
+    "Stop Captions": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Untertitel stoppen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Detener subtítulos"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arrêter les sous-titres"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "字幕を停止"
+          }
+        }
+      }
+    },
+    "Check recognition": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spracherkennung testen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Comprobar reconocimiento"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tester la reconnaissance"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "音声認識を確認"
+          }
+        }
+      }
+    },
+    "Review setup": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Einrichtung prüfen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revisar configuración"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vérifier la configuration"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設定を確認"
+          }
+        }
+      }
+    },
+    "Trial complete": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Test abgeschlossen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prueba completada"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Essai terminé"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "テスト完了"
+          }
+        }
+      }
+    },
+    "Stop the current session before trying setup.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Beende die laufende Sitzung, bevor du die Einrichtung testest."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Detén la sesión actual antes de probar la configuración."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arrêtez la session en cours avant de tester la configuration."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "現在のセッションを停止してから設定を試してください。"
+          }
+        }
+      }
+    },
+    "Download the selected recognition model under Setup or Models, then try again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lade das gewählte Erkennungsmodell unter Einrichtung oder Modelle herunter und versuche es erneut."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Descarga el modelo de reconocimiento seleccionado en Configuración o Modelos y vuelve a intentarlo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Téléchargez le modèle de reconnaissance choisi dans Configuration ou Modèles, puis réessayez."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設定またはモデルで選択した音声認識モデルをダウンロードして、もう一度お試しください。"
+          }
+        }
+      }
+    },
+    "Allow Screen Recording in the Permission step, then try captions again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erlaube Bildschirmaufnahme im Schritt Berechtigung und teste die Untertitel erneut."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Permite la grabación de pantalla en el paso Permisos y vuelve a probar los subtítulos."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Autorisez l’enregistrement de l’écran à l’étape Autorisation, puis réessayez les sous-titres."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アクセス許可の手順で画面収録を許可して、字幕をもう一度お試しください。"
+          }
+        }
+      }
+    },
+    "Starting captions — play speech on your Mac.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Untertitel werden gestartet — spiele Sprache auf deinem Mac ab."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Iniciando subtítulos: reproduce voz en tu Mac."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Démarrage des sous-titres — lancez un contenu parlé sur votre Mac."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "字幕を開始しています。Macで音声を再生してください。"
+          }
+        }
+      }
+    },
+    "Allow Microphone access in System Settings → Privacy & Security → Microphone, then try again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erlaube den Mikrofonzugriff unter Systemeinstellungen → Datenschutz & Sicherheit → Mikrofon und versuche es erneut."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Permite el acceso al micrófono en Ajustes del Sistema → Privacidad y seguridad → Micrófono y vuelve a intentarlo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Autorisez le microphone dans Réglages Système → Confidentialité et sécurité → Microphone, puis réessayez."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "システム設定 → プライバシーとセキュリティ → マイクでアクセスを許可して、もう一度お試しください。"
+          }
+        }
+      }
+    },
+    "No speech captured yet. Play speech on your Mac and try again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Noch keine Sprache erfasst. Spiele Sprache auf deinem Mac ab und versuche es erneut."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aún no se ha capturado voz. Reproduce voz en tu Mac y vuelve a intentarlo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucune parole captée. Lancez un contenu parlé sur votre Mac et réessayez."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "音声はまだ認識されていません。Macで音声を再生して、もう一度お試しください。"
+          }
+        }
+      }
+    },
+    "Captions worked. The trial has stopped.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Untertitel funktionieren. Der Test ist beendet."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Los subtítulos funcionan. La prueba se ha detenido."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les sous-titres fonctionnent. L’essai est arrêté."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "字幕が動作しました。テストは停止しました。"
+          }
+        }
+      }
+    },
+    "Listening — speak, then choose Stop & Transcribe.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hört zu — sprich und wähle dann Stoppen & transkribieren."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Escuchando: habla y elige Detener y transcribir."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "À l’écoute — parlez, puis choisissez Arrêter et transcrire."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "聞き取り中です。話した後に「停止して文字起こし」を選んでください。"
+          }
+        }
+      }
+    },
+    "Dictation worked. Your result is shown below.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Das Diktat funktioniert. Das Ergebnis steht unten."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "El dictado funciona. El resultado se muestra abajo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La dictée fonctionne. Le résultat s’affiche ci-dessous."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "音声入力が動作しました。結果は下に表示されます。"
+          }
+        }
+      }
+    },
+    "Recording limit reached — finishing the result.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aufnahmelimit erreicht — das Ergebnis wird fertiggestellt."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Límite de grabación alcanzado: terminando el resultado."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Limite d’enregistrement atteinte — finalisation du résultat."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "録音の上限に達しました。結果を処理しています。"
+          }
+        }
+      }
+    },
+    "Processing on your Mac…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verarbeitung auf deinem Mac…"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Procesando en tu Mac…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Traitement sur votre Mac…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Macで処理中…"
+          }
+        }
+      }
+    },
+    "Captions worked. Keep playing speech or choose Stop Captions.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Untertitel funktionieren. Spiele weiter Sprache ab oder wähle Untertitel stoppen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Los subtítulos funcionan. Sigue reproduciendo voz o elige Detener subtítulos."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les sous-titres fonctionnent. Continuez la lecture ou choisissez Arrêter les sous-titres."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "字幕が動作しました。音声の再生を続けるか「字幕を停止」を選んでください。"
+          }
+        }
+      }
+    },
+    "Finish dictation before starting captions": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Beende das Diktat, bevor du Untertitel startest"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Termina el dictado antes de iniciar los subtítulos"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Terminez la dictée avant de lancer les sous-titres"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "音声入力を終了してから字幕を開始してください"
+          }
+        }
+      }
+    },
+    "For dictation, record a short sentence, then stop to see the result here. For captions, play speech on your Mac.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nimm für das Diktat einen kurzen Satz auf und stoppe, um hier das Ergebnis zu sehen. Spiele für Untertitel Sprache auf deinem Mac ab."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Para el dictado, graba una frase corta y detén la grabación para ver el resultado aquí. Para los subtítulos, reproduce voz en tu Mac."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pour la dictée, enregistrez une courte phrase, puis arrêtez pour voir le résultat ici. Pour les sous-titres, lancez un contenu parlé sur votre Mac."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "音声入力では短い文を録音し、停止するとここに結果が表示されます。字幕ではMacで音声を再生してください。"
+          }
+        }
+      }
+    },
+    "The dictation trial leaves your clipboard and other apps untouched. Stop captions or close setup to end the trial.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Der Diktattest verändert weder die Zwischenablage noch andere Apps. Stoppe die Untertitel oder schließe die Einrichtung, um den Test zu beenden."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La prueba de dictado no modifica el portapapeles ni otras apps. Detén los subtítulos o cierra la configuración para terminar la prueba."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’essai de dictée ne modifie ni le presse-papiers ni les autres apps. Arrêtez les sous-titres ou fermez la configuration pour terminer l’essai."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "音声入力のテストはクリップボードや他のアプリを変更しません。字幕を停止するか設定を閉じるとテストが終了します。"
+          }
+        }
+      }
+    },
+    "Speakers %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sprecher %@"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hablantes %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Intervenants %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "話者 %@"
+          }
+        }
+      }
+    },
+    "Overlapping voices": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Überlappende Stimmen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voces superpuestas"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voix superposées"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重なった声"
+          }
+        }
+      }
+    },
+    "Speaker %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sprecher %lld"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hablante %lld"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Intervenant %lld"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "話者 %lld"
+          }
+        }
+      }
+    },
+    "Speaker identification": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sprechererkennung"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Identificación de hablantes"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Identification des intervenants"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "話者識別"
+          }
+        }
+      }
+    },
+    "Local voice labels for captions. Up to 10 speakers; overlapping voices are marked, not separated.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lokale Sprecherkennzeichnung für Untertitel. Bis zu 10 Sprecher; überlappende Stimmen werden markiert, nicht getrennt."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Etiquetas de voz locales para subtítulos. Hasta 10 hablantes; las voces superpuestas se marcan, no se separan."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Identification locale des voix pour les sous-titres. Jusqu’à 10 intervenants ; les voix superposées sont signalées, pas séparées."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "字幕にローカルの話者ラベルを追加。最大10人。重なった声は分離せずに表示します。"
+          }
+        }
+      }
+    },
+    "Downloading speaker identification…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sprechererkennung wird heruntergeladen…"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Descargando identificación de hablantes…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Téléchargement de l’identification des intervenants…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "話者識別をダウンロード中…"
+          }
+        }
+      }
+    },
+    "Download Speaker identification from Models first.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lade zuerst die Sprechererkennung unter Modelle herunter."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Descarga primero la identificación de hablantes en Modelos."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Téléchargez d’abord l’identification des intervenants dans Modèles."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "まず「モデル」から話者識別をダウンロードしてください。"
+          }
+        }
+      }
+    },
+    "Identify speakers": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sprecher erkennen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Identificar hablantes"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Identifier les intervenants"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "話者を識別"
+          }
+        }
+      }
+    },
+    "Adds local voice labels to captions and saved transcripts. Overlapping voices are marked; their words cannot be separated. Applies to the next caption session.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fügt Untertiteln und gespeicherten Transkripten lokale Sprecherkennzeichnungen hinzu. Überlappende Stimmen werden markiert; ihre Wörter können nicht getrennt werden. Gilt für die nächste Untertitelsitzung."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Añade etiquetas de voz locales a subtítulos y transcripciones guardadas. Las voces superpuestas se marcan; sus palabras no se pueden separar. Se aplica a la próxima sesión de subtítulos."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ajoute des étiquettes de voix locales aux sous-titres et transcriptions enregistrées. Les voix superposées sont signalées ; leurs mots ne peuvent pas être séparés. S’applique à la prochaine session de sous-titres."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "字幕と保存済みの文字起こしにローカルの話者ラベルを追加します。重なった声は表示されますが、単語を分離できません。次の字幕セッションから適用されます。"
+          }
+        }
+      }
+    },
+    "Speaker labels unavailable — captions continue": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sprecherkennzeichnung nicht verfügbar — Untertitel laufen weiter"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Etiquetas de hablantes no disponibles — los subtítulos continúan"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Étiquettes des intervenants indisponibles — les sous-titres continuent"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "話者ラベルを使用できません — 字幕は続行します"
+          }
+        }
+      }
+    },
+    "The local model could not finish decoding.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Das lokale Modell konnte die Dekodierung nicht abschließen." } },
+        "es": { "stringUnit": { "state": "translated", "value": "El modelo local no pudo completar la decodificación." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Le modèle local n’a pas pu terminer le décodage." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ローカルモデルがデコードを完了できませんでした。" } }
+      }
+    },
+    "The MLX Metal library is missing from this app build.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Die MLX-Metal-Bibliothek fehlt in dieser App-Version." } },
+        "es": { "stringUnit": { "state": "translated", "value": "La biblioteca Metal de MLX falta en esta versión de la aplicación." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "La bibliothèque Metal de MLX manque dans cette version de l’application." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "このアプリのビルドにはMLX Metalライブラリがありません。" } }
+      }
+    },
     "%lld pt": {
       "extractionState": "manual",
       "localizations": {

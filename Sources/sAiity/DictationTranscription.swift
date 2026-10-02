@@ -158,6 +158,13 @@ struct SpeechRegionSegmenter: Sendable {
 struct DictationRegionTranscript: Equatable, Sendable {
     let text: String
     let language: String?
+    let overlapsPreviousAudio: Bool
+
+    init(text: String, language: String?, overlapsPreviousAudio: Bool = false) {
+        self.text = text
+        self.language = language
+        self.overlapsPreviousAudio = overlapsPreviousAudio
+    }
 }
 
 /// Language information kept internal to the dictation pipeline.
@@ -185,11 +192,14 @@ struct DictationLanguageMetadata: Equatable, Sendable {
             guard let best else { return code }
             return counts[code, default: 0] > counts[best, default: 0] ? code : best
         }
-        dominantLanguage = dominantCode.flatMap { firstCode[$0] }
+        let maximum = dominantCode.map { counts[$0, default: 0] } ?? 0
+        dominantLanguage = counts.values.filter { $0 == maximum }.count == 1
+            ? dominantCode.flatMap { firstCode[$0] } : nil
 
         let languageMix = counts.count > 1
-        let scriptMix = regions.contains { Self.scriptFamilies(in: $0.text).count > 1 }
-            || Set(regions.compactMap { Self.scriptFamily(in: $0.text) }).count > 1
+        var scripts = regions.reduce(into: Set<ScriptFamily>()) { $0.formUnion(Self.scriptFamilies(in: $1.text)) }
+        if scripts.contains(.kana) { scripts.remove(.han) }
+        let scriptMix = scripts.count > 1
         containsMultipleLanguages = languageMix || scriptMix
     }
 
@@ -208,22 +218,6 @@ struct DictationLanguageMetadata: Equatable, Sendable {
         case latin, cyrillic, arabic, devanagari, hangul, han, kana, other
     }
 
-    private static func scriptFamily(in text: String) -> ScriptFamily? {
-        for scalar in text.unicodeScalars {
-            switch scalar.value {
-            case 0x0041...0x024F, 0x1E00...0x1EFF: return .latin
-            case 0x0400...0x052F: return .cyrillic
-            case 0x0600...0x06FF, 0x0750...0x077F, 0x08A0...0x08FF: return .arabic
-            case 0x0900...0x097F: return .devanagari
-            case 0x1100...0x11FF, 0xAC00...0xD7AF: return .hangul
-            case 0x3040...0x30FF: return .kana
-            case 0x3400...0x4DBF, 0x4E00...0x9FFF, 0xF900...0xFAFF: return .han
-            default: continue
-            }
-        }
-        return nil
-    }
-
     private static func scriptFamilies(in text: String) -> Set<ScriptFamily> {
         var result = Set<ScriptFamily>()
         for scalar in text.unicodeScalars {
@@ -238,20 +232,40 @@ struct DictationLanguageMetadata: Equatable, Sendable {
             default: continue
             }
         }
+        if result.contains(.kana) { result.remove(.han) }
         return result
     }
 }
 
 /// Refines obvious script switches inside one recognizer region. Audio models
 /// do not expose reliable mid-region language tags, but script transitions are
-/// unambiguous and cost no second decode. Same-script switches remain attached
-/// to the recognizer region rather than being guessed from a short text window.
+/// unambiguous and cost no second decode. Same-script switches require confident
+/// text evidence; short filler/name windows never override an audio language tag.
 private enum DictationCodeSwitching {
     private enum Script: Hashable {
         case latin, cyrillic, arabic, devanagari, hangul, han, kana
     }
 
     static func split(_ region: DictationRegionTranscript) -> [DictationRegionTranscript] {
+        let scripts = Set(region.text.compactMap(script(for:)))
+        if scripts == [.latin] {
+            let detected = CaptionLanguageSpanDetector.analyze(region.text,
+                fallbackLanguage: region.language ?? "und")
+            let languages = Set(detected.compactMap { $0.language }.filter { $0 != "und" })
+            // Tiny filler/name windows are frequently classified as unrelated
+            // Latin languages. Require evidence before contradicting audio tags.
+            let supported = detected.allSatisfy { span in
+                if let original = region.language, let language = span.language,
+                   TranslationLanguage.isSame(original, as: language) { return true }
+                guard span.text.split(whereSeparator: { $0.isWhitespace }).count >= 3,
+                      let reading = LanguageRecognizerPool.shared.classify(span.text),
+                      reading.probability >= 0.85 else { return false }
+                return TranslationLanguage.isSame(reading.language.rawValue, as: span.language ?? "und")
+            }
+            if detected.count > 1, languages.count > 1, supported {
+                return detected.map { .init(text: $0.text, language: $0.language == "und" ? nil : $0.language) }
+            }
+        }
         let characters = Array(region.text)
         guard characters.count > 1 else { return [region] }
         var parts: [(String, Script)] = []
@@ -272,7 +286,9 @@ private enum DictationCodeSwitching {
 
         for character in characters {
             let nextScript = script(for: character)
-            if let nextScript, let currentScript, nextScript != currentScript {
+            let japaneseBoundary = (nextScript == .han && currentScript == .kana)
+                || (nextScript == .kana && currentScript == .han)
+            if let nextScript, let currentScript, nextScript != currentScript, !japaneseBoundary {
                 flush()
             }
             if currentScript == nil, let nextScript {
@@ -281,7 +297,10 @@ private enum DictationCodeSwitching {
             current.append(character)
         }
         flush()
-        guard parts.count > 1 else { return [region] }
+        guard !parts.isEmpty else { return [region] }
+        if parts.count == 1, region.language == nil || ["auto", "und"].contains(region.language ?? "") {
+            return [region]
+        }
 
         return parts.map { text, scriptFamily in
             DictationRegionTranscript(text: text.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -298,16 +317,26 @@ private enum DictationCodeSwitching {
             .split(separator: "-").first.map(String.init)?.lowercased()
         switch scriptFamily {
         case .han:
-            return text.contains(where: { script(for: $0) == .kana }) || base == "ja" ? "ja" : "zh"
-        case .kana: return "ja"
-        case .hangul: return "ko"
-        case .cyrillic: return base ?? "ru"
-        case .arabic: return base ?? "ar"
-        case .devanagari: return base ?? "hi"
+            if base == "ja" || base == "zh" { return original }
+        case .kana:
+            if base == "ja" { return original }
+        case .hangul:
+            if base == "ko" { return original }
+        case .cyrillic:
+            if let base, ["ru", "uk", "bg", "sr", "mk", "be"].contains(base) { return original }
+        case .arabic:
+            if let base, ["ar", "fa", "ur", "ps"].contains(base) { return original }
+        case .devanagari:
+            if let base, ["hi", "mr", "ne"].contains(base) { return original }
         case .latin:
-            if let base, !["auto", "zh", "ja", "ko"].contains(base) { return base }
-            return "en"
+            if let base, ["en", "de", "fr", "es", "pt", "it", "nl", "sv", "da", "no", "fi",
+                          "pl", "cs", "sk", "ro", "hu", "tr", "vi", "id", "ms", "tl",
+                          "hr", "sl", "et", "lv", "lt", "ca", "eu", "gl", "af", "sw"].contains(base) {
+                return original
+            }
         }
+        guard let reading = LanguageRecognizerPool.shared.classify(text), reading.probability >= 0.85 else { return nil }
+        return reading.language.rawValue
     }
 
     private static func script(for character: Character) -> Script? {
@@ -353,7 +382,16 @@ struct DictationTranscriptionResult: Equatable, Sendable {
     }
 
     init(regions: [DictationRegionTranscript]) {
-        let refined = regions.flatMap(DictationCodeSwitching.split)
+        var accepted: [DictationRegionTranscript] = []
+        var joined = ""
+        for region in regions {
+            let text = region.overlapsPreviousAudio
+                ? DictationTranscriptMerger.removingOverlap(region.text, after: joined) : region.text
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+            accepted.append(.init(text: text, language: region.language))
+            joined = DictationTranscriptMerger.merge([joined, text])
+        }
+        let refined = accepted.flatMap(DictationCodeSwitching.split)
         self.regions = refined
         self.text = DictationTranscriptMerger.merge(refined.map(\.text))
         self.languageMetadata = DictationLanguageMetadata(regions: refined)
@@ -366,9 +404,9 @@ struct DictationTranscriptionResult: Equatable, Sendable {
 
 /// Joins sequential recogniser results without an LLM.
 enum DictationTranscriptMerger {
-    static func merge(_ texts: [String]) -> String {
+    static func merge(_ texts: [String], removingAudioOverlap: Bool = false) -> String {
         texts.reduce(into: "") { output, text in
-            append(text, to: &output)
+            append(text, to: &output, removingAudioOverlap: removingAudioOverlap)
         }
     }
 
@@ -378,14 +416,9 @@ enum DictationTranscriptMerger {
         let key: String
     }
 
-    private static func append(_ value: String, to output: inout String) {
+    static func removingOverlap(_ value: String, after output: String) -> String {
         let next = normalizedRecognizerText(value)
-        guard !next.isEmpty else { return }
-        guard !output.isEmpty else {
-            output = next
-            return
-        }
-
+        guard !output.isEmpty else { return next }
         let left = units(in: output)
         let right = units(in: next)
         var overlapEnd = next.startIndex
@@ -402,10 +435,14 @@ enum DictationTranscriptMerger {
             }
         }
 
-        let remainder = next[overlapEnd...].trimmingCharacters(in: .whitespacesAndNewlines)
+        return next[overlapEnd...].trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func append(_ value: String, to output: inout String, removingAudioOverlap: Bool) {
+        let remainder = removingAudioOverlap ? removingOverlap(value, after: output) : normalizedRecognizerText(value)
         guard !remainder.isEmpty else { return }
-        if needsSpace(between: output, and: remainder) {
-            output += " "
+        if let last = output.last, let first = remainder.first {
+            output += CaptionTextMerger.separator(after: last, before: first)
         }
         output += remainder
     }
@@ -451,19 +488,6 @@ enum DictationTranscriptMerger {
 
     private static func canonical<S: StringProtocol>(_ value: S) -> String {
         String(value).filter { !$0.isWhitespace }.lowercased()
-    }
-
-    private static func needsSpace(between left: String, and right: String) -> Bool {
-        guard let previous = left.last, let next = right.first else { return false }
-        guard !previous.isWhitespace, !next.isWhitespace else { return false }
-        if next.isPunctuation || previous == "(" || previous == "[" || previous == "{" {
-            return false
-        }
-        if "，。！？、；：".contains(previous) { return false }
-        if ",.;:!?".contains(previous) { return true }
-        guard previous.isLetter || previous.isNumber,
-              next.isLetter || next.isNumber else { return false }
-        return !(isCJK(previous) && isCJK(next))
     }
 
     private static func isCJK(_ character: Character) -> Bool {

@@ -171,9 +171,22 @@ import Testing
         #expect(DictationCleanupValidator.validate("...", preserving: "hello there") == nil)
     }
 
+    @Test("cleanup keeps literal formatting mentions, negation and uncertainty")
+    func meaningAndCommandEligibility() {
+        #expect(!DictationCleanupValidator.needsModelCleanup("I like Swift and it works well."))
+        #expect(!DictationCleanupValidator.needsModelCleanup("Nein, das stimmt nicht.", sourceLanguage: "de"))
+        for value in ["We need a new line of products.", "Take a bullet train.", "The period lasted two weeks."] {
+            #expect(DictationCleanupValidator.deterministicCleanup(value, sourceLanguage: "en") == value)
+        }
+        #expect(DictationCleanupValidator.deterministicCleanup("Das ist ein wichtiger Punkt.", sourceLanguage: "de") == "Das ist ein wichtiger Punkt.")
+        #expect(DictationCleanupValidator.validate("Please send the report.", preserving: "Please do not send the report.") == nil)
+        #expect(DictationCleanupValidator.validate("Send it tomorrow.", preserving: "Maybe send it tomorrow.") == nil)
+        #expect(DictationCleanupValidator.validate("Das stimmt.", preserving: "Das stimmt nicht.", sourceLanguage: "de") == nil)
+    }
+
     @Test("cleanup prompt describes a conservative speech editor")
     func promptContract() {
-        let prompt = LocalLLMTranslator.cleanupSystemPrompt.lowercased()
+        let prompt = LocalLLMTranslator.cleanupFastSystemPrompt.lowercased()
         #expect(prompt.contains("filler"))
         #expect(prompt.contains("self-correction"))
         #expect(prompt.contains("bullet point"))
@@ -181,8 +194,9 @@ import Testing
         #expect(prompt.contains("numbers"))
         #expect(prompt.contains("never summarize"))
         #expect(prompt.contains("output only"))
-        #expect(prompt.contains("tomorrow, actually friday morning"))
-        #expect(LocalLLMTranslator.cleanupUserPrompt("hello").lowercased().contains("<transcript>"))
+        #expect(prompt.contains("negation"))
+        #expect(prompt.contains("spoken content"))
+        #expect(LocalLLMTranslator.cleanupUserPrompt("hello").lowercased().contains("json string"))
     }
 
     @Test("cleanup prompt carries the source language without making it a translation request")

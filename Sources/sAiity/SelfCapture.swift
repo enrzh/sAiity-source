@@ -1,6 +1,7 @@
 #if SAIITY_TEST_HOOKS
 import AppKit
 import Foundation
+import SwiftUI
 
 /// Lets the app photograph its own settings window, one PNG per pane.
 ///
@@ -83,6 +84,23 @@ enum SelfCapture {
             RunLoop.main.run(until: Date().addingTimeInterval(settle))
             captureWindow(named: pane.rawValue, into: directory)
         }
+        for useCase in OnboardingModel.UseCase.allCases {
+            let model = OnboardingModel(state: SettingsWindowController.state)
+            model.useCase = useCase
+            model.step = .finish
+            model.trialStatus = "Setup trial preview"
+            model.trialText = "Das ist ein Test and this result stays in the setup window."
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 600),
+                                  styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.makeVibrant()
+            window.contentViewController = NSHostingController(rootView: OnboardingView(model: model, onFinish: {}))
+            window.center()
+            window.orderFront(nil)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+            captureWindow(named: "onboarding-\(useCase.rawValue)", into: directory, window: window)
+            window.close()
+        }
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
         // `NSApp.terminate` is deferred when called from inside a run loop, which
         // is where this runs, so the process would linger as a menu-bar app. This
@@ -102,8 +120,8 @@ enum SelfCapture {
     }
 
     @MainActor
-    private static func captureWindow(named name: String, into directory: URL) {
-        guard let view = settingsWindow?.contentView else {
+    private static func captureWindow(named name: String, into directory: URL, window: NSWindow? = nil) {
+        guard let view = (window ?? settingsWindow)?.contentView else {
             NSLog("SelfCapture: no settings content view for \(name)")
             return
         }

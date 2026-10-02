@@ -10,6 +10,19 @@ import Testing
 /// Reads at most 12 mono Float32 16 kHz WAVs, each at most 60 seconds. No downloads.
 @Suite(.serialized)
 struct DictationASRPerformanceTests {
+    private final class FixtureCapture: DictationAudioCapture {
+        var samples: [Float] = []
+        var sink: (@Sendable (AVAudioPCMBuffer) -> Void)?
+        func start(targetFormat: AVAudioFormat, onBuffer: @escaping @Sendable (AVAudioPCMBuffer) -> Void) throws { sink = onBuffer }
+        func stop() { sink = nil }
+        func takeCollectedSamples() -> [Float] { samples }
+    }
+
+    private final class MemoryPasteboard: DictationPasteboard {
+        var text = ""
+        func setString(_ value: String) -> Bool { text = value; return true }
+    }
+
     private struct BenchmarkError: Error, CustomStringConvertible {
         let description: String
         init(_ description: String) { self.description = description }
@@ -88,6 +101,7 @@ struct DictationASRPerformanceTests {
         var fields = fields
         let seconds = Double(duration.seconds) + Double(duration.attoseconds) / 1e18
         fields["seconds"] = seconds
+        fields["physicalMemoryBytes"] = MemoryPolicy.physicalFootprint()
         if let audioSeconds = fields["audioSeconds"] as? Double, audioSeconds > 0 {
             fields["realTimeFactor"] = seconds / audioSeconds
         }
@@ -98,7 +112,7 @@ struct DictationASRPerformanceTests {
     private func measure(_ model: String, fixtures: [Fixture],
                          decode: (Fixture) async throws -> DictationTranscriptionResult) async throws {
         for fixture in fixtures {
-            for run in 1...3 {
+            for run in 1...5 {
                 try Task.checkCancellation()
                 let start = ContinuousClock.now
                 let result = try await decode(fixture)
@@ -118,6 +132,8 @@ struct DictationASRPerformanceTests {
                     let wer = DictationBenchmarkScorer.wordErrorRate(reference: expectedText,
                                                                       hypothesis: result.text)
                     fields["wer"] = wer
+                    fields["cer"] = DictationBenchmarkScorer.characterErrorRate(reference: expectedText, hypothesis: result.text)
+                    fields["missingWords"] = DictationBenchmarkScorer.wordErrors(reference: expectedText, hypothesis: result.text).deletions
                     if let maxWER = fixture.maxWER, wer > maxWER {
                         throw BenchmarkError("\(fixture.name): \(model) WER \(wer) exceeds max \(maxWER)")
                     }
@@ -130,6 +146,132 @@ struct DictationASRPerformanceTests {
                 try record(fields, since: start)
             }
         }
+    }
+
+    /// Real controller, segmentation, cleanup, translation and insertion; fixture
+    /// PCM replaces the microphone and a memory pasteboard protects user data.
+    @Test("complete installed dictation pipeline with both preview states",
+          .enabled(if: ProcessInfo.processInfo.environment["SAIITY_DICTATION_PIPELINE_BENCHMARK"] == "1"))
+    @MainActor func completePipeline() async throws {
+        let path = try #require(ProcessInfo.processInfo.environment["SAIITY_ASR_BENCHMARK_DIR"])
+        let inputs = try fixtures(in: URL(fileURLWithPath: path, isDirectory: true))
+        try #require(NemotronEngine.isDownloaded(chunkMs: 2240), "Installed Nemotron required; downloads disabled")
+        let cleanupMode = ProcessInfo.processInfo.environment["SAIITY_DICTATION_BENCHMARK_CLEANUP"] ?? "rules"
+        try #require(["off", "rules", "model"].contains(cleanupMode))
+        let model = cleanupMode == "model" ? LocalModel.cleanupSelected : nil
+        if cleanupMode == "model" { try #require(model?.isDownloaded == true, "Installed cleanup model required; downloads disabled") }
+        let translationMode = ProcessInfo.processInfo.environment["SAIITY_DICTATION_BENCHMARK_TRANSLATION"] ?? "off"
+        if translationMode == "madlad" {
+            MADLADTranslator.metalLibraryRootOverride = URL(fileURLWithPath:
+                "\(FileManager.default.currentDirectoryPath)/.build/release/sAiityTests.xctest/Contents/MacOS")
+        }
+        defer { MADLADTranslator.metalLibraryRootOverride = nil }
+        let translator: (any Translating)?
+        switch translationMode {
+        case "off": translator = nil
+        case "hy-mt2":
+            try #require(HyMT2Translator.isDownloaded, "Installed Hy-MT2 required; downloads disabled")
+            translator = HyMT2Translator()
+        case "madlad":
+            try #require(MADLADTranslator.isDownloaded() && MADLADTranslator.hasBundledMetalLibrary,
+                         "Installed MADLAD and native test Metal resources required; downloads disabled")
+            translator = MADLADTranslator()
+        default: throw BenchmarkError("Unsupported dictation translation engine")
+        }
+        let target = ProcessInfo.processInfo.environment["SAIITY_DICTATION_BENCHMARK_TARGET"] ?? "de"
+        let gate = TranslationInferenceGate()
+        let cleanup = DictationCleanupSession(gate: gate)
+        var translatorPrepared = false
+        let pool = ASRBackendPool(makeBackend: {
+            StreamingASRBackend(name: "Pipeline Nemotron", engine: InstalledNemotron(directory: NemotronEngine.variantDirectory(chunkMs: 2240)))
+        }, idleEvictionDelay: .seconds(3_600))
+        let cold = ContinuousClock.now
+        try await pool.prepare(locale: Locale(identifier: "auto")) { _ in }
+        try record(["model": "nemotron-2240", "phase": "pipeline_cold_prepare"], since: cold)
+        for preview in [false, true] {
+            let capture = FixtureCapture()
+            let pasteboard = MemoryPasteboard()
+            let inserter = TextInserter(pasteboard: pasteboard, accessibilityTrusted: { false })
+            var timings: [String: Double] = [:]
+            var snapshot: DictationResultSnapshot?
+            let controller = DictationController(backendProvider: pool, capture: capture, inserter: inserter,
+                captionsActive: { false },
+                translationConfiguration: { .init(enabled: translator != nil, target: target) },
+                detailedTranslate: { _, result, target in
+                    guard let translator else { return nil }
+                    return try? await gate.run { @MainActor in
+                        if !translatorPrepared {
+                            await cleanup.releaseModel()
+                            try await translator.prepare(from: "auto", to: target) { _ in }
+                            translatorPrepared = true
+                        }
+                        var translated: [String] = []
+                        for region in result.translationRuns {
+                            if let source = region.language, TranslationLanguage.isSame(source, as: target) {
+                                translated.append(region.text)
+                            } else {
+                                guard let output = try await translator.translate(region.text,
+                                    from: region.language ?? "auto", to: target) else { return nil }
+                                translated.append(output)
+                            }
+                        }
+                        return DictationTranscriptMerger.merge(translated)
+                    }
+                },
+                cleanupConfiguration: { .init(enabled: cleanupMode != "off") },
+                detailedCleanup: { input in
+                    await cleanup.cleanup(input, modelKey: model?.file) {
+                        await translator?.stop()
+                        translatorPrepared = false
+                        let local = LocalLLMTranslator()
+                        try await local.prepare(model: model, from: "auto", to: "auto") { _ in }
+                        return .init(cleanup: { await local.cleanup($0, sourceLanguage: $1, languageMetadata: $2) },
+                                     cleanupRegions: { await local.cleanupRegions($0) }, stop: { await local.stop() })
+                    }
+                }, onResult: { snapshot = $0 }, dictationStreamingDraftEnabled: { preview },
+                onTiming: { operation, seconds, _ in timings[operation] = seconds })
+            for fixture in inputs {
+                for run in 1...5 {
+                    capture.samples = fixture.samples
+                    pasteboard.text = ""
+                    snapshot = nil
+                    timings.removeAll()
+                    controller.press()
+                    await controller.waitForWorkForTests()
+                    // Pace capture for the preview path, matching microphone callbacks.
+                    for offset in stride(from: 0, to: fixture.samples.count, by: 3_200) {
+                        let end = min(offset + 3_200, fixture.samples.count)
+                        capture.sink?(CaptionASRPerformanceTests.audioBufferForDictation(fixture.samples[offset..<end]))
+                        if preview { try await Task.sleep(for: .milliseconds(200)) }
+                    }
+                    let released = ContinuousClock.now
+                    controller.release()
+                    await controller.waitForWorkForTests()
+                    try #require(!pasteboard.text.isEmpty, "No inserted dictation result")
+                    if translator != nil { #expect(snapshot?.wasTranslated == true, "Translation silently fell back") }
+                    if cleanupMode != "off" { #expect(snapshot?.cleanupUnavailable == false, "Cleanup was unavailable") }
+                    var fields: [String: Any] = ["model": "nemotron-2240", "phase": "release_to_insertion",
+                        "fixture": fixture.name, "preview": preview, "run": run,
+                        "cleanup": cleanupMode, "translation": translationMode, "timings": timings,
+                        "outputChars": pasteboard.text.count]
+                    if translationMode == "off", let expected = fixture.expectedText {
+                        let wer = DictationBenchmarkScorer.wordErrorRate(reference: expected, hypothesis: pasteboard.text)
+                        fields["wer"] = wer
+                        fields["missingWords"] = DictationBenchmarkScorer.wordErrors(reference: expected, hypothesis: pasteboard.text).deletions
+                        if let maximum = fixture.maxWER { #expect(wer <= maximum) }
+                    }
+                    if translationMode == "off", let expected = fixture.expectedLanguages,
+                       let metadata = snapshot?.languageMetadata {
+                        fields["languagePreserved"] = DictationBenchmarkScorer.preservesLanguageSequence(
+                            expected: expected, actual: metadata.regionLanguages.compactMap { $0 })
+                    }
+                    try record(fields, since: released)
+                }
+            }
+        }
+        await pool.invalidate()
+        await cleanup.invalidate()
+        await translator?.stop()
     }
 
     @Test("Installed Nemotron 2240 versus Whisper base, three sequential decodes per fixture",

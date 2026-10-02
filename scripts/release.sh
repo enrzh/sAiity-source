@@ -58,6 +58,8 @@ if git rev-parse --verify --quiet "refs/tags/v$VERSION" >/dev/null; then
     exit 1
 fi
 
+./scripts/quality-matrix.sh
+
 SAIITY_VERSION="$VERSION" ./build-app.sh --notarize
 
 # Refuse to create release metadata for a bundle that is structurally invalid or
@@ -66,6 +68,11 @@ plutil -lint build/sAiity.app/Contents/Info.plist >/dev/null
 test -x build/sAiity.app/Contents/MacOS/sAiity
 codesign --verify --deep --strict build/sAiity.app
 ./scripts/verify-release.sh build/sAiity.app "$VERSION"
+build/sAiity.app/Contents/MacOS/sAiity --selftest 20 2>&1 | tee build/release-launch-smoke.log
+grep -q '^saiity-selftest: ok$' build/release-launch-smoke.log || {
+    echo "FATAL: release requires a completed GUI smoke test, not a headless skip." >&2
+    exit 1
+}
 
 ZIP="build/sAiity.zip"
 [ -f "$ZIP" ] || { echo "FATAL: $ZIP missing after notarize"; exit 1; }

@@ -1066,6 +1066,15 @@ struct CaptionsView: View {
                 LabeledToggle("Include my microphone",
                               "Off by default. System audio on a call carries only the other participants — your own voice never enters the mix, so a saved transcript is missing your half of the conversation. On, sAiity also opens the microphone (macOS asks once) and mixes it into recognition. Audio still never leaves this Mac. Takes effect immediately, including mid-session: switching it off releases the microphone straight away.",
                                                             isOn: $state.includeMic)
+                LabeledToggle("Identify speakers",
+                              "Adds local voice labels to captions and saved transcripts. Overlapping voices are marked; their words cannot be separated. Applies to the next caption session.",
+                              isOn: $state.identifyCaptionSpeakers)
+                    .disabled(state.isCaptioning)
+                if state.identifyCaptionSpeakers, !CaptionSpeakerTracker.isInstalled {
+                    Text("Download Speaker identification from Models first.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    AssetControl(state: state, status: ModelRegistry.status(of: CaptionSpeakerTracker.asset))
+                }
             }
 
             SettingsSection(title: "Sentences",
@@ -2375,6 +2384,9 @@ private struct TranscriptViewerSheet: View {
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                         VStack(alignment: .leading, spacing: 2) {
+                            if let label = seg.speakerLabel {
+                                Text(verbatim: label).font(.caption).foregroundStyle(.secondary)
+                            }
                             Text(seg.text).textSelection(.enabled)
                             if let tr = seg.tr, !tr.isEmpty {
                                 Text(tr).foregroundStyle(.secondary)

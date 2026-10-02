@@ -198,15 +198,11 @@ struct SystemAudioCaptureGapTests {
 
     @Test("a finished sentence closes a gap through the capture path")
     func capturePathFiresAGap() {
-        let previous = (SpeechGap.enabled, SpeechGap.holdMs)
-        defer { SpeechGap.enabled = previous.0; SpeechGap.holdMs = previous.1 }
 
         let capture = SystemAudioCapture()
         let gaps = GapCounter<[Range<Int>]>([])
         capture.onSpeechGap = { range in gaps.withValue { $0.append(range) } }
-        SpeechGap.enabled = true
-        SpeechGap.holdMs = SpeechGap.defaultHoldMs
-        capture.applySpeechGapSettings()
+        capture.applySpeechGapSettings(enabled: true, holdFrames: 36_000)
 
         speech(capture, ms: 2_000)
         pause(capture)
@@ -217,22 +213,18 @@ struct SystemAudioCaptureGapTests {
 
     @Test("gaps off means no gap, and turning them back on resumes cleanly")
     func disabledGapsProduceNothing() {
-        let previous = (SpeechGap.enabled, SpeechGap.holdMs)
-        defer { SpeechGap.enabled = previous.0; SpeechGap.holdMs = previous.1 }
 
         let capture = SystemAudioCapture()
         let gaps = GapCounter<[Range<Int>]>([])
         capture.onSpeechGap = { range in gaps.withValue { $0.append(range) } }
-        SpeechGap.enabled = false
-        capture.applySpeechGapSettings()
+        capture.applySpeechGapSettings(enabled: false, holdFrames: 36_000)
 
         speech(capture, ms: 2_000)
         pause(capture)
         #expect(gaps.value.isEmpty, "a gap fired with the setting off")
         #expect(capture.gapFireCountForTests == 0)
 
-        SpeechGap.enabled = true
-        capture.applySpeechGapSettings()
+        capture.applySpeechGapSettings(enabled: true, holdFrames: 36_000)
         speech(capture, ms: 2_000)
         pause(capture)
         #expect(gaps.value.count == 1)
@@ -242,15 +234,11 @@ struct SystemAudioCaptureGapTests {
     /// another queue than the buffers.
     @Test("a settings change during capture never corrupts the running session")
     func settingsChangesDuringCaptureAreSafe() {
-        let previous = (SpeechGap.enabled, SpeechGap.holdMs)
-        defer { SpeechGap.enabled = previous.0; SpeechGap.holdMs = previous.1 }
-        SpeechGap.enabled = true
-        SpeechGap.holdMs = SpeechGap.defaultHoldMs
 
         let capture = SystemAudioCapture()
         let gaps = GapCounter(0)
         capture.onSpeechGap = { _ in gaps.withValue { $0 += 1 } }
-        capture.applySpeechGapSettings()
+        capture.applySpeechGapSettings(enabled: true, holdFrames: 36_000)
 
         let settings = DispatchQueue(label: "test.capture.settings")
         let buffers = DispatchQueue(label: "test.capture.buffers")
@@ -258,9 +246,8 @@ struct SystemAudioCaptureGapTests {
         done.enter()
         settings.async {
             for step in 0..<2_000 {
-                SpeechGap.holdMs = SpeechGap.range.lowerBound
-                    + (step % SpeechGap.range.count)   // 300…2000 ms
-                capture.applySpeechGapSettings()
+                let hold = SpeechGap.range.lowerBound + (step % SpeechGap.range.count)
+                capture.applySpeechGapSettings(enabled: true, holdFrames: hold * 48)
             }
             done.leave()
         }
@@ -275,8 +262,7 @@ struct SystemAudioCaptureGapTests {
 
         // The session still works: a full stop after speech closes a sentence,
         // exactly once.
-        SpeechGap.holdMs = SpeechGap.defaultHoldMs
-        capture.applySpeechGapSettings()
+        capture.applySpeechGapSettings(enabled: true, holdFrames: 36_000)
         let before = gaps.value
         speech(capture, ms: 2_000)
         pause(capture)

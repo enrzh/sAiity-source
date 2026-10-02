@@ -1,22 +1,14 @@
-name: Windows overlay spike
+name: Experimental Windows overlay spike (manual)
 
 on:
-  push:
-    paths:
-      - "windows/spike/**"
-      - ".github/workflows/windows-overlay.yml"
-  pull_request:
-    paths:
-      - "windows/spike/**"
-      - ".github/workflows/windows-overlay.yml"
+  workflow_dispatch:
 
 # Nothing here writes to the repository, so the token needs to read and nothing
 # more. A build step that turns malicious has no write to exfiltrate through.
 permissions:
   contents: read
 
-# The spike compiles on every push to windows/spike. An older run's result
-# describes an older commit, so cancel it rather than queue behind it.
+# Keep experimental checks available without making them a macOS release gate.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true

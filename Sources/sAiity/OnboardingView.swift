@@ -64,6 +64,12 @@ final class OnboardingModel {
 
     var purpose: Purpose = .anyLanguage
     var wantsAutoUpdates = false
+    var trial: UseCase?
+    var trialBusy = false
+    var trialRecording = false
+    var trialStatus = ""
+    var trialText = ""
+    var trialPermissionPane: String?
 
     /// Which way the last step change went, so the transition can match it.
     var goingBack = false
@@ -132,6 +138,7 @@ final class OnboardingModel {
 }
 
 struct OnboardingView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Bindable var model: OnboardingModel
     let onFinish: () -> Void
 
@@ -149,10 +156,10 @@ struct OnboardingView: View {
             // and the motion should say so.
             content
                 .id(model.step)
-                .transition(.push(from: model.goingBack ? .leading : .trailing))
+                .transition(reduceMotion ? .opacity : .push(from: model.goingBack ? .leading : .trailing))
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 .padding(.horizontal, 28)
-                .animation(.smooth(duration: 0.28), value: model.step)
+                .animation(reduceMotion ? nil : .smooth(duration: 0.28), value: model.step)
             Divider()
             footer
         }
@@ -396,10 +403,56 @@ struct OnboardingView: View {
     }
 
     private var finish: some View {
+        ScrollView {
         VStack(alignment: .leading, spacing: 14) {
             header("checkmark.seal",
-                   "Ready",
-                   "Everything is in place.")
+                   "Try it out",
+                   "An optional check before you finish setup.")
+            GroupBox {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("For dictation, record a short sentence, then stop to see the result here. For captions, play speech on your Mac.")
+                        .font(.callout).foregroundStyle(.secondary)
+                    HStack {
+                        if model.useCase.includesDictation {
+                            Button(model.trial == .dictation && model.trialRecording ? "Stop & Transcribe" : "Try Dictation") {
+                                Task { await (NSApp.delegate as? AppDelegate)?.tryOnboarding(.dictation, model: model) }
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(model.trialBusy && !(model.trial == .dictation && model.trialRecording))
+                        }
+                        if model.useCase.includesCaptions {
+                            Button(model.trial == .captions && model.trialBusy ? "Stop Captions" : "Try Captions") {
+                                Task { await (NSApp.delegate as? AppDelegate)?.tryOnboarding(.captions, model: model) }
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(model.trialBusy && model.trial != .captions)
+                        }
+                    }
+                    if !model.trialStatus.isEmpty {
+                        Text(model.trialStatus).font(.callout)
+                            .accessibilityAddTraits(.updatesFrequently)
+                    }
+                    if !model.trialText.isEmpty {
+                        Text(model.trialText).textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(10).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                    }
+                    Text("The dictation trial leaves your clipboard and other apps untouched. Stop captions or close setup to end the trial.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if !model.trialBusy, !model.trialStatus.isEmpty, model.trialText.isEmpty {
+                        HStack {
+                            if let pane = model.trialPermissionPane {
+                                Button("Open Settings") {
+                                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") {
+                                        NSWorkspace.shared.open(url)
+                                    }
+                                }
+                            }
+                            Button("Review setup") { model.step = .setup }
+                        }
+                    }
+                }
+            } label: { Text("Check recognition") }
             GroupBox {
                 VStack(alignment: .leading, spacing: 6) {
                     Toggle("Check for updates automatically", isOn: $model.wantsAutoUpdates)
@@ -416,15 +469,21 @@ struct OnboardingView: View {
             // LocalizedStringKey interpolating \(shortcut) becomes the key
             // "…, or press %@." and stays translatable. Gluing the tail on at
             // runtime produced a String, which localizes to nothing at all.
-            if let shortcut = HotKeyCenter.shortcut(for: .toggleCaptions)?.displayString {
+            if model.useCase.includesCaptions,
+               let shortcut = HotKeyCenter.shortcut(for: .toggleCaptions)?.displayString {
                 bullet("captions.bubble",
                        "Start captions from the sAiity icon in the menu bar, or press \(shortcut).")
-            } else {
+            } else if model.useCase.includesCaptions {
                 bullet("captions.bubble", "Start captions from the sAiity icon in the menu bar.")
+            }
+            if model.useCase.includesDictation {
+                let shortcut = model.state.dictationChord.displayString
+                bullet("keyboard", "For everyday dictation, hold \(shortcut) while speaking, then release.")
             }
             bullet("slider.horizontal.3", "Change engine, language and appearance in Settings.")
             bullet("lock", "Nothing you caption is sent anywhere.")
             Spacer()
+        }
         }
     }
 
@@ -528,6 +587,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        (NSApp.delegate as? AppDelegate)?.cancelOnboardingTrial()
         // Closing without finishing is a decision, not a completion.
         if Onboarding.needsRun { Onboarding.dismiss() }
         ForegroundActivation.end()

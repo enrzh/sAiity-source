@@ -1,6 +1,7 @@
 import AppKit
 import CoreGraphics
 import Foundation
+import SwiftUI
 
 // MARK: - Pure reporting
 
@@ -200,6 +201,7 @@ final class LaunchSmokeTest {
         record("edit menu routes the standard shortcuts", hasEditingMenu())
         record("run loop turns", runOneTurn())
         record("window server reachable", orderAWindow())
+        exerciseUserSurfaces()
         finish(with: LaunchSmokeReport.outcome(for: checks))
     }
 
@@ -272,6 +274,79 @@ final class LaunchSmokeTest {
         return shown
             ? (true, "ordered a window in and out")
             : (false, "the window never became visible")
+    }
+
+    /// Real native views and presentation transitions, without audio capture,
+    /// model downloads, clipboard writes or permanent settings changes.
+    private func exerciseUserSurfaces() {
+        let defaults = UserDefaults.standard
+        let keys = [CaptionStyle.key, CaptionStyle.dictationKey, "captionFrame",
+                    "captionUserWidth", "dictationToastFrame", "onboardingResumeStep"]
+        let saved = keys.map { ($0, defaults.object(forKey: $0)) }
+        let captionStyle = CaptionStyle.current
+        let dictationStyle = CaptionStyle.currentDictation
+        defer {
+            CaptionStyle.current = captionStyle
+            CaptionStyle.currentDictation = dictationStyle
+            for (key, value) in saved {
+                if let value { defaults.set(value, forKey: key) }
+                else { defaults.removeObject(forKey: key) }
+            }
+        }
+        let caption = OverlayWindow()
+        let dictation = DictationToastWindow(contentRect: .zero, styleMask: [.borderless],
+                                            backing: .buffered, defer: false)
+        caption.isReleasedWhenClosed = false
+        dictation.isReleasedWhenClosed = false
+        for preset in BubbleStylePreset.allCases {
+            var style = preset.applying(to: captionStyle, context: .captions)
+            style.hidden = false
+            CaptionStyle.current = style
+            CaptionStyle.currentDictation = preset.applying(to: dictationStyle, context: .dictation)
+            _ = runOneTurn()
+            caption.applyStyle(style)
+            caption.show(text: "First caption.", isFinal: true, sentenceID: 1)
+            caption.showTranslation("Erster Untertitel.", forSentenceID: 1)
+            caption.show(text: "A later caption appears below it.", isFinal: true, sentenceID: 2)
+            caption.contentView?.layoutSubtreeIfNeeded()
+            record("caption bubble \(preset.rawValue)", caption.isVisible && caption.frame.width > 0,
+                   detail: "original, translation and following caption presented")
+            caption.clearHistory(keepVisible: true)
+            caption.show(text: "Captions continue after Clear.", isFinal: true, sentenceID: 3)
+            record("caption clear \(preset.rawValue)", caption.isVisible,
+                   detail: "clear followed by new content kept the bubble visible")
+
+            dictation.show(phase: .dictating)
+            let compact = dictation.frame.size
+            dictation.updateWaveform(Array(repeating: 0.7, count: 28))
+            dictation.show(resultText: String(repeating: "Dictation result. ", count: 30), autoDismissAfter: nil)
+            dictation.contentView?.layoutSubtreeIfNeeded()
+            record("dictation result \(preset.rawValue)", dictation.isVisible && dictation.frame.height >= compact.height,
+                   detail: "waveform changed to a long result")
+            dictation.show(phase: .dictating)
+            record("dictation reset \(preset.rawValue)", dictation.frame.size == compact,
+                   detail: "next recording restored the compact bubble")
+        }
+        caption.clear()
+        dictation.dismiss()
+        caption.close()
+        dictation.close()
+
+        for useCase in OnboardingModel.UseCase.allCases {
+            let model = OnboardingModel(state: SettingsWindowController.state)
+            model.useCase = useCase
+            model.step = .finish
+            model.trialText = "A trial result stays here without replacing your clipboard."
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 600),
+                                  styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentViewController = NSHostingController(rootView: OnboardingView(model: model, onFinish: {}))
+            window.orderFront(nil)
+            window.contentView?.layoutSubtreeIfNeeded()
+            record("setup trial \(useCase.rawValue)", window.isVisible && window.contentView?.subviews.isEmpty == false,
+                   detail: "native setup result and trial controls laid out")
+            window.close()
+        }
     }
 
     /// Written by the main queue and read on the main thread, which is the only

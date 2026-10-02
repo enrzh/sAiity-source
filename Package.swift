@@ -42,7 +42,7 @@ let package = Package(
                 // For HuggingFaceDownloader: fetching MADLAD's weights without
                 // also loading 1.86 GB into memory, which fromPretrained does.
                 .product(name: "AudioCommon", package: "speech-swift"),
-                .product(name: "LLM", package: "LLM.swift"),
+                "SaiityLLM",
                 .product(name: "MLX", package: "mlx-swift"),
                 // Qwen3-ASR 0.6B and 1.7B. Finals are append-only; partials are
                 // not fed to the caption reconciler. SpeechVAD segments the
@@ -60,6 +60,11 @@ let package = Package(
                 .define("SAIITY_TEST_HOOKS", .when(configuration: .debug)),
             ]
         ),
+        .target(name: "SaiityLLM",
+                dependencies: [.product(name: "LLM", package: "LLM.swift")],
+                path: "Vendor/SaiityLLM",
+                exclude: ["README.md", "LICENSE"],
+                swiftSettings: [.swiftLanguageMode(.v5)]),
         // Covers the pure logic only — the model registry and the per-engine
         // language mapping. Both are places where a wrong answer is silent:
         // a bad removal path deletes the wrong directory, and a bad language

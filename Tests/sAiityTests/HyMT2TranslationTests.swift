@@ -173,6 +173,7 @@ struct HyMT2TranslationTests {
     @Test("Hy-MT2 loads and translates a real Q4 model",
           .enabled(if: ProcessInfo.processInfo.environment["SAIITY_HYMT2_SMOKE"] == "1"))
     func realModelSmokeTest() async throws {
+        try #require(HyMT2Translator.isDownloaded, "Installed Hy-MT2 required; downloads disabled")
         let translator = HyMT2Translator()
         do {
             try await translator.prepare(from: "de", to: "en") { _ in }
@@ -190,5 +191,37 @@ struct HyMT2TranslationTests {
             await translator.stop()
             throw error
         }
+    }
+
+    @Test("installed Hy-MT2 translates all code-switched spans",
+          .enabled(if: ProcessInfo.processInfo.environment["SAIITY_HYMT2_MIXED"] == "1"))
+    func realMixedLanguage() async throws {
+        try #require(HyMT2Translator.isDownloaded, "Installed Hy-MT2 required; downloads disabled")
+        let translator = HyMT2Translator()
+        try await translator.prepare(from: "auto", to: "en") { _ in }
+        do {
+            let fixtures: [(String, String, [String])] = [
+                ("Ich denke we should ship this today.", "en", ["today"]),
+                ("Can you send mir bitte die Rechnung?", "en", ["invoice"]),
+                ("你好，can you check das nochmal?", "en", ["hello|hi", "check"]),
+                ("Bitte send the invoice today, dann prüfen wir sie morgen.", "en", ["invoice", "today", "tomorrow"]),
+                ("Please send die Rechnung today und prüfe 12 Artikel.", "en", ["invoice", "today", "12"]),
+                ("We should ship heute und check the invoice morgen.", "de", ["heute", "rechnung", "morgen"]),
+                ("你好，this is an English sentence，然后我们继续。", "en", ["english", "continue"])
+            ]
+            for (source, target, terms) in fixtures {
+                let start = ContinuousClock.now
+                let result = try #require(try await translator.translate(source, from: "auto", to: target))
+                for term in terms {
+                    let alternatives = term == "invoice" ? ["invoice", "bill"] : term.split(separator: "|").map(String.init)
+                    #expect(alternatives.contains(where: { result.lowercased().contains($0) }), "Missing meaning-bearing term: \(term)")
+                }
+                #expect(!result.contains("Rechnung") || target == "de")
+                #expect(!result.contains("然后"))
+                let elapsed = start.duration(to: .now).components
+                print("SAIITY_HY_MIXED target=\(target) chars=\(result.count) seconds=\(Double(elapsed.seconds) + Double(elapsed.attoseconds)/1e18)")
+            }
+        } catch { await translator.stop(); throw error }
+        await translator.stop()
     }
 }

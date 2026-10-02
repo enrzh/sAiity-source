@@ -524,6 +524,7 @@ struct WhisperDictationBackend {
         return try await mutex.run {
             if let segmentTranscribeHook {
                 var transcripts: [DictationRegionTranscript] = []
+                var previousTranscriptEnd = 0
                 for region in regions {
                     try Task.checkCancellation()
                     let audio = Array(samples[region.audioRange])
@@ -535,7 +536,9 @@ struct WhisperDictationBackend {
                     let text = decoded.text.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !text.isEmpty {
                         transcripts.append(DictationRegionTranscript(text: text,
-                                                                     language: decoded.language))
+                                                                     language: decoded.language,
+                                                                     overlapsPreviousAudio: previousTranscriptEnd > region.audioRange.lowerBound))
+                        previousTranscriptEnd = region.audioRange.upperBound
                     }
                 }
                 return DictationTranscriptionResult(regions: transcripts)
@@ -543,6 +546,7 @@ struct WhisperDictationBackend {
 
             return try await Self.modelCache.withModel(for: Self.cacheKey(c, self.root)) { loaded in
                 var transcripts: [DictationRegionTranscript] = []
+                var previousTranscriptEnd = 0
                 for region in regions {
                     try Task.checkCancellation()
                     let audio = Array(samples[region.audioRange])
@@ -551,7 +555,9 @@ struct WhisperDictationBackend {
                     let text = decoded.text.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !text.isEmpty {
                         transcripts.append(DictationRegionTranscript(text: text,
-                                                                     language: decoded.language))
+                                                                     language: decoded.language,
+                                                                     overlapsPreviousAudio: previousTranscriptEnd > region.audioRange.lowerBound))
+                        previousTranscriptEnd = region.audioRange.upperBound
                     }
                 }
                 return DictationTranscriptionResult(regions: transcripts)

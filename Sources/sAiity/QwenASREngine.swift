@@ -4,6 +4,76 @@ import MLX
 import Qwen3ASR
 import SpeechVAD
 
+/// Sample-clock storage shared by production VAD and weight-free boundary tests.
+struct QwenSpeechBuffer {
+    private var audio: [Float] = []
+    private(set) var origin = 0
+    private var speechStart: Int?
+    private var transcribedThrough = 0
+    var retainedSampleCount: Int { audio.count }
+    static let sampleRate = 16_000
+    static let silenceHistorySamples = sampleRate
+    static let boundaryContextSamples = sampleRate / 5
+
+    mutating func append(_ samples: [Float], events: [VADEvent], flush: Bool = false) -> [[Float]] {
+        audio.append(contentsOf: samples)
+        var slices: [[Float]] = []
+        for event in events {
+            switch event {
+            case .speechStarted(let time):
+                speechStart = max(origin, Int((Double(time) * Double(Self.sampleRate)).rounded()) - Self.boundaryContextSamples)
+            case .speechEnded(let segment):
+                let end = Int((Double(segment.endTime) * Double(Self.sampleRate)).rounded()) + Self.boundaryContextSamples
+                slices += takeSlices(endingAt: end)
+                speechStart = nil
+            }
+        }
+        let maximum = Int(QwenASREngine.forceSplitSeconds * Double(Self.sampleRate))
+        while let start = speechStart, origin + audio.count - max(start, transcribedThrough) >= maximum {
+            if let slice = takeSlice(endingAt: max(start, transcribedThrough) + maximum) { slices.append(slice) }
+            speechStart = transcribedThrough
+        }
+        if flush, speechStart != nil {
+            slices += takeSlices(endingAt: origin + audio.count)
+            speechStart = nil
+        }
+        if speechStart == nil {
+            drop(through: max(origin, origin + audio.count - Self.silenceHistorySamples))
+        }
+        return slices
+    }
+
+    private mutating func takeSlices(endingAt end: Int) -> [[Float]] {
+        var slices: [[Float]] = []
+        let maximum = Int(QwenASREngine.forceSplitSeconds * Double(Self.sampleRate))
+        let availableEnd = min(end, origin + audio.count)
+        while max(speechStart ?? transcribedThrough, transcribedThrough) < availableEnd {
+            let start = max(origin, max(speechStart ?? transcribedThrough, transcribedThrough))
+            guard let slice = takeSlice(endingAt: min(availableEnd, start + maximum)) else { break }
+            slices.append(slice)
+        }
+        return slices
+    }
+
+    private mutating func takeSlice(endingAt endAbsolute: Int) -> [Float]? {
+        let start = max(origin, max(speechStart ?? transcribedThrough, transcribedThrough))
+        let end = min(max(endAbsolute, start), origin + audio.count)
+        guard end > start else { return nil }
+        let slice = Array(audio[(start - origin)..<(end - origin)])
+        transcribedThrough = end
+        drop(through: end)
+        return slice
+    }
+
+    private mutating func drop(through end: Int) {
+        let count = min(max(0, end - origin), audio.count)
+        guard count > 0 else { return }
+        audio.removeFirst(count)
+        origin += count
+        transcribedThrough = max(transcribedThrough, origin)
+    }
+}
+
 /// Qwen3-ASR as a caption engine.
 ///
 /// Two sizes, one behaviour. `transcribeStream` cannot be called on each
@@ -55,18 +125,16 @@ final class QwenASREngine: FluidStreamingEngine, @unchecked Sendable {
     private var vadModel: SileroVADModel?
     private var vad: StreamingVADProcessor?
     private var onPartial: (@Sendable (String) -> Void)?
-    /// Samples not yet transcribed, and the absolute index of `audio[0]`.
-    private var audio: [Float] = []
-    private var origin = 0
-    private var speechStart: Int?
-    private var transcribedThrough = 0
+    private var audio = QwenSpeechBuffer()
     private var committed = ""
+    private let resourceRoot: URL?
 
     private static let residentLock = NSLock()
     private static var resident: [Size: QwenASREngine] = [:]
 
-    init(size: Size) {
+    init(size: Size, resourceRoot: URL? = Bundle.main.resourceURL) {
         self.size = size
+        self.resourceRoot = resourceRoot
     }
 
     static func directory(for size: Size) -> URL {
@@ -90,7 +158,7 @@ final class QwenASREngine: FluidStreamingEngine, @unchecked Sendable {
     static func extending(_ committed: String, with addition: String) -> String {
         let next = addition.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !next.isEmpty else { return committed }
-        return committed.isEmpty ? next : committed + " " + next
+        return CaptionTextMerger.concatenate(committed, next)
     }
 
     static func downloadWeights(size: Size, progress: @escaping ProgressSink) async throws {
@@ -128,6 +196,11 @@ final class QwenASREngine: FluidStreamingEngine, @unchecked Sendable {
     }
 
     func load(progress: @escaping @Sendable (String) -> Void) async throws {
+        guard TranslationPreflight.hasBundledMetalLibrary(resourceRoot: resourceRoot) else {
+            throw TranslationEngineError.runtimeUnavailable(
+                String(localized: "The MLX Metal library is missing from this app build."))
+        }
+        MemoryPolicy.prepareForMLX()
         if !Self.isDownloaded(size) {
             progress(String(localized: "Downloading Qwen3-ASR…"))
             try await Self.downloadWeights(size: size) { update in
@@ -164,10 +237,7 @@ final class QwenASREngine: FluidStreamingEngine, @unchecked Sendable {
 
     func reset() async {
         lock.withLock {
-            audio.removeAll(keepingCapacity: true)
-            origin = 0
-            speechStart = nil
-            transcribedThrough = 0
+            audio = QwenSpeechBuffer()
             committed = ""
             if let vadModel {
                 vad = StreamingVADProcessor(model: vadModel)
@@ -177,12 +247,11 @@ final class QwenASREngine: FluidStreamingEngine, @unchecked Sendable {
 
     func process(_ samples: [Float]) async throws {
         let model = lock.withLock { asr }
-        guard let model else { return }
+        guard let model else { throw BackendError.notPrepared }
         let events = lock.withLock { () -> [VADEvent] in
-            audio.append(contentsOf: samples)
             return vad?.process(samples: samples) ?? []
         }
-        await commit(events: events, model: model, flushOpenSpeech: false)
+        await commit(samples: samples, events: events, model: model, flushOpenSpeech: false)
     }
 
     func finishSession() async -> String? {
@@ -192,7 +261,7 @@ final class QwenASREngine: FluidStreamingEngine, @unchecked Sendable {
             return text.isEmpty ? nil : text
         }
         let events = lock.withLock { vad?.flush() ?? [] }
-        await commit(events: events, model: model, flushOpenSpeech: true)
+        await commit(samples: [], events: events, model: model, flushOpenSpeech: true)
         let text = lock.withLock { committed }
         return text.isEmpty ? nil : text
     }
@@ -212,36 +281,14 @@ final class QwenASREngine: FluidStreamingEngine, @unchecked Sendable {
             asr = nil
             vadModel = nil
             vad = nil
-            audio.removeAll()
+            audio = QwenSpeechBuffer()
         }
+        MemoryPolicy.releaseCaches()
     }
 
     /// Transcribe each closed slice once, then publish the extended transcript.
-    private func commit(events: [VADEvent], model: Qwen3ASRModel, flushOpenSpeech: Bool) async {
-        var slices: [[Float]] = []
-        lock.withLock {
-            for event in events {
-                switch event {
-                case .speechStarted(let time):
-                    speechStart = Int((Double(time) * sampleRate).rounded(.down))
-                case .speechEnded(let segment):
-                    let end = Int((Double(segment.endTime) * sampleRate).rounded(.down))
-                    if let slice = takeSlice(endingAt: end) { slices.append(slice) }
-                    speechStart = nil
-                }
-            }
-            if flushOpenSpeech, speechStart != nil {
-                if let slice = takeSlice(endingAt: origin + audio.count) { slices.append(slice) }
-                speechStart = nil
-            } else if !flushOpenSpeech, speechStart != nil {
-                let pending = (origin + audio.count) - max(speechStart ?? transcribedThrough, transcribedThrough)
-                if Double(pending) / sampleRate >= Self.forceSplitSeconds {
-                    let end = origin + audio.count
-                    if let slice = takeSlice(endingAt: end) { slices.append(slice) }
-                    speechStart = transcribedThrough
-                }
-            }
-        }
+    private func commit(samples: [Float], events: [VADEvent], model: Qwen3ASRModel, flushOpenSpeech: Bool) async {
+        let slices = lock.withLock { audio.append(samples, events: events, flush: flushOpenSpeech) }
 
         for slice in slices where !slice.isEmpty {
             let text = model.transcribe(audio: slice, sampleRate: Int(sampleRate))
@@ -257,31 +304,4 @@ final class QwenASREngine: FluidStreamingEngine, @unchecked Sendable {
         }
     }
 
-    /// Audio from the last commit up to `endAbsolute`, then drop it.
-    /// Caller holds `lock`.
-    private func takeSlice(endingAt endAbsolute: Int) -> [Float]? {
-        let start = max(speechStart ?? transcribedThrough, transcribedThrough)
-        let end = min(max(endAbsolute, start), origin + audio.count)
-        guard end > start else {
-            transcribedThrough = max(transcribedThrough, end)
-            return nil
-        }
-        let localStart = start - origin
-        let localEnd = end - origin
-        guard localStart >= 0, localEnd <= audio.count, localStart < localEnd else {
-            transcribedThrough = max(transcribedThrough, end)
-            return nil
-        }
-        let slice = Array(audio[localStart..<localEnd])
-        transcribedThrough = end
-        let drop = transcribedThrough - origin
-        if drop >= audio.count {
-            origin += audio.count
-            audio.removeAll(keepingCapacity: true)
-        } else if drop > 0 {
-            audio.removeFirst(drop)
-            origin += drop
-        }
-        return slice
-    }
 }

@@ -5,6 +5,38 @@ import Testing
 
 @MainActor
 @Suite struct ModelLifecycleTests {
+    @Test("translator lifetime waits for every native user before allowing teardown")
+    func translatorWaitsForAllUsers() async {
+        let runtime = TranslationRuntime()
+        runtime.beginUse()
+        runtime.beginUse()
+        var finished = false
+        let wait = Task { @MainActor in await runtime.waitUntilIdle(); finished = true }
+        await Task.yield()
+        runtime.endUse()
+        await Task.yield()
+        #expect(!finished)
+        #expect(runtime.users == 1)
+        runtime.endUse()
+        await wait.value
+        #expect(finished)
+        #expect(runtime.users == 0)
+    }
+
+    @Test("caption teardown returns its lease once and retains warm model weights")
+    func captionResourcesReturnLease() async throws {
+        let backend = FakeLifecycleBackend()
+        let resources = CaptionSessionResources(makeBackend: { backend })
+        resources.backend = try await resources.pool.acquire(locale: Locale(identifier: "en")) { _ in }
+        await resources.stopAudio()
+        await resources.stopAudio()
+        #expect(backend.stops == 1)
+        #expect(backend.releases == 0)
+        #expect(resources.backend == nil)
+        #expect(resources.pool.preparedForTests)
+        #expect(!resources.pool.hasActiveLeaseForTests)
+        await resources.pool.invalidate()
+    }
     @Test("cleanup compatibility requires a downloaded supported GGUF")
     func cleanupCompatibilityIsRestricted() {
         let qwen = LocalModel(source: .url("https://example.invalid/qwen.gguf"), file: "qwen.gguf", label: "Qwen", bytes: 1, recommended: false, note: "", licence: "")

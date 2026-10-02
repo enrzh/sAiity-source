@@ -94,17 +94,19 @@ struct CaptionEndToEndTests {
 
         let recognised = try await recognise(try Self.samples(wav))
         let text = CaptionTextMerger.join(recognised.map(\.text))
-        print("E2E recognised: \(text)")
+        if ProcessInfo.processInfo.environment["SAIITY_BENCHMARK_INCLUDE_TEXT"] == "1" { print("E2E recognised: \(text)") }
         #expect(!text.isEmpty, "the recogniser produced nothing")
 
         // The real translation, on the real wording. `prepare` is also what
         // checks the weights are present, so reaching a translation at all is
         // the download check.
         let translator = HyMT2Translator()
+        try #require(HyMT2Translator.isDownloaded,
+                     "installed Hy-MT2 weights required; downloads disabled")
         try await translator.prepare(from: "en", to: "de") { _ in }
         let translated = try await translator.translate(text, from: "en", to: "de")
         await translator.stop()
-        print("E2E translated: \(translated ?? "<nil>")")
+        if ProcessInfo.processInfo.environment["SAIITY_BENCHMARK_INCLUDE_TEXT"] == "1" { print("E2E translated: \(translated ?? "<nil>")") }
         let value = try #require(translated, "the translator declined its own caption line")
         #expect(value.caseInsensitiveCompare(text) != .orderedSame,
                 "the model echoed the English back")
@@ -120,7 +122,7 @@ struct CaptionEndToEndTests {
             return s
         }
         let srt = Export.srt(bilingual)
-        print("E2E srt:\n\(srt)")
+        if ProcessInfo.processInfo.environment["SAIITY_BENCHMARK_INCLUDE_TEXT"] == "1" { print("E2E srt:\n\(srt)") }
         #expect(srt.contains("-->"), "no cue was written")
     }
 }

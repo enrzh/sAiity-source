@@ -70,6 +70,7 @@ enum AssetRemoval: Sendable {
 /// When deleting would pull the rug out from under a running session.
 enum AssetUse: Sendable {
     case never
+    case captionSpeakers
     case whenRecognitionEngine(ASREngine)
     /// One latency tier of the Nemotron model. Only the selected tier counts as
     /// in use — the other is just bytes that can be deleted freely.
@@ -99,6 +100,7 @@ enum AssetUse: Sendable {
 
     var isAdvanced: Bool {
         switch self {
+        case .captionSpeakers: return false
         case .whenTranslator(let engine): return engine.isAdvanced
         case .whenQwenVariant: return true
         case .whenCleanupModel: return false
@@ -109,6 +111,7 @@ enum AssetUse: Sendable {
     /// True when this asset is the one currently selected to do its job.
     var isSelected: Bool {
         switch self {
+        case .captionSpeakers: return CaptionSpeakerTracker.enabled
         case .never:
             return false
         case .whenRecognitionEngine(let e):
@@ -284,6 +287,7 @@ enum ModelRegistry {
             + WhisperDictationBackend.ModelChoice.allCases.flatMap(\.assetDescriptors)
             + TranslationEngine.userSelectableCases.flatMap(\.assetDescriptors)
             + TranslationEngine.qwen.assetDescriptors
+            + [CaptionSpeakerTracker.asset]
     }
 
     /// Descriptors for weights that an older build could have downloaded. They
