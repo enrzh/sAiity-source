@@ -184,6 +184,17 @@ included in the application bundle.
 | Sources/sAiity/OverlayWindow.swift | Caption bubble geometry and presentation |
 | Resources/Localizable.xcstrings | User-facing localization catalog |
 
+## What's new in 2.6.3
+
+- Automatic insertion requires the press-time app and accessibility field to stay
+  focused; otherwise the result is copied without attempting a paste.
+- Clipboard write failures keep the complete result in a persistent bubble whose
+  action is **Retry Copy**; retry copies the retained text without pasting.
+- Caption first-text / first-final cold reporting uses the inverse of prepared-model
+  state, and setup reopening restores the persisted automatic-update preference.
+- Release-quality logs fingerprint corpus and model bytes without retaining
+  transcript contents, and reject inconsistent evidence.
+
 ## What's new in 2.6.2
 
 - Failed caption pumps become terminal instead of silent, so a stuck recognition
@@ -293,14 +304,14 @@ included in the application bundle.
 
 ## Release
 
-The current signed and notarized release is [sAiity 2.6.2](https://github.com/enrzh/sAiity/releases/tag/v2.6.2).
+The current signed and notarized release is [sAiity 2.6.3](https://github.com/enrzh/sAiity/releases/tag/v2.6.3).
 
-- [Download the DMG](https://github.com/enrzh/sAiity/releases/download/v2.6.2/sAiity-2.6.2.dmg)
-- [Download the ZIP](https://github.com/enrzh/sAiity/releases/download/v2.6.2/sAiity-2.6.2.zip)
+- [Download the DMG](https://github.com/enrzh/sAiity/releases/download/v2.6.3/sAiity-2.6.3.dmg)
+- [Download the ZIP](https://github.com/enrzh/sAiity/releases/download/v2.6.3/sAiity-2.6.3.zip)
 - [Sparkle update feed](https://enrzh.github.io/sAiity/appcast.xml)
 
-This release tightens recognition and generation bounds, validates translation
-output across engines, and gates notarization on a clean-source quality matrix —
+This release makes paste safer with field-level focus checks, adds Retry Copy
+when the clipboard write fails, and fingerprints release-quality inputs —
 still fully local recognition and translation on the Mac.
 
 sAiity is part of the [aiity](https://aiity.de) family.
