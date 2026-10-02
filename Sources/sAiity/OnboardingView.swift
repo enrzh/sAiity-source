@@ -63,7 +63,7 @@ final class OnboardingModel {
     }
 
     var purpose: Purpose = .anyLanguage
-    var wantsAutoUpdates = false
+    var wantsAutoUpdates: Bool
     var trial: UseCase?
     var trialBusy = false
     var trialRecording = false
@@ -79,8 +79,9 @@ final class OnboardingModel {
     var lastAutoAdvance: Date?
 
     let state: AppState
-    init(state: AppState) {
+    init(state: AppState, defaults: UserDefaults = .standard) {
         self.state = state
+        wantsAutoUpdates = defaults.bool(forKey: "SUEnableAutomaticChecks")
         if let resume = Onboarding.resumeStep {
             switch resume {
             case .purpose, .models: step = .setup

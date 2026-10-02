@@ -94,6 +94,7 @@ meta="$REPORT_DIR/model-matrix-$stamp.meta"
     echo "wavCount=$wav_count"
 } > "$meta"
 
+evidence_before=$(python3 scripts/benchmark_evidence.py "$FIXTURES" --profile asr)
 set +e
 SAIITY_ASR_BENCHMARK_DIR="$FIXTURES" \
     xcrun swift test -c release -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS \
@@ -124,6 +125,9 @@ grep -q '"phase":"warm_segmented_decode"' "$log" || {
     exit 1
 }
 
+evidence_after=$(python3 scripts/benchmark_evidence.py "$FIXTURES" --profile asr)
+[ "$evidence_before" = "$evidence_after" ] || { echo "FATAL: ASR benchmark inputs changed during measurement." >&2; exit 1; }
+printf 'SAIITY_BENCHMARK_EVIDENCE %s\n' "$evidence_after" | tee -a "$log"
 cp "$log" "$REPORT_DIR/latest.log"
 cp "$meta" "$REPORT_DIR/latest.meta"
 echo "model matrix passed: $result_count records"

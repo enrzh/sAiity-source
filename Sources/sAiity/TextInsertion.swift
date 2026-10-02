@@ -25,6 +25,7 @@ struct TextInsertionResult: Equatable {
     enum Outcome: Equatable {
         case insertedAndCopied
         case copied
+        case copyFailed
     }
 
     let outcome: Outcome
@@ -60,9 +61,21 @@ struct TextInsertionTarget: Equatable {
 /// became frontmost in the meantime — a Mail draft you switched to, a Terminal,
 /// a password prompt. Capturing the identity at press time and re-checking it at
 /// insert time turns that silent misdelivery into an ordinary clipboard copy.
-struct DictationFocusToken: Equatable, Sendable {
+// AX handles are retained here and inspected only by the main-actor inserter.
+struct DictationFocusToken: Equatable, @unchecked Sendable {
     let processIdentifier: pid_t
     let bundleIdentifier: String?
+    var field: AXUIElement? = nil
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        guard lhs.processIdentifier == rhs.processIdentifier,
+              lhs.bundleIdentifier == rhs.bundleIdentifier else { return false }
+        switch (lhs.field, rhs.field) {
+        case (nil, nil): return true
+        case let (left?, right?): return CFEqual(left, right)
+        default: return false
+        }
+    }
 }
 
 extension DictationTextInsertion {
@@ -114,7 +127,8 @@ final class TextInserter {
     static func currentFocusToken() -> DictationFocusToken? {
         guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
         return DictationFocusToken(processIdentifier: app.processIdentifier,
-                                   bundleIdentifier: app.bundleIdentifier)
+                                   bundleIdentifier: app.bundleIdentifier,
+                                   field: AXIsProcessTrusted() ? currentFocusedUIElement() : nil)
     }
 
     /// Record which app the user was in when dictation started. Call this at the
@@ -129,16 +143,16 @@ final class TextInserter {
     /// ask for.
     func insert(_ text: String, expecting expected: DictationFocusToken?) -> TextInsertionResult {
         guard let expected, isStillFrontmost(expected) else {
-            let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            _ = pasteboard.setString(cleaned)
-            return TextInsertionResult(outcome: .copied)
+            return copy(text)
         }
-        return insert(text)
+        return insert(text, shouldPaste: { self.isStillFrontmost(expected) })
     }
 
     private func isStillFrontmost(_ token: DictationFocusToken) -> Bool {
         guard let current = currentFocus() else { return false }
         if current.processIdentifier != token.processIdentifier { return false }
+        guard let expectedField = token.field, let currentField = current.field,
+              CFEqual(expectedField, currentField) else { return false }
         // Some apps expose no bundle identifier; the process identity is enough
         // in that case, and requiring both would reject perfectly good targets.
         guard let expectedID = token.bundleIdentifier,
@@ -147,10 +161,19 @@ final class TextInserter {
     }
 
     func insert(_ text: String) -> TextInsertionResult {
+        insert(text, shouldPaste: { true })
+    }
+
+    /// Retry copies only; it must never paste into a newly focused destination.
+    func copy(_ text: String) -> TextInsertionResult {
+        let copied = pasteboard.setString(text.trimmingCharacters(in: .whitespacesAndNewlines))
+        return TextInsertionResult(outcome: copied ? .copied : .copyFailed)
+    }
+
+    private func insert(_ text: String, shouldPaste: () -> Bool) -> TextInsertionResult {
         let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else {
-            _ = pasteboard.setString(cleaned)
-            return TextInsertionResult(outcome: .copied)
+            return copy(cleaned)
         }
 
         let target = accessibilityTrusted() ? focusedElement() : nil
@@ -161,9 +184,11 @@ final class TextInserter {
         // part of a Terminal command, advance a slide deck, and it stays in the
         // document even when the paste that follows it fails.
         let payload = Self.needsSeparator(before: target?.value) ? " " + cleaned : cleaned
-        _ = pasteboard.setString(payload)
+        guard pasteboard.setString(payload) else {
+            return TextInsertionResult(outcome: .copyFailed)
+        }
 
-        guard canPaste else {
+        guard canPaste, shouldPaste() else {
             return TextInsertionResult(outcome: .copied)
         }
 
@@ -187,7 +212,7 @@ final class TextInserter {
         return true
     }
 
-    private static func currentFocusedElement() -> TextInsertionTarget? {
+    private static func currentFocusedUIElement() -> AXUIElement? {
         let system = AXUIElementCreateSystemWide()
         var focusedValue: CFTypeRef?
         guard AXUIElementCopyAttributeValue(system,
@@ -196,7 +221,11 @@ final class TextInserter {
               let focusedValue else { return nil }
 
         guard CFGetTypeID(focusedValue) == AXUIElementGetTypeID() else { return nil }
-        let focused = focusedValue as! AXUIElement
+        return (focusedValue as! AXUIElement)
+    }
+
+    private static func currentFocusedElement() -> TextInsertionTarget? {
+        guard let focused = currentFocusedUIElement() else { return nil }
         let role = stringAttribute(kAXRoleAttribute, from: focused)
         let subrole = stringAttribute(kAXSubroleAttribute, from: focused)
         let value = stringAttribute(kAXValueAttribute, from: focused)

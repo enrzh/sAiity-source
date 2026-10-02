@@ -7,6 +7,8 @@ import sys
 import tempfile
 import unittest
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+import benchmark_evidence
 
 verify = runpy.run_path(str(Path(__file__).resolve().parents[1] / "scripts/verify-quality.py"))["verify"]
 
@@ -66,16 +68,47 @@ class ReleaseQualityTests(unittest.TestCase):
             root = Path(directory)
             (root / "policy.json").write_text(json.dumps(self.policy))
             (root / "manifest.json").write_text(json.dumps(self.manifest))
+            (root / "mixed.wav").write_bytes(b"local fixture bytes")
+            evidence = {"schema": 1, "corpus": benchmark_evidence.corpus(root), "models": {"nemotron-2240": "a" * 64},
+                        "hardware": {"model": "test", "arch": "arm64", "memoryBytes": 16, "macOS": "27", "osBuild": "test", "toolchain": "test", "swift": "test", "sdk": "test"},
+                        "configuration": {"profile": "pipeline", "language": "auto", "runs": 5, "chunkMs": 2240,
+                                          "preview": [False, True], "cleanup": "rules", "translation": "off"}}
             records = "\n".join("SAIITY_ASR_BENCHMARK " + json.dumps(row) for row in self.records)
             for stamp, rows, status in [("revision clean", records, 0), ("other clean", records, 1),
                                         ("revision dirty", records, 1), ("revision clean", "", 1),
                                         ("revision clean", "SAIITY_ASR_BENCHMARK {broken}", 1)]:
                 with self.subTest(stamp=stamp, empty=not rows):
-                    (root / "run.log").write_text("SAIITY_QUALITY_SOURCE " + stamp + "\n" + rows)
+                    (root / "run.log").write_text("SAIITY_QUALITY_SOURCE " + stamp + "\nSAIITY_BENCHMARK_EVIDENCE " + json.dumps(evidence) + "\n" + rows)
                     result = subprocess.run([sys.executable, str(script), "--revision", "revision",
                         "--policy", str(root / "policy.json"), "--manifest", str(root / "manifest.json"),
                         str(root / "run.log")], capture_output=True, text=True)
                     self.assertEqual(result.returncode, status, result.stderr)
+
+            def check_header(header):
+                (root / "run.log").write_text("SAIITY_QUALITY_SOURCE revision clean\nSAIITY_BENCHMARK_EVIDENCE " + json.dumps(header) + "\n" + records)
+                return subprocess.run([sys.executable, str(script), "--revision", "revision",
+                    "--policy", str(root / "policy.json"), "--manifest", str(root / "manifest.json"),
+                    str(root / "run.log")], capture_output=True, text=True).returncode
+            for field, invalid in [("models", {}), ("hardware", {}), ("configuration", {"profile": "pipeline"})]:
+                altered = copy.deepcopy(evidence)
+                altered[field] = invalid
+                self.assertEqual(check_header(altered), 1)
+            check_header(evidence)
+            for part, field, value, message in [("hardware", "model", "another-device", "different hardware"),
+                                                 ("models", "nemotron-2240", "b" * 64, "different model bytes")]:
+                altered = copy.deepcopy(evidence)
+                altered[part][field] = value
+                (root / "second.log").write_text("SAIITY_QUALITY_SOURCE revision clean\nSAIITY_BENCHMARK_EVIDENCE " + json.dumps(altered) + "\n" + records)
+                result = subprocess.run([sys.executable, str(script), "--revision", "revision",
+                    "--policy", str(root / "policy.json"), "--manifest", str(root / "manifest.json"),
+                    str(root / "run.log"), str(root / "second.log")], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn(message, result.stderr)
+            (root / "mixed.wav").write_bytes(b"changed after measurement")
+            self.assertEqual(check_header(evidence), 1)
+            (root / "mixed.wav").write_bytes(b"local fixture bytes")
+            (root / "manifest.json").write_text(json.dumps(dict(self.manifest, note="changed reference")))
+            self.assertEqual(check_header(evidence), 1)
 
     def test_checked_in_policy_is_complete(self):
         policy = json.loads((Path(__file__).resolve().parents[1] / "docs/benchmarks/release-quality.json").read_text())

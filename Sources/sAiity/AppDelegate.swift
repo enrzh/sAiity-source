@@ -137,6 +137,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         dictationToast.onResetPosition = { [weak self] in
             self?.dictationToast.resetPosition()
         }
+        dictationToast.onRetryCopy = { [weak self] in self?.retryDictationCopy() }
+    }
+
+    private func retryDictationCopy() {
+        guard case .recovery = dictationController.phase,
+              let output = lastDictationResult?.outputText else { return }
+        if TextInserter().copy(output).outcome == .copied {
+            dictationController.completeCopyRecovery()
+        } else {
+            dictationToast.show(resultText: output, autoDismissAfter: nil, retryCopy: true)
+        }
     }
 
     func tryOnboarding(_ kind: OnboardingModel.UseCase, model: OnboardingModel) async {
@@ -342,6 +353,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// The lines this session has recorded, whether or not saving is on.
     var sessionLinesForTests: [Segment] { sessionLines }
     var pendingTranscriptWritesForTests: Int { pendingTranscriptWrites }
+    func recordCaptionTimingForTests(warmStart: Bool) {
+        captionWarmStart = warmStart
+        captionFirstTextLogged = false
+        captionFirstFinalLogged = false
+        subtitleSessionStartedAt = Date()
+        captionCaptureStartedAt = .now
+        recordCaptionTimings(TranscriptChunk(text: "Test.", isFinal: true, start: 0, end: 0.01))
+    }
     #endif
     /// The current caption lease. The pool remains the owner of the cached
     /// backend; this is held only between caption start and teardown.
@@ -1778,6 +1797,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             dictationToast.show(phase: phase)
         case .dictating, .transcribing, .cleaning, .translating, .inserting, .limit:
             dictationToast.show(phase: phase)
+        case .recovery where lastDictationResult != nil:
+            dictationFeedbackTask?.cancel()
+            dictationFeedbackTask = nil
+            if let output = lastDictationResult?.outputText {
+                dictationToast.show(resultText: output, autoDismissAfter: nil, retryCopy: true)
+            }
         case .recovery, .failure:
             dictationToast.show(phase: phase)
             Task { @MainActor in
@@ -2886,6 +2911,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             model.trialText = text
             model.trialStatus = String(localized: "Captions worked. Keep playing speech or choose Stop Captions.")
         }
+        recordCaptionTimings(chunk)
+        if TestHooks.verboseLogging {
+            NSLog("sAiity chunk final=%@ chars=%d", chunk.isFinal ? "true" : "false", text.count)
+        }
+        showedAnyCaption = true
+
+        renderCaptionText(text, chunk: chunk)
+    }
+
+    private func recordCaptionTimings(_ chunk: TranscriptChunk) {
         if let startedAt = subtitleSessionStartedAt {
             let elapsed = captionCaptureStartedAt.map { elapsedSeconds(since: $0) }
                 ?? Date().timeIntervalSince(startedAt)
@@ -2893,28 +2928,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 NSLog("sAiity caption timing: first-text %.3fs", elapsed)
                 Diagnostics.recordTiming(operation: "captions.first-text",
                                          seconds: elapsed,
-                                         cold: captionWarmStart)
+                                         cold: !captionWarmStart)
                 captionFirstTextLogged = true
             }
             if chunk.isFinal, !captionFirstFinalLogged {
                 NSLog("sAiity caption timing: first-final %.3fs", elapsed)
                 Diagnostics.recordTiming(operation: "captions.first-final",
                                          seconds: elapsed,
-                                         cold: captionWarmStart)
+                                         cold: !captionWarmStart)
                 captionFirstFinalLogged = true
             }
             if chunk.isFinal, chunk.end > 0, let captureStarted = captionCaptureStartedAt {
                 let visibleLag = max(0, elapsedSeconds(since: captureStarted) - chunk.end)
                 Diagnostics.recordTiming(operation: "captions.visible-lag",
                                          seconds: visibleLag,
-                                         cold: captionWarmStart)
+                                         cold: !captionWarmStart)
             }
         }
-        if TestHooks.verboseLogging {
-            NSLog("sAiity chunk final=%@ chars=%d", chunk.isFinal ? "true" : "false", text.count)
-        }
-        showedAnyCaption = true
+    }
 
+    private func renderCaptionText(_ text: String, chunk: TranscriptChunk) {
         // The first words of a new sentence replace the last one on screen. The
         // translation under them belongs to the sentence that just left — but
         // clearing it here was wrong: recognition is faster than translation,

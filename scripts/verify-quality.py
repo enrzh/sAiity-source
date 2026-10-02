@@ -6,6 +6,7 @@ import math
 from pathlib import Path
 import statistics
 import sys
+import benchmark_evidence
 
 
 PREFIXES = ("SAIITY_ASR_BENCHMARK ", "SAIITY_CAPTION_BENCHMARK ")
@@ -94,19 +95,62 @@ def main():
     args = parser.parse_args()
     try:
         records = []
+        collected = []
+        current_corpus = benchmark_evidence.corpus(args.manifest.parent)
+        current_corpus["manifestSHA256"] = benchmark_evidence.file_hash(args.manifest)
         for log in args.logs:
             lines = log.read_text().splitlines()
             stamps = [line for line in lines if line.startswith("SAIITY_QUALITY_SOURCE ")]
             if stamps != [f"SAIITY_QUALITY_SOURCE {args.revision} clean"]:
                 raise ValueError(f"{log.name}: missing, dirty or stale source revision")
+            headers = [json.loads(line.removeprefix("SAIITY_BENCHMARK_EVIDENCE ")) for line in lines
+                       if line.startswith("SAIITY_BENCHMARK_EVIDENCE ")]
+            if not headers or any(header != headers[0] for header in headers):
+                raise ValueError(f"{log.name}: missing or inconsistent input fingerprints")
+            evidence = headers[0]
+            if not isinstance(evidence, dict):
+                raise ValueError(f"{log.name}: input fingerprints are not an object")
+            if evidence.get("schema") != 1 or evidence.get("corpus") != current_corpus:
+                raise ValueError(f"{log.name}: recordings or reference manifest differ from the measured corpus")
+            hardware = evidence["hardware"]
+            if not isinstance(hardware, dict) or not all(hardware.get(key) for key in ["model", "arch", "memoryBytes", "macOS", "osBuild", "toolchain", "swift", "sdk"]):
+                raise ValueError(f"{log.name}: incomplete hardware/toolchain evidence")
+            if number(hardware["memoryBytes"]) == 0:
+                raise ValueError(f"{log.name}: invalid hardware memory")
+            models = evidence["models"]
+            if not isinstance(models, dict) or not models or any(not isinstance(value, str) or len(value) != 64
+                                 or any(c not in "0123456789abcdef" for c in value) for value in models.values()):
+                raise ValueError(f"{log.name}: missing model checksums")
+            config = evidence["configuration"]
+            if not isinstance(config, dict):
+                raise ValueError(f"{log.name}: missing benchmark settings")
+            profile = config["profile"]
+            phase = {"asr": "warm_segmented_decode", "captions": "warm_live_stream", "pipeline": "release_to_insertion"}[profile]
+            if config.get("language") != "auto" or config.get("runs", 0) < 5 or config.get("chunkMs") != 2240:
+                raise ValueError(f"{log.name}: benchmark settings differ from release settings")
+            if profile == "captions" and (config.get("realtime") is not True or config.get("translation") != "off"):
+                raise ValueError(f"{log.name}: release caption timing requires paced untranslated capture")
+            if profile == "pipeline" and (config.get("preview") != [False, True] or config.get("cleanup") != "rules" or config.get("translation") != "off"):
+                raise ValueError(f"{log.name}: pipeline settings differ from release settings")
+            measured = []
             for line in lines:
                 for prefix in PREFIXES:
                     if line.startswith(prefix):
                         record = json.loads(line[len(prefix):])
                         if not isinstance(record, dict):
                             raise ValueError("benchmark record is not an object")
-                        records.append(record)
+                        measured.append(record)
+            if any(record.get("phase") == phase and record.get("model") not in models for record in measured):
+                raise ValueError(f"{log.name}: measured model has no checksum")
+            for previous in collected:
+                if previous["hardware"] != hardware:
+                    raise ValueError("reports from different hardware/toolchains cannot be combined")
+                if any(previous["models"][name] != models[name] for name in previous["models"].keys() & models.keys()):
+                    raise ValueError("reports used different model bytes")
+            collected.append(evidence)
+            records.extend(record for record in measured if record.get("phase") == phase)
         result = verify(json.loads(args.policy.read_text()), json.loads(args.manifest.read_text()), records)
+        print(json.dumps({"evidence": collected}, sort_keys=True, allow_nan=False))
         for summary in result:
             print(json.dumps(summary, sort_keys=True, allow_nan=False))
         print(f"quality gate passed: {len(result)} fixture/model/preview cases")

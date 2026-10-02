@@ -181,6 +181,7 @@ final class DictationToastWindow: NSPanel {
     private var hasPlacedToast = false
     private var suppressFrameSave = false
     private var isShowingResult = false
+    private var offersCopyRetry = false
     private var labelPointSize: CGFloat?
     private var resultPointSize: CGFloat?
     private var dragStart: NSPoint?
@@ -196,6 +197,7 @@ final class DictationToastWindow: NSPanel {
     /// Backs up the hover tracking; see `startArmingTick`.
     private var armingTimer: Timer?
     var onResetPosition: (() -> Void)?
+    var onRetryCopy: (() -> Void)?
 #if SAIITY_TEST_HOOKS
     private(set) var orderFrontCallsForTests = 0
 #endif
@@ -476,6 +478,11 @@ final class DictationToastWindow: NSPanel {
     }
 
     func performResetPosition() -> Bool {
+        if offersCopyRetry {
+            guard let onRetryCopy else { return false }
+            onRetryCopy()
+            return true
+        }
         guard let onResetPosition else { return false }
         onResetPosition()
         return true
@@ -698,6 +705,7 @@ final class DictationToastWindow: NSPanel {
     var waveformVisibleForTests: Bool { !waveform.isHidden }
     var labelVisibleForTests: Bool { !label.isHidden }
     var resetButtonVisibleForTests: Bool { !resetButton.isHidden }
+    var offersCopyRetryForTests: Bool { offersCopyRetry }
     var resultVisibleForTests: Bool { !resultScrollView.isHidden }
     var resultTextForTests: String { resultTextView.string }
     var resultFontSizeForTests: CGFloat { resultTextView.font?.pointSize ?? 0 }
@@ -718,6 +726,7 @@ final class DictationToastWindow: NSPanel {
 
     func show(text: String, animated: Bool, autoDismissAfter: Duration? = nil) {
         cancelAutoDismiss()
+        configureCopyRetry(false)
         isShowingResult = false
         labelPointSize = nil
         label.isHidden = false
@@ -737,8 +746,9 @@ final class DictationToastWindow: NSPanel {
 
     /// Displays the completed dictation, after insertion/clipboard handling has
     /// finished. Long results stay inside the bubble and scroll vertically.
-    func show(resultText: String, autoDismissAfter: Duration? = .seconds(4.5)) {
+    func show(resultText: String, autoDismissAfter: Duration? = .seconds(4.5), retryCopy: Bool = false) {
         cancelAutoDismiss()
+        configureCopyRetry(retryCopy)
         isShowingResult = true
         resultPointSize = nil
         label.isHidden = true
@@ -754,6 +764,19 @@ final class DictationToastWindow: NSPanel {
         setAccessibilityEnabled(true)
         applyAccessibilitySurface()
         present(size: resultSize(for: resultText), autoDismissAfter: autoDismissAfter)
+        if retryCopy {
+            setAccessibilityLabel(String(localized: "Copy failed — use Retry Copy in the bubble."))
+            Self.postAccessibility(self, .announcementRequested)
+        }
+    }
+
+    private func configureCopyRetry(_ enabled: Bool) {
+        offersCopyRetry = enabled
+        let title = enabled ? String(localized: "Retry Copy") : String(localized: "Reset Position")
+        resetButton.image = NSImage(systemSymbolName: enabled ? "doc.on.clipboard" : "arrow.counterclockwise",
+                                   accessibilityDescription: title)
+        resetButton.toolTip = title
+        resetButton.setAccessibilityLabel(title)
     }
 
     private func resultSize(for text: String) -> NSSize {

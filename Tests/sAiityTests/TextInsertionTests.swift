@@ -1,4 +1,5 @@
 import Foundation
+import ApplicationServices
 import Testing
 
 @testable import sAiity
@@ -7,10 +8,12 @@ import Testing
 @Suite struct TextInsertionTests {
     final class FakePasteboard: DictationPasteboard {
         var value: String?
+        var succeeds = true
 
         init(value: String? = nil) { self.value = value }
 
         func setString(_ value: String) -> Bool {
+            guard succeeds else { return false }
             self.value = value
             return true
         }
@@ -19,7 +22,8 @@ import Testing
     @Test("changing apps during processing copies the result without sending a paste")
     func focusChangePreventsPaste() {
         let board = FakePasteboard()
-        var focus = DictationFocusToken(processIdentifier: 1, bundleIdentifier: "test.original")
+        var focus = DictationFocusToken(processIdentifier: 1, bundleIdentifier: "test.original",
+                                       field: AXUIElementCreateApplication(1))
         var pastes = 0
         let inserter = TextInserter(pasteboard: board, accessibilityTrusted: { true },
             focusedElement: { .init(role: "AXTextArea", value: "", isEditable: true) },
@@ -32,6 +36,60 @@ import Testing
         #expect(pastes == 1)
         #expect(inserter.insert("unknown focus", expecting: nil).outcome == .copied)
         #expect(pastes == 1)
+    }
+
+    @Test("changing fields within the same app copies without pasting")
+    func fieldChangePreventsPaste() {
+        let board = FakePasteboard()
+        var focus = DictationFocusToken(processIdentifier: 42, bundleIdentifier: "test.editor",
+                                       field: AXUIElementCreateApplication(1))
+        var pastes = 0
+        let inserter = TextInserter(pasteboard: board, accessibilityTrusted: { true },
+            focusedElement: { .init(role: "AXTextArea", value: "", isEditable: true) },
+            sendPaste: { pastes += 1; return true }, currentFocus: { focus })
+        let captured = inserter.captureFocus()
+        focus.field = AXUIElementCreateApplication(2) // Opaque stand-ins for two field handles.
+        #expect(inserter.insert("different document", expecting: captured).outcome == .copied)
+        #expect(pastes == 0)
+        #expect(board.value == "different document")
+        focus.field = nil
+        #expect(inserter.insert("unavailable field", expecting: captured).outcome == .copied)
+        #expect(pastes == 0)
+    }
+
+    @Test("focus is rechecked after a successful clipboard write")
+    func lateFieldChangePreventsPaste() {
+        let board = FakePasteboard()
+        let original = DictationFocusToken(processIdentifier: 42, bundleIdentifier: "test.editor",
+                                          field: AXUIElementCreateApplication(1))
+        var reads = 0
+        var pastes = 0
+        let inserter = TextInserter(pasteboard: board, accessibilityTrusted: { true },
+            focusedElement: { .init(role: "AXTextArea", value: "", isEditable: true) },
+            sendPaste: { pastes += 1; return true }, currentFocus: {
+                reads += 1
+                return reads == 1 ? original : .init(processIdentifier: 42, bundleIdentifier: "test.editor", field: AXUIElementCreateApplication(2))
+            })
+        #expect(inserter.insert("keep the result", expecting: original).outcome == .copied)
+        #expect(pastes == 0)
+    }
+
+    @Test("clipboard failure never sends Paste or claims a copy; retry copies only")
+    func copyFailureAndRetry() {
+        let board = FakePasteboard(value: "previous clipboard")
+        board.succeeds = false
+        var pastes = 0
+        let inserter = TextInserter(pasteboard: board, accessibilityTrusted: { true },
+            focusedElement: { .init(role: "AXTextArea", value: "", isEditable: true) },
+            sendPaste: { pastes += 1; return true })
+        #expect(inserter.insert("new result").outcome == .copyFailed)
+        #expect(inserter.insert("new result", expecting: nil).outcome == .copyFailed)
+        #expect(pastes == 0)
+        #expect(board.value == "previous clipboard")
+        board.succeeds = true
+        #expect(inserter.copy("new result").outcome == .copied)
+        #expect(board.value == "new result")
+        #expect(pastes == 0)
     }
 
     @Test("a focused editable field receives dictation and the clipboard keeps a copy")

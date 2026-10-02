@@ -326,6 +326,12 @@ final class LaunchSmokeTest {
             dictation.show(phase: .dictating)
             record("dictation reset \(preset.rawValue)", dictation.frame.size == compact,
                    detail: "next recording restored the compact bubble")
+            var retries = 0
+            dictation.onRetryCopy = { retries += 1 }
+            dictation.show(resultText: "Retained copy failure result.", autoDismissAfter: nil, retryCopy: true)
+            dictation.performResetButtonAction()
+            record("dictation copy recovery \(preset.rawValue)", dictation.isVisible && retries == 1,
+                   detail: "retained result's native action invoked Retry Copy")
         }
         caption.clear()
         dictation.dismiss()

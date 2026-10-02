@@ -1,6 +1,64 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Retry Copy": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kopieren erneut versuchen"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Réessayer la copie"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reintentar copia"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "コピーを再試行"
+          }
+        }
+      }
+    },
+    "Copy failed — use Retry Copy in the bubble.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kopieren fehlgeschlagen — nutze „Kopieren erneut versuchen“ in der Blase."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Échec de la copie — utilisez Réessayer la copie dans la bulle."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La copia falló: usa Reintentar copia en la burbuja."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "コピーできませんでした。バブルの「コピーを再試行」を選んでください。"
+          }
+        }
+      }
+    },
     "For everyday dictation, hold %@ while speaking, then release.": {
       "extractionState": "manual",
       "localizations": {

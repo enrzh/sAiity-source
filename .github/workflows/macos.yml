@@ -89,7 +89,9 @@ jobs:
         run: xcrun swift test -c release -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS
 
       - name: Check release quality gate
-        run: python3 Tests/release_quality_test.py
+        run: |
+          python3 Tests/release_quality_test.py
+          python3 Tests/benchmark_evidence_test.py
 
       - name: Assemble signed app bundle
         run: ./build-app.sh --no-test-hooks

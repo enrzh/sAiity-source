@@ -141,7 +141,77 @@ python3 scripts/verify-quality.py --revision FULL_GIT_SHA \
   build/release-quality/pipeline.log
 ```
 
+Release-quality logs now also carry a `SAIITY_BENCHMARK_EVIDENCE` JSON header.
+It records SHA-256 of each WAV, the reference manifest, and the complete files
+of each loaded model, plus hardware, macOS build, Xcode toolchain and benchmark
+settings. Hashes are streamed in 1 MiB blocks; reference/transcript contents are
+not included. Model filenames and bytes both contribute to the tree digest.
+`scripts/benchmark_evidence.py` can also fingerprint an existing local corpus
+for a standalone ASR/caption/pipeline report:
+
+```sh
+python3 scripts/benchmark_evidence.py /absolute/verified-fixtures --profile asr
+```
+
+The release runner compares fingerprints before and after each harness. The
+verifier rejects missing fingerprints, changed reference/audio bytes, different
+hardware/toolchains, incompatible settings or conflicting model hashes across
+reports. Summaries retain the complete evidence header. Hashing runs outside
+inference timings and may warm the OS file cache; a cold preparation measurement
+still means fresh model state, not guaranteed cold storage. Old reports without
+these fingerprints remain historical evidence and cannot pass the new gate.
+
 ## 2 October 2026 project verification
+
+### Follow-up: insertion, setup preferences and benchmark identity
+
+At baseline `625c2e0` on `main`, clipboard write failures now return a distinct
+outcome, skip synthetic Paste and leave the complete result in a persistent,
+selectable bubble. Its native action changes to localized **Retry Copy**;
+retry copies the retained output only. The same outcome reaches the controller's
+existing recovery state, so failure cannot be reported as a successful copy.
+
+The press-time focus token now retains the macOS accessibility field handle.
+Automatic insertion requires the same app and field at completion, with a
+second check after copying and before sending Paste. Missing/changed field
+identity falls back to copy. Apps that recreate editor accessibility elements
+may therefore require manual paste. Apps that reuse a single field identity
+when changing documents may not expose that document change to this guard;
+the real-app checklist remains necessary. No destination contents or field
+handles are written to diagnostics.
+
+Caption first-text, first-final and visible-lag diagnostics now report cold as
+the inverse of the prepared-model state. Reopening setup reads the persisted
+automatic-update preference rather than defaulting an existing opt-in to off.
+Benchmark reports fingerprint recordings, reference manifests and model bytes,
+record hardware/macOS/Xcode/Swift/SDK/settings, and reject inconsistent inputs.
+
+Verification on macOS 27.0, Mac mini M1, 16 GB, Xcode 27.0:
+
+- **604 Swift tests / 76 suites passed**, 17.786 s, using the supported release
+  test command. Log: `/tmp/saiity-next-improvements-tests-verified.log`.
+- **11 Python checks passed**: quality-gate validation and streamed hashes,
+  including mutated audio/reference/model files, conflicting device/model
+  reports and missing inputs. Shell syntax, workflow YAML and `git diff --check`
+  also passed.
+- The existing five-recording local corpus and resident Nemotron/Whisper models
+  produced identical fingerprints on repeated reads. Logs:
+  `/tmp/saiity-next-real-evidence.json` and
+  `/tmp/saiity-next-real-evidence-repeat.json`. This checks fingerprint stability,
+  not speech accuracy or inference performance.
+- `./build-app.sh --no-test-hooks` passed bundle/native-resource/signature
+  verification. Log: `/tmp/saiity-next-improvements-build.log`.
+- The signed app's `--selftest 20` completed **28 native checks**, including
+  Retry Copy actions across all four bubble presets.
+  Log: `/tmp/saiity-next-improvements-smoke.log`.
+
+The normal Swift test host initially exited without a final summary after
+native button animation in the added recovery test. That test now invokes the
+same production action handler and captures accessibility announcements through
+the existing test hook; native button activation remains checked in the actual
+signed application. No existing tests were skipped or weakened. Actual
+Accessibility insertion into third-party documents and clipboard-service failure
+are represented by mocks in this run; device/manual checks remain distinct.
 
 Implemented the CI build-mode correction and toolchain-specific cache, explicit
 release accuracy/latency gate, production-path setup trials, concrete caption

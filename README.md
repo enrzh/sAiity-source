@@ -55,6 +55,11 @@ Hold the configured press-to-talk key while speaking. Release it to transcribe
 locally, clean the result, and insert it into the focused app. When there is no
 focused editable field, the result is copied without attempting a paste.
 
+Automatic insertion also requires the original app and text field to remain
+focused. Changing documents or fields while processing keeps the result on the
+clipboard. If copying fails, the result stays in the bubble and its action
+offers **Retry Copy**; retrying copies the retained text without pasting it.
+
 Dictation is a separate microphone-only session. It does not write to saved
 caption transcripts and it does not require sAiity to be the frontmost app.
 Captions and dictation do not own the microphone at the same time.

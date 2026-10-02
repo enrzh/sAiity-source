@@ -12,7 +12,8 @@ Sparkle updating.
 | Fresh installation | DMG opens, Applications installation launches, setup offers one recognition download and explains required permissions |
 | Permission denial/recovery | Trial explains Microphone or Screen Recording failure; returning from System Settings and retrying succeeds |
 | Dictation | Hold/release the configured key; expected complete text lands in an editable field in TextEdit and another ordinary app |
-| Focus change / secure field | Switching apps during processing does not paste into the wrong app; a password field refuses insertion |
+| Focus change / secure field | Switching apps, documents or text fields during processing does not paste into the wrong field; unavailable field identity falls back to copy; a password field refuses insertion |
+| Clipboard failure / retry | Failure does not send Paste or claim success; retained text remains selectable and Retry Copy copies it without pasting into a newly focused field |
 | Cleanup / translation | Names, numbers and intended meaning survive cleanup; mixed languages remain mixed with translation off and become the target language when on |
 | Cancellation | Close setup or cancel while preparing/recording/processing; no later microphone start, result, paste or stale bubble appears |
 | Caption clear/restart | Clear the bubble during continuous speech and during a pause; new speech appears without restarting captioning |

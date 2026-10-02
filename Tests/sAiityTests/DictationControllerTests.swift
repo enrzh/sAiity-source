@@ -233,6 +233,7 @@ import Testing
         var inserted: [String] = []
         var focus = DictationFocusToken(processIdentifier: 1, bundleIdentifier: "test.original")
         var expectedFocus: DictationFocusToken?
+        var outcome: TextInsertionResult.Outcome = .copied
         func captureFocus() -> DictationFocusToken? { focus }
         func insert(_ text: String, expecting expected: DictationFocusToken?) -> TextInsertionResult {
             expectedFocus = expected
@@ -241,7 +242,7 @@ import Testing
 
         func insert(_ text: String) -> TextInsertionResult {
             inserted.append(text)
-            return TextInsertionResult(outcome: .copied)
+            return TextInsertionResult(outcome: outcome)
         }
     }
 
@@ -273,6 +274,25 @@ import Testing
                                                      languageMetadata: .init(regions: [
                                                          .init(text: "hello from dictation", language: "en")
                                                      ])))
+        #expect(controller.phase == .result("Copied to Clipboard"))
+    }
+
+    @Test("clipboard failure retains the completed result until copy recovery")
+    func clipboardFailureRetainsResult() async {
+        let inserter = FakeInserter()
+        inserter.outcome = .copyFailed
+        var snapshot: DictationResultSnapshot?
+        let controller = DictationController(makeBackend: { FakeBackend(log: EventLog()) },
+            capture: FakeCapture(log: EventLog()), inserter: inserter, captionsActive: { false },
+            onResult: { snapshot = $0 })
+        controller.press()
+        await controller.waitForWorkForTests()
+        controller.release()
+        await controller.waitForWorkForTests()
+        #expect(snapshot?.outputText == "hello from dictation")
+        #expect(!controller.phase.automaticallyDismissesToast)
+        guard case .recovery = controller.phase else { Issue.record("copy failure was reported as success"); return }
+        controller.completeCopyRecovery()
         #expect(controller.phase == .result("Copied to Clipboard"))
     }
 

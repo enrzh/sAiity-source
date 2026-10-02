@@ -12,6 +12,18 @@ import Testing
 /// abspielt" left `Mac abspielt` on screen, translated as `Mac plays.`
 @MainActor
 struct SentenceAssemblyTests {
+    @Test("caption latency diagnostics distinguish a warm model from a cold start")
+    func temperatureLabelsMatchModelState() {
+        let app = AppDelegate()
+        for warm in [false, true] {
+            app.recordCaptionTimingForTests(warmStart: warm)
+            let entries = Diagnostics.recentTimings.filter {
+                ["captions.first-text", "captions.first-final", "captions.visible-lag"].contains($0.operation)
+            }.prefix(3)
+            #expect(entries.count == 3)
+            #expect(entries.allSatisfy { $0.cold == !warm })
+        }
+    }
 
     @Test("Clauses are joined into one readable line")
     func joinsWithSpaces() {

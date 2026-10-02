@@ -136,6 +136,12 @@ run_caption_tests() {
 
 export SAIITY_CAPTION_BENCHMARK_DIR="$FIXTURES"
 export SAIITY_CAPTION_BENCHMARK_MODELS="$models"
+evidence_before=""
+# Explicit developer downloads can create a previously absent model. Release
+# runs disable downloads and require unchanged fingerprints before/after.
+if [ "${SAIITY_CAPTION_BENCHMARK_DOWNLOAD:-0}" != "1" ]; then
+    evidence_before=$(python3 scripts/benchmark_evidence.py "$FIXTURES" --profile captions)
+fi
 set +e
 run_caption_tests 2>&1 | tee "$log"
 status=${PIPESTATUS[0]}
@@ -170,6 +176,12 @@ grep -q '"phase":"warm_live_stream"' "$log" || {
     exit 1
 }
 
+evidence_after=$(python3 scripts/benchmark_evidence.py "$FIXTURES" --profile captions)
+if [ -n "$evidence_before" ] && [ "$evidence_before" != "$evidence_after" ]; then
+    echo "FATAL: caption benchmark inputs changed during measurement." >&2
+    exit 1
+fi
+printf 'SAIITY_BENCHMARK_EVIDENCE %s\n' "$evidence_after" | tee -a "$log"
 cp "$log" "$REPORT_DIR/latest.log"
 cp "$meta" "$REPORT_DIR/latest.meta"
 echo "caption matrix passed: $result_count records"

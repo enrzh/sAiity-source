@@ -428,6 +428,35 @@ import Testing
         window.dismiss()
     }
 
+    @Test("copy recovery keeps selectable text and routes the action to retry")
+    func copyRecoveryUsesResultAction() {
+        let originalPost = DictationToastWindow.postAccessibility
+        var announcements = 0
+        DictationToastWindow.postAccessibility = { _, notification in
+            if notification == .announcementRequested { announcements += 1 }
+        }
+        defer { DictationToastWindow.postAccessibility = originalPost }
+        let window = makeWindow()
+        window.isReleasedWhenClosed = false
+        var retries = 0
+        var resets = 0
+        window.onRetryCopy = { retries += 1 }
+        window.onResetPosition = { resets += 1 }
+        window.show(resultText: "Retained output.", autoDismissAfter: nil, retryCopy: true)
+        #expect(window.resultVisibleForTests)
+        #expect(window.resultSelectableForTests)
+        #expect(window.offersCopyRetryForTests)
+        #expect(announcements == 1)
+        #expect(window.performResetPosition())
+        #expect(retries == 1)
+        #expect(resets == 0)
+        window.show(phase: .ready)
+        #expect(!window.offersCopyRetryForTests)
+        #expect(window.performResetPosition())
+        #expect(resets == 1)
+        window.dismiss()
+    }
+
     @Test("returning from a result restores the compact bubble height")
     func resultHeightDoesNotPersistIntoStatus() {
         let window = makeWindow()

@@ -256,6 +256,11 @@ final class DictationController {
         phase = .ready
     }
 
+    func completeCopyRecovery() {
+        guard !state.isActive, case .recovery = phase else { return }
+        phase = .result(String(localized: "Copied to Clipboard"))
+    }
+
     /// Keeps the missing global-key permission visible instead of making the
     /// shortcut look dead while the monitor retries in the background.
     func markWaitingForInputMonitoring() {
@@ -719,6 +724,9 @@ final class DictationController {
         let result = inserter.insert(output, expecting: sessionFocus)
         if let releaseStarted { logDuration("release-to-insert", since: releaseStarted) }
         switch result.outcome {
+        case .copyFailed:
+            reportIssue("dictation.clipboard", "Clipboard write failed; result retained in the bubble.")
+            phase = .recovery(String(localized: "Copy failed — use Retry Copy in the bubble."))
         case .insertedAndCopied:
             if translated {
                 phase = .result(String(localized: "Translated and inserted"))
