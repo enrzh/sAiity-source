@@ -139,9 +139,17 @@ struct DictationASRPerformanceTests {
                     }
                 }
                 if let expectedLanguages = fixture.expectedLanguages {
+                    // Match caption matrix: judge language from the transcript
+                    // text. Engines that omit or partially tag regions (Nemotron
+                    // English / trailing unknown) still have to keep languages
+                    // in the words they emitted.
+                    let fallback = LanguageDetector.languageCode(in: result.text,
+                                                                  minimumCharacters: 8) ?? "und"
+                    let actual = CaptionLanguageSpanDetector.analyze(result.text,
+                                                                      fallbackLanguage: fallback)
+                        .compactMap(\.language)
                     fields["languagePreserved"] = DictationBenchmarkScorer.preservesLanguageSequence(
-                        expected: expectedLanguages,
-                        actual: result.languageMetadata.regionLanguages.compactMap { $0 })
+                        expected: expectedLanguages, actual: actual)
                 }
                 try record(fields, since: start)
             }
@@ -260,10 +268,15 @@ struct DictationASRPerformanceTests {
                         fields["missingWords"] = DictationBenchmarkScorer.wordErrors(reference: expected, hypothesis: pasteboard.text).deletions
                         if let maximum = fixture.maxWER { #expect(wer <= maximum) }
                     }
-                    if translationMode == "off", let expected = fixture.expectedLanguages,
-                       let metadata = snapshot?.languageMetadata {
+                    if translationMode == "off", let expected = fixture.expectedLanguages {
+                        let hypothesis = pasteboard.text
+                        let fallback = LanguageDetector.languageCode(in: hypothesis,
+                                                                      minimumCharacters: 8) ?? "und"
+                        let actual = CaptionLanguageSpanDetector.analyze(hypothesis,
+                                                                          fallbackLanguage: fallback)
+                            .compactMap(\.language)
                         fields["languagePreserved"] = DictationBenchmarkScorer.preservesLanguageSequence(
-                            expected: expected, actual: metadata.regionLanguages.compactMap { $0 })
+                            expected: expected, actual: actual)
                     }
                     try record(fields, since: released)
                 }
