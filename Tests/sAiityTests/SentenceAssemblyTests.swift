@@ -12,6 +12,28 @@ import Testing
 /// abspielt" left `Mac abspielt` on screen, translated as `Mac plays.`
 @MainActor
 struct SentenceAssemblyTests {
+    @Test("cross-chunk dictionary corrections are applied once and survive timed subtitle export")
+    func correctedSentenceExport() throws {
+        let old = DictationVocabulary.corrections
+        defer { DictationVocabulary.corrections = old }
+        DictationVocabulary.corrections = [
+            .init(heard: "Ube Eats", replacement: "Uber Eats"),
+            .init(heard: "Uber Eats", replacement: "Another company")
+        ]
+        let app = AppDelegate()
+        app.openSentenceForTests(["Please call Ube", "Eats today."], words: [
+            .init(start: 0, end: 0.5, text: "Please call Ube "),
+            .init(start: 0.5, end: 1, text: "Eats today.")
+        ])
+        #expect(AppDelegate.joinClauses(app.pendingSentenceForTests) == "Please call Uber Eats today.")
+        app.closeSentenceForTests()
+        let saved = try #require(app.sessionLinesForTests.first)
+        #expect(saved.text == "Please call Uber Eats today.")
+        #expect(saved.words == nil)
+        #expect(Export.srt([saved]).contains("Uber Eats"))
+        #expect(!Export.srt([saved]).contains("Another company"))
+    }
+
     @Test("caption latency diagnostics distinguish a warm model from a cold start")
     func temperatureLabelsMatchModelState() {
         let app = AppDelegate()

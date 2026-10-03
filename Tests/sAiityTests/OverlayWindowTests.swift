@@ -5,6 +5,38 @@ import Testing
 
 @MainActor
 @Suite struct OverlayWindowTests {
+    @Test("reading history survives incoming captions and translation until Jump to latest")
+    func readerControlsScrolling() async throws {
+        let previous = CaptionStyle.current
+        var style = previous
+        style.hidden = false
+        style.maxHeight = 180
+        CaptionStyle.current = style
+        defer { CaptionStyle.current = previous }
+        let window = OverlayWindow()
+        window.showHistory((0..<30).map {
+            CaptionHistoryEntry(sentenceID: $0, original: "Earlier caption number \($0).")
+        })
+        window.jumpToLatest()
+        try #require(window.historyScrollMaximumForTests > 100)
+        #expect(window.followsLatestForTests)
+        window.scrollHistoryForTests(to: 40)
+        #expect(!window.followsLatestForTests)
+        let offset = window.historyScrollOffsetForTests
+        window.show(text: "New speech at the bottom.", isFinal: true, sentenceID: 30)
+        window.showTranslation("Earlier translated caption.", forSentenceID: 25)
+        await Task.yield(); await Task.yield()
+        #expect(!window.followsLatestForTests)
+        #expect(abs(window.historyScrollOffsetForTests - offset) <= 1)
+        window.jumpToLatest()
+        #expect(window.followsLatestForTests)
+        #expect(abs(window.historyScrollOffsetForTests - window.historyScrollMaximumForTests) <= 1)
+        window.scrollHistoryForTests(to: 0)
+        window.clearHistory(keepVisible: true)
+        #expect(window.followsLatestForTests)
+        window.orderOut(nil)
+    }
+
     @Test("Liquid Glass is applied to the subtitle bubble")
     func liquidGlassStyle() {
         let defaults = UserDefaults.standard

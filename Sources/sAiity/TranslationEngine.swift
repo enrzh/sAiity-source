@@ -207,12 +207,9 @@ actor TranslationInferenceGate {
 
 /// When translation happens.
 ///
-/// Whole sentences is the default and the quality choice: the translator is
-/// handed one finished thought, once. Live retranslates the still-growing
-/// sentence on every committed clause, so a rough translation appears within a
-/// couple of seconds and settles when the sentence closes — at the price of
-/// several translator runs per sentence. Display-only: whatever mode is set,
-/// the transcript records the one translation made at the close.
+/// Whole sentences translates a finished thought once. Live coalesces interim
+/// words into revisable subtitle translations while speech continues. Saved
+/// transcripts always receive the authoritative translation at sentence close.
 enum TranslationTiming: String, CaseIterable, Sendable {
     case sentence
     case live
@@ -222,7 +219,7 @@ enum TranslationTiming: String, CaseIterable, Sendable {
     var displayName: String {
         switch self {
         case .sentence: return String(localized: "Whole sentences")
-        case .live: return String(localized: "Live")
+        case .live: return String(localized: "Realtime")
         }
     }
 }

@@ -428,6 +428,30 @@ import Testing
         window.dismiss()
     }
 
+    @Test("original copy is reachable, retries failure and leaves the processed result intact")
+    func originalCopyRecovery() throws {
+        let originalPost = DictationToastWindow.postAccessibility
+        DictationToastWindow.postAccessibility = { _, _ in }
+        defer { DictationToastWindow.postAccessibility = originalPost }
+        let window = makeWindow()
+        var copies = 0
+        window.onCopyOriginal = { copies += 1; return copies > 1 }
+        window.show(resultText: "Processed result", autoDismissAfter: nil, canCopyOriginal: true)
+        let target = try #require(window.originalTargetAreaForTests)
+        #expect(target.width >= 28 && target.height >= 28)
+        #expect(!window.claimsTextGesture(atWindowPoint: NSPoint(x: target.maxX - 1, y: target.midY)))
+        window.copyOriginal()
+        #expect(window.resultTextForTests == "Processed result")
+        #expect(window.originalTargetAreaForTests != nil)
+        window.copyOriginal()
+        #expect(copies == 2)
+        window.show(phase: .dictating)
+        #expect(window.originalTargetAreaForTests == nil)
+        window.copyOriginal()
+        #expect(copies == 2)
+        window.dismiss()
+    }
+
     @Test("copy recovery keeps selectable text and routes the action to retry")
     func copyRecoveryUsesResultAction() {
         let originalPost = DictationToastWindow.postAccessibility

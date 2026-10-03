@@ -175,6 +175,7 @@ final class DictationToastWindow: NSPanel {
     private let resultScrollView = NSScrollView()
     private let resultTextView = NSTextView(frame: .zero)
     private let resetButton = NSButton()
+    private let originalButton = NSButton()
     private let host = DictationToastContentView()
     private var autoDismissTask: Task<Void, Never>?
     private var presentationGeneration = 0
@@ -198,6 +199,7 @@ final class DictationToastWindow: NSPanel {
     private var armingTimer: Timer?
     var onResetPosition: (() -> Void)?
     var onRetryCopy: (() -> Void)?
+    var onCopyOriginal: (() -> Bool)?
 #if SAIITY_TEST_HOOKS
     private(set) var orderFrontCallsForTests = 0
 #endif
@@ -280,17 +282,27 @@ final class DictationToastWindow: NSPanel {
         resetButton.target = self
         resetButton.action = #selector(resetPositionFromButton)
 
+        originalButton.isBordered = false
+        originalButton.isHidden = true
+        originalButton.image = NSImage(systemSymbolName: "doc.text", accessibilityDescription: nil)
+        originalButton.toolTip = String(localized: "Copy Original")
+        originalButton.setAccessibilityLabel(String(localized: "Copy Original"))
+        originalButton.target = self
+        originalButton.action = #selector(copyOriginal)
+
         host.onHover = { [weak self] point in
             self?.updateMouseArming(atContentPoint: point)
         }
         host.onExit = { [weak self] in self?.armMouseEvents(false) }
         host.addSubview(spinner)
         host.addSubview(resetButton)
+        host.addSubview(originalButton)
         host.addSubview(label)
         host.addSubview(waveform)
         host.addSubview(resultScrollView)
         spinner.translatesAutoresizingMaskIntoConstraints = false
         resetButton.translatesAutoresizingMaskIntoConstraints = false
+        originalButton.translatesAutoresizingMaskIntoConstraints = false
         label.translatesAutoresizingMaskIntoConstraints = false
         resultScrollView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -302,6 +314,10 @@ final class DictationToastWindow: NSPanel {
             resetButton.centerYAnchor.constraint(equalTo: host.centerYAnchor),
             resetButton.widthAnchor.constraint(equalToConstant: 16),
             resetButton.heightAnchor.constraint(equalToConstant: 16),
+            originalButton.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: 8),
+            originalButton.centerYAnchor.constraint(equalTo: host.centerYAnchor),
+            originalButton.widthAnchor.constraint(equalToConstant: 16),
+            originalButton.heightAnchor.constraint(equalToConstant: 16),
             label.centerXAnchor.constraint(equalTo: host.centerXAnchor),
             label.centerYAnchor.constraint(equalTo: host.centerYAnchor),
             label.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: Self.horizontalInset),
@@ -394,6 +410,7 @@ final class DictationToastWindow: NSPanel {
         resultPointSize = resultFont.pointSize
         resultTextView.font = resultFont
         resultTextView.textColor = color
+        originalButton.contentTintColor = color
         waveform.setColor(color)
     }
 
@@ -510,6 +527,7 @@ final class DictationToastWindow: NSPanel {
     }
     override func mouseDown(with event: NSEvent) {
         let point = contentView?.convert(event.locationInWindow, from: nil) ?? .zero
+        if originalTargetArea?.contains(point) == true { copyOriginal(); return }
         // The same padded target the arming uses. Anything the panel claims a
         // click for has to do something with it, or the ring around the icon
         // would swallow clicks and start a drag instead.
@@ -577,6 +595,21 @@ final class DictationToastWindow: NSPanel {
         resetButton.convert(resetButton.bounds, to: contentView)
     }
 
+    private var originalTargetArea: NSRect? {
+        originalButton.isHidden ? nil : originalButton.convert(originalButton.bounds, to: contentView).insetBy(dx: -6, dy: -6)
+    }
+
+    @objc func copyOriginal() {
+        guard !originalButton.isHidden, let onCopyOriginal else { return }
+        let copied = onCopyOriginal()
+        let title = copied ? String(localized: "Original copied") : String(localized: "Copy failed — try again")
+        originalButton.image = NSImage(systemSymbolName: copied ? "checkmark" : "exclamationmark.circle",
+                                      accessibilityDescription: nil)
+        originalButton.toolTip = title
+        originalButton.setAccessibilityLabel(title + ". " + String(localized: "Copy Original"))
+        Self.postAccessibility(originalButton, .announcementRequested)
+    }
+
     /// The reset control's real hit target: a 16 pt icon is not a 16 pt target.
     private var resetTargetArea: NSRect {
         let dx = max(0, (Self.resetButtonTarget.width - resetControlArea.width) / 2)
@@ -591,6 +624,7 @@ final class DictationToastWindow: NSPanel {
     func claimsTextGesture(atWindowPoint windowPoint: NSPoint) -> Bool {
         guard let resultArea,
               let point = contentView?.convert(windowPoint, from: nil) else { return false }
+        if originalTargetArea?.contains(point) == true { return false }
         return resultArea.contains(point)
     }
 
@@ -604,7 +638,7 @@ final class DictationToastWindow: NSPanel {
         armMouseEvents(true)
         // An open hand over the drag strip says "you can move this"; the arrow
         // everywhere else keeps the controls and the text honest.
-        if resetTargetArea.contains(inContent) || !dragRegion.contains(inContent) {
+        if resetTargetArea.contains(inContent) || originalTargetArea?.contains(inContent) == true || !dragRegion.contains(inContent) {
             NSCursor.arrow.set()
         } else {
             NSCursor.openHand.set()
@@ -638,6 +672,7 @@ final class DictationToastWindow: NSPanel {
         let slack = Self.armSlack
         return dragRegion.insetBy(dx: -slack, dy: -slack).contains(point)
             || resetTargetArea.insetBy(dx: -slack, dy: -slack).contains(point)
+            || (originalTargetArea?.insetBy(dx: -slack, dy: -slack).contains(point) ?? false)
             || (resultArea?.insetBy(dx: -slack, dy: -slack).contains(point) ?? false)
     }
 
@@ -692,6 +727,7 @@ final class DictationToastWindow: NSPanel {
         _ = performResetPosition()
     }
     func performResetButtonAction() { resetButton.performClick(nil) }
+    func performCopyOriginalButtonAction() { originalButton.performClick(nil) }
 #if SAIITY_TEST_HOOKS
     var renderedBubbleStyleForTests: Int { (contentView as? BubbleSurfaceView)?.renderedStyle ?? -1 }
     var usesLiquidGlassForTests: Bool { (contentView as? BubbleSurfaceView)?.usesLiquidGlassForTests ?? false }
@@ -720,12 +756,14 @@ final class DictationToastWindow: NSPanel {
     var resultSelectableForTests: Bool { resultTextView.isSelectable }
     /// The result area in content coordinates, or nil when no result is shown.
     var resultAreaForTests: NSRect? { resultArea }
+    var originalTargetAreaForTests: NSRect? { originalTargetArea }
     var resetTargetAreaForTests: NSRect { resetTargetArea }
     private(set) var resetCallbackCountForTests = 0
 #endif
 
     func show(text: String, animated: Bool, autoDismissAfter: Duration? = nil) {
         cancelAutoDismiss()
+        originalButton.isHidden = true
         configureCopyRetry(false)
         isShowingResult = false
         labelPointSize = nil
@@ -746,8 +784,13 @@ final class DictationToastWindow: NSPanel {
 
     /// Displays the completed dictation, after insertion/clipboard handling has
     /// finished. Long results stay inside the bubble and scroll vertically.
-    func show(resultText: String, autoDismissAfter: Duration? = .seconds(4.5), retryCopy: Bool = false) {
+    func show(resultText: String, autoDismissAfter: Duration? = .seconds(4.5), retryCopy: Bool = false,
+              canCopyOriginal: Bool = false) {
         cancelAutoDismiss()
+        originalButton.isHidden = !canCopyOriginal
+        originalButton.image = NSImage(systemSymbolName: "doc.text", accessibilityDescription: nil)
+        originalButton.toolTip = String(localized: "Copy Original")
+        originalButton.setAccessibilityLabel(String(localized: "Copy Original"))
         configureCopyRetry(retryCopy)
         isShowingResult = true
         resultPointSize = nil
@@ -894,6 +937,7 @@ final class DictationToastWindow: NSPanel {
 
     func dismiss() {
         cancelAutoDismiss()
+        originalButton.isHidden = true
         waveform.stopAnimating()
         spinner.stopAnimation(nil)
         alphaValue = 1

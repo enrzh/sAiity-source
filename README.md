@@ -28,12 +28,32 @@ and runs locally through MLX. Hy-MT2 is an alternative local CPU engine for its
 target-language choices. A failed engine can fall back only to an installed,
 compatible alternative; otherwise the original text remains available.
 
+Realtime translation previews automatically update less often in Low Power
+Mode, under thermal/memory pressure, or after sustained slow decoding. Final
+sentence translations retain priority; recognition settings are not changed.
+
 Mixed-language dictation keeps each spoken language when translation is off.
 Enabling translation asks for the entire message in the chosen target language.
 Cleanup fixes wording in place; it does not request translation.
 
 Models are downloaded on first use and stored locally. The app does not ship
 model weights.
+
+## Realtime subtitles
+
+Under **Captions → Quick controls**, choose **Nemotron → Subtitle timing →
+Realtime** for the 1.12-second streaming model, or **Balanced** for 2.24-second
+updates with lower processing cost. The two timing models are separate local
+downloads; the page offers Download when the selected one is missing. Spoken
+words appear while speech continues and may be revised. Qwen's captions remain
+pause-based; choose Nemotron for realtime word updates.
+
+When translation is enabled, **Translation timing → Realtime** translates interim
+words as the sentence grows. Requests coalesce over 400 ms, retain one active
+decode and one newest revision, and use the existing local translation engine.
+Translation adds its own inference delay and needs more processing than whole
+sentences. Closing/clearing a sentence or changing the language cancels stale
+previews. Saved transcripts receive only the final sentence translation.
 
 ## Setup
 
@@ -59,6 +79,20 @@ Automatic insertion also requires the original app and text field to remain
 focused. Changing documents or fields while processing keeps the result on the
 clipboard. If copying fails, the result stays in the bubble and its action
 offers **Retry Copy**; retrying copies the retained text without pasting it.
+
+If cleanup, translation or an approved correction changes the result, the bubble
+offers **Copy Original**. The menu bar also offers **Copy Original Dictation**,
+including after the bubble disappears. Both copy the retained recognition text
+without pasting into another app. It stays in memory until the next recording starts.
+
+Under Advanced settings on either page, **Names and terms** protects spelling
+and **Corrections** stores explicit phrase replacements such as `Ube Eats` →
+`Uber Eats`. The dictionary is shared, local, and bounded. Corrections match whole
+phrases once, before cleanup/translation; nothing is learned automatically.
+
+Scrolling upward in the caption bubble pauses automatic scrolling while new
+speech continues. **Jump to latest**, or scrolling back to the bottom, resumes
+following new captions. Clearing the bubble also resumes following.
 
 Dictation is a separate microphone-only session. It does not write to saved
 caption transcripts and it does not require sAiity to be the frontmost app.

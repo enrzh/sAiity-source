@@ -624,7 +624,8 @@ final class DictationController {
             phase = .result(String(localized: "No speech detected"))
             return
         }
-        let text = authoritativeText
+        let transcription = DictationVocabulary.applying(to: transcription)
+        let text = transcription.text
         let configuration = translationConfiguration()
         let metadata = transcription.languageMetadata
         let sourceLanguage = metadata.dominantLanguage ?? fallbackSourceLanguage
@@ -709,7 +710,7 @@ final class DictationController {
             ])
             : transcriptionForTranslation.languageMetadata
         if let releaseStarted { logDuration("release-to-result", since: releaseStarted) }
-        onResult(DictationResultSnapshot(rawText: text,
+        onResult(DictationResultSnapshot(rawText: authoritativeText,
                                          outputText: output,
                                          wasCleaned: cleaned,
                                          wasTranslated: translated,

@@ -130,6 +130,10 @@ struct DictationResultSnapshot: Equatable, Sendable {
     /// source regions' language mix.
     let languageMetadata: DictationLanguageMetadata?
 
+    var originalForRecovery: String? {
+        rawText.isEmpty || rawText == outputText ? nil : rawText
+    }
+
     init(rawText: String, outputText: String, wasCleaned: Bool,
          wasTranslated: Bool, languageMetadata: DictationLanguageMetadata? = nil,
          cleanupUnavailable: Bool = false) {

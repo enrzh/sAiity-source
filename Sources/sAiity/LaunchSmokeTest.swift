@@ -332,6 +332,12 @@ final class LaunchSmokeTest {
             dictation.performResetButtonAction()
             record("dictation copy recovery \(preset.rawValue)", dictation.isVisible && retries == 1,
                    detail: "retained result's native action invoked Retry Copy")
+            var originals = 0
+            dictation.onCopyOriginal = { originals += 1; return true }
+            dictation.show(resultText: "Processed result.", autoDismissAfter: nil, canCopyOriginal: true)
+            dictation.performCopyOriginalButtonAction()
+            record("dictation original copy \(preset.rawValue)", dictation.isVisible && originals == 1,
+                   detail: "native Copy Original action invoked without clipboard writes")
         }
         caption.clear()
         dictation.dismiss()

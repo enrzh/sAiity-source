@@ -255,7 +255,6 @@ struct DictationView: View {
     // many times while the page is opening.
     @State private var inputMonitoringGranted: Bool?
     @State private var accessibilityGranted: Bool?
-    @State private var vocabularyText = DictationVocabulary.serialized
     @State private var whisperReady: Bool?
     @State private var whisperBusy = false
     @State private var showsProcessingDetails = false
@@ -452,20 +451,9 @@ struct DictationView: View {
                 }
             }
 
-            // No subtitle: the chooser is no longer here, so the old
-            // "choose the local cleanup model …" line would be describing
-            // a control that has moved. The vocabulary field keeps its own
-            // caption below.
             SettingsSection(title: "Cleanup details") {
                 cleanupModelControls
-                TextField("Protected vocabulary (comma separated)", text: $vocabularyText)
-                    .textFieldStyle(.roundedBorder)
-                    .onChange(of: vocabularyText) { _, value in
-                        DictationVocabulary.serialized = value
-                    }
-                Text("Optional names and technical terms keep their spelling during cleanup.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                VocabularyEditor()
             }
 
             SettingsSection(title: "Bubble appearance",
@@ -955,7 +943,6 @@ struct CaptionsView: View {
     @Bindable var state: AppState
     var onDetailVisibilityChanged: (Bool) -> Void = { _ in }
     @State private var diagnosticsRevision = 0
-    @State private var vocabularyText = DictationVocabulary.serialized
     @State private var showsProcessingDetails = false
 
     var body: some View {
@@ -1032,29 +1019,6 @@ struct CaptionsView: View {
     @ViewBuilder
     private var detailSettings: some View {
         VStack(alignment: .leading, spacing: 14) {
-            // The engine picker and its notices moved up to Quick controls.
-            // What is left here is speed, which only applies to one engine.
-
-            if state.engine == .nemotron {
-                SettingsSection(title: "Caption speed",
-                                subtitle: "Choose how quickly captions update or how much context each update uses.") {
-                    Picker("When captions appear", selection: $state.nemotronTier) {
-                        Text(verbatim: CaptionLatencyCopy.title(chunkMs: 2240)).tag(2240)
-                        Text(verbatim: CaptionLatencyCopy.title(chunkMs: 1120)).tag(1120)
-                    }
-                    .pickerStyle(.segmented)
-                    if !NemotronEngine.isDownloaded(chunkMs: state.nemotronTier) {
-                        Label {
-                            Text(verbatim: CaptionLatencyCopy.missingDownload)
-                        } icon: {
-                            Image(systemName: "arrow.down.circle")
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                    }
-                }
-            }
-
             SettingsSection(title: "Capture",
                             subtitle: "Choose which audio reaches the caption engine.") {
                 Picker("Capture audio from", selection: $state.captureApp) {
@@ -1097,28 +1061,9 @@ struct CaptionsView: View {
                 }
             }
 
-            if state.translateTo != nil {
-                SettingsSection(title: "Translation details",
-                                subtitle: "Decide when translated sentences are produced.") {
-                    Picker("Translation mode", selection: $state.translationTiming) {
-                        ForEach(TranslationTiming.allCases, id: \.self) { t in
-                            Text(t.displayName).tag(t)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                }
-            }
-
             SettingsSection(title: "Vocabulary",
                             subtitle: "Keep names and technical terms consistent across captions and dictation.") {
-                TextField("Protected vocabulary (comma separated)", text: $vocabularyText)
-                    .textFieldStyle(.roundedBorder)
-                    .onChange(of: vocabularyText) { _, value in
-                        DictationVocabulary.serialized = value
-                    }
-                Text("Shared with dictation. Recognized names and technical terms keep their spelling in captions.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                VocabularyEditor()
             }
 
             appearanceSections
@@ -1228,6 +1173,29 @@ struct CaptionsView: View {
                     Label("Not downloaded yet — see Models.", systemImage: "arrow.down.circle")
                         .font(.caption).foregroundStyle(.orange)
                 }
+                if state.engine == .nemotron {
+                    Picker("Subtitle timing", selection: $state.nemotronTier) {
+                        Text("Balanced").tag(2240)
+                        Text("Realtime").tag(1120)
+                    }
+                    .pickerStyle(.segmented)
+                    Text(state.nemotronTier == 1120
+                         ? "Words appear while speech continues, using the faster local model. Uses more processing power; text can still be revised."
+                         : "Streaming words with more context per update and lower processing cost.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if !NemotronEngine.isDownloaded(chunkMs: state.nemotronTier),
+                       let asset = ASREngine.nemotron.assetDescriptors.first(where: { $0.id == AssetID.nemotron(chunkMs: state.nemotronTier) }) {
+                        HStack {
+                            Text("Download this timing model before starting captions.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            AssetControl(state: state, status: state.assets.first(where: { $0.id == asset.id }) ?? ModelRegistry.status(of: asset))
+                        }
+                    }
+                } else if state.engine == .qwen06 || state.engine == .qwen17 {
+                    Text("This model shows captions on pauses. Choose Nemotron for realtime word updates.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 HStack {
                     Label("Language", systemImage: "waveform")
                     Spacer()
@@ -1305,6 +1273,22 @@ struct CaptionsView: View {
                 // control that causes it.
                 if let t = state.translateTo, !state.targetSupportedByEngine {
                     TargetUnsupportedNotice(state: state, target: t)
+                }
+                if state.translateTo != nil {
+                    Picker("Translation timing", selection: $state.translationTiming) {
+                        ForEach(TranslationTiming.allCases, id: \.self) { timing in
+                            Text(timing.displayName).tag(timing)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    Text(state.translationTiming == .live
+                         ? "Translation follows the words while you listen and may change as the sentence grows. Saved transcripts use the final translation."
+                         : "Translation appears when a sentence finishes.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if state.translationTiming == .live {
+                        Text("Realtime previews slow down in Low Power Mode or under sustained load. Final sentence translations keep priority.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
             }
 

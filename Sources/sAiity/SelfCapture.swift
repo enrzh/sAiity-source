@@ -101,6 +101,18 @@ enum SelfCapture {
             captureWindow(named: "onboarding-\(useCase.rawValue)", into: directory, window: window)
             window.close()
         }
+        for width in [480, 640] {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 560),
+                                  styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentViewController = NSHostingController(rootView: ScrollView {
+                VocabularyEditor().padding(24)
+            }.frame(width: CGFloat(width), height: 560))
+            window.orderFront(nil)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+            captureWindow(named: "vocabulary-\(width)", into: directory, window: window)
+            window.close()
+        }
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
         // `NSApp.terminate` is deferred when called from inside a run loop, which
         // is where this runs, so the process would linger as a menu-bar app. This

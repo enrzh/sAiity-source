@@ -24,6 +24,7 @@ extension Notification.Name {
     /// toggle() the hot key and the menu bar item use, rather than a second
     /// code path that could quietly drift from the one the hot key drives.
     static let saiityToggleCaptions = Notification.Name("saiityToggleCaptions")
+    static let saiityCaptionTranslationTimingChanged = Notification.Name("saiityCaptionTranslationTimingChanged")
 }
 
 // MARK: - Model
@@ -241,13 +242,12 @@ final class AppState {
     }
     var shortcutError: String?
 
-    /// Sentence-at-close or live retranslation of the growing sentence. Read
-    /// by the caption pipeline per clause, so no notification is needed — the
-    /// next clause simply behaves the new way.
+    /// Live previews must be invalidated immediately when timing changes.
     var translationTiming = TranslationTiming.current {
         didSet {
             guard translationTiming != oldValue else { return }
             TranslationTiming.current = translationTiming
+            NotificationCenter.default.post(name: .saiityCaptionTranslationTimingChanged, object: nil)
         }
     }
 

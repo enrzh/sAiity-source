@@ -14,9 +14,13 @@ Sparkle updating.
 | Dictation | Hold/release the configured key; expected complete text lands in an editable field in TextEdit and another ordinary app |
 | Focus change / secure field | Switching apps, documents or text fields during processing does not paste into the wrong field; unavailable field identity falls back to copy; a password field refuses insertion |
 | Clipboard failure / retry | Failure does not send Paste or claim success; retained text remains selectable and Retry Copy copies it without pasting into a newly focused field |
+| Original-text recovery | After cleanup, translation or dictionary correction, Copy Original copies the exact recognition text without pasting or replacing the displayed processed result; retry a failed copy; the menu action works after the bubble dismisses and resets on the next dictation |
+| Personal dictionary | Existing names survive upgrade; add/remove a name and a correction on both pages; C++, .NET and non-Latin names keep punctuation; only whole approved phrases change, without cascading replacements |
 | Cleanup / translation | Names, numbers and intended meaning survive cleanup; mixed languages remain mixed with translation off and become the target language when on |
 | Cancellation | Close setup or cancel while preparing/recording/processing; no later microphone start, result, paste or stale bubble appears |
 | Caption clear/restart | Clear the bubble during continuous speech and during a pause; new speech appears without restarting captioning |
+| Caption history | Scroll up while speech continues and translations arrive; the visible row stays in place; Jump to latest and manually reaching the bottom resume following; check the 50-row history limit and clearing |
+| Realtime power/load | On a laptop, enable/disable Low Power Mode during a session; repeat under sustained load; interim translations update less frequently, original captions continue, final translations complete, stale previews never overwrite them |
 | Devices and sleep | Change input devices and sleep/wake; capture resumes or gives a recovery action rather than silently stalling |
 | Appearance and displays | All presets work in light/dark, increased contrast and reduced motion; bubbles stay visible after disconnecting an external display |
 | Keyboard and accessibility | Tab/Shift-Tab, Space, Escape, standard editing shortcuts and VoiceOver reach trial and settings controls |
@@ -26,6 +30,22 @@ At minimum verify macOS 26 and 27 on Apple Silicon, including the M4 MacBook Air
 that previously reproduced crashes. Mark unavailable combinations **not tested**.
 Keep recordings and transcripts outside Git; diagnostics should contain timings
 and error summaries rather than conversation content.
+
+For broader speech validation, provide an authorized natural-speech corpus with
+reviewed reference transcripts and recorded provenance/license or consent.
+Include accented German/English, other supported languages, quiet/fast speech,
+proper names and numbers, within-sentence language switches, competing
+noise/music, silence followed by speech, long continuous speech and two-person
+turn taking/overlap. Speaker labels may identify turns; overlapping words cannot
+be separated. Bluetooth switching and sleep/wake require actual device checks,
+not merely a recording played through a model.
+
+Reuse `scripts/caption-matrix.sh` and the `DictationASRPerformanceTests.completePipeline`
+benchmark with these fixtures. Run both caption tiers and cleanup/translation
+off/on with installed compatible engines, sequentially. Never download a model
+silently or treat synthesized fixtures as evidence of natural-speech accuracy.
+Record every unavailable combination as **not tested**, and keep device results
+separate from mocked tests, local model measurements and release publication.
 
 Automatic coverage: CI runs the release Swift tests, quality-gate self-checks,
 builds without test hooks, verifies native resources/signatures and runs the

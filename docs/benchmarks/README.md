@@ -1,5 +1,157 @@
 # Local ASR fixtures
 
+## 3 October 2026 product follow-up
+
+Working source is `9c8c91e` plus the existing realtime changes and this local
+follow-up. No release is represented by these results. Original dictation can
+be copied from the bubble or menu without pasting; the processed result remains
+intact. The shared native dictionary editor keeps existing names, adds explicit
+whole-phrase corrections, preserves technical punctuation, and never learns
+replacements automatically. Corrected text reaches cleanup/translation while
+the uncorrected recognition text stays recoverable in memory. Caption corrections
+apply once to the assembled raw sentence, including cross-chunk phrases. When
+wording changes, exports use the saved corrected text with the existing span
+timing interpolation instead of the recognizer's old word text.
+
+Caption history stops following when the reader scrolls upward, preserves the
+visible row during updates, and resumes on Jump to latest, reaching the bottom
+or clearing. Jump to latest is also reachable from the menu while reviewing
+history. Interim translation pacing uses the normal 400 ms window, at least
+1500 ms under Low Power Mode or thermal/memory pressure, and up to 2 seconds
+after sustained slow native decoding. It keeps one in-flight decode and the
+newest pending revision; final translations retain their existing priority.
+
+Verification on this Mac mini M1 / 16 GB / macOS 27.0 / Xcode 27.0:
+
+- The supported release command passed **619 registered tests / 77 suites**,
+  18.678 s, after the final source changes. Log:
+  `/tmp/saiity-product-improvements-tests-final.log`. New mocked checks cover
+  recovery, correction boundaries/non-cascading replacements, mixed metadata,
+  processing order, corrected caption export across chunk boundaries,
+  reader-controlled scrolling and adaptive pacing/recovery.
+- **11 Python checks passed** across release-quality and evidence validation.
+  Logs: `/tmp/saiity-product-quality-checks.log` and
+  `/tmp/saiity-product-evidence-checks.log`.
+- The final `./build-app.sh --no-test-hooks` passed native-resource, version and
+  signature verification. Its `--selftest 20` passed **32 native checks**,
+  including Copy Original actions across all four bubble presets. Logs:
+  `/tmp/saiity-product-improvements-build.log` and
+  `/tmp/saiity-product-improvements-smoke.log`. The app is at `build/sAiity.app`.
+- Resident Hy-MT2 processed 80 revisable updates per cohort, three paired runs.
+  Simulated constrained mode reduced native calls from **8 to 4** every run.
+  Median accumulated decode time was **5.247 → 2.393 s**; final translation after
+  draining previews was **0.552 → 0.552 s**. This measures local inference work,
+  not battery energy or actual Low Power Mode on a laptop. Models stayed resident
+  and all calls were sequential. Log: `/tmp/saiity-product-adaptive-native.log`.
+- The production dictation controller, rules cleanup and in-memory clipboard
+  processed all five existing fixtures, five times with each preview state:
+  **50 native runs passed**. Pooled release-to-copy p50 / p95 was **0.352 / 0.417 s**
+  with preview off and **0.439 / 0.680 s** with preview on. Worst WER was **0.0455**,
+  missing words **0**, and expected languages survived every run. Five observations
+  per fixture and pooled percentiles do not establish a population tail. This
+  benchmark does not exercise a real microphone or focused-field paste. Log:
+  `/tmp/saiity-product-pipeline-native.log`.
+- The existing capture harness rendered the dictionary in German at 480 and
+  640 points with sample names and an explicit correction. Entry/field layouts
+  were inspected at `/tmp/saiity-product-ui.rd3iIN/captures/`; the temporary QA
+  app was stopped and its preferences domain removed. `cacheDisplay` cannot establish
+  native material/button appearance. Direct UI automation failed with
+  `Sky Computer Use native pipe closed before response`; do not treat the
+  component captures as a complete keyboard/mouse or appearance trial.
+
+The corpus manifest has references/categories but no recorded provenance or
+license/consent review. Broader natural-speech accuracy, accents, quiet/overlapping
+voices, Bluetooth transitions, sleep/wake and the M4 MacBook Air therefore remain
+**not verified**. The expanded cases and required observations are in
+`docs/release-checklist.md`. Keep these outstanding gates separate from local
+functional checks and model measurements. No weights or recordings were fetched.
+
+## Realtime subtitle verification
+
+The captions page exposes the existing 1120 ms Nemotron tier as **Realtime** and
+2240 ms as **Balanced**, with an explicit download control for a missing tier.
+The model stays resident and recognition still uses its one processing pump.
+Qwen continues to emit pause-final captions. Selecting a subtitle timing uses
+the existing caption preference and engine-change lifecycle; existing automatic
+tier selection and persisted choices are retained.
+
+**Translation timing → Realtime** now receives volatile words as well as
+committed clauses. A 400 ms fixed coalescing window avoids starvation during
+continuous speech; it retains one active translation and one newest request.
+Each request carries sentence/session/translator identity and target language.
+Hidden bubbles, closed/cleared sentences, changed targets/models and stopped
+sessions reject stale previews. Cancellation drains native inference before the
+next preview can enter, and does not count as a translator failure. Final
+sentence translations take priority over previews and remain the only
+translations written to the transcript.
+
+Normal verification uses mocked requests and checks coalescing, one in-flight
+decode, bounded pending revisions, cancelled work draining, session replacement
+and stale target/sentence output. These functional tests have a suite timeout;
+their wall time in the full UI suite is not a latency benchmark.
+
+To measure the coalescing window plus resident native translation separately,
+use the installed Hy-MT2 model:
+
+```sh
+SAIITY_REALTIME_TRANSLATION_BENCHMARK=1 \
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+xcrun swift test -c release -Xswiftc -enable-testing -Xswiftc -DSAIITY_TEST_HOOKS \
+  --filter CaptionLiveTranslationTests.installedPreviewLatency
+```
+
+This measures three text fixtures, including German/English and Chinese/English
+switches, three times each without reloading the model or downloading weights.
+It reports time to a translated preview and verifies a meaning-bearing target
+term, without logging the output text. It does not include ASR delay, system
+audio capture or display compositing. Use paced `CaptionASRPerformanceTests`
+with each tier for first-recognition-text latency and dropped-audio metrics.
+
+Local results, 3 October 2026, baseline `9c8c91e` on `main`, Mac mini M1 / 16 GB,
+macOS 27.0, Xcode 27.0. Five existing fixtures (German, English, mixed speech,
+noise and technical wording) were paced in real time, three repetitions each.
+Nemotron and translation benchmarks ran sequentially; no weights were fetched.
+
+| Cohort | First interim text p50 | Recognition RTF p50 | Process footprint p50 | Worst WER | Dropped audio |
+| --- | --- | --- | --- | --- | --- |
+| Balanced before | 2.425 s | 0.046 | 76.4 MiB | 0.091 | 0 s |
+| Balanced after | 2.432 s | 0.045 | 65.2 MiB | 0.091 | 0 s |
+| Realtime after | 1.586 s | 0.258 | 1365.3 MiB | 0.091 | 0 s |
+
+Realtime reached first text about 35% sooner in this fixture set, with materially
+more compute and process memory. These are observed model-tier tradeoffs, not
+an algorithmic improvement to Nemotron and not a general subsecond promise.
+Process footprint excludes memory held by system services; do not treat it as
+total model memory. Balanced remains available and existing defaults are retained.
+Logs: `/tmp/saiity-realtime-before-2240.log`,
+`/tmp/saiity-realtime-after-2240.log`, `/tmp/saiity-realtime-after-1120.log`.
+
+Resident Hy-MT2 passed nine translated-preview runs: English, German/English,
+and Chinese/English requests, three runs each. A preview had to change the
+input and preserve the meaning-bearing target word. Coalescing plus translation
+took 1.114–1.206 s, median 1.154 s; this is additional to ASR latency.
+Log: `/tmp/saiity-realtime-native-preview-final.log`. Very short mixed-language
+spans remain subject to the existing language detector's ambiguity; these
+fixtures do not prove arbitrary language-switch accuracy.
+
+The supported release test command passed **610 registered tests / 77 suites**,
+18.478 s. Mocked realtime tests ran normally; native measurements are opt-in.
+Log: `/tmp/saiity-realtime-tests-verified.log`. Earlier verification caught an
+overly short polling deadline in a new test when unrelated UI work occupied the
+main actor; the new suite now uses the test framework timeout. No unrelated
+test was skipped or changed. Three warm observations per clip establish local
+behavior, not a reliable production-tail estimate or M4/macOS 26 validation.
+
+The normal signed application build without test hooks passed native-resource,
+version, signature and release-mode checks. Its `--selftest 20` completed all
+28 native checks. Logs: `/tmp/saiity-realtime-build.log` and
+`/tmp/saiity-realtime-smoke.log`. The existing capture harness rendered the new
+German Quick controls in an isolated QA app at
+`/tmp/saiity-realtime-ui.vSoK3c/captures/settings-captions.png`; the temporary
+preferences domain was removed afterward. The settings pane remains scrollable
+at the supported compact size. No GitHub release, model download or publication
+was performed for this feature implementation.
+
 Keep real recordings out of Git. A fixture directory used by
 `scripts/model-matrix.sh` contains mono Float32 16 kHz WAV files and a sidecar
 `manifest.json`:

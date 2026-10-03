@@ -1,6 +1,731 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Copy Original": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Original kopieren"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copier l’original"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copiar original"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "原文をコピー"
+          }
+        }
+      }
+    },
+    "Original copied": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Original kopiert"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Original copié"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Original copiado"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "原文をコピーしました"
+          }
+        }
+      }
+    },
+    "Copy failed — try again": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kopieren fehlgeschlagen — erneut versuchen"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Échec de la copie — réessayez"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo copiar — inténtalo de nuevo"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "コピーできませんでした。もう一度お試しください"
+          }
+        }
+      }
+    },
+    "Copy Original Dictation": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Originaldiktat kopieren"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copier la dictée originale"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copiar dictado original"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "音声入力の原文をコピー"
+          }
+        }
+      }
+    },
+    "Jump to latest": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zum neuesten Untertitel"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aller aux derniers sous-titres"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ir al último subtítulo"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最新の字幕へ"
+          }
+        }
+      }
+    },
+    "Names and terms": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Namen und Begriffe"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Noms et termes"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nombres y términos"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "名前と用語"
+          }
+        }
+      }
+    },
+    "Name or term": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Name oder Begriff"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nom ou terme"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nombre o término"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "名前または用語"
+          }
+        }
+      }
+    },
+    "Add name or term": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Name oder Begriff hinzufügen"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ajouter un nom ou un terme"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Añadir nombre o término"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "名前または用語を追加"
+          }
+        }
+      }
+    },
+    "Corrections": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Korrekturen"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Corrections"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Correcciones"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "置換"
+          }
+        }
+      }
+    },
+    "Remove correction for": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Korrektur entfernen für"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Supprimer la correction de"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eliminar corrección de"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "次の置換を削除"
+          }
+        }
+      }
+    },
+    "Heard phrase": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erkannter Ausdruck"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Expression reconnue"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Frase reconocida"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "認識された表現"
+          }
+        }
+      }
+    },
+    "Replace with": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ersetzen durch"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remplacer par"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reemplazar por"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "置換後の表現"
+          }
+        }
+      }
+    },
+    "Add correction": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Korrektur hinzufügen"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ajouter une correction"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Añadir corrección"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "置換を追加"
+          }
+        }
+      }
+    },
+    "Keep recognized names and technical terms spelled correctly. Shared with captions and dictation.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erkannte Namen und Fachbegriffe behalten ihre Schreibweise. Für Untertitel und Diktat gemeinsam."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Préservez l’orthographe des noms et termes reconnus. Partagé entre les sous-titres et la dictée."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mantén la ortografía de nombres y términos reconocidos. Compartido entre subtítulos y dictado."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "認識された名前と専門用語の表記を保持します。字幕と音声入力で共通です。"
+          }
+        }
+      }
+    },
+    "Only phrases you add are replaced. Up to 50 names and 50 corrections, 64 characters per field. Nothing is learned automatically.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nur eingetragene Ausdrücke werden ersetzt. Bis zu 50 Namen und 50 Korrekturen, 64 Zeichen pro Feld. Es wird nichts automatisch gelernt."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Seules les expressions ajoutées sont remplacées. Jusqu’à 50 noms et 50 corrections, 64 caractères par champ. Aucun apprentissage automatique."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Solo se reemplazan las frases que añadas. Hasta 50 nombres y 50 correcciones, 64 caracteres por campo. No se aprende nada automáticamente."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "追加した表現だけを置換します。名前と置換を各50件まで、各欄64文字まで保存できます。自動学習は行いません。"
+          }
+        }
+      }
+    },
+    "Realtime previews slow down in Low Power Mode or under sustained load. Final sentence translations keep priority.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Echtzeitvorschauen werden im Stromsparmodus oder bei anhaltender Last seltener aktualisiert. Abschließende Satzübersetzungen haben weiter Vorrang."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les aperçus ralentissent en mode économie d’énergie ou sous charge prolongée. Les traductions finales restent prioritaires."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Las vistas previas se actualizan menos en modo de bajo consumo o con carga sostenida. Las traducciones finales mantienen la prioridad."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "低電力モードや負荷が続く場合、プレビューの更新頻度を下げます。文全体の最終翻訳を優先します。"
+          }
+        }
+      }
+    },
+    "Realtime": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Echtzeit"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tiempo real"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Temps réel"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "リアルタイム"
+          }
+        }
+      }
+    },
+    "Subtitle timing": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Untertitel-Timing"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tiempo de los subtítulos"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rythme des sous-titres"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "字幕の表示タイミング"
+          }
+        }
+      }
+    },
+    "Translation timing": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Übersetzungs-Timing"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tiempo de traducción"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rythme de traduction"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "翻訳の表示タイミング"
+          }
+        }
+      }
+    },
+    "Words appear while speech continues, using the faster local model. Uses more processing power; text can still be revised.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wörter erscheinen bereits während des Sprechens mit dem schnelleren lokalen Modell. Benötigt mehr Rechenleistung; der Text kann noch korrigiert werden."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Las palabras aparecen mientras continúa el habla, con el modelo local más rápido. Usa más recursos; el texto aún puede corregirse."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les mots apparaissent pendant que la parole continue grâce au modèle local plus rapide. Utilise plus de ressources ; le texte peut encore être corrigé."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "高速なローカルモデルで、話している間に言葉が表示されます。処理負荷は増え、テキストが修正される場合があります。"
+          }
+        }
+      }
+    },
+    "Streaming words with more context per update and lower processing cost.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fortlaufende Wörter mit mehr Kontext pro Aktualisierung und geringerem Rechenaufwand."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Palabras en directo con más contexto por actualización y menor consumo de recursos."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mots en direct avec plus de contexte par mise à jour et une charge de traitement réduite."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新ごとに多くの文脈を使い、処理負荷を抑えて言葉を表示します。"
+          }
+        }
+      }
+    },
+    "Download this timing model before starting captions.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lade dieses Timing-Modell herunter, bevor du Untertitel startest."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Descarga este modelo antes de iniciar los subtítulos."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Téléchargez ce modèle avant de lancer les sous-titres."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "字幕を開始する前に、このタイミング用のモデルをダウンロードしてください。"
+          }
+        }
+      }
+    },
+    "This model shows captions on pauses. Choose Nemotron for realtime word updates.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dieses Modell zeigt Untertitel bei Pausen. Wähle Nemotron für Wortaktualisierungen in Echtzeit."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Este modelo muestra subtítulos en las pausas. Elige Nemotron para actualizar las palabras en tiempo real."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce modèle affiche les sous-titres aux pauses. Choisissez Nemotron pour les mises à jour en temps réel."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このモデルは話の区切りで字幕を表示します。リアルタイムの更新にはNemotronを選んでください。"
+          }
+        }
+      }
+    },
+    "Translation follows the words while you listen and may change as the sentence grows. Saved transcripts use the final translation.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Übersetzung folgt den Wörtern während des Zuhörens und kann sich mit dem Satz ändern. Gespeicherte Transkripte verwenden die endgültige Übersetzung."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La traducción sigue las palabras mientras escuchas y puede cambiar al crecer la frase. Las transcripciones guardadas usan la traducción final."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La traduction suit les mots pendant l’écoute et peut évoluer avec la phrase. Les transcriptions enregistrées utilisent la traduction finale."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "聞いている間に言葉に沿って翻訳され、文が続くと内容が変わる場合があります。保存する文字起こしには確定した翻訳を使います。"
+          }
+        }
+      }
+    },
+    "Translation appears when a sentence finishes.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Übersetzung erscheint, wenn ein Satz endet."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La traducción aparece al terminar una frase."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La traduction apparaît à la fin d’une phrase."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文が終わると翻訳が表示されます。"
+          }
+        }
+      }
+    },
     "Retry Copy": {
       "extractionState": "manual",
       "localizations": {

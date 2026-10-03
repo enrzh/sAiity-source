@@ -138,6 +138,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.dictationToast.resetPosition()
         }
         dictationToast.onRetryCopy = { [weak self] in self?.retryDictationCopy() }
+        dictationToast.onCopyOriginal = { [weak self] in self?.copyOriginalDictation() == true }
+    }
+
+    private func copyOriginalDictation() -> Bool {
+        guard !dictationController.isBusy,
+              let original = lastDictationResult?.originalForRecovery else { return false }
+        let copied = TextInserter().copy(original).outcome == .copied
+        if copied { scheduleDictationFeedbackDismissal() }
+        else { dictationFeedbackTask?.cancel(); dictationFeedbackTask = nil }
+        return copied
+    }
+
+    @objc private func copyOriginalDictationFromMenu() {
+        guard let result = lastDictationResult, result.originalForRecovery != nil,
+              !dictationController.isBusy else { return }
+        dictationToast.show(resultText: result.outputText, autoDismissAfter: nil, canCopyOriginal: true)
+        dictationToast.copyOriginal()
     }
 
     private func retryDictationCopy() {
@@ -146,7 +163,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if TextInserter().copy(output).outcome == .copied {
             dictationController.completeCopyRecovery()
         } else {
-            dictationToast.show(resultText: output, autoDismissAfter: nil, retryCopy: true)
+            dictationToast.show(resultText: output, autoDismissAfter: nil, retryCopy: true,
+                                canCopyOriginal: lastDictationResult?.originalForRecovery != nil)
         }
     }
 
@@ -342,8 +360,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// it has closed.
     var pendingSentenceForTests: [String] { sentenceParts }
     /// Seed that partial sentence the way a real chunk does.
-    func openSentenceForTests(_ parts: [String]) {
+    func openSentenceForTests(_ parts: [String], words: [TimedWord] = []) {
         sentenceParts = parts
+        sentenceWords = words
         sentenceStart = 0
         sentenceEnd = Double(parts.count) * 0.5
     }
@@ -572,6 +591,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// is constructed, so the peak is one model rather than two.
     @MainActor
     private func swapTranslator(for scope: TranslationEngineScope = .captions) {
+        liveTranslation.invalidate()
         captionTranslationTasks.values.forEach { $0.cancel() }
         captionTranslationTasks.removeAll()
         captionTranslationTargets.removeAll()
@@ -582,6 +602,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             defer {
                 if let self, self.translationRuntime.generation == generation {
                     self.translationRuntime.swap = nil
+                    if scope == .captions {
+                        self.kickLiveTranslation(of: Self.joinClauses(self.sentenceParts + [self.lastVolatileText]),
+                                                 sentenceID: self.displayLifecycle.sentenceID)
+                    }
                 }
             }
             await previous?.value
@@ -623,6 +647,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// processes — quite possibly this one, mid-session.
     @MainActor
     private func handleMemoryPressure(_ level: MemoryPolicy.Pressure) {
+        previewMemoryPressure = level != .normal
         // Cached transcript text is the cheapest thing in the process to give
         // back — it is re-readable from disk, unlike a loaded model. It costs
         // a slower next search and nothing else, so it goes first and on any
@@ -861,6 +886,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case empty
         /// The call itself failed — a native error, not a quiet answer.
         case failed
+        case cancelled
     }
 
     /// One caption translation, with its timing recorded and the three outcomes
@@ -898,6 +924,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // sustained failure, not a running total across the session.
             translationRuntime.failureBudget.recordSuccess()
             return .translated(out)
+        } catch is CancellationError {
+            return .cancelled
         } catch {
             NSLog("sAiity caption translation failed: %@",
                   DiagnosticsRedactor.redact(error.localizedDescription))
@@ -1225,16 +1253,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// latest-wins, because neither translator can be cancelled mid-decode —
     /// queueing every clause would fall permanently behind, and what matters is
     /// only ever the newest text.
-    private var liveTranslationBusy = false
-    private var pendingLiveText: (text: String, sentenceID: Int)?
-    private struct LiveTranslationRequest: Equatable {
-        let text: String
-        let sentenceID: Int
-        let source: String
-        let target: String
-        let engine: TranslationEngine
-    }
-    private var lastLiveTranslationRequest: LiveTranslationRequest?
+    private var liveTranslationBusy: Bool { liveTranslation.isBusy }
+    private var previewMemoryPressure = false
+    private lazy var liveTranslation = CaptionLiveTranslation(
+        resourceLimited: { [weak self] in
+            CaptionLiveTranslation.systemResourceLimited || self?.previewMemoryPressure == true
+        },
+        isCurrent: { [weak self] request in self?.isCurrentLiveTranslation(request) == true },
+        translate: { [weak self] request in
+            guard let self, self.isCurrentLiveTranslation(request),
+                  let engine = self.translationRuntime.active else { return nil }
+            self.translationRuntime.beginUse()
+            defer { self.translationRuntime.endUse() }
+            switch await self.runCaptionTranslation(request.text, fallbackSource: request.source,
+                                                   target: request.target, engine: engine) {
+            case .translated(let value): return value
+            case .empty, .cancelled: return nil
+            case .failed:
+                if self.translationRuntime.generation == request.translatorGeneration {
+                    self.retireFailedTranslator(request.engine, reason: "live inference failed")
+                }
+                return nil
+            }
+        },
+        display: { [weak self] text, request in
+            guard let self else { return }
+            self.overlay.showTranslation(text, forSentenceID: request.sentenceID)
+            self.shownTranslationID = request.sentenceID
+        })
     private var sentenceWords: [TimedWord] = []
     private var sentenceStart: Double = 0
     private var sentenceEnd: Double = 0
@@ -1286,7 +1332,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// run on without spaces, and inserting one produces text a native reader
     /// sees as broken — and a translator sees as two words.
     static func joinClauses(_ parts: [String]) -> String {
-        CaptionTextMerger.join(parts)
+        DictationVocabulary.preservingSpelling(in: CaptionTextMerger.join(parts))
     }
 
     private static func trimmedForDisplay(_ parts: [String]) -> String {
@@ -1516,6 +1562,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                                queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in self?.toggle() }
         }
+        NotificationCenter.default.addObserver(forName: .saiityCaptionTranslationTimingChanged, object: nil,
+                                               queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.liveTranslation.invalidate()
+                self.kickLiveTranslation(of: Self.joinClauses(self.sentenceParts + [self.lastVolatileText]),
+                                         sentenceID: self.displayLifecycle.sentenceID)
+            }
+        }
 
         // Nemotron is one multilingual model that identifies the language from
         // audio, so there is no locale to choose and nothing to query. This used
@@ -1702,6 +1757,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Close the transcript cleanly on quit, otherwise the last lines are on
     /// disk but meta.json still says the session never ended.
     func applicationWillTerminate(_ note: Notification) {
+        liveTranslation.invalidate()
         dictationHotkeyMonitor.stop()
         dictationHotkeyRetryTask?.cancel()
         dictationController.cancel()
@@ -1801,7 +1857,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             dictationFeedbackTask?.cancel()
             dictationFeedbackTask = nil
             if let output = lastDictationResult?.outputText {
-                dictationToast.show(resultText: output, autoDismissAfter: nil, retryCopy: true)
+                dictationToast.show(resultText: output, autoDismissAfter: nil, retryCopy: true,
+                                    canCopyOriginal: lastDictationResult?.originalForRecovery != nil)
             }
         case .recovery, .failure:
             dictationToast.show(phase: phase)
@@ -1814,7 +1871,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .result(let message):
             if let output = lastDictationResult?.outputText.trimmingCharacters(in: .whitespacesAndNewlines),
                !output.isEmpty {
-                dictationToast.show(resultText: output, autoDismissAfter: nil)
+                dictationToast.show(resultText: output, autoDismissAfter: nil,
+                                    canCopyOriginal: lastDictationResult?.originalForRecovery != nil)
             } else {
                 dictationToast.show(text: message, animated: false)
             }
@@ -1916,12 +1974,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             showingCaption: overlay.hasVisibleCaption)
         menu.addItem(clearItem)
 
+        let latest = NSMenuItem(title: String(localized: "Jump to latest"),
+                                action: #selector(jumpToLatestCaption), keyEquivalent: "")
+        latest.tag = Self.jumpToLatestMenuTag
+        latest.isHidden = !overlay.isReviewingHistory
+        menu.addItem(latest)
+
         let chord = SettingsWindowController.state.dictationChord.displayString
         let dictationItem = NSMenuItem(title: String(localized: "Hold \(chord) to Dictate"),
                                        action: nil, keyEquivalent: "")
         dictationItem.image = Self.menuSymbol("mic")
         dictationItem.isEnabled = false
         menu.addItem(dictationItem)
+
+        let original = NSMenuItem(title: String(localized: "Copy Original Dictation"),
+                                  action: #selector(copyOriginalDictationFromMenu), keyEquivalent: "")
+        original.tag = Self.copyOriginalMenuTag
+        original.isEnabled = !dictationController.isBusy && lastDictationResult?.originalForRecovery != nil
+        menu.addItem(original)
 
         // Translation, transcript export, and model choices live in Settings.
         // The menu stays focused on actions needed while captions are running.
@@ -1961,6 +2031,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // So: coalesce the rebuild, and never replace the menu that is open.
         menuIsTracking = true
         menuRebuildPending = false
+        menu.item(withTag: Self.copyOriginalMenuTag)?.isEnabled =
+            !dictationController.isBusy && lastDictationResult?.originalForRecovery != nil
+        menu.item(withTag: Self.jumpToLatestMenuTag)?.isHidden = !overlay.isReviewingHistory
         guard let item = menu.item(withTag: Self.clearCaptionMenuTag) else { return }
         item.isEnabled = CaptionLatencyCopy.clearEnabled(
             showingCaption: overlay.hasVisibleCaption)
@@ -1980,7 +2053,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         clearCaption()
     }
 
+    @objc private func jumpToLatestCaption() { overlay.jumpToLatest() }
+
     private static let clearCaptionMenuTag = 174
+    private static let copyOriginalMenuTag = 175
+    private static let jumpToLatestMenuTag = 176
 
 
     /// Only claim items that have not already chosen a target — otherwise this
@@ -2081,7 +2158,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func copyCurrentLine() {
-        let line = lastFinalText.isEmpty ? lastVolatileText : lastFinalText
+        let line = lastFinalText.isEmpty ? DictationVocabulary.preservingSpelling(in: lastVolatileText) : lastFinalText
         guard !line.isEmpty else { return }
         Clipboard.copy(line)
         setStatus("Line copied")
@@ -2341,6 +2418,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// against the sentence ID means normal captions resume by themselves when
     /// the speaker starts the next one; there is no state to get stuck in.
     private func clearCaption() {
+        liveTranslation.invalidate()
         // Commit the current display state before hiding it. Volatile text is
         // cumulative, so it belongs after the settled parts and must not be
         // redisplayed by the next ASR revision.
@@ -2480,8 +2558,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         pendingTranslations = 0
         shownTranslationID = nil
         displayLifecycle = CaptionDisplayLifecycle()
-        pendingLiveText = nil
-        lastLiveTranslationRequest = nil
+        liveTranslation.invalidate()
         // A recap flash from the previous session has nothing to restore into
         // this one; its generation guard would drop it anyway, but a pending
         // task that outlives its subject is worth ending outright.
@@ -2625,6 +2702,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
                 NSLog("sAiity engine: started; preparing translator")
                 await prepareTranslatorIfNeeded()
+                kickLiveTranslation(of: Self.joinClauses(sentenceParts + [lastVolatileText]),
+                                    sentenceID: displayLifecycle.sentenceID)
                 // Translator preparation may finish after the first caption.
                 // Never paint the listening placeholder over that caption.
                 if state == .running, !showedAnyCaption {
@@ -2784,6 +2863,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // for deleting weights while idle.
         let wasRunning = state.isActive
         state = .stopping
+        await liveTranslation.stop()
         if wasRunning { announce(String(localized: "Captions stopped")) }
         // Not "Idle". Cancelling a model download in flight can take a moment,
         // and this await used to sit behind a menu that already said Idle and
@@ -2901,8 +2981,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// stays on screen until the next utterance's first volatile replaces it.
     @MainActor
     private func render(_ chunk: TranscriptChunk) {
-        let text = DictationVocabulary.preservingSpelling(
-            in: chunk.text.trimmingCharacters(in: .whitespacesAndNewlines))
+        let text = chunk.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         // After committing a sentence the engine often emits a lone "." as the
         // start of the next one; showing that would blank the bar to a dot.
@@ -2979,6 +3058,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
                 overlay.show(text: Self.trimmedForDisplay(sentenceParts + [text]),
                              isFinal: false, sentenceID: displayLifecycle.sentenceID)
+                kickLiveTranslation(of: Self.trimmedForDisplay(sentenceParts + [text]),
+                                    sentenceID: displayLifecycle.sentenceID)
             }
             return
         }
@@ -3047,11 +3128,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // translation from emitSentence owns the row. The display ID does not
         // bump until the NEXT sentence renders, so the ID check alone
         // leaves a window where a stale partial still passes.
-        guard sentenceID == displayLifecycle.sentenceID,
+        guard TranslationTiming.current == .live, state == .running,
+              text.contains(where: { $0.isLetter || $0.isNumber }),
+              sentenceID == displayLifecycle.sentenceID,
               !displayLifecycle.sentenceClosed,
               !displayLifecycle.isCleared(sentenceID),
-              translateTo != nil, translationRuntime.ready,
-              CaptionStyle.current.showTranslation else { return }
+              translateTo != nil, translationRuntime.ready, translationRuntime.swap == nil,
+              pendingTranslations == 0,
+              CaptionStyle.current.showTranslation, !CaptionStyle.current.hidden else { return }
         // The close path skips lines already in the target language; making
         // the same call about the same text here keeps live mode from filling
         // the row with an LLM's paraphrase of a line the close path then
@@ -3059,69 +3143,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // sentences with nothing to correct it.
         if alreadyInTargetLanguage(text) { return }
         let source = captionSourceLanguage(for: text)
-        guard let target = translateTo else { return }
-        let request = LiveTranslationRequest(text: text,
+        guard let target = translateTo, let engine = translationRuntime.engine else { return }
+        let request = CaptionLiveTranslation.Request(text: text,
                                              sentenceID: sentenceID,
+                                             sessionGeneration: sessionGeneration,
+                                             translatorGeneration: translationRuntime.generation,
                                              source: source,
                                              target: target,
-                                             engine: TranslationEngine.effective)
-        // Recognition can emit the same revision more than once. Avoid
-        // decoding identical input again while keeping different sentences
-        // distinct even when their text happens to match.
-        guard request != lastLiveTranslationRequest else { return }
-        if liveTranslationBusy {
-            pendingLiveText = (text, sentenceID)
-            return
-        }
-        lastLiveTranslationRequest = request
-        liveTranslationBusy = true
-        let srcCode = source
-        let generation = sessionGeneration
-        Task { @MainActor in
-            defer {
-                liveTranslationBusy = false
-                if let next = pendingLiveText {
-                    pendingLiveText = nil
-                    kickLiveTranslation(of: next.text, sentenceID: next.sentenceID)
-                }
-                scheduleTranslatorEvictionIfIdle()
-            }
-            translationRuntime.beginUse()
-            defer { translationRuntime.endUse() }
-            guard let engine = translationRuntime.active else { return }
-            let engineKind = translationRuntime.engine
-            let out: String
-            switch await runCaptionTranslation(text, fallbackSource: srcCode,
-                                               target: target, engine: engine) {
-            case .translated(let value):
-                out = value
-            case .empty:
-                // The model had nothing to say about this line. Keep the
-                // original caption and leave the translator loaded.
-                return
-            case .failed:
-                if let engineKind {
-                    retireFailedTranslator(engineKind, reason: "live inference failed")
-                }
-                return
-            }
-            // Same guards as the authoritative path: not across a session
-            // boundary, and only under the sentence it translates. The
-            // `!sentenceClosed` leg drops a partial that resolves after the
-            // sentence closed — it would race the authoritative translation
-            // behind the translator's serial lock, and landing second it
-            // rewrote the settled row with an older, shorter text.
-            guard sessionGeneration == generation,
-                  displayLifecycle.sentenceID == sentenceID,
-                  !displayLifecycle.sentenceClosed,
-                  !displayLifecycle.isCleared(sentenceID),
-                  CaptionStyle.current.showTranslation else { return }
-            if TestHooks.verboseLogging {
-                NSLog("sAiity live translated: chars=%d target=%@", out.count, target)
-            }
-            overlay.showTranslation(out, forSentenceID: sentenceID)
-            shownTranslationID = sentenceID
-        }
+                                             engine: engine)
+        liveTranslation.submit(request)
+    }
+
+    private func isCurrentLiveTranslation(_ request: CaptionLiveTranslation.Request) -> Bool {
+        TranslationTiming.current == .live && state == .running
+            && request.sessionGeneration == sessionGeneration
+            && request.translatorGeneration == translationRuntime.generation
+            && request.engine == translationRuntime.engine && request.target == translateTo
+            && translationRuntime.swap == nil && pendingTranslations == 0
+            && request.sentenceID == displayLifecycle.sentenceID
+            && !displayLifecycle.sentenceClosed && !displayLifecycle.isCleared(request.sentenceID)
+            && CaptionStyle.current.showTranslation && !CaptionStyle.current.hidden
     }
 
     /// Hand the assembled sentence on: language detection, translation, and the
@@ -3130,9 +3171,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func closeSentence() {
         guard !sentenceParts.isEmpty else { return }
         let text = Self.joinClauses(sentenceParts)
+        // Correct the assembled raw sentence once, including phrases across
+        // ASR chunks. Changed text cannot use the recognizer's original words
+        // for export; existing span interpolation supplies its cue timings.
+        let words = text == CaptionTextMerger.join(sentenceParts) ? sentenceWords : []
         let chunk = TranscriptChunk(text: text, isFinal: true,
                                     start: sentenceStart, end: sentenceEnd,
-                                    words: sentenceWords)
+                                    words: words)
         sentenceParts.removeAll()
         sentenceWords.removeAll()
         // Its original stays on screen until the next sentence starts rendering.
@@ -3141,7 +3186,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // A live partial queued behind the busy slot is now superseded: the
         // close translates the full sentence anyway, so re-kicking the queued
         // partial would translate the same words twice and race the result.
-        pendingLiveText = nil
+        liveTranslation.invalidate()
         // Sentence-final is the natural throttle: volatile revisions would
         // queue faster than VoiceOver speech or a braille display can render.
         if UserDefaults.standard.bool(forKey: "announceCaptions") {
@@ -3308,7 +3353,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                                         target: target, engine: engine) {
                 case .translated(let translated):
                     out = translated
-                case .empty:
+                case .empty, .cancelled:
                     // Nothing translated, but nothing is broken. The original
                     // caption stands and the translator stays loaded.
                     return nil

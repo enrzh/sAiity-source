@@ -171,6 +171,10 @@ final class BubbleContentView: NSView {
     var onCopy: (() -> Void)?
     var onSaveTranscript: (() -> Void)?
     var onClear: (() -> Void)?
+    var onJumpToLatest: (() -> Void)?
+    var showsJumpToLatest = false {
+        didSet { jumpButton.isHidden = !showsJumpToLatest }
+    }
 
     private let controlStripHeight: CGFloat = 38
     /// Matches OverlayWindow's cornerRadius. Content inset by the radius lines up
@@ -191,6 +195,7 @@ final class BubbleContentView: NSView {
     private let copyButton = AccessibleIconButton()
     private let saveButton = AccessibleIconButton()
     private let clearButton = AccessibleIconButton()
+    private let jumpButton = AccessibleIconButton()
     private let recordDot = NSView()
     private var copyFlashWork: DispatchWorkItem?
 
@@ -230,6 +235,15 @@ final class BubbleContentView: NSView {
         clearButton.alphaValue = 0
         clearButton.toolTip = String(localized: "Clear the caption")
 
+        jumpButton.image = NSImage(systemSymbolName: "arrow.down.to.line", accessibilityDescription: nil)?
+            .withSymbolConfiguration(cfg)
+        jumpButton.contentTintColor = .white
+        jumpButton.isHidden = true
+        jumpButton.toolTip = String(localized: "Jump to latest")
+        jumpButton.setAccessibilityRole(.button)
+        jumpButton.setAccessibilityLabel(String(localized: "Jump to latest"))
+        jumpButton.onPress = { [weak self] in self?.onJumpToLatest?() }
+
         // Recording writes a durable, permanent record — it gets a marker on the
         // one element guaranteed to be on screen.
         recordDot.wantsLayer = true
@@ -261,7 +275,7 @@ final class BubbleContentView: NSView {
             b.onAccessibilityFocus = { [weak self] in self?.setControls(visible: true) }
         }
 
-        for v in [copyButton, saveButton, clearButton, recordDot] {
+        for v in [copyButton, saveButton, clearButton, jumpButton, recordDot] {
             v.translatesAutoresizingMaskIntoConstraints = false
             addSubview(v)
         }
@@ -294,6 +308,10 @@ final class BubbleContentView: NSView {
             clearButton.centerYAnchor.constraint(equalTo: recordDot.centerYAnchor),
             clearButton.widthAnchor.constraint(equalToConstant: 16),
             clearButton.heightAnchor.constraint(equalToConstant: 16),
+            jumpButton.trailingAnchor.constraint(equalTo: clearButton.leadingAnchor, constant: -12),
+            jumpButton.centerYAnchor.constraint(equalTo: recordDot.centerYAnchor),
+            jumpButton.widthAnchor.constraint(equalToConstant: 20),
+            jumpButton.heightAnchor.constraint(equalToConstant: 20),
         ])
     }
 
@@ -312,6 +330,7 @@ final class BubbleContentView: NSView {
     private var copyRect: NSRect { copyButton.frame.insetBy(dx: -10, dy: -10) }
     private var saveRect: NSRect { saveButton.frame.insetBy(dx: -10, dy: -10) }
     private var clearRect: NSRect { clearButton.frame.insetBy(dx: -10, dy: -10) }
+    private var jumpRect: NSRect { jumpButton.isHidden ? .zero : jumpButton.frame.insetBy(dx: -4, dy: -4) }
 
     // MARK: - Tracking
 
@@ -355,7 +374,7 @@ final class BubbleContentView: NSView {
         guard interactive else { return }
         if let resize = resizeCursor(at: p) {
             resize.set()
-        } else if copyRect.contains(p) || saveRect.contains(p) || clearRect.contains(p) {
+        } else if copyRect.contains(p) || saveRect.contains(p) || clearRect.contains(p) || jumpRect.contains(p) {
             NSCursor.arrow.set()
         } else {
             NSCursor.openHand.set()
@@ -418,6 +437,11 @@ final class BubbleContentView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
+
+        if !jumpButton.isHidden, jumpRect.contains(p) {
+            jumpButton.onPress?()
+            return
+        }
 
         if copyRect.contains(p) {
             copyButton.onPress?()
@@ -726,6 +750,10 @@ final class OverlayWindow: NSPanel {
         scrollView.scrollerStyle = .overlay
         scrollView.verticalScrollElasticity = .automatic
         scrollView.documentView = historyStack
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(self, selector: #selector(historyScrollChanged(_:)),
+                                               name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
+        host.onJumpToLatest = { [weak self] in self?.jumpToLatest() }
 
         host.translatesAutoresizingMaskIntoConstraints = false
         host.addSubview(scrollView)
@@ -938,6 +966,8 @@ final class OverlayWindow: NSPanel {
     private var shrinkWork: DispatchWorkItem?
     private var allowShrink = false
     private var scrollToLatestPending = false
+    private var followsLatest = true
+    private var isAdjustingScroll = false
     private static let volatileRenderInterval: TimeInterval = 0.1
     private var renderWork: DispatchWorkItem?
     private var pendingRenderSentenceID: Int?
@@ -1145,6 +1175,13 @@ final class OverlayWindow: NSPanel {
     var usesLiquidGlassForTests: Bool { surface.usesLiquidGlassForTests }
     var renderedStyleForTests: CaptionStyle { effectiveStyle }
     var renderPassesForTests: Int { renderPassCount }
+    var followsLatestForTests: Bool { followsLatest }
+    var historyScrollOffsetForTests: CGFloat { scrollView.contentView.bounds.minY }
+    var historyScrollMaximumForTests: CGFloat { max(0, historyStack.bounds.height - scrollView.contentView.bounds.height) }
+    func scrollHistoryForTests(to offset: CGFloat) {
+        scrollView.contentView.scroll(to: NSPoint(x: 0, y: offset))
+        historyScrollChanged()
+    }
 #endif
 
     /// Reveal an intentionally enabled bubble even before the first caption
@@ -1291,6 +1328,7 @@ final class OverlayWindow: NSPanel {
     /// Replace the visible history, used by the recent-caption recap and the
     /// settings preview. The live transcript remains the source of truth.
     func showHistory(_ entries: [CaptionHistoryEntry]) {
+        followsLatest = true
         volatileSentenceID = nil
         history.replace(with: entries)
         renderHistory(immediate: true)
@@ -1304,6 +1342,8 @@ final class OverlayWindow: NSPanel {
     }
 
     func clearHistory(keepVisible: Bool = false) {
+        followsLatest = true
+        host.showsJumpToLatest = false
         volatileSentenceID = nil
         history.clear()
         renderHistory(immediate: true)
@@ -1342,11 +1382,28 @@ final class OverlayWindow: NSPanel {
     }
 
     private func scrollToLatest() {
+        isAdjustingScroll = true
+        defer { isAdjustingScroll = false }
         let maxY = max(0, historyStack.bounds.height
             - scrollView.contentView.bounds.height)
         scrollView.contentView.scroll(to: NSPoint(x: 0, y: maxY))
         scrollView.reflectScrolledClipView(scrollView.contentView)
     }
+
+    @objc private func historyScrollChanged(_ notification: Notification? = nil) {
+        guard !isAdjustingScroll else { return }
+        let remaining = historyStack.bounds.height - scrollView.contentView.bounds.maxY
+        followsLatest = remaining <= 8
+        host.showsJumpToLatest = !followsLatest
+    }
+
+    func jumpToLatest() {
+        followsLatest = true
+        host.showsJumpToLatest = false
+        scrollToLatest()
+    }
+
+    var isReviewingHistory: Bool { isVisible && !followsLatest }
 
     private func renderHistory(changedSentenceID: Int? = nil,
                                immediate: Bool = false) {
@@ -1371,6 +1428,13 @@ final class OverlayWindow: NSPanel {
         renderWork = nil
         pendingRenderSentenceID = nil
         lastRenderAt = Date()
+        let oldOffset = scrollView.contentView.bounds.minY
+        let anchor = history.entries.compactMap { entry -> (Int, CGFloat)? in
+            guard let row = rowViews[entry.sentenceID], row.frame.maxY > oldOffset else { return nil }
+            return (entry.sentenceID, oldOffset - row.frame.minY)
+        }.first
+        isAdjustingScroll = true
+        defer { isAdjustingScroll = false }
         #if SAIITY_TEST_HOOKS
         renderPassCount += 1
         #endif
@@ -1411,6 +1475,14 @@ final class OverlayWindow: NSPanel {
         scrollView.needsLayout = true
         sizeToFit()
         layoutHistory()
+        if !followsLatest {
+            let offset = anchor.flatMap { id, inset in rowViews[id].map { $0.frame.minY + inset } } ?? oldOffset
+            let maximum = max(0, historyStack.bounds.height - scrollView.contentView.bounds.height)
+            scrollView.contentView.scroll(to: NSPoint(x: 0, y: min(maximum, max(0, offset))))
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+            host.showsJumpToLatest = true
+            return
+        }
         // Let AppKit finish the stack/document layout outside the caption
         // callback. Explicit layout calls can recurse on macOS 27 while the
         // window server is already laying out. One dispatch, one scroll: the
@@ -1423,6 +1495,7 @@ final class OverlayWindow: NSPanel {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.scrollToLatestPending = false
+            guard self.followsLatest else { return }
             self.scrollToLatest()
         }
     }
