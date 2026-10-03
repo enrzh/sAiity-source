@@ -218,6 +218,21 @@ included in the application bundle.
 | Sources/sAiity/OverlayWindow.swift | Caption bubble geometry and presentation |
 | Resources/Localizable.xcstrings | User-facing localization catalog |
 
+## What's new in 2.6.4
+
+- Nemotron captions offer **Realtime** (1.12 s) or **Balanced** (2.24 s) subtitle
+  timing, with a download control when the selected model is missing.
+- **Translation timing → Realtime** translates interim words as the sentence
+  grows. Requests coalesce, and only the final sentence translation is saved.
+- Interim translation updates less often in Low Power Mode, under thermal or
+  memory pressure, or after sustained slow decoding. Final translations stay first.
+- After cleanup, translation, or an approved correction, **Copy Original** copies
+  the recognition text without pasting it.
+- **Names and terms** and explicit whole-phrase **Corrections** live in one
+  shared local dictionary. Nothing is learned automatically.
+- Scrolling up in the caption bubble pauses follow. **Jump to latest**, or
+  scrolling back to the bottom, resumes it.
+
 ## What's new in 2.6.3
 
 - Automatic insertion requires the press-time app and accessibility field to stay
@@ -338,14 +353,14 @@ included in the application bundle.
 
 ## Release
 
-The current signed and notarized release is [sAiity 2.6.3](https://github.com/enrzh/sAiity/releases/tag/v2.6.3).
+The current signed and notarized release is [sAiity 2.6.4](https://github.com/enrzh/sAiity/releases/tag/v2.6.4).
 
-- [Download the DMG](https://github.com/enrzh/sAiity/releases/download/v2.6.3/sAiity-2.6.3.dmg)
-- [Download the ZIP](https://github.com/enrzh/sAiity/releases/download/v2.6.3/sAiity-2.6.3.zip)
+- [Download the DMG](https://github.com/enrzh/sAiity/releases/download/v2.6.4/sAiity-2.6.4.dmg)
+- [Download the ZIP](https://github.com/enrzh/sAiity/releases/download/v2.6.4/sAiity-2.6.4.zip)
 - [Sparkle update feed](https://enrzh.github.io/sAiity/appcast.xml)
 
-This release makes paste safer with field-level focus checks, adds Retry Copy
-when the clipboard write fails, and fingerprints release-quality inputs —
+This release adds realtime Nemotron subtitle timing and interim translation,
+Copy Original after cleanup or correction, and a shared local dictionary —
 still fully local recognition and translation on the Mac.
 
 sAiity is part of the [aiity](https://aiity.de) family.
