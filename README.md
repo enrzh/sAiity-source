@@ -228,6 +228,18 @@ included in the application bundle.
 | Sources/sAiity/OverlayWindow.swift | Caption bubble geometry and presentation |
 | Resources/Localizable.xcstrings | User-facing localization catalog |
 
+## What's new in 2.6.5
+
+- On the Transcripts page, **Summarize** writes a local recap, decisions, and
+  action items for one saved session.
+- It uses the Gemma cleanup model already installed for dictation. It does not
+  download a model, and it does not run while captions or dictation are using
+  that model.
+- Spoken lines stay unchanged. SRT and WebVTT remain the words that were said.
+  Markdown export prints the summary once, above the transcript.
+- A long session keeps the latest portion that fits and says how many earlier
+  lines were left out.
+
 ## What's new in 2.6.4
 
 - Nemotron captions offer **Realtime** (1.12 s) or **Balanced** (2.24 s) subtitle
@@ -363,14 +375,14 @@ included in the application bundle.
 
 ## Release
 
-The current signed and notarized release is [sAiity 2.6.4](https://github.com/enrzh/sAiity/releases/tag/v2.6.4).
+The current signed and notarized release is [sAiity 2.6.5](https://github.com/enrzh/sAiity/releases/tag/v2.6.5).
 
-- [Download the DMG](https://github.com/enrzh/sAiity/releases/download/v2.6.4/sAiity-2.6.4.dmg)
-- [Download the ZIP](https://github.com/enrzh/sAiity/releases/download/v2.6.4/sAiity-2.6.4.zip)
+- [Download the DMG](https://github.com/enrzh/sAiity/releases/download/v2.6.5/sAiity-2.6.5.dmg)
+- [Download the ZIP](https://github.com/enrzh/sAiity/releases/download/v2.6.5/sAiity-2.6.5.zip)
 - [Sparkle update feed](https://enrzh.github.io/sAiity/appcast.xml)
 
-This release adds realtime Nemotron subtitle timing and interim translation,
-Copy Original after cleanup or correction, and a shared local dictionary —
-still fully local recognition and translation on the Mac.
+This release adds a local summary of one saved transcript — recap, decisions,
+and action items from the installed Gemma cleanup model — still fully local
+recognition and translation on the Mac.
 
 sAiity is part of the [aiity](https://aiity.de) family.
