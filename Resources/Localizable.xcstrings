@@ -22620,6 +22620,114 @@
           }
         }
       }
+    },
+    "Summarize": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Zusammenfassen" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Résumer" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Resumir" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "要約する" } }
+      }
+    },
+    "Summarizing…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Zusammenfassung wird erstellt…" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Résumé en cours…" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Resumiendo…" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "要約しています…" } }
+      }
+    },
+    "Summary": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Zusammenfassung" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Résumé" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Resumen" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "要約" } }
+      }
+    },
+    "Recap": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Überblick" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Récapitulatif" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Resumen breve" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "あらすじ" } }
+      }
+    },
+    "Decisions": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Entscheidungen" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Décisions" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Decisiones" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "決定事項" } }
+      }
+    },
+    "Actions": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Aufgaben" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Actions" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Acciones" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "対応" } }
+      }
+    },
+    "Wait until dictation finishes — the model is in use.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Warte, bis das Diktat fertig ist — das Modell wird gerade verwendet." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Attendez la fin de la dictée — le modèle est utilisé." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Espera a que termine el dictado: el modelo está en uso." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ディクテーションが終わるまで待ってください。モデルを使用中です。" } }
+      }
+    },
+    "Summaries use the installed dictation cleanup model. Choose Gemma under Settings → Dictation and download it first.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Zusammenfassungen verwenden das installierte Bereinigungsmodell. Wähle Gemma unter Einstellungen → Diktat und lade es zuerst herunter." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Les résumés utilisent le modèle de nettoyage installé. Choisissez Gemma dans Réglages → Dictée et téléchargez-le d’abord." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Los resúmenes usan el modelo de limpieza instalado. Elige Gemma en Ajustes → Dictado y descárgalo primero." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "要約にはインストール済みの整形モデルを使います。設定 → ディクテーションで Gemma を選び、先にダウンロードしてください。" } }
+      }
+    },
+    "The summary did not finish. The transcript is unchanged.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Die Zusammenfassung wurde nicht fertig. Das Transkript ist unverändert." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Le résumé ne s’est pas terminé. La transcription est inchangée." } },
+        "es": { "stringUnit": { "state": "translated", "value": "El resumen no terminó. La transcripción no ha cambiado." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "要約は完了しませんでした。記録はそのままです。" } }
+      }
+    },
+    "Summarized.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Zusammengefasst." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Résumé créé." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Resumido." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "要約しました。" } }
+      }
+    },
+    "Earlier lines were left out of this summary.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Frühere Zeilen sind in dieser Zusammenfassung nicht enthalten." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Les lignes précédentes ne figurent pas dans ce résumé." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Las líneas anteriores no están incluidas en este resumen." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "この要約には前の方の行は含まれていません。" } }
+      }
+    },
+    "Stop captions and dictation before summarizing.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Beende Untertitel und Diktat, bevor du zusammenfasst." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Arrêtez les sous-titres et la dictée avant de résumer." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Detén los subtítulos y el dictado antes de resumir." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "要約する前に字幕とディクテーションを止めてください。" } }
+      }
     }
   },
   "version": "1.0"

@@ -60,6 +60,8 @@ import Testing
         #expect(LocalGeneration.outputLimit(inputTokens: 5, promptTokens: 100) == 96)
         #expect(LocalGeneration.outputLimit(inputTokens: 300, promptTokens: 700) == 932)
         #expect(LocalGeneration.outputLimit(inputTokens: 700, promptTokens: 1_600) == nil)
+        #expect(LocalGeneration.fixedOutputLimit(promptTokens: 400, outputTokens: 320) == 320)
+        #expect(LocalGeneration.fixedOutputLimit(promptTokens: 1_800, outputTokens: 320) == nil)
     }
 
     @Test("benchmark scoring distinguishes missing words and CJK character errors")

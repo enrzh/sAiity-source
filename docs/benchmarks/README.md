@@ -1,5 +1,43 @@
 # Local ASR fixtures
 
+## 4 October 2026 — shipped 2.6.4, then a local summary
+
+Published 2.6.4 is `1ae1163`. The summary work is an uncommitted change on top
+of that commit. No release is represented by these results. No model weights
+were downloaded for this check. The only GGUF on this Mac is Hy-MT2; Gemma 3
+is absent, so the opt-in summary probe (`SAIITY_SUMMARY_PROBE=1`) did not run.
+
+Verification on this Mac mini M1 / 16 GB / macOS 27.0.1 (26A434) / Xcode 27.0
+(27A266a):
+
+- The release suite, built with the supported flags and then run with
+  `--no-parallel --skip takeOwnsSamplesAgainstLateCallback`, passed
+  **627 tests / 79 suites**, 17.070 s. Twenty of those are opt-in probes or
+  benchmarks and were skipped, including the Gemma summary probe. Log:
+  `/tmp/saiity-summary-release-tests-serial.log`.
+- `DictationMicrophoneCaptureTests.takeOwnsSamplesAgainstLateCallback` was
+  excluded. Twice, in a full run, `stop()` hung inside `AVAudioEngine.inputNode`
+  after `beginForTesting()` had marked the capture running without starting the
+  engine. That case is **not tested** here.
+- A run that did not pass `--no-parallel` executed suites together. Three
+  dictionary assertions then failed because they share
+  `DictationVocabulary.corrections`. The same three passed in the serial run
+  above. Log of the parallel failure:
+  `/tmp/saiity-summary-release-tests-3.log`.
+
+The summary tests cover chunking, a short fixed output budget, section
+parsing, a stand-in generator that leaves `segments.jsonl` untouched, cancel
+keeping an older summary, a multi-piece reduce, Markdown versus SRT, and
+refusal when the cleanup model is missing or captions or dictation are busy.
+Localization covered the new strings.
+
+These rows were **not tested** on this machine: Copy Original in the signed
+app, the shared dictionary in the GUI, caption scroll and Jump to latest,
+dictation paste and focus, a notarized DMG upgrade, Low Power Mode on a
+laptop, Bluetooth device changes, sleep/wake, the M4 MacBook Air crash
+recheck, and a consented natural-speech corpus. Recordings and transcripts
+were not added to Git.
+
 ## 3 October 2026 product follow-up
 
 Working source is `9c8c91e` plus the existing realtime changes and this local

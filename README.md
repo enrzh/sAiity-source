@@ -98,6 +98,16 @@ Dictation is a separate microphone-only session. It does not write to saved
 caption transcripts and it does not require sAiity to be the frontmost app.
 Captions and dictation do not own the microphone at the same time.
 
+## Transcript summary
+
+On the Transcripts page, **Summarize** writes a local recap, decisions, and
+action items for one saved session. It uses the Gemma cleanup model already
+installed for dictation. It does not run while captions or dictation are using
+that model, it does not download a model, and it does not change the spoken
+lines. SRT and WebVTT stay the words that were said. Markdown export prints
+the summary once, above the transcript. A long session keeps the latest portion
+that fits and says how many earlier lines were left out.
+
 ## Privacy
 
 System audio is captured through ScreenCaptureKit. Screen Recording permission

@@ -1805,6 +1805,8 @@ struct TranscriptsView: View {
     @State private var retranslateProgress: Retranslator.Progress?
     @State private var retranslateNote: String?
     @State private var retranslating: SessionRef?
+    @State private var summarizer = TranscriptSummarizer()
+    @State private var summaryProgress: TranscriptSummarizer.Progress?
 
     var body: some View {
         ScrollView {
@@ -1927,7 +1929,11 @@ struct TranscriptsView: View {
                             }
                             .controlSize(.small)
                             .fixedSize()
-                            .disabled(retranslator.running || state.sessions.isEmpty)
+                            .disabled(retranslateProgress != nil || summaryProgress != nil || state.sessions.isEmpty)
+                            Button("Summarize") { startSummary(s) }
+                                .controlSize(.small)
+                                .disabled(retranslateProgress != nil || summaryProgress != nil)
+                                .help("Stop captions and dictation before summarizing.")
                             Button {
                                 NSWorkspace.shared.activateFileViewerSelecting([s.url])
                             } label: { Image(systemName: "folder") }
@@ -1945,7 +1951,9 @@ struct TranscriptsView: View {
                         }
                     }
                 }
-                if let p = retranslateProgress {
+                if let p = retranslateProgress ?? summaryProgress.map({
+                    Retranslator.Progress(done: $0.done, total: $0.total, note: $0.note)
+                }) {
                     VStack(alignment: .leading, spacing: 4) {
                         ProgressView(value: Double(p.done), total: Double(max(p.total, 1)))
                         HStack {
@@ -1957,7 +1965,12 @@ struct TranscriptsView: View {
                             // loaded, which is the window in which a Delete on
                             // the Models page would unlink the weights a
                             // decoding thread is still reading.
-                            Button("Cancel") { Task { await retranslator.cancelAndWait() } }
+                            Button("Cancel") {
+                                Task {
+                                    if summaryProgress != nil { await summarizer.cancelAndWait() }
+                                    else { await retranslator.cancelAndWait() }
+                                }
+                            }
                                 .controlSize(.small)
                         }
                     }
@@ -2076,6 +2089,23 @@ struct TranscriptsView: View {
         }
     }
 
+    private func startSummary(_ s: SessionRef) {
+        retranslateNote = nil
+        Task {
+            await summarizer.run(session: s) { p in
+                summaryProgress = p
+            } onFinish: { err in
+                summaryProgress = nil
+                if let err {
+                    retranslateNote = err
+                } else {
+                    retranslateNote = "✓ " + String(localized: "Summarized.")
+                    NotificationCenter.default.post(name: .saiityTranscriptLibraryChanged, object: nil)
+                }
+            }
+        }
+    }
+
     private func exportLibrary(_ format: String) {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -2108,7 +2138,7 @@ struct TranscriptsView: View {
         switch kind {
         case "srt": text = Export.srt(segs)
         case "vtt": text = Export.vtt(segs)
-        default: text = Export.markdown(segs, meta: s.meta)
+        default: text = Export.markdown(segs, meta: s.meta, summary: TranscriptSummaryStore.read(s))
         }
         if let url = Export.write(text, named: "transcript.\(kind)", in: s.url) {
             NSWorkspace.shared.activateFileViewerSelecting([url])
@@ -2341,6 +2371,7 @@ struct GeneralView: View {
 private struct TranscriptViewerSheet: View {
     let session: SessionRef
     @State private var segments: [Segment] = []
+    @State private var summary: TranscriptSummary?
     @State private var query = ""
 
     private var shown: [Segment] {
@@ -2362,6 +2393,33 @@ private struct TranscriptViewerSheet: View {
                            .frame(width: 160)
                    }) {
             VStack(spacing: 0) {
+                if let summary {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Summary").font(.headline)
+                        Text("Recap").font(.caption).foregroundStyle(.secondary)
+                        Text(verbatim: summary.recap).textSelection(.enabled)
+                        if !summary.decisions.isEmpty {
+                            Text("Decisions").font(.caption).foregroundStyle(.secondary)
+                            ForEach(Array(summary.decisions.enumerated()), id: \.offset) { _, line in
+                                Text(verbatim: line).textSelection(.enabled)
+                            }
+                        }
+                        if !summary.actions.isEmpty {
+                            Text("Actions").font(.caption).foregroundStyle(.secondary)
+                            ForEach(Array(summary.actions.enumerated()), id: \.offset) { _, line in
+                                Text(verbatim: line).textSelection(.enabled)
+                            }
+                        }
+                        if summary.omittedLineCount > 0 {
+                            Text("Earlier lines were left out of this summary.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    Divider()
+                }
                 List(shown, id: \.i) { seg in
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
                         Text(Export.clock(seg.t0))
@@ -2392,12 +2450,21 @@ private struct TranscriptViewerSheet: View {
                 // A full read plus a JSON decode per line, off the main actor.
                 // The viewer is a sheet the user can leave open, so a long
                 // session must not freeze the UI on first open.
-                let session = session
-                segments = await Task.detached {
-                    await TranscriptStore.segments(of: session)
-                }.value
+                await reload()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .saiityTranscriptLibraryChanged)) { _ in
+                Task { await reload() }
             }
         }
+    }
+
+    private func reload() async {
+        let session = session
+        let loaded = await Task.detached { () -> ([Segment], TranscriptSummary?) in
+            (TranscriptStore.segments(of: session), TranscriptSummaryStore.read(session))
+        }.value
+        segments = loaded.0
+        summary = loaded.1
     }
 }
 

@@ -156,8 +156,8 @@ argument is quality and native feel.
 
 ## Sequencing
 
-1. **Summary + glossary on Mac** → **1.5**
-2. **The acrylic/click-through spike** — half a day, gates everything below
+1. **Glossary on Mac** shipped in 2.6.4 as the shared dictionary. **Session summary** is the next Mac feature: one explicit summary of a saved transcript, using the installed Gemma cleanup model. It does not run by itself and it does not send the transcript anywhere.
+2. **The acrylic/click-through spike** — the Windows overlay source compiles; the visual check on a Windows 11 desktop is still open and gates everything below
 3. **Extract the core** (no behaviour change, Mac stays green throughout)
 4. **Windows: capture → sherpa-onnx → overlay** — the prototype
 5. **Windows: settings, transcripts, updates, installer** — the long tail

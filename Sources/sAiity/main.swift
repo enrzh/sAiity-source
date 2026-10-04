@@ -36,7 +36,8 @@ if let plan {
         switch format {
         case "srt": print(Export.srt(segs))
         case "vtt": print(Export.vtt(segs))
-        case "md":  print(Export.markdown(segs, meta: session.meta, localized: false))
+        case "md":  print(Export.markdown(segs, meta: session.meta,
+                                          summary: TranscriptSummaryStore.read(session), localized: false))
         default:    print(Export.txt(segs))
         }
     case .openApp(let verb):

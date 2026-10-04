@@ -577,6 +577,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// dictation press could decode on it at the same time.
     var translationInferenceGate: TranslationInferenceGate { translationRuntime.gate }
 
+    /// Dictation still owns cleanup or the microphone pipeline. A library
+    /// summary loads the same GGUF and must wait rather than start a second one.
+    var dictationBlocksLibraryGeneration: Bool { dictationController.isBusy }
+
+    /// Drop a warm cleanup model before a library summary loads Gemma.
+    func releaseWarmCleanupModel() async {
+        await dictationCleanupSession.releaseModel()
+    }
+
     /// Serialises translator replacement, and lets a superseded swap bow out.
     ///
     /// Replacing the translator means releasing gigabytes and loading gigabytes.

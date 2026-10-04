@@ -35,6 +35,7 @@ enum Export {
     /// the labels vary; every structural token is outside the localised span,
     /// and the transcript body is whatever was said either way.
     static func markdown(_ segments: [Segment], meta: SessionMeta,
+                         summary: TranscriptSummary? = nil,
                          localized: Bool = true) -> String {
         func t(_ key: String.LocalizationValue, _ english: String) -> String {
             localized ? String(localized: key) : english
@@ -48,7 +49,26 @@ enum Export {
         if let tr = meta.translateTo {
             out += "- " + t("Translated to", "Translated to") + ": `\(tr)`\n"
         }
-        out += "- " + t("Lines: \(segments.count)", "Lines: \(segments.count)") + "\n\n---\n\n"
+        out += "- " + t("Lines: \(segments.count)", "Lines: \(segments.count)") + "\n\n"
+        if let summary {
+            out += "## " + t("Summary", "Summary") + "\n\n"
+            out += "**" + t("Recap", "Recap") + "**\n\n" + summary.recap + "\n\n"
+            if !summary.decisions.isEmpty {
+                out += "**" + t("Decisions", "Decisions") + "**\n\n"
+                for item in summary.decisions { out += "- \(item)\n" }
+                out += "\n"
+            }
+            if !summary.actions.isEmpty {
+                out += "**" + t("Actions", "Actions") + "**\n\n"
+                for item in summary.actions { out += "- \(item)\n" }
+                out += "\n"
+            }
+            if summary.omittedLineCount > 0 {
+                out += "_" + t("Earlier lines were left out of this summary.",
+                               "Earlier lines were left out of this summary.") + "_\n\n"
+            }
+        }
+        out += "---\n\n"
         for seg in segments {
             // A thematic break where ≥2 s of silence preceded the line — the
             // reader sees the floor change hands without anyone claiming to
@@ -490,7 +510,7 @@ enum Export {
             switch format {
             case "srt": body = srt(segs)
             case "vtt": body = vtt(segs)
-            case "md":  body = markdown(segs, meta: s.meta)
+            case "md":  body = markdown(segs, meta: s.meta, summary: TranscriptSummaryStore.read(s))
             default:    body = txt(segs)
             }
             let name = "sAiity-\(df.string(from: s.meta.startedAt))-\(s.id).\(format)"

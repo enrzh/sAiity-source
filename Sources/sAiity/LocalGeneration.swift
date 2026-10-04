@@ -1,7 +1,9 @@
 import Foundation
 import SaiityLLM
 
-/// One policy for both cleanup and translation, separate from context capacity.
+/// One policy for cleanup, translation, and a saved-transcript summary.
+/// Cleanup and translation size the output from the input. A summary passes
+/// `outputTokens` because its output is short and must not grow with the meeting.
 enum LocalGeneration {
     @TaskLocal static var deadline: ContinuousClock.Instant?
 
@@ -10,20 +12,39 @@ enum LocalGeneration {
         return promptTokens + requested + 16 <= 2_048 ? requested : nil
     }
 
+    /// A fixed output that still has to fit the 2,048-token context with the prompt.
+    static func fixedOutputLimit(promptTokens: Int, outputTokens: Int, contextTokens: Int = 2_048) -> Int? {
+        guard outputTokens > 0, promptTokens >= 0,
+              promptTokens + outputTokens + 16 <= contextTokens else { return nil }
+        return outputTokens
+    }
+
     static func run(_ model: LLM, user: String, payload: String,
-                    thinking: ThinkingMode = .none) async throws -> String? {
+                    thinking: ThinkingMode = .none,
+                    outputTokens: Int? = nil,
+                    maximumDuration: Double = 15) async throws -> String? {
         guard !Task.isCancelled else { return nil }
         let started = ContinuousClock.now
         let framed = model.template?.preprocess(user, [], thinking) ?? user
         let promptTokens = await model.encode(framed).count
-        let inputTokens = await model.encode(payload).count
-        guard let limit = outputLimit(inputTokens: inputTokens, promptTokens: promptTokens) else {
-            NSLog("sAiity generation: context budget insufficient, input=%d prompt=%d", inputTokens, promptTokens)
-            return nil
+        let limit: Int?
+        if let outputTokens {
+            limit = fixedOutputLimit(promptTokens: promptTokens, outputTokens: outputTokens)
+            if limit == nil {
+                NSLog("sAiity generation: fixed budget insufficient, prompt=%d output=%d", promptTokens, outputTokens)
+            }
+        } else {
+            let inputTokens = await model.encode(payload).count
+            limit = outputLimit(inputTokens: inputTokens, promptTokens: promptTokens)
+            if limit == nil {
+                NSLog("sAiity generation: context budget insufficient, input=%d prompt=%d", inputTokens, promptTokens)
+            }
         }
-        let remaining = deadline.map { seconds(ContinuousClock.now.duration(to: $0)) } ?? 15
+        guard let limit else { return nil }
+        let remaining = deadline.map { seconds(ContinuousClock.now.duration(to: $0)) } ?? maximumDuration
         guard remaining > 0, !Task.isCancelled else { return nil }
-        await model.core.setGenerationBudget(maximumGeneratedTokens: limit, maximumDuration: min(15, remaining))
+        await model.core.setGenerationBudget(maximumGeneratedTokens: limit,
+                                             maximumDuration: min(maximumDuration, remaining))
         // Stream termination cancels the exact native generation task. A
         // detached stop request could arrive after a subsequent request starts.
         do {
