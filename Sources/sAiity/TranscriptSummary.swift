@@ -179,6 +179,23 @@ enum TranscriptSummaryStore {
         return try? decoder.decode(TranscriptSummary.self, from: data)
     }
 
+    /// Remove only the generated preface, never the spoken lines or exports.
+    @MainActor
+    @discardableResult
+    static func remove(_ session: SessionRef) throws -> Bool {
+        guard !CaptionSession.shared.isSummarizing else { return false }
+        let directory = session.url.standardizedFileURL.resolvingSymlinksInPath()
+        let root = TranscriptStore.sessionsDir.standardizedFileURL.resolvingSymlinksInPath()
+        guard directory.deletingLastPathComponent() == root else { return false }
+        let destination = directory.appendingPathComponent(fileName)
+        do {
+            try FileManager.default.removeItem(at: destination)
+        } catch CocoaError.fileNoSuchFile {
+            return true
+        }
+        return true
+    }
+
     /// Replaces any previous summary only after the new one is fully encoded.
     /// A crash before the replace leaves the previous file in place.
     /// Returns false when `session` is not inside the transcript library.
@@ -207,6 +224,7 @@ enum TranscriptSummaryStore {
 /// One explicit summary of a saved session, using the installed cleanup model.
 @MainActor
 final class TranscriptSummarizer {
+    static let modelRequiredMessage: String.LocalizationValue = "Summaries use the installed dictation cleanup model. Choose Gemma under Settings → Dictation and download it first."
     struct Progress {
         var done: Int
         var total: Int
@@ -225,7 +243,6 @@ final class TranscriptSummarizer {
 
     func cancel() {
         task?.cancel()
-        task = nil
     }
 
     func cancelAndWait() async {
@@ -238,6 +255,10 @@ final class TranscriptSummarizer {
              onProgress: @escaping @MainActor (Progress) -> Void,
              onFinish: @escaping @MainActor (String?) -> Void) async {
         guard !running else { return }
+        guard !CaptionSession.shared.isProcessingTranscript else {
+            onFinish(String(localized: CaptionSession.shared.transcriptWorkMessage))
+            return
+        }
         if captionsBusy {
             onFinish(String(localized: "Stop the captions first — the translator is busy with the live session."))
             return
@@ -247,13 +268,15 @@ final class TranscriptSummarizer {
             return
         }
         guard modelAvailable else {
-            onFinish(String(localized: "Summaries use the installed dictation cleanup model. Choose Gemma under Settings → Dictation and download it first."))
+            onFinish(String(localized: Self.modelRequiredMessage))
             return
         }
         running = true
+        CaptionSession.shared.setSummarizing(true)
         let captured = session
         task = Task { @MainActor [weak self] in
             defer {
+                CaptionSession.shared.setSummarizing(false)
                 self?.running = false
                 self?.task = nil
             }
@@ -279,7 +302,7 @@ final class TranscriptSummarizer {
         #endif
     }
 
-    private var modelAvailable: Bool {
+    var modelAvailable: Bool {
         #if SAIITY_TEST_HOOKS
         if generatorOverrideForTests != nil { return true }
         if let modelAvailableForTests { return modelAvailableForTests }
@@ -290,7 +313,19 @@ final class TranscriptSummarizer {
     private func execute(session: SessionRef,
                          onProgress: @escaping @MainActor (Progress) -> Void,
                          onFinish: @escaping @MainActor (String?) -> Void) async {
-        let segments = await Task.detached { TranscriptStore.segments(of: session) }.value
+        let spokenFile = session.url.appendingPathComponent("segments.jsonl")
+        let snapshot = await Task.detached { () -> (Data, [Segment])? in
+            guard let data = try? Data(contentsOf: spokenFile) else { return nil }
+            return (data, TranscriptStore.segments(from: data))
+        }.value
+        guard let (before, segments) = snapshot else {
+            onFinish(String(localized: "The summary did not finish. The transcript is unchanged."))
+            return
+        }
+        guard !Task.isCancelled else {
+            onFinish(String(localized: "Cancelled — the transcript was not changed."))
+            return
+        }
         let lines = TranscriptSummaryPlan.spokenLines(segments)
         guard !lines.isEmpty else {
             onFinish(String(localized: "That transcript has no lines."))
@@ -303,7 +338,6 @@ final class TranscriptSummarizer {
         }
         let steps = planned.pieces.count + (planned.pieces.count > 1 ? 1 : 0)
         onProgress(Progress(done: 0, total: steps, note: String(localized: "Summarizing…")))
-        let before = try? Data(contentsOf: session.url.appendingPathComponent("segments.jsonl"))
         let produced = await generate(planned.pieces, omitted: planned.omittedLineCount) { done in
             onProgress(Progress(done: done, total: steps, note: String(localized: "Summarizing…")))
         }
@@ -317,17 +351,16 @@ final class TranscriptSummarizer {
                 onFinish(String(localized: "Cancelled — the transcript was not changed."))
                 return
             }
+            guard (try? Data(contentsOf: spokenFile)) == before else {
+                onFinish(String(localized: "The transcript changed during summarization. The previous summary was kept."))
+                return
+            }
             do {
                 guard try TranscriptSummaryStore.write(summary, to: session) else {
                     onFinish(String(localized: "The summary did not finish. The transcript is unchanged."))
                     return
                 }
             } catch {
-                onFinish(String(localized: "The summary did not finish. The transcript is unchanged."))
-                return
-            }
-            let after = try? Data(contentsOf: session.url.appendingPathComponent("segments.jsonl"))
-            if before != after {
                 onFinish(String(localized: "The summary did not finish. The transcript is unchanged."))
                 return
             }
@@ -343,8 +376,8 @@ final class TranscriptSummarizer {
 
     private func generate(_ pieces: [String], omitted: Int,
                           progress: @escaping @MainActor (Int) -> Void) async -> Generation {
-        let report: @Sendable (Int) -> Void = { done in
-            Task { @MainActor in progress(done) }
+        let report: @Sendable (Int) async -> Void = { done in
+            await progress(done)
         }
         #if SAIITY_TEST_HOOKS
         if let generatorOverrideForTests {
@@ -378,7 +411,7 @@ final class TranscriptSummarizer {
 /// Loads Gemma off the main actor and releases it before returning.
 enum TranscriptSummaryEngine {
     static func generate(url: URL, pieces: [String], omitted: Int,
-                         progress: @Sendable (Int) -> Void) async throws -> TranscriptSummarizer.Generation {
+                         progress: @Sendable (Int) async -> Void) async throws -> TranscriptSummarizer.Generation {
         var model: LLM? = await Task.detached(priority: .userInitiated) {
             guard let loaded = LLM(from: url, maxTokenCount: 2_048) else { return nil }
             loaded.temp = 0.1
@@ -397,7 +430,7 @@ enum TranscriptSummaryEngine {
     }
 
     static func generate(pieces: [String], omitted: Int,
-                         progress: @Sendable (Int) -> Void,
+                         progress: @Sendable (Int) async -> Void,
                          complete: @Sendable (String, Int) async throws -> String?) async rethrows -> TranscriptSummarizer.Generation {
         var notes: [String] = []
         for (index, piece) in pieces.enumerated() {
@@ -407,7 +440,7 @@ enum TranscriptSummaryEngine {
             if Task.isCancelled { return .cancelled }
             guard let output, !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .failed }
             notes.append(output.trimmingCharacters(in: .whitespacesAndNewlines))
-            progress(index + 1)
+            await progress(index + 1)
         }
         let finalText: String
         if notes.count == 1 {
@@ -419,7 +452,7 @@ enum TranscriptSummaryEngine {
             if Task.isCancelled { return .cancelled }
             guard let reduced else { return .failed }
             finalText = reduced
-            progress(pieces.count + 1)
+            await progress(pieces.count + 1)
         }
         guard let summary = TranscriptSummaryPrompt.parse(finalText, omittedLineCount: omitted) else { return .failed }
         return .ready(summary)

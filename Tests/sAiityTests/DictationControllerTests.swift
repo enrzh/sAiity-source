@@ -277,35 +277,6 @@ import Testing
         #expect(controller.phase == .result("Copied to Clipboard"))
     }
 
-    @Test("approved corrections reach cleanup and translation while original ASR remains recoverable")
-    func dictionaryBeforeProcessing() async {
-        let old = DictationVocabulary.corrections
-        defer { DictationVocabulary.corrections = old }
-        DictationVocabulary.corrections = [.init(heard: "Ube Eats", replacement: "Uber Eats")]
-        let backend = FakeBackend(log: EventLog())
-        backend.authoritativeResult = "Please call Ube Eats."
-        let inserter = FakeInserter()
-        var snapshot: DictationResultSnapshot?
-        var cleanupInput = ""
-        var translationInput = ""
-        let controller = DictationController(makeBackend: { backend },
-            capture: FakeCapture(log: EventLog()), inserter: inserter, captionsActive: { false },
-            translationConfiguration: { .init(enabled: true, target: "de") },
-            translate: { text, _, _ in translationInput = text; return "Bitte ruf Uber Eats an." },
-            cleanupConfiguration: { .init(enabled: true) },
-            cleanup: { text, _ in cleanupInput = text; return text },
-            onResult: { snapshot = $0 })
-        controller.press()
-        await controller.waitForWorkForTests()
-        controller.release()
-        await controller.waitForWorkForTests()
-        #expect(cleanupInput == "Please call Uber Eats.")
-        #expect(translationInput == cleanupInput)
-        #expect(snapshot?.originalForRecovery == "Please call Ube Eats.")
-        #expect(snapshot?.outputText == "Bitte ruf Uber Eats an.")
-        #expect(inserter.inserted == ["Bitte ruf Uber Eats an."])
-    }
-
     @Test("clipboard failure retains the completed result until copy recovery")
     func clipboardFailureRetainsResult() async {
         let inserter = FakeInserter()

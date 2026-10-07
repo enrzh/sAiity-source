@@ -1,10 +1,48 @@
 import AppKit
+import Observation
 import Testing
 
 @testable import sAiity
 
+extension SavedTranscriptOperationTests {
+
 @MainActor
 @Suite struct SettingsWindowTests {
+    @Test("persist-only settings use existing keys and still invalidate observed bindings")
+    func defaultsBackedPreferencesRemainObservable() {
+        let defaults = UserDefaults.standard
+        let keys = ["captionClickThrough", "announceCaptions", CaptionSpeakerTracker.preferenceKey]
+        let saved = keys.map { ($0, defaults.object(forKey: $0)) }
+        defer {
+            for (key, value) in saved {
+                if let value { defaults.set(value, forKey: key) }
+                else { defaults.removeObject(forKey: key) }
+            }
+        }
+        let state = AppState()
+        let properties: [(String, ReferenceWritableKeyPath<AppState, Bool>)] = [
+            ("captionClickThrough", \.captionClickThrough),
+            ("announceCaptions", \.announceCaptions),
+            (CaptionSpeakerTracker.preferenceKey, \.identifyCaptionSpeakers)
+        ]
+        for (key, property) in properties {
+            defaults.set(false, forKey: key)
+            #expect(state[keyPath: property] == false)
+            let changed = NSLock()
+            var notifications = 0
+            withObservationTracking {
+                _ = state[keyPath: property]
+            } onChange: {
+                changed.withLock { notifications += 1 }
+            }
+            state[keyPath: property] = true
+            #expect(defaults.bool(forKey: key))
+            #expect(state[keyPath: property])
+            #expect(changed.withLock { notifications } == 1)
+            state[keyPath: property] = false
+        }
+    }
+
     @Test("settings keeps the everyday destinations separate")
     func settingsNavigationIsCompact() {
         #expect(SettingsPane.allCases == [.setup, .captions, .dictation, .library, .transcripts])
@@ -637,4 +675,5 @@ import Testing
             $0.identifier == SettingsWindowController.settingsWindowIdentifier
         }
     }
+}
 }

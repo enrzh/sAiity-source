@@ -14,6 +14,7 @@ struct SheetShell<Content: View, HeaderAccessory: View>: View {
     let subtitle: LocalizedStringKey
     let width: CGFloat
     let height: CGFloat
+    let minimumSize: CGSize?
     let dismissTitle: LocalizedStringKey
     let dismissIsDefaultAction: Bool
     @ViewBuilder var headerAccessory: HeaderAccessory
@@ -23,6 +24,7 @@ struct SheetShell<Content: View, HeaderAccessory: View>: View {
 
     init(title: LocalizedStringKey, subtitle: LocalizedStringKey,
          width: CGFloat, height: CGFloat,
+         minimumSize: CGSize? = nil,
          dismissTitle: LocalizedStringKey = "Done",
          dismissIsDefaultAction: Bool = true,
          @ViewBuilder headerAccessory: () -> HeaderAccessory = { EmptyView() },
@@ -31,6 +33,7 @@ struct SheetShell<Content: View, HeaderAccessory: View>: View {
         self.subtitle = subtitle
         self.width = width
         self.height = height
+        self.minimumSize = minimumSize
         self.dismissTitle = dismissTitle
         self.dismissIsDefaultAction = dismissIsDefaultAction
         self.headerAccessory = headerAccessory()
@@ -59,7 +62,10 @@ struct SheetShell<Content: View, HeaderAccessory: View>: View {
             Divider()
             content
         }
-        .frame(width: width, height: height)
+        .frame(minWidth: minimumSize?.width ?? width, idealWidth: width,
+               maxWidth: minimumSize == nil ? width : .infinity,
+               minHeight: minimumSize?.height ?? height, idealHeight: height,
+               maxHeight: minimumSize == nil ? height : .infinity)
         .background(.regularMaterial)
         .onExitCommand { dismiss() }
     }

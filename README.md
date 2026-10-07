@@ -100,8 +100,13 @@ Captions and dictation do not own the microphone at the same time.
 
 ## Transcript summary
 
-On the Transcripts page, **Summarize** writes a local recap, decisions, and
-action items for one saved session. It uses the Gemma cleanup model already
+Open a saved session on the Transcripts page, then choose **Summarize** in its
+viewer to write a local recap, decisions, and action items. **Summarize Again**
+replaces that preface; **Remove Summary** deletes only the summary, keeping the
+spoken lines and exports. The session list marks sessions with a summary and
+keeps secondary actions in one menu. The reading sheet can be resized.
+
+The summary can miss or invent details. It uses the Gemma cleanup model already
 installed for dictation. It does not run while captions or dictation are using
 that model, it does not download a model, and it does not change the spoken
 lines. SRT and WebVTT stay the words that were said. Markdown export prints

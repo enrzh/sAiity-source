@@ -1,6 +1,46 @@
 import AppKit
 import SwiftUI
 
+/// Shared target/engine controls. Bindings keep each mode's preferences and
+/// notification bridge in AppState; this view owns no copy of either value.
+struct TranslationSettingsRows: View {
+    @Binding var target: String?
+    @Binding var engine: TranslationEngine
+    let engines: [TranslationEngine]
+    let chooseTarget: () -> Void
+
+    var body: some View {
+        HStack {
+            Label("Translate to", systemImage: "character.book.closed")
+            Spacer()
+            Button(action: chooseTarget) {
+                HStack(spacing: 4) {
+                    Text(target.map { AppLanguage(code: $0).displayName } ?? String(localized: "Off"))
+                    Image(systemName: "chevron.up.chevron.down").font(.caption2)
+                }
+            }
+            if target != nil {
+                Button("Off") { target = nil }
+                    .controlSize(.small)
+            }
+        }
+        HStack {
+            Label("Translate with", systemImage: "cpu")
+            Spacer()
+            Picker("Translate with", selection: $engine) {
+                ForEach(engines, id: \.self) { engine in
+                    Text(engine.displayName).tag(engine)
+                }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            // Available even with translation off: an engine's coverage may
+            // determine the language the user chooses next.
+            .help(engine.summary)
+        }
+    }
+}
+
 /// Choose what captions are translated into, from what the selected engine can
 /// actually do.
 ///
@@ -28,12 +68,6 @@ struct TranslationTargetPicker: View {
         LanguageCatalog.all.filter { $0.matches(query) }
     }
     private var available: [AppLanguage] { matches.filter { supported.contains($0.code) } }
-    private var recommendedAvailable: [AppLanguage] {
-        available
-    }
-    private var experimentalAvailable: [AppLanguage] {
-        []
-    }
     private var elsewhere: [AppLanguage] { matches.filter { !supported.contains($0.code) } }
 
     /// Whose language coverage this list reflects.
@@ -112,14 +146,9 @@ struct TranslationTargetPicker: View {
 
     private var list: some View {
         List {
-            if !recommendedAvailable.isEmpty {
+            if !available.isEmpty {
                 Section("Available with \(engine.displayName)") {
-                    ForEach(recommendedAvailable) { row($0) }
-                }
-            }
-            if !experimentalAvailable.isEmpty {
-                Section("Experimental with \(engine.displayName)") {
-                    ForEach(experimentalAvailable) { row($0, experimental: true) }
+                    ForEach(available) { row($0) }
                 }
             }
             if !elsewhere.isEmpty {
@@ -135,7 +164,7 @@ struct TranslationTargetPicker: View {
         .listStyle(.inset)
     }
 
-    private func row(_ lang: AppLanguage, experimental: Bool = false) -> some View {
+    private func row(_ lang: AppLanguage) -> some View {
         // A real Button, not an onTapGesture on a passive view: gestures are
         // invisible to the keyboard and to VoiceOver, so the menu bar's "All
         // languages…" opened a sheet a keyboard user could not operate at all.
@@ -144,13 +173,7 @@ struct TranslationTargetPicker: View {
             dismiss()
         } label: {
             HStack {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(lang.displayName)
-                    if experimental {
-                        Text("Experimental quality — verify important translations.")
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
+                Text(lang.displayName)
                 Spacer()
                 if target == lang.code {
                     Image(systemName: "checkmark").foregroundStyle(.tint)

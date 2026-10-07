@@ -32,8 +32,20 @@ final class CaptionSession {
     /// — re-translation refused to start during a session, but a session was
     /// free to start during a re-translation, which is the same two models in
     /// memory at once by the other route. This is the other half.
-    private(set) var isRetranslating = false
-    func setRetranslating(_ on: Bool) { isRetranslating = on }
+    private var retranslationRuns = 0
+    var isRetranslating: Bool { retranslationRuns > 0 }
+    func beginRetranslation() { retranslationRuns += 1 }
+    func endRetranslation() { retranslationRuns = max(0, retranslationRuns - 1) }
+
+    private(set) var isSummarizing = false
+    func setSummarizing(_ on: Bool) { isSummarizing = on }
+    var isProcessingTranscript: Bool { isRetranslating || isSummarizing }
+
+    var transcriptWorkMessage: String.LocalizationValue {
+        isSummarizing
+            ? "Summarizing a saved transcript — wait for that to finish, or cancel it"
+            : "Translating a saved transcript — wait for that to finish, or cancel it"
+    }
 
     /// Drop every loaded model so its files can actually be removed. No-op when
     /// nothing is loaded.

@@ -27,7 +27,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Sparkle. The standard controller drives the whole flow — check, consent,
     /// download, staged install — against the appcast in Info.plist. Automatic
     /// checks are off until the user opts in.
-    private lazy var updater = SPUStandardUpdaterController(startingUpdater: true,
+    // An unbundled test/CLI host has no appcast or updateable app identity.
+    private lazy var updater = SPUStandardUpdaterController(startingUpdater: Bundle.main.bundleURL.pathExtension == "app",
                                                             updaterDelegate: nil,
                                                             userDriverDelegate: nil)
     private let overlay = OverlayWindow()
@@ -182,7 +183,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         guard !model.trialBusy else { return }
-        guard state == .idle, !dictationController.isBusy, !CaptionSession.shared.isRetranslating else {
+        guard state == .idle, !dictationController.isBusy, !CaptionSession.shared.isProcessingTranscript else {
             model.trialStatus = String(localized: "Stop the current session before trying setup.")
             return
         }
@@ -204,7 +205,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 return
             }
             guard state == .idle, !dictationController.isBusy,
-                  !CaptionSession.shared.isRetranslating else {
+                  !CaptionSession.shared.isProcessingTranscript else {
                 model.trialBusy = false
                 model.trialStatus = String(localized: "Stop the current session before trying setup.")
                 onboardingTrialModel = nil
@@ -234,7 +235,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     return
                 }
                 guard self.state == .idle, !self.dictationController.isBusy,
-                      !CaptionSession.shared.isRetranslating else {
+                      !CaptionSession.shared.isProcessingTranscript else {
                     model.trialBusy = false
                     model.trialStatus = String(localized: "Stop the current session before trying setup.")
                     self.onboardingTrialModel = nil
@@ -354,6 +355,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     #if SAIITY_TEST_HOOKS
     var captionEngineForTests: ASREngine { engine }
+    func startCaptionsForTests() { start() }
+    var captionsActiveForTests: Bool { state.isActive }
     var captionPoolPreparedForTests: Bool { captionResources.pool.preparedForTests }
     var captionPoolLeaseForTests: Bool { captionResources.pool.hasActiveLeaseForTests }
     /// The sentence still being assembled, as the recogniser sees it. Empty once
@@ -559,7 +562,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
               // translator this is about to stop and files it is about to
               // unlink. It reports through the same global flag captions do, so
               // the check belongs here as much as in the window.
-              !CaptionSession.shared.isRetranslating,
+              !CaptionSession.shared.isProcessingTranscript,
               translationRuntime.swap == nil,
               translationRuntime.users == 0 else { return false }
         await dictationController.invalidatePreparedBackend()
@@ -2521,9 +2524,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // during a re-translation — the same two multi-gigabyte models in
         // memory at once, by the other route, on a machine this app has
         // already been taught not to push into swap.
-        guard !CaptionSession.shared.isRetranslating else {
-            setStatus("Translating a saved transcript — wait for that to finish, or cancel it")
-            overlay.show(text: String(localized: "Translating a saved transcript. Wait for it to finish, or cancel it under Transcripts."),
+        guard !CaptionSession.shared.isProcessingTranscript else {
+            setStatus(CaptionSession.shared.transcriptWorkMessage)
+            overlay.show(text: String(localized: CaptionSession.shared.transcriptWorkMessage),
                          isFinal: true)
             return
         }

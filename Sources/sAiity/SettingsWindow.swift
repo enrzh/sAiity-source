@@ -46,13 +46,19 @@ final class AppState {
                                             object: nil, userInfo: ["on": saveTranscript])
         }
     }
-    var captionClickThrough = UserDefaults.standard.bool(forKey: "captionClickThrough") {
-        didSet { UserDefaults.standard.set(captionClickThrough, forKey: "captionClickThrough") }
+    // Wrappers are ignored by @Observable; the public accessors still report
+    // reads/mutations so bindings invalidate just like the other settings.
+    @ObservationIgnored @Defaults("captionClickThrough") private var clickThroughPreference = false
+    var captionClickThrough: Bool {
+        get { access(keyPath: \.captionClickThrough); return clickThroughPreference }
+        set { withMutation(keyPath: \.captionClickThrough) { clickThroughPreference = newValue } }
     }
     /// Speak each finished sentence through VoiceOver. Read per sentence by
     /// the caption pipeline, so no notification is needed.
-    var announceCaptions = UserDefaults.standard.bool(forKey: "announceCaptions") {
-        didSet { UserDefaults.standard.set(announceCaptions, forKey: "announceCaptions") }
+    @ObservationIgnored @Defaults("announceCaptions") private var announcementPreference = false
+    var announceCaptions: Bool {
+        get { access(keyPath: \.announceCaptions); return announcementPreference }
+        set { withMutation(keyPath: \.announceCaptions) { announcementPreference = newValue } }
     }
 
     var launchAtLogin = false
@@ -251,11 +257,10 @@ final class AppState {
         }
     }
 
-    var identifyCaptionSpeakers = CaptionSpeakerTracker.enabled {
-        didSet {
-            guard identifyCaptionSpeakers != oldValue else { return }
-            UserDefaults.standard.set(identifyCaptionSpeakers, forKey: CaptionSpeakerTracker.preferenceKey)
-        }
+    @ObservationIgnored @Defaults(CaptionSpeakerTracker.preferenceKey) private var speakerPreference = false
+    var identifyCaptionSpeakers: Bool {
+        get { access(keyPath: \.identifyCaptionSpeakers); return speakerPreference }
+        set { withMutation(keyPath: \.identifyCaptionSpeakers) { speakerPreference = newValue } }
     }
 
     /// Capture scope: one app's audio, or nil for the whole mix. Applies when
@@ -735,8 +740,8 @@ final class AppState {
         // from starting during a re-translation — and it was missing: the
         // Models page could unlink the weights a running re-translation was
         // decoding from, which frees nothing and then fails at the next line.
-        if CaptionSession.shared.isRetranslating {
-            modelError = String(localized: "Translating a saved transcript — wait for that to finish, or cancel it")
+        if CaptionSession.shared.isProcessingTranscript {
+            modelError = String(localized: CaptionSession.shared.transcriptWorkMessage)
             return
         }
         if CaptionSession.shared.isRunning, asset.use.isSelected {
@@ -788,8 +793,8 @@ final class AppState {
         // Same reasoning as `delete`: a re-translation holds the translator
         // open, and the partial files it needs to fetch again are not ours to
         // clear underneath it.
-        guard !CaptionSession.shared.isRetranslating else {
-            modelError = String(localized: "Translating a saved transcript — wait for that to finish, or cancel it")
+        guard !CaptionSession.shared.isProcessingTranscript else {
+            modelError = String(localized: CaptionSession.shared.transcriptWorkMessage)
             return nil
         }
 
@@ -838,8 +843,8 @@ final class AppState {
             modelError = String(localized: "Captions are running. Stop them first.")
             return nil
         }
-        guard !CaptionSession.shared.isRetranslating else {
-            modelError = String(localized: "Translating a saved transcript — wait for that to finish, or cancel it")
+        guard !CaptionSession.shared.isProcessingTranscript else {
+            modelError = String(localized: CaptionSession.shared.transcriptWorkMessage)
             return nil
         }
         await CaptionSession.shared.releaseEverything()

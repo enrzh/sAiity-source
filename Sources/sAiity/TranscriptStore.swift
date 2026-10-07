@@ -197,6 +197,11 @@ actor TranscriptStore {
         #if SAIITY_TEST_HOOKS
         if let scoped = TranscriptTestLibrary.sessionsDir { return scoped }
         if let processWide = sessionsDirOverride { return processWide }
+        // Route layout previews before launch retention can touch real sessions.
+        if let capture = SelfCapture.directory,
+           ProcessInfo.processInfo.environment["SAIITY_CAPTURE_TRANSCRIPTS"] == "1" {
+            return capture.appendingPathComponent("fixture-sessions", isDirectory: true)
+        }
         #endif
         return root.appendingPathComponent("Sessions", isDirectory: true)
     }
@@ -435,7 +440,15 @@ actor TranscriptStore {
             size: (attrs?[.size] as? Int) ?? 0)
         if let hit = SegmentCache.shared.value(for: url.path, stamp: stamp) { return hit }
 
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+        guard let data = try? Data(contentsOf: url) else { return [] }
+        let segs = segments(from: data)
+        SegmentCache.shared.store(segs, for: url.path, stamp: stamp)
+        return segs
+    }
+
+    /// Decode a captured file without a second disk read or a cached generation.
+    nonisolated static func segments(from data: Data) -> [Segment] {
+        guard let text = String(data: data, encoding: .utf8) else { return [] }
         let dec = JSONDecoder()
         var segs: [Segment] = []
         var positions: [Int: Int] = [:]
@@ -454,7 +467,6 @@ actor TranscriptStore {
                 segs[position].overlappingSpeech = update.overlappingSpeech ? true : nil
             }
         }
-        SegmentCache.shared.store(segs, for: url.path, stamp: stamp)
         return segs
     }
 

@@ -597,42 +597,12 @@ struct DictationView: View {
 
             Toggle("Translate dictated text", isOn: $state.translateDictation)
                 .disabled(state.dictationTranslateTo?.isEmpty != false)
-            HStack {
-                Label("Target language", systemImage: "character.book.closed")
-                Spacer()
-                Button {
-                    state.showDictationTranslationPicker = true
-                } label: {
-                    HStack(spacing: 5) {
-                        Text(state.dictationTranslateTo.map { AppLanguage(code: $0).displayName }
-                             ?? String(localized: "Off"))
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.caption2)
-                    }
-                }
-            }
-
-            // Beside the target it translates into, mirroring the Captions
-            // page's Translate to / Translate with pair so the two surfaces
-            // are edited the same way. The trade-off between the engines is
-            // too long for a menu item — same call as that row makes — so it
-            // lives in the tooltip and on the Models page.
-            HStack {
-                Label("Translate with", systemImage: "cpu")
-                Spacer()
-                Picker("Translation engine", selection: Binding(
-                    get: { state.dictationTranslationEngine ?? TranslationEngine.dictationEffective },
-                    set: { state.dictationTranslationEngine = $0 })) {
-                    ForEach(TranslationEngine.primaryCases, id: \.self) { engine in
-                        Text("\(engine.displayName) · recommended").tag(engine)
-                    }
-                    ForEach(TranslationEngine.advancedCases, id: \.self) { engine in
-                        Text("\(engine.displayName) · experimental").tag(engine)
-                    }
-                }
-                .pickerStyle(.menu)
-                .labelsHidden()
-                .help((state.dictationTranslationEngine ?? TranslationEngine.dictationEffective).summary)
+            TranslationSettingsRows(target: $state.dictationTranslateTo,
+                                    engine: Binding(
+                                        get: { state.dictationTranslationEngine ?? TranslationEngine.dictationEffective },
+                                        set: { state.dictationTranslationEngine = $0 }),
+                                    engines: TranslationEngine.userSelectableCases) {
+                state.showDictationTranslationPicker = true
             }
 
             Divider()
@@ -1217,55 +1187,12 @@ struct CaptionsView: View {
                                     state.style = updated
                                 }))
                     .disabled(state.translateTo?.isEmpty != false)
-                HStack {
-                    Label("Translate to", systemImage: "character.book.closed")
-                    Spacer()
-                    Button {
-                        state.showTranslationPicker = true
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(state.translateTo.map { AppLanguage(code: $0).displayName }
-                                 ?? String(localized: "Off"))
-                            Image(systemName: "chevron.up.chevron.down")
-                                .font(.caption2)
-                        }
-                    }
-                    if state.translateTo != nil {
-                        Button("Off") { state.translateTo = nil }
-                            .controlSize(.small)
-                    }
-                }
-                // The engine lives here rather than behind "More options" because
-                // it is the other half of the row above: you pick a target
-                // language, and this decides what translates it. It was buried in
-                // a section called "Translation details" behind a disclosure, so
-                // the two decisions that make a caption appear in another
-                // language sat on different screens, one of them two clicks away.
-                //
-                // Left enabled when no target is chosen. The two engines cover very
-                // different language sets, so the engine is chosen *for* a target
-                // you are about to pick — requiring a target first would invert
-                // that order. It stays available with translation off for the same
-                // reason the "Off" button does: a standing preference, not a
-                // per-session toggle.
-                HStack {
-                    Label("Translate with", systemImage: "cpu")
-                    Spacer()
-                    Picker("Translate with", selection: Binding(
-                        get: { state.translationEngine ?? .recommended },
-                        set: { state.translationEngine = $0 })) {
-                        ForEach(TranslationEngine.userSelectableCases, id: \.self) { e in
-                            Text(e.displayName).tag(e)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    // The real trade-off — 452 languages at 1.9 GB against 37 at
-                    // 1.1 GB — is too long for a menu item, and an interpolated
-                    // localization key for it would need re-translating in four
-                    // languages every time a word changed. It lives in the tooltip,
-                    // the Models page, and the section below.
-                    .help(state.translationEngine?.summary ?? TranslationEngine.recommended.summary)
+                TranslationSettingsRows(target: $state.translateTo,
+                                        engine: Binding(
+                                            get: { state.translationEngine ?? .recommended },
+                                            set: { state.translationEngine = $0 }),
+                                        engines: TranslationEngine.userSelectableCases) {
+                    state.showTranslationPicker = true
                 }
                 // This notice warns about the engine-and-target pair, so it belongs
                 // with both of them. It came out of the detail section with the
@@ -1807,6 +1734,10 @@ struct TranscriptsView: View {
     @State private var retranslating: SessionRef?
     @State private var summarizer = TranscriptSummarizer()
     @State private var summaryProgress: TranscriptSummarizer.Progress?
+    @State private var summarizing: SessionRef?
+    @State private var summaryFailure: (sessionID: String, message: String)?
+    @State private var summaryIDs: Set<String> = []
+    @State private var libraryRevision = 0
 
     var body: some View {
         ScrollView {
@@ -1818,6 +1749,7 @@ struct TranscriptsView: View {
                         Text(TranscriptRetention.label(d)).tag(d)
                     }
                 }
+                .disabled(CaptionSession.shared.isProcessingTranscript || summarizing != nil)
                 .onChange(of: retentionDays) { old, new in
                     // Ask first. Choosing "7 days" used to delete every older
                     // transcript the instant the menu closed — irreversible,
@@ -1894,92 +1826,21 @@ struct TranscriptsView: View {
                     }
                 } else if !state.sessions.isEmpty {
                     ForEach(state.sessions, id: \.id) { s in
-                        HStack {
-                            // A real Button, not a tap gesture: the row has to
-                            // open from the keyboard and VoiceOver too.
-                            Button {
-                                viewing = s
-                            } label: {
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(s.meta.startedAt.formatted(date: .abbreviated, time: .shortened))
-                                    Text("\(s.meta.lineCount) lines · \(s.meta.locale)")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .help("Open this transcript")
-                            Spacer()
-                            Menu("Export") {
-                                Button("SRT") { export(s, "srt") }
-                                Button("WebVTT") { export(s, "vtt") }
-                                Button("Markdown") { export(s, "md") }
-                            }
-                            .controlSize(.small)
-                            .fixedSize()
-                            // Translate a transcript after the fact — into a
-                            // language you did not choose at record time, or
-                            // at all if translation was off then.
-                            Menu("Translate") {
-                                ForEach(state.recentTargetsForMenu, id: \.self) { code in
-                                    Button(AppLanguage(code: code).displayName) {
-                                        startRetranslate(s, to: code)
-                                    }
-                                }
-                            }
-                            .controlSize(.small)
-                            .fixedSize()
-                            .disabled(retranslateProgress != nil || summaryProgress != nil || state.sessions.isEmpty)
-                            Button("Summarize") { startSummary(s) }
-                                .controlSize(.small)
-                                .disabled(retranslateProgress != nil || summaryProgress != nil)
-                                .help("Stop captions and dictation before summarizing.")
-                            Button {
-                                NSWorkspace.shared.activateFileViewerSelecting([s.url])
-                            } label: { Image(systemName: "folder") }
-                                .controlSize(.small)
-                                .help("Show this transcript in Finder")
-                                .accessibilityLabel("Show this transcript in Finder")
-                            Button(role: .destructive) {
-                                TranscriptStore.delete(s)
-                                    SessionCatalog.invalidate()
-                                    Task { await state.refreshLibraryAsync(force: true) }
-                            } label: { Image(systemName: "trash") }
-                                .controlSize(.small)
-                                .help("Delete this transcript permanently")
-                                .accessibilityLabel("Delete this transcript permanently")
-                        }
+                        sessionRow(s)
                     }
                 }
-                if let p = retranslateProgress ?? summaryProgress.map({
-                    Retranslator.Progress(done: $0.done, total: $0.total, note: $0.note)
-                }) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ProgressView(value: Double(p.done), total: Double(max(p.total, 1)))
-                        HStack {
-                            Text("\(p.note) \(p.done)/\(p.total)")
-                                .font(.caption).foregroundStyle(.secondary)
-                            Spacer()
-                            // Wait for the unwind, not just the request: plain
-                            // `cancel()` returns while the translator is still
-                            // loaded, which is the window in which a Delete on
-                            // the Models page would unlink the weights a
-                            // decoding thread is still reading.
-                            Button("Cancel") {
-                                Task {
-                                    if summaryProgress != nil { await summarizer.cancelAndWait() }
-                                    else { await retranslator.cancelAndWait() }
-                                }
-                            }
-                                .controlSize(.small)
-                        }
-                    }
+                if !trimmedQuery.isEmpty {
+                    // Keep a running session and its Cancel reachable during search.
+                    if let s = summarizing { sessionRow(s) }
+                    if let s = retranslating { sessionRow(s) }
+                }
+                if let p = retranslateProgress, retranslating == nil {
+                    TranscriptProgressRow(label: "\(p.note) \(p.done)/\(p.total)",
+                                          done: p.done, total: p.total)
                 }
                 if let note = retranslateNote {
-                    // Both branches boxed: a ternary mixing .secondary
-                    // (HierarchicalShapeStyle) with .orange (Color) has no
-                    // common type for the compiler to settle on.
-                    Text(note).font(.caption)
+                    Label(note, systemImage: note.hasPrefix("✓") ? "checkmark.circle" : "exclamationmark.triangle")
+                        .font(.caption)
                         .foregroundStyle(note.hasPrefix("✓")
                                          ? AnyShapeStyle(.secondary)
                                          : AnyShapeStyle(Color.orange))
@@ -1994,6 +1855,7 @@ struct TranscriptsView: View {
                         }
                         .controlSize(.small)
                         .fixedSize()
+                        .disabled(retranslateProgress != nil || retranslating != nil || summarizing != nil)
                     }
                     Button("Delete all…", role: .destructive) {
                         let a = NSAlert()
@@ -2009,6 +1871,7 @@ struct TranscriptsView: View {
                         }
                     }
                     .controlSize(.small)
+                    .disabled(CaptionSession.shared.isProcessingTranscript || summarizing != nil || retranslating != nil)
                 }
             }
 
@@ -2020,7 +1883,99 @@ struct TranscriptsView: View {
         .task(id: "\(trimmedQuery)|\(state.sessions.count)") {
             await refreshSearch()
         }
-        .sheet(item: $viewing) { TranscriptViewerSheet(session: $0) }
+        .task(id: "\(state.sessions.map(\.id))|\(libraryRevision)") {
+            let sessions = state.sessions
+            let ids = await Task.detached {
+                Set(sessions.filter { TranscriptSummaryStore.read($0) != nil }.map(\.id))
+            }.value
+            guard !Task.isCancelled else { return }
+            summaryIDs = ids
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .saiityTranscriptLibraryChanged)) { _ in
+            libraryRevision += 1
+        }
+        .sheet(item: $viewing) { s in
+            TranscriptViewerSheet(
+                session: s,
+                summaryProgress: summarizing?.id == s.id ? summaryProgress : nil,
+                isSummarizing: summarizing?.id == s.id,
+                summaryFailure: summaryFailure?.sessionID == s.id ? summaryFailure?.message : nil,
+                modelAvailable: summarizer.modelAvailable,
+                summaryUnavailable: retranslateProgress != nil || summarizing != nil || CaptionSession.shared.isProcessingTranscript,
+                onSummarize: { startSummary(s) },
+                onCancel: { Task { await summarizer.cancelAndWait() } },
+                onRemove: { removeSummary(s) },
+                onShowDictation: {
+                    viewing = nil
+                    NotificationCenter.default.post(name: .saiitySelectSettingsPane, object: SettingsPane.dictation.rawValue)
+                })
+        }
+    }
+
+    private func sessionRow(_ s: SessionRef) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                Button { viewing = s } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(s.meta.startedAt.formatted(date: .abbreviated, time: .shortened))
+                        Text("\(s.meta.lineCount) lines · \(s.meta.locale)")
+                            .font(.caption).foregroundStyle(.secondary)
+                        if summaryIDs.contains(s.id) {
+                            Text("Summary").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Open this transcript")
+                Menu {
+                    Menu("Export") {
+                        Button("SRT") { export(s, "srt") }
+                        Button("WebVTT") { export(s, "vtt") }
+                        Button("Markdown") { export(s, "md") }
+                    }
+                    Menu("Translate") {
+                        ForEach(state.recentTargetsForMenu, id: \.self) { code in
+                            Button(AppLanguage(code: code).displayName) { startRetranslate(s, to: code) }
+                        }
+                    }
+                    .disabled(retranslateProgress != nil || retranslating != nil || summarizing != nil || CaptionSession.shared.isProcessingTranscript)
+                    Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([s.url]) }
+                    Divider()
+                    Button("Delete", role: .destructive) {
+                        guard summarizing?.id != s.id, retranslating?.id != s.id else { return }
+                        TranscriptStore.delete(s)
+                        SessionCatalog.invalidate()
+                        Task { await state.refreshLibraryAsync(force: true) }
+                    }
+                    .disabled(summarizing?.id == s.id || retranslating?.id == s.id)
+                } label: {
+                    Label("Session actions", systemImage: "ellipsis")
+                        .labelStyle(.iconOnly)
+                        .frame(minWidth: 28, minHeight: 28)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Session actions")
+            }
+            if let p = retranslateProgress, retranslating?.id == s.id {
+                TranscriptProgressRow(
+                    label: "Translating \(s.meta.startedAt.formatted(date: .abbreviated, time: .shortened))… \(p.done)/\(p.total)",
+                    done: p.done, total: p.total,
+                    cancel: { Task { await retranslator.cancelAndWait() } })
+            }
+            if let p = summaryProgress, summarizing?.id == s.id {
+                TranscriptProgressRow(
+                    label: "Summarizing \(s.meta.startedAt.formatted(date: .abbreviated, time: .shortened))… \(p.done)/\(p.total)",
+                    done: p.done, total: p.total,
+                    cancel: { Task { await summarizer.cancelAndWait() } })
+            }
+            if let failure = summaryFailure, failure.sessionID == s.id {
+                Label(failure.message, systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+        }
     }
 
     private var trimmedQuery: String {
@@ -2071,6 +2026,7 @@ struct TranscriptsView: View {
     }
 
     private func startRetranslate(_ s: SessionRef, to code: String) {
+        guard retranslating == nil, retranslateProgress == nil, summarizing == nil else { return }
         retranslateNote = nil
         retranslating = s
         Task {
@@ -2080,9 +2036,9 @@ struct TranscriptsView: View {
                 retranslateProgress = nil
                 retranslating = nil
                 if let err {
-                    retranslateNote = err
+                    retranslateNote = s.meta.startedAt.formatted(date: .abbreviated, time: .shortened) + ": " + err
                 } else {
-                    retranslateNote = "✓ " + String(localized: "Translated into \(AppLanguage(code: code).displayName).")
+                    retranslateNote = "✓ " + s.meta.startedAt.formatted(date: .abbreviated, time: .shortened) + ": " + String(localized: "Translated into \(AppLanguage(code: code).displayName).")
                     Task { await state.refreshLibraryAsync(force: true) }
                 }
             }
@@ -2090,19 +2046,35 @@ struct TranscriptsView: View {
     }
 
     private func startSummary(_ s: SessionRef) {
-        retranslateNote = nil
+        guard summarizing == nil, retranslateProgress == nil, retranslating == nil else { return }
+        summaryFailure = nil
+        summarizing = s
         Task {
             await summarizer.run(session: s) { p in
                 summaryProgress = p
             } onFinish: { err in
-                summaryProgress = nil
                 if let err {
-                    retranslateNote = err
+                    summaryFailure = (s.id, err)
                 } else {
-                    retranslateNote = "✓ " + String(localized: "Summarized.")
+                    summaryIDs.insert(s.id)
                     NotificationCenter.default.post(name: .saiityTranscriptLibraryChanged, object: nil)
                 }
             }
+            // Keep the controls busy until the model and task have unwound.
+            summaryProgress = nil
+            summarizing = nil
+        }
+    }
+
+    private func removeSummary(_ s: SessionRef) {
+        guard summarizing == nil else { return }
+        do {
+            guard try TranscriptSummaryStore.remove(s) else { throw CocoaError(.fileWriteNoPermission) }
+            summaryFailure = nil
+            summaryIDs.remove(s.id)
+            NotificationCenter.default.post(name: .saiityTranscriptLibraryChanged, object: nil)
+        } catch {
+            summaryFailure = (s.id, String(localized: "The summary could not be removed. The transcript and existing summary were kept."))
         }
     }
 
@@ -2364,12 +2336,38 @@ struct GeneralView: View {
     }
 }
 
-/// Read a saved transcript where it lives. Before this the app recorded
-/// durable transcripts and offered no way to look at one — the session row
-/// showed only metadata, and reading a line meant exporting the session or
-/// opening segments.jsonl in Finder.
-private struct TranscriptViewerSheet: View {
+private struct TranscriptProgressRow: View {
+    let label: LocalizedStringKey
+    let done: Int
+    let total: Int
+    var cancel: (() -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ProgressView(value: Double(done), total: Double(max(total, 1)))
+                .accessibilityLabel(Text(label))
+            HStack {
+                Text(label).font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                if let cancel {
+                    Button("Cancel", action: cancel).buttonStyle(.bordered)
+                }
+            }
+        }
+    }
+}
+
+struct TranscriptViewerSheet: View {
     let session: SessionRef
+    let summaryProgress: TranscriptSummarizer.Progress?
+    let isSummarizing: Bool
+    let summaryFailure: String?
+    let modelAvailable: Bool
+    let summaryUnavailable: Bool
+    let onSummarize: () -> Void
+    let onCancel: () -> Void
+    let onRemove: () -> Void
+    let onShowDictation: () -> Void
     @State private var segments: [Segment] = []
     @State private var summary: TranscriptSummary?
     @State private var query = ""
@@ -2386,18 +2384,49 @@ private struct TranscriptViewerSheet: View {
     var body: some View {
         SheetShell(title: "Transcript — \(session.meta.startedAt.formatted(date: .abbreviated, time: .shortened))",
                    subtitle: "Times count from the session start. Text can be selected and copied.",
-                   width: 560, height: 560,
+                   width: 640, height: 680, minimumSize: CGSize(width: 560, height: 480),
                    headerAccessory: {
                        TextField("Search", text: $query)
                            .textFieldStyle(.roundedBorder)
                            .frame(width: 160)
                    }) {
-            VStack(spacing: 0) {
-                if let summary {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Summary").font(.headline)
-                        Text("Recap").font(.caption).foregroundStyle(.secondary)
-                        Text(verbatim: summary.recap).textSelection(.enabled)
+            List {
+                VStack(alignment: .leading, spacing: 10) {
+                    ViewThatFits(in: .horizontal) {
+                        HStack {
+                            Text("Summary").font(.headline).fixedSize()
+                            Spacer()
+                            summaryActions
+                        }
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Summary").font(.headline)
+                            summaryActions
+                        }
+                    }
+                    Text("Written on this Mac by the dictation cleanup model. It can miss or invent details. The spoken lines below are unchanged.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if !modelAvailable {
+                        Text(String(localized: TranscriptSummarizer.modelRequiredMessage))
+                            .font(.caption).foregroundStyle(.secondary)
+                        Button("Open Dictation Settings", action: onShowDictation)
+                            .buttonStyle(.bordered)
+                    }
+                    if let p = summaryProgress {
+                        TranscriptProgressRow(
+                            label: "Summarizing \(session.meta.startedAt.formatted(date: .abbreviated, time: .shortened))… \(p.done)/\(p.total)",
+                            done: p.done, total: p.total, cancel: onCancel)
+                    }
+                    if let summaryFailure {
+                        Label(summaryFailure, systemImage: "exclamationmark.triangle")
+                            .font(.caption).foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let summary {
+                        if !summary.recap.isEmpty {
+                            Text("Recap").font(.caption).foregroundStyle(.secondary)
+                            Text(verbatim: summary.recap).textSelection(.enabled)
+                        }
                         if !summary.decisions.isEmpty {
                             Text("Decisions").font(.caption).foregroundStyle(.secondary)
                             ForEach(Array(summary.decisions.enumerated()), id: \.offset) { _, line in
@@ -2415,12 +2444,13 @@ private struct TranscriptViewerSheet: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    Divider()
                 }
-                List(shown, id: \.i) { seg in
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 8)
+                if shown.isEmpty, !query.isEmpty {
+                    ContentUnavailableView.search(text: query)
+                }
+                ForEach(shown, id: \.i) { seg in
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
                         Text(Export.clock(seg.t0))
                             .font(.caption.monospacedDigit())
@@ -2440,11 +2470,6 @@ private struct TranscriptViewerSheet: View {
                     .padding(.top, seg.turn == true ? 12 : 1)
                     .padding(.bottom, 1)
                 }
-                .overlay {
-                    if shown.isEmpty, !query.isEmpty {
-                        ContentUnavailableView.search(text: query)
-                    }
-                }
             }
             .task {
                 // A full read plus a JSON decode per line, off the main actor.
@@ -2456,6 +2481,23 @@ private struct TranscriptViewerSheet: View {
                 Task { await reload() }
             }
         }
+        .presentationSizing(.fitted)
+    }
+
+    private var summaryActions: some View {
+        HStack(spacing: 12) {
+            Button(action: onSummarize) {
+                if summary == nil { Text("Summarize") }
+                else { Text("Summarize Again") }
+            }
+            .disabled(!modelAvailable || summaryUnavailable || isSummarizing)
+            if summary != nil {
+                Button("Remove Summary", role: .destructive, action: onRemove)
+                    .disabled(isSummarizing || CaptionSession.shared.isSummarizing)
+            }
+        }
+        .buttonStyle(.bordered)
+        .fixedSize()
     }
 
     private func reload() async {

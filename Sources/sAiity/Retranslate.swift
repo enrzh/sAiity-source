@@ -97,6 +97,10 @@ final class Retranslator {
              onProgress: @escaping @MainActor (Progress) -> Void,
              onFinish: @escaping @MainActor (String?) -> Void) async {
         guard !running else { return }
+        guard !CaptionSession.shared.isSummarizing else {
+            onFinish(String(localized: CaptionSession.shared.transcriptWorkMessage))
+            return
+        }
         guard !CaptionSession.shared.isRunning else {
             onFinish(String(localized: "Stop the captions first — the translator is busy with the live session."))
             return
@@ -142,7 +146,7 @@ final class Retranslator {
                           onProgress: @escaping @MainActor (Progress) -> Void,
                           onFinish: @escaping @MainActor (String?) -> Void) async {
         running = true
-        CaptionSession.shared.setRetranslating(true)
+        CaptionSession.shared.beginRetranslation()
         // The read is a full-file parse that scales with the session's length.
         // It happens before the main-actor work, so a multi-hour transcript
         // costs a detached read rather than a frozen window. Repeat reads are
@@ -152,7 +156,7 @@ final class Retranslator {
         }.value
         task = Task { @MainActor [weak self] in
             defer {
-                CaptionSession.shared.setRetranslating(false)
+                CaptionSession.shared.endRetranslation()
                 self?.running = false
                 self?.task = nil
             }

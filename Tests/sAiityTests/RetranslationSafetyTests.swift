@@ -3,6 +3,8 @@ import Testing
 
 @testable import sAiity
 
+extension SavedTranscriptOperationTests {
+
 /// Re-translating a saved transcript used to be the one inference path in the
 /// app that ran outside `TranslationInferenceGate`. It loads and decodes the
 /// same model the live caption path and dictation's own translation use, and
@@ -407,12 +409,12 @@ import Testing
         state.assets = [ModelRegistry.status(of: asset), ModelRegistry.status(of: partialAsset)]
         let app = AppDelegate()
 
-        CaptionSession.shared.setRetranslating(true)
+        CaptionSession.shared.beginRetranslation()
         await state.delete(asset)
         let cleared = await state.clearInterruptedDownloads(includeRetired: false)
         let removed = await state.removeAllDownloads()
         let quiesced = await app.prepareForModelCleanup()
-        CaptionSession.shared.setRetranslating(false)
+        CaptionSession.shared.endRetranslation()
 
         #expect(state.modelError == expected)
         #expect(cleared == nil)
@@ -424,4 +426,5 @@ import Testing
             atPath: partial.appendingPathComponent("weights.part").path),
             "an interrupted download was cleared from under a running re-translation")
     }
+}
 }

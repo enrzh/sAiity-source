@@ -1,6 +1,145 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Session actions": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Sitzungsaktionen" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Actions de la session" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Acciones de la sesión" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "セッションの操作" } }
+      }
+    },
+    "Show in Finder": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Im Finder anzeigen" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Afficher dans le Finder" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Mostrar en Finder" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "Finderに表示" } }
+      }
+    },
+    "Summarize Again": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Erneut zusammenfassen" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Résumer à nouveau" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Resumir de nuevo" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "もう一度要約" } }
+      }
+    },
+    "Remove Summary": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Zusammenfassung entfernen" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Supprimer le résumé" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Eliminar resumen" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "要約を削除" } }
+      }
+    },
+    "Open Dictation Settings": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Diktateinstellungen öffnen" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Ouvrir les réglages de dictée" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Abrir ajustes de dictado" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ディクテーション設定を開く" } }
+      }
+    },
+    "Written on this Mac by the dictation cleanup model. It can miss or invent details. The spoken lines below are unchanged.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Auf diesem Mac vom Diktat-Bereinigungsmodell erstellt. Es kann Details auslassen oder erfinden. Die gesprochenen Zeilen darunter bleiben unverändert." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Rédigé sur ce Mac par le modèle de nettoyage de dictée. Il peut omettre ou inventer des détails. Les paroles ci-dessous restent inchangées." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Escrito en este Mac por el modelo de limpieza de dictado. Puede omitir o inventar detalles. Las líneas habladas de abajo no han cambiado." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "このMac上でディクテーション整形モデルが作成しました。詳細を見落としたり、事実にない内容を含めたりすることがあります。下の発言記録は変更されていません。" } }
+      }
+    },
+    "The summary could not be removed. The transcript and existing summary were kept.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Die Zusammenfassung konnte nicht entfernt werden. Das Transkript und die bestehende Zusammenfassung wurden beibehalten." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Le résumé n’a pas pu être supprimé. La transcription et le résumé existant ont été conservés." } },
+        "es": { "stringUnit": { "state": "translated", "value": "No se pudo eliminar el resumen. Se conservaron la transcripción y el resumen existente." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "要約を削除できませんでした。文字起こしと既存の要約は保持されています。" } }
+      }
+    },
+    "Summarizing %@… %lld/%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "%@ wird zusammengefasst… %lld/%lld" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Résumé de %@… %lld/%lld" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Resumiendo %@… %lld/%lld" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "%@を要約中… %lld/%lld" } }
+      }
+    },
+    "Translating %@… %lld/%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "%@ wird übersetzt… %lld/%lld" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Traduction de %@… %lld/%lld" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Traduciendo %@… %lld/%lld" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "%@を翻訳中… %lld/%lld" } }
+      }
+    },
+    "Summarizing a saved transcript — wait for that to finish, or cancel it": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ein gespeichertes Transkript wird zusammengefasst — warte bis zum Ende oder brich ab"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Résumé d’une transcription enregistrée en cours — attendez la fin ou annulez"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se está resumiendo una transcripción guardada — espera o cancela"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保存済みの文字起こしを要約中です。完了を待つか、キャンセルしてください"
+          }
+        }
+      }
+    },
+    "The transcript changed during summarization. The previous summary was kept.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Das Transkript wurde während der Zusammenfassung geändert. Die vorherige Zusammenfassung wurde beibehalten."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La transcription a changé pendant le résumé. Le résumé précédent a été conservé."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La transcripción cambió durante el resumen. Se conservó el resumen anterior."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "要約中に文字起こしが変更されました。以前の要約を保持しました。"
+          }
+        }
+      }
+    },
     "Copy Original": {
       "extractionState": "manual",
       "localizations": {

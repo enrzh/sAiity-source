@@ -63,6 +63,14 @@ enum SelfCapture {
         guard let directory else { return }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
+        if ProcessInfo.processInfo.environment["SAIITY_CAPTURE_TRANSCRIPTS"] == "1" {
+            Task {
+                await captureTranscripts(into: directory)
+                exit(EXIT_SUCCESS)
+            }
+            return
+        }
+
         for pane in SettingsPane.allCases {
             // Post the navigation notification rather than only assigning
             // `SettingsWindowController.selectedPane`. That property is read once,
@@ -118,6 +126,75 @@ enum SelfCapture {
         // is where this runs, so the process would linger as a menu-bar app. This
         // is a capture tool: leave immediately and let the caller read the files.
         exit(EXIT_SUCCESS)
+    }
+
+    /// Synthetic spoken lines in a disposable library; never read or mutate a
+    /// user's sessions, install a model, or run inference for a layout check.
+    @MainActor
+    private static func captureTranscripts(into directory: URL) async {
+        let library = directory.appendingPathComponent("fixture-sessions", isDirectory: true)
+        try? FileManager.default.createDirectory(at: library, withIntermediateDirectories: true)
+        let lines = ["We agreed to ship on Friday.", "Can you bitte die Rechnung öffnen?", "Send the notes after the meeting."]
+        let segments = lines.enumerated().map { index, text in
+            Segment(i: index, t0: Double(index * 5), t1: Double(index * 5 + 4), text: text,
+                    loc: "en", tr: nil, trLoc: nil, words: nil)
+        }
+        guard let session = try? TranscriptStore.saveSession(segments, locale: "en", translateTo: nil),
+              let _ = try? TranscriptStore.saveSession(segments, locale: "de", translateTo: nil) else { return }
+        let summary = TranscriptSummary(recap: "The team agreed to ship Friday and share the notes.",
+                                        decisions: ["Ship on Friday."], actions: ["Send the meeting notes."],
+                                        omittedLineCount: 0, createdAt: Date())
+        try? TranscriptSummaryStore.write(summary, to: session)
+        SettingsWindowController.selectedPane = .transcripts
+        NotificationCenter.default.post(name: .saiitySelectSettingsPane, object: SettingsPane.transcripts.rawValue)
+        SettingsWindowController.show()
+        await SettingsWindowController.state.refreshLibraryAsync(force: true)
+        try? await Task.sleep(for: .seconds(1))
+        captureWindow(named: "transcripts", into: directory)
+
+        for variant in ["summary", "missing-model", "progress", "failure"] {
+            if variant == "missing-model" { try? TranscriptSummaryStore.remove(session) }
+            else { try? TranscriptSummaryStore.write(summary, to: session) }
+            let progress = variant == "progress" ? TranscriptSummarizer.Progress(done: 2, total: 3, note: "Summarizing…") : nil
+            let viewer = TranscriptViewerSheet(
+                session: session, summaryProgress: progress, isSummarizing: progress != nil,
+                summaryFailure: variant == "failure" ? String(localized: "The summary did not finish. The transcript is unchanged.") : nil,
+                modelAvailable: variant != "missing-model", summaryUnavailable: progress != nil,
+                onSummarize: {}, onCancel: {}, onRemove: {}, onShowDictation: {})
+            let parent = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 860, height: 760),
+                                  styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+            parent.isReleasedWhenClosed = false
+            parent.contentViewController = NSHostingController(rootView:
+                Text(verbatim: "Transcript layout preview").sheet(isPresented: .constant(true)) { viewer })
+            parent.orderFront(nil)
+            try? await Task.sleep(for: .milliseconds(600))
+            if let sheet = parent.attachedSheet {
+                guard sheet.styleMask.contains(.resizable) else {
+                    NSLog("SelfCapture: FAILED — transcript sheet is not resizable")
+                    exit(EXIT_FAILURE)
+                }
+                NSLog("SelfCapture: transcript sheet resizable=%@ size=%@ min=%@ max=%@",
+                      sheet.styleMask.contains(.resizable) ? "yes" : "no", NSStringFromSize(sheet.contentView?.bounds.size ?? .zero),
+                      NSStringFromSize(sheet.contentMinSize), NSStringFromSize(sheet.contentMaxSize))
+                captureWindow(named: "transcript-\(variant)", into: directory, window: sheet)
+                sheet.setContentSize(NSSize(width: 560, height: 480))
+                try? await Task.sleep(for: .milliseconds(200))
+                captureWindow(named: "transcript-\(variant)-compact", into: directory, window: sheet)
+                sheet.setContentSize(NSSize(width: 820, height: 800))
+                try? await Task.sleep(for: .milliseconds(200))
+                guard let size = sheet.contentView?.bounds.size,
+                      abs(size.width - 820) < 1, abs(size.height - 800) < 1 else {
+                    NSLog("SelfCapture: FAILED — transcript sheet did not expand")
+                    exit(EXIT_FAILURE)
+                }
+                captureWindow(named: "transcript-\(variant)-large", into: directory, window: sheet)
+                parent.endSheet(sheet)
+            } else {
+                NSLog("SelfCapture: FAILED — transcript sheet did not open")
+                exit(EXIT_FAILURE)
+            }
+            parent.close()
+        }
     }
 
     /// The settings window, found through the app's own window list.

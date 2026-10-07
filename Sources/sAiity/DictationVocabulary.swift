@@ -15,6 +15,11 @@ enum DictationVocabulary {
     private static let maxTerms = 50
     private static let maxLength = 64
     static let changed = Notification.Name("saiityVocabularyChanged")
+    // ponytail: serialize the bounded 50+50 dictionary; snapshot reads if contention is measured.
+    // The bounded dictionary is shared by settings, captions and dictation.
+    // Reentrant because compound reads reuse the same cached accessors. Never
+    // notify while holding it: observers may hop to another thread and read.
+    private static let cacheLock = NSRecursiveLock()
     private static var cachedCorrections: [Correction]?
     private static var cachedProtectedTerms: [String]?
     private static var correctionPattern: NSRegularExpression?
@@ -29,6 +34,8 @@ enum DictationVocabulary {
 
     static var terms: [String] {
         get {
+            cacheLock.lock()
+            defer { cacheLock.unlock() }
             if let cachedTerms { return cachedTerms }
             guard let values = UserDefaults.standard.array(forKey: key) as? [String] else {
                 return []
@@ -39,15 +46,19 @@ enum DictationVocabulary {
         }
         set {
             let normalized = normalize(newValue)
-            cachedTerms = normalized
-            cachedProtectedTerms = nil
-            UserDefaults.standard.set(normalized, forKey: key)
+            cacheLock.withLock {
+                cachedTerms = normalized
+                cachedProtectedTerms = nil
+                UserDefaults.standard.set(normalized, forKey: key)
+            }
             NotificationCenter.default.post(name: changed, object: nil)
         }
     }
 
     static var corrections: [Correction] {
         get {
+            cacheLock.lock()
+            defer { cacheLock.unlock() }
             if let cachedCorrections { return cachedCorrections }
             let saved = UserDefaults.standard.data(forKey: correctionsKey)
                 .flatMap { try? JSONDecoder().decode([Correction].self, from: $0) } ?? []
@@ -57,13 +68,17 @@ enum DictationVocabulary {
         set {
             let values = normalizeCorrections(newValue)
             guard let data = try? JSONEncoder().encode(values) else { return }
-            cacheCorrections(values)
-            UserDefaults.standard.set(data, forKey: correctionsKey)
+            cacheLock.withLock {
+                cacheCorrections(values)
+                UserDefaults.standard.set(data, forKey: correctionsKey)
+            }
             NotificationCenter.default.post(name: changed, object: nil)
         }
     }
 
     private static var protectedTerms: [String] {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
         let names = terms
         let replacements = corrections
         if let cachedProtectedTerms { return cachedProtectedTerms }
@@ -107,6 +122,8 @@ enum DictationVocabulary {
     /// One pass over the original text: replacements cannot trigger another
     /// correction, and longer phrases win over their shorter prefixes.
     static func applyingCorrections(in text: String) -> String {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
         _ = corrections
         guard let correctionPattern else { return text }
         let result = NSMutableString(string: text)
@@ -119,6 +136,8 @@ enum DictationVocabulary {
     }
 
     static func applying(to input: DictationTranscriptionResult) -> DictationTranscriptionResult {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
         let regions = input.regions.map {
             DictationRegionTranscript(text: preservingSpelling(in: $0.text), language: $0.language)
         }
@@ -144,6 +163,8 @@ enum DictationVocabulary {
 
     /// Apply approved corrections, then protect configured spelling/casing.
     static func preservingSpelling(in text: String) -> String {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
         var result = applyingCorrections(in: text)
         for term in protectedTerms {
             var searchStart = result.startIndex

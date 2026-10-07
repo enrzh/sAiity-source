@@ -1,5 +1,66 @@
 # Local ASR fixtures
 
+## 7 October 2026 — transcript reading controls
+
+On `339f295` plus the preserved local changes, session rows now keep the date,
+line count and one secondary-action menu. Summarize, Summarize Again and Remove
+Summary live in the reader, with local-model attribution and a warning that the
+result can omit or invent details. Session-specific progress retains Cancel;
+deletion of the active session is disabled. Removing a summary deletes only
+`summary.json`, preserving spoken lines, metadata and exports.
+
+The supported release suite passed **636 registered tests / 80 suites**, 12.887 s
+(`/tmp/saiity-transcript-design-tests-verified.log`). Added checks cover summary-only
+removal, refusing external/symlinked session directories and preserving a summary
+while generation owns the busy state. The normal build without test hooks passed
+signature/resource/version verification; its app passed **32 native smoke checks**
+(`/tmp/saiity-transcript-design-build-final.log`,
+`/tmp/saiity-transcript-design-smoke-final.log`).
+
+Native previews cover English and German session rows and four reader states:
+summary, missing model, progress and failure. All four sheets start at 640×680,
+are natively resizable with a 560×480 minimum, and expand to 820×800. There are
+26 captures under `/tmp/saiity-transcript-ui.bARORe/{en,de}-verified/`; the capture
+runner uses a disposable library and a separate app preference domain. The
+reader needs `.presentationSizing(.fitted)` on macOS 27; flexible content alone
+left the sheet non-resizable. Async capture now awaits the library/view reads
+instead of blocking their main-actor continuations with a nested run loop.
+`cacheDisplay` omits some material/header compositing, so these are layout checks,
+not verification of the primary button's fill or composited header appearance.
+No Gemma is installed; the real summary-generation probe remains **not run**.
+
+## 7 October 2026 — saved-summary lifecycle fixes
+
+Local source is `339f295` plus the preserved settings/dictionary cleanup and
+these fixes. Summaries now hold the shared saved-transcript busy state through
+file reading, generation, cancellation drain and completion. Starting captions,
+onboarding trials and model cleanup consult the same state. Retranslation refuses
+to enter during a summary; multiple queued retranslations retain busy ownership
+until the last run exits.
+
+Summary progress is awaited on the main actor, so no queued update can arrive
+after the completion callback clears the progress row. Cancellation retains the
+task handle until native work unwinds. Input is decoded from one captured
+`segments.jsonl` byte snapshot; changed or missing input is rejected before
+publishing, preserving the previous summary. Atomic replacement, 0600 permissions,
+whole-line chunking and spoken-only subtitle export retain their existing paths.
+
+The supported release test command passed **634 registered tests / 80 suites**,
+12.900 s. New checks exercise busy ownership, refusal of caption start/model
+deletion/partial cleanup, cancellation while generation drains, late UI progress,
+and changed input with/without an existing summary. Tests using the process-wide
+library busy state are serialized together; existing assertions remain in place.
+Log: `/tmp/saiity-summary-lifecycle-tests.log`.
+
+The final build without test hooks passed signature/resource/version verification,
+and the signed app passed **32 native smoke checks**. Logs:
+`/tmp/saiity-summary-lifecycle-build.log` and
+`/tmp/saiity-summary-lifecycle-smoke.log`. The unbundled test host initially opened
+a Sparkle modal when exercising Start; updater startup now requires an actual app
+bundle, preserving normal app behavior. No Gemma weights are installed here, so
+the real Gemma summary probe remains **not run**. No models were downloaded and
+no release was published for these local fixes.
+
 ## 4 October 2026 — shipped 2.6.4, then a local summary
 
 Published 2.6.4 is `1ae1163`. The summary work is an uncommitted change on top
