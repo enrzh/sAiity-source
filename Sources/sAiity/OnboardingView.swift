@@ -568,11 +568,8 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
                          styleMask: [.titled, .closable],
                          backing: .buffered, defer: false)
         w.title = String(localized: "Set up sAiity")
-        // Without this the material in the view above is inert: an opaque
-        // window paints its solid backgroundColor over the blur before it is
-        // ever composited. Settings needs the same call — the two windows have
-        // to be told separately, which is precisely how this was missed here.
-        w.makeVibrant()
+        // Give the native titlebar and window controls a solid system surface.
+        w.makeOpaqueSettingsSurface()
         w.center()
         w.isReleasedWhenClosed = false
         w.delegate = self

@@ -1064,22 +1064,14 @@ struct VibrantBackground: NSViewRepresentable {
 }
 
 extension NSWindow {
-    /// Let a behind-window material actually show. An opaque window with a
-    /// solid backgroundColor paints over the blur before it is ever composited
-    /// — the effect silently does nothing, which is the usual reason vibrancy
-    /// "doesn't work".
-    func makeVibrant() {
-        isOpaque = false
-        backgroundColor = .clear
-    }
-
-    /// Settings uses an opaque semantic base so the system titlebar cannot
+    /// Settings and setup use an opaque semantic base so the titlebar cannot
     /// sample a bright window behind it. The content can still use its own
     /// system materials without turning the window chrome into a see-through
     /// layer.
     func makeOpaqueSettingsSurface() {
         isOpaque = true
         backgroundColor = .windowBackgroundColor
+        titlebarAppearsTransparent = false
     }
 }
 
