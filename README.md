@@ -233,6 +233,18 @@ included in the application bundle.
 | Sources/sAiity/OverlayWindow.swift | Caption bubble geometry and presentation |
 | Resources/Localizable.xcstrings | User-facing localization catalog |
 
+## What's new in 2.6.6
+
+- Open a saved session, then choose **Summarize** in its viewer for a local
+  recap, decisions, and action items.
+- **Summarize Again** replaces that preface; **Remove Summary** deletes only
+  the summary, keeping spoken lines and exports.
+- Session rows keep the date, line count, and one secondary-action menu. The
+  reading sheet is resizable.
+- Summaries share the saved-transcript busy state with retranslation, hold
+  cancellation until native work drains, and refuse changed or missing input
+  before publishing.
+
 ## What's new in 2.6.5
 
 - On the Transcripts page, **Summarize** writes a local recap, decisions, and
@@ -380,14 +392,14 @@ included in the application bundle.
 
 ## Release
 
-The current signed and notarized release is [sAiity 2.6.5](https://github.com/enrzh/sAiity/releases/tag/v2.6.5).
+The current signed and notarized release is [sAiity 2.6.6](https://github.com/enrzh/sAiity/releases/tag/v2.6.6).
 
-- [Download the DMG](https://github.com/enrzh/sAiity/releases/download/v2.6.5/sAiity-2.6.5.dmg)
-- [Download the ZIP](https://github.com/enrzh/sAiity/releases/download/v2.6.5/sAiity-2.6.5.zip)
+- [Download the DMG](https://github.com/enrzh/sAiity/releases/download/v2.6.6/sAiity-2.6.6.dmg)
+- [Download the ZIP](https://github.com/enrzh/sAiity/releases/download/v2.6.6/sAiity-2.6.6.zip)
 - [Sparkle update feed](https://enrzh.github.io/sAiity/appcast.xml)
 
-This release adds a local summary of one saved transcript — recap, decisions,
-and action items from the installed Gemma cleanup model — still fully local
-recognition and translation on the Mac.
+This release adds a resizable transcript reader with Summarize Again and Remove
+Summary, plus safer summary lifecycle controls — still fully local recognition
+and translation on the Mac.
 
 sAiity is part of the [aiity](https://aiity.de) family.
