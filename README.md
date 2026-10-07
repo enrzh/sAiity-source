@@ -244,6 +244,8 @@ included in the application bundle.
 - Summaries share the saved-transcript busy state with retranslation, hold
   cancellation until native work drains, and refuse changed or missing input
   before publishing.
+- Build 2: setup and SelfCapture use the same opaque settings surface as
+  Settings, so the native titlebar stays solid system chrome.
 
 ## What's new in 2.6.5
 
@@ -399,7 +401,8 @@ The current signed and notarized release is [sAiity 2.6.6](https://github.com/en
 - [Sparkle update feed](https://enrzh.github.io/sAiity/appcast.xml)
 
 This release adds a resizable transcript reader with Summarize Again and Remove
-Summary, plus safer summary lifecycle controls — still fully local recognition
-and translation on the Mac.
+Summary, plus safer summary lifecycle controls. Build 2 also keeps setup window
+chrome opaque like Settings — still fully local recognition and translation on
+the Mac.
 
 sAiity is part of the [aiity](https://aiity.de) family.
