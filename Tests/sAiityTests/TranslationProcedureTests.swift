@@ -4,11 +4,99 @@ import Testing
 @testable import sAiity
 
 @Suite struct TranslationProcedureTests {
+    @Test("an invalid batch slice is retried without repeating accepted slices")
+    func pql4BatchValidation() async throws {
+        let engine = Engine()
+        engine.batch = ["Please 確認してください before continuing.", "This ends the meeting."]
+        engine.outputs = ["Please check before continuing."]
+        let result = try await TranslationProcedure.translate([
+            .init(text: "続ける前に確認してください。", source: "ja"),
+            .init(text: "Damit endet die Besprechung.", source: "de")
+        ], to: "en", engine: engine)
+        #expect(result == "Please check before continuing. This ends the meeting.")
+        #expect(engine.inputs.map(\.source) == ["ja"])
+    }
+
+    @Test("a plausible slice cannot hide untranslated grammar in the assembled result")
+    func pql4CombinedValidation() async throws {
+        let engine = Engine()
+        engine.batch = ["は", "い"]
+        #expect(try await TranslationProcedure.translate([
+            .init(text: "Please", source: "en"), .init(text: "continue", source: "en")
+        ], to: "de", engine: engine) == nil)
+        #expect(engine.inputs.isEmpty)
+    }
+
+    @Test("numeric-only regions retain the supplied source locale")
+    func pql4SourceLocale() async throws {
+        let engine = Engine()
+        engine.outputs = ["1234"]
+        #expect(try await TranslationProcedure.translate([
+            .init(text: "1,234", source: "de")
+        ], to: "en", engine: engine) == nil)
+    }
+
+    @Test("a cancelled request never enters batch translation")
+    func pql4CancelledBatch() async {
+        let engine = Engine()
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            do {
+                _ = try await TranslationProcedure.translate([
+                    .init(text: "日本語の字幕を確認してください。", source: "ja"),
+                    .init(text: "Bitte prüfen Sie die Rechnung.", source: "de")
+                ], to: "en", engine: engine)
+                Issue.record("cancelled translation returned")
+            } catch { #expect(error is CancellationError) }
+        }
+        await task.value
+        #expect(engine.batchCalls == 0)
+        #expect(engine.inputs.isEmpty)
+    }
+
+    @Test("wrong-language and numerically incomplete sequential results preserve the original")
+    func pql4SequentialValidation() async throws {
+        for (source, output) in [
+            ("Guten Morgen", "Bonjour"),
+            ("Sende 2 Kopien an 2 Teams.", "Send 2 copies to the team.")
+        ] {
+            let engine = Engine()
+            engine.outputs = [output]
+            #expect(try await TranslationProcedure.translate([
+                .init(text: source, source: "de")
+            ], to: "en", engine: engine) == nil)
+        }
+    }
+
+    @Test("PQL2 Chinese language identity cannot skip output script conversion")
+    func pql2ChineseVariant() {
+        #expect(TranslationLanguage.isSame("zh-Hans", as: "zh-Hant"))
+        #expect(!TranslationProcedure.isAlreadyInTarget("我们今天需要检查这张发票并讨论会议安排。", target: "zh-Hant"))
+        #expect(!TranslationProcedure.isAlreadyInTarget("我們今天需要檢查這張發票並討論會議安排。", target: "zh-Hans"))
+        #expect(!TranslationProcedure.isAlreadyInTarget("字幕", target: "zh-Hant"))
+    }
+
+    @Test("PQL2 Japanese translation receives one complete coherent phrase", arguments: ["en", "de"])
+    func pql2JapaneseTranslation(_ target: String) async throws {
+        let text = "日本語の字幕を確認してください。"
+        let spans = CaptionLanguageSpanDetector.analyze(text, fallbackLanguage: "zh")
+        let engine = Engine()
+        let expected = target == "en" ? "Please check the Japanese subtitles." : "Bitte prüfen Sie die japanischen Untertitel."
+        // Enough replies to record a bad split as assertion failures, not an array trap.
+        engine.outputs = Array(repeating: expected, count: max(1, spans.count))
+        let result = try await TranslationProcedure.translate(
+            spans.map { .init(text: $0.text, source: $0.language ?? "auto") },
+            to: target, engine: engine)
+        #expect(engine.inputs == [.init(text: text, source: "ja")])
+        #expect(result == expected)
+    }
+
     final class Engine: Translating, @unchecked Sendable {
         let name = "Test"
         var inputs: [TranslationRegion] = []
         var outputs: [String?] = []
         var batch: [String]?
+        var batchCalls = 0
         var beforeTranslate: (() async throws -> Void)?
         func prepare(from: String, to: String, progress: @escaping @Sendable (String) -> Void) async throws {}
         func stop() async {}
@@ -17,7 +105,10 @@ import Testing
             inputs.append(.init(text: text, source: source))
             return outputs.removeFirst()
         }
-        func translateRegions(_ regions: [TranslationRegion], to target: String) async throws -> [String]? { batch }
+        func translateRegions(_ regions: [TranslationRegion], to target: String) async throws -> [String]? {
+            batchCalls += 1
+            return batch
+        }
     }
 
     @Test("mixed target-language hints and unknown spans are never silently skipped")

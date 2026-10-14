@@ -1,5 +1,14 @@
 import AVFoundation
+import CoreAudio
 import Foundation
+
+/// Observations of accepted input, without retaining audio or judging speech quality.
+struct DictationInputHealth: Sendable, Equatable {
+    let sampleCount: Int
+    let rmsDBFS: Double?
+    let clippedSampleFraction: Double
+    let observedDuration: TimeInterval
+}
 
 /// Pure lifecycle guard used by the hardware-backed capture object and tests.
 struct DictationCaptureLifecycle: Sendable {
@@ -37,6 +46,10 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
     private var lifecycle = DictationCaptureLifecycle()
     private var converter: AVAudioConverter?
     private var sampleCount = 0
+    private var inputHealthSnapshot: DictationInputHealth?
+    private var healthSumSquares = 0.0
+    private var healthClippedSampleCount = 0
+    private var healthSampleRate = 16_000.0
     // Keep one contiguous buffer so releasing a long dictation does not need
     // to allocate and flatten one array per audio callback.
     private var convertedSamples: [Float] = []
@@ -51,6 +64,32 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
 
     func setWaveformHandler(_ handler: (@Sendable ([Float]) -> Void)?) {
         lock.withLock { waveformHandler = handler }
+    }
+
+    var inputHealth: DictationInputHealth? {
+        lock.withLock { inputHealthSnapshot }
+    }
+
+    var inputDeviceName: String? {
+        callbackCondition.lock()
+        defer { callbackCondition.unlock() }
+        // Accessing inputNode can initialize hardware, so gate it on the existing live capture.
+        guard lifecycle.isRunning, !stopping, engine.isRunning,
+              let audioUnit = engine.inputNode.audioUnit else { return nil }
+        var device = AudioDeviceID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        guard AudioUnitGetProperty(audioUnit, kAudioOutputUnitProperty_CurrentDevice,
+                                   kAudioUnitScope_Global, 0, &device, &size) == noErr,
+              device != kAudioObjectUnknown else { return nil }
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioObjectPropertyName,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var name: Unmanaged<CFString>?
+        size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, &name) == noErr,
+              let name = name?.takeRetainedValue() else { return nil }
+        return name as String
     }
 
     var isRunning: Bool {
@@ -89,6 +128,10 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
         callbackCondition.unlock()
         lock.withLock {
             sampleCount = 0
+            inputHealthSnapshot = nil
+            healthSumSquares = 0
+            healthClippedSampleCount = 0
+            healthSampleRate = targetFormat.sampleRate
             convertedSamples.removeAll(keepingCapacity: true)
             convertedSamples.reserveCapacity(DictationAudioSampleLimit.maximumSamples)
             didEmitLimit = false
@@ -249,6 +292,23 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
             let accepted = min(samples.count, remaining)
             sampleCount += accepted
             convertedSamples.append(contentsOf: samples.prefix(accepted))
+            for sample in samples.prefix(accepted) {
+                guard sample.isFinite else {
+                    // Unknown signal stays unknown until the next session; audio is preserved above.
+                    healthSumSquares = .nan
+                    continue
+                }
+                let value = Double(sample)
+                healthSumSquares += value * value
+                if abs(sample) >= 0.995 { healthClippedSampleCount += 1 }
+            }
+            let healthCount = (inputHealthSnapshot?.sampleCount ?? 0) + accepted
+            inputHealthSnapshot = DictationInputHealth(
+                sampleCount: healthCount,
+                rmsDBFS: healthSumSquares.isFinite
+                    ? 10 * log10(healthSumSquares / Double(healthCount)) : nil,
+                clippedSampleFraction: Double(healthClippedSampleCount) / Double(healthCount),
+                observedDuration: Double(healthCount) / healthSampleRate)
             let shouldEmit = sampleCount == DictationAudioSampleLimit.maximumSamples && !didEmitLimit
             if shouldEmit { didEmitLimit = true }
             return (accepted, shouldEmit)
@@ -276,6 +336,10 @@ final class DictationMicrophoneCapture: @unchecked Sendable {
         lock.withLock {
             _ = lifecycle.start()
             sampleCount = 0
+            inputHealthSnapshot = nil
+            healthSumSquares = 0
+            healthClippedSampleCount = 0
+            healthSampleRate = 16_000
             convertedSamples.removeAll(keepingCapacity: true)
             convertedSamples.reserveCapacity(DictationAudioSampleLimit.maximumSamples)
             didEmitLimit = false

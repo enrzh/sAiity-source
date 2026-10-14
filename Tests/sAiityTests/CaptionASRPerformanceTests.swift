@@ -10,6 +10,61 @@ import Testing
 /// backlog describe the live caption path, not a burst-decoding stress test.
 @Suite(.serialized)
 struct CaptionASRPerformanceTests {
+    @Test("caption evidence uses the production mixed-language and output-script procedure")
+    func pql7CaptionTranslationProcedure() async {
+        let english = "Please check the invoice before continuing with the meeting today."
+        let japanese = "日本語の字幕を確認してください。"
+        let engine = TranslationProcedureTests.Engine()
+        engine.outputs = ["Please check the Japanese subtitles."]
+        let mixed = Observation(started: .now, translator: engine, target: "en")
+        mixed.append(.init(text: english + " " + japanese, isFinal: true))
+        _ = await mixed.translationMetrics()
+        #expect(engine.inputs.map(\.source) == ["ja"])
+        #expect(engine.inputs.map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) } == [japanese])
+        #expect(mixed.translatedText() == english + " Please check the Japanese subtitles.")
+
+        let traditional = "我們今天需要檢查這張發票並討論會議安排。"
+        let variantEngine = TranslationProcedureTests.Engine()
+        variantEngine.outputs = [traditional]
+        let variant = Observation(started: .now, translator: variantEngine, target: "zh-Hant")
+        variant.append(.init(text: "我们今天需要检查这张发票并讨论会议安排。", isFinal: true))
+        _ = await variant.translationMetrics()
+        #expect(variantEngine.inputs.count == 1)
+        #expect(variant.translatedText() == traditional)
+    }
+
+    private final class EvidenceTranslator: Translating, Sendable {
+        let name = "Synthetic evidence translator"
+        let output: String?
+        init(output: String?) { self.output = output }
+        func prepare(from: String, to: String, progress: @escaping @Sendable (String) -> Void) async throws {}
+        func translate(_ text: String, from: String, to: String) async throws -> String? { output }
+        func stop() async {}
+    }
+
+    @Test("target caption evidence measures first output, final output and post-ASR drain separately")
+    func targetLatencyEvidence() async throws {
+        let started = ContinuousClock.now.advanced(by: .seconds(-1))
+        let observation = Observation(started: started, translator: EvidenceTranslator(output: "Hallo Welt."), target: "de")
+        observation.append(.init(text: "Hello world.", isFinal: true))
+        let metrics = await observation.translationMetrics()
+        let first = try #require(metrics["firstTargetSeconds"] as? Double)
+        let final = try #require(metrics["targetFinalSeconds"] as? Double)
+        let drain = try #require(metrics["translationDrainSeconds"] as? Double)
+        #expect(first >= 1)
+        #expect(final >= first)
+        #expect(drain >= 0)
+        #expect(observation.translatedText() == "Hallo Welt.")
+        #expect(observation.snapshot().finalText == "Hello world.")
+
+        let declined = Observation(started: started, translator: EvidenceTranslator(output: nil), target: "de")
+        declined.append(.init(text: "Hello world.", isFinal: true))
+        let failed = await declined.translationMetrics()
+        #expect(failed["firstTargetSeconds"] is NSNull)
+        #expect(failed["targetFinalSeconds"] is NSNull)
+        #expect(failed["translationSkipped"] as? Int == 1)
+    }
+
     private static func requested(_ name: String) -> Bool {
         let models = ProcessInfo.processInfo.environment["SAIITY_CAPTION_BENCHMARK_MODELS"] ?? "nemotron"
         return models.split(separator: ",").contains(Substring(name))
@@ -25,6 +80,8 @@ struct CaptionASRPerformanceTests {
         let expectedText: String?
         let expectedLanguages: [String]?
         let maxWER: Double?
+        let expectedTranslations: [String: DictationBenchmarkFixture.TranslationReference]?
+        let scoring: [String: String]?
     }
 
     private struct Snapshot {
@@ -52,6 +109,9 @@ struct CaptionASRPerformanceTests {
         private var translationFailures = 0
         private var translatedLines = 0
         private var gateWaitSeconds = 0.0
+        private var translatedOutput: [Int: String] = [:]
+        private var firstTarget: Double?
+        private var targetFinal: Double?
 
         init(started: ContinuousClock.Instant, translator: (any Translating)?, target: String) {
             self.started = started
@@ -74,27 +134,44 @@ struct CaptionASRPerformanceTests {
                     guard pendingTranslations < 4 else { skippedTranslations += 1; return }
                     pendingTranslations += 1
                     let queued = ContinuousClock.now
+                    let index = translationTasks.count
                     translationTasks.append(Task { [self] in
                         defer { lock.withLock { pendingTranslations -= 1 } }
                         do {
-                            let output = try await gate.run { [self] in
+                            let output = try await gate.run { [self] () async throws -> String? in
                                 let wait = Self.seconds(queued.duration(to: .now))
                                 lock.withLock { gateWaitSeconds += wait }
-                                return try await translator.translate(text,
-                                    from: LanguageDetector.languageCode(in: text) ?? "auto", to: target)
+                                let source = LanguageDetector.sourceLanguage(in: text) ?? "auto"
+                                let spans = CaptionLanguageSpanDetector.analyze(text, fallbackLanguage: source)
+                                // Match AppDelegate's committed-caption procedure, including
+                                // uncertain/mixed sources and explicit output scripts.
+                                let regions: [TranslationRegion] = CaptionLanguageSpanDetector.isMixed(spans)
+                                    ? spans.map { .init(text: $0.text, source: $0.language ?? "auto") }
+                                    : [.init(text: text, source: spans.first?.language ?? "auto")]
+                                return try await TranslationProcedure.translate(regions, to: target, engine: translator)
                             }
-                            lock.withLock { if output != nil { translatedLines += 1 } else { skippedTranslations += 1 } }
+                            lock.withLock {
+                                if let output, !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    translatedLines += 1
+                                    translatedOutput[index] = output
+                                    let completed = Self.seconds(started.duration(to: .now))
+                                    firstTarget = firstTarget ?? completed
+                                    targetFinal = completed
+                                } else { skippedTranslations += 1 }
+                            }
                         } catch { lock.withLock { translationFailures += 1 } }
                     })
                 }
             }
         }
 
-        func translationMetrics() async -> [String: Any] {
+        func translationMetrics(drainStarted: ContinuousClock.Instant = .now) async -> [String: Any] {
             let tasks = lock.withLock { translationTasks }
             for task in tasks { await task.value }
             return lock.withLock { ["translatedLines": translatedLines, "translationSkipped": skippedTranslations,
-                                    "translationFailures": translationFailures, "translationGateWaitSeconds": gateWaitSeconds] }
+                                    "translationFailures": translationFailures, "translationGateWaitSeconds": gateWaitSeconds,
+                                    "firstTargetSeconds": firstTarget ?? NSNull(), "targetFinalSeconds": targetFinal ?? NSNull(),
+                                    "translationDrainSeconds": Self.seconds(drainStarted.duration(to: .now))] }
         }
 
         func snapshot() -> Snapshot {
@@ -103,6 +180,10 @@ struct CaptionASRPerformanceTests {
                          firstVolatileSeconds: firstVolatile,
                          firstFinalSeconds: firstFinal)
             }
+        }
+
+        func translatedText() -> String {
+            lock.withLock { translatedOutput.keys.sorted().reduce("") { CaptionTextMerger.concatenate($0, translatedOutput[$1]!) } }
         }
 
         private static func seconds(_ duration: Duration) -> Double {
@@ -196,7 +277,8 @@ struct CaptionASRPerformanceTests {
                            samples: samples,
                            expectedText: metadata?.expectedText,
                            expectedLanguages: metadata?.expectedLanguages,
-                           maxWER: metadata?.maxWER)
+                           maxWER: metadata?.maxWER, expectedTranslations: metadata?.expectedTranslations,
+                           scoring: metadata?.scoring)
         }
     }
 
@@ -223,6 +305,8 @@ struct CaptionASRPerformanceTests {
     }
 
     private static func record(_ fields: [String: Any]) throws {
+        var fields = fields
+        fields["configuration"] = try DictationASRPerformanceTests.benchmarkConfiguration(profile: "captions")
         let data = try JSONSerialization.data(withJSONObject: fields,
                                                options: [.sortedKeys])
         print("SAIITY_CAPTION_BENCHMARK " + String(decoding: data, as: UTF8.self))
@@ -263,6 +347,7 @@ struct CaptionASRPerformanceTests {
         let stopStarted = ContinuousClock.now
         await backend.stop()
         let finalizationSeconds = durationSeconds(stopStarted.duration(to: .now))
+        let translationDrainStarted = ContinuousClock.now
 
         let snapshot = observation.snapshot()
         guard !snapshot.finalText.isEmpty else {
@@ -276,6 +361,7 @@ struct CaptionASRPerformanceTests {
             "run": run,
             "audioSeconds": Double(fixture.samples.count) / 16_000,
             "outputChars": snapshot.finalText.count,
+            "outputSHA256": DictationASRPerformanceTests.outputHash(snapshot.finalText),
             "finalRegions": snapshot.chunks.filter { $0.isFinal }.count,
             "physicalMemoryBytes": MemoryPolicy.physicalFootprint(),
             "firstVolatileSeconds": snapshot.firstVolatileSeconds ?? NSNull(),
@@ -283,10 +369,17 @@ struct CaptionASRPerformanceTests {
             "finalizationSeconds": finalizationSeconds,
             "elapsedSeconds": durationSeconds(started.duration(to: .now)),
         ]
-        let translationMetrics = await observation.translationMetrics()
+        let translationMetrics = await observation.translationMetrics(drainStarted: translationDrainStarted)
         fields.merge(translationMetrics, uniquingKeysWith: { _, new in new })
-        fields["translationDrainSeconds"] = durationSeconds(stopStarted.duration(to: .now)) - finalizationSeconds
         fields["translationEngine"] = ProcessInfo.processInfo.environment["SAIITY_CAPTION_BENCHMARK_TRANSLATION"] ?? "off"
+        if translator != nil {
+            let output = observation.translatedText()
+            fields["outputSHA256"] = DictationASRPerformanceTests.outputHash(output)
+            let language = LanguageDetector.languageCode(in: output, minimumCharacters: 8) ?? "und"
+            let languages = CaptionLanguageSpanDetector.analyze(output, fallbackLanguage: language).map { $0.language ?? "und" }
+            fields.merge(try DictationASRPerformanceTests.translationFields(reference: fixture.expectedTranslations?[target],
+                output: output, target: target, languages: languages), uniquingKeysWith: { _, new in new })
+        }
         if translationMetrics["translationFailures"] as? Int != 0 {
             throw BenchmarkError("\(fixture.name): native translation failed")
         }
@@ -294,11 +387,9 @@ struct CaptionASRPerformanceTests {
             fields["text"] = snapshot.finalText
         }
         if let expectedText = fixture.expectedText {
-            let wer = DictationBenchmarkScorer.wordErrorRate(reference: expectedText,
-                                                              hypothesis: snapshot.finalText)
-            fields["wer"] = wer
-            fields["cer"] = DictationBenchmarkScorer.characterErrorRate(reference: expectedText, hypothesis: snapshot.finalText)
-            fields["missingWords"] = DictationBenchmarkScorer.wordErrors(reference: expectedText, hypothesis: snapshot.finalText).deletions
+            let score = try DictationASRPerformanceTests.scoreFields(reference: expectedText, hypothesis: snapshot.finalText, scoring: fixture.scoring)
+            fields.merge(score, uniquingKeysWith: { _, new in new })
+            let wer = score["wer"] as! Double
             if let maxWER = fixture.maxWER, wer > maxWER {
                 throw BenchmarkError("\(fixture.name): \(model) WER \(wer) exceeds max \(maxWER)")
             }
@@ -307,9 +398,10 @@ struct CaptionASRPerformanceTests {
             let fallback = LanguageDetector.languageCode(in: snapshot.finalText) ?? "und"
             let spans = CaptionLanguageSpanDetector.analyze(snapshot.finalText,
                                                              fallbackLanguage: fallback)
+            let languages = spans.map { $0.language ?? "und" }
+            fields["scoredLanguages"] = languages
             fields["languagePreserved"] = DictationBenchmarkScorer.preservesLanguageSequence(
-                expected: expectedLanguages,
-                actual: spans.compactMap(\.language))
+                expected: expectedLanguages, actual: languages)
         }
         if let asrMetrics = metrics.snapshot() {
             fields["realTimeFactor"] = asrMetrics.realTimeFactor
@@ -336,9 +428,8 @@ struct CaptionASRPerformanceTests {
                                   inputs: [Fixture],
                                   backend: StreamingASRBackend,
                                   metrics: MetricsBox) async throws {
-        let configuredRuns = Int(ProcessInfo.processInfo.environment["SAIITY_CAPTION_BENCHMARK_RUNS"]
-            ?? "3") ?? 3
-        let runs = min(max(configuredRuns, 1), 10)
+        let configuration = try DictationASRPerformanceTests.benchmarkConfiguration(profile: "captions")
+        let runs = try #require(configuration["runs"] as? Int)
         let target = ProcessInfo.processInfo.environment["SAIITY_CAPTION_BENCHMARK_TARGET"] ?? "de"
         let translator: (any Translating)?
         if ProcessInfo.processInfo.environment["SAIITY_CAPTION_BENCHMARK_TRANSLATION"] == "madlad" {
@@ -360,6 +451,12 @@ struct CaptionASRPerformanceTests {
             }
             translator = MADLADTranslator()
         default: throw BenchmarkError("Unsupported caption benchmark translation engine")
+        }
+        if translator != nil {
+            for fixture in inputs {
+                _ = try DictationASRPerformanceTests.translationFields(reference: fixture.expectedTranslations?[target],
+                    output: "", target: target, languages: [])
+            }
         }
         do {
             if let translator {
@@ -398,8 +495,8 @@ struct CaptionASRPerformanceTests {
     func installedNemotronBenchmark() async throws {
         let path = try #require(ProcessInfo.processInfo.environment["SAIITY_CAPTION_BENCHMARK_DIR"])
         let inputs = try fixtures(in: URL(fileURLWithPath: path, isDirectory: true))
-        let chunkMs = Int(ProcessInfo.processInfo.environment["SAIITY_CAPTION_BENCHMARK_CHUNK_MS"]
-            ?? "\(NemotronEngine.chunkMs)") ?? NemotronEngine.chunkMs
+        let configuration = try DictationASRPerformanceTests.benchmarkConfiguration(profile: "captions")
+        let chunkMs = try #require(configuration["chunkMs"] as? Int)
         guard NemotronEngine.availableChunkMs.contains(chunkMs) else {
             throw BenchmarkError("Unsupported Nemotron chunk tier: \(chunkMs)")
         }

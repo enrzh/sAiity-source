@@ -7,9 +7,16 @@ struct TranslationSettingsRows: View {
     @Binding var target: String?
     @Binding var engine: TranslationEngine
     let engines: [TranslationEngine]
+    let state: AppState
     let chooseTarget: () -> Void
 
     var body: some View {
+        targetControls
+        engineControls
+    }
+
+    @ViewBuilder
+    var targetControls: some View {
         HStack {
             Label("Translate to", systemImage: "character.book.closed")
             Spacer()
@@ -24,6 +31,36 @@ struct TranslationSettingsRows: View {
                     .controlSize(.small)
             }
         }
+        Text("Using \(engine.displayName)")
+            .font(.caption).foregroundStyle(.secondary)
+        if target != nil, let id = engine.activeAssetID,
+           let asset = engine.assetDescriptors.first(where: { $0.id == id }) {
+            let status = state.assets.first(where: { $0.id == id }) ?? ModelRegistry.status(of: asset)
+            if !state.needsModelRepair(status) {
+                Label("Translator installed", systemImage: "checkmark.circle")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                HStack {
+                    if !status.isInstalled {
+                        Text("Translator needed · \(ModelRegistry.format(status.asset.advertisedBytes ?? status.bytesOnDisk))")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    AssetControl(state: state, status: status)
+                }
+            }
+        } else if target != nil, engine.activeAssetID == nil {
+            HStack {
+                Text("No translation model chosen.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("Models") { SettingsWindowController.selectModelsPane() }
+                    .controlSize(.small)
+            }
+        }
+    }
+
+    var engineControls: some View {
         HStack {
             Label("Translate with", systemImage: "cpu")
             Spacer()

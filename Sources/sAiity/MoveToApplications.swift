@@ -19,9 +19,9 @@ enum MoveToApplications {
         guard let source = badLocation(of: path) else { return }
 
         let a = NSAlert()
-        a.messageText = String(localized: "Move sAiity to the Applications folder?")
+        a.messageText = String(localized: "Move Syllivra to the Applications folder?")
         a.informativeText = String(
-            localized: "sAiity is running from \(source). From Applications, the Screen Recording permission sticks across launches and updates can install themselves. This is one copy, done once.")
+            localized: "Syllivra is running from \(source). From Applications, the Screen Recording permission sticks across launches and updates can install themselves. This is one copy, done once.")
         // The app's own icon, not the generic alert badge: this is the first
         // dialog a new user sees, and it should be recognisably the thing they
         // just downloaded.
@@ -75,7 +75,7 @@ enum MoveToApplications {
         // crash. Staging inside /Applications, not /tmp, keeps the final step
         // a same-volume rename rather than a second full copy.
         let staging = URL(fileURLWithPath: "/Applications")
-            .appendingPathComponent(".sAiity-staging-\(UUID().uuidString)")
+            .appendingPathComponent(".Syllivra-staging-\(UUID().uuidString)")
         let staged = staging.appendingPathComponent(src.lastPathComponent)
         defer { try? fm.removeItem(at: staging) }
         do {
@@ -89,7 +89,7 @@ enum MoveToApplications {
             }
         } catch {
             let fail = NSAlert()
-            fail.messageText = String(localized: "Could not move sAiity")
+            fail.messageText = String(localized: "Could not move Syllivra")
             fail.informativeText = error.localizedDescription
             fail.addButton(withTitle: String(localized: "OK"))
             fail.runModal()

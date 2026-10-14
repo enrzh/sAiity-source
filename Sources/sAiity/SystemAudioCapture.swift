@@ -219,7 +219,7 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
             CGRequestScreenCaptureAccess()
             throw NSError(domain: "sAiity", code: 2, userInfo: [
                 NSLocalizedDescriptionKey:
-                    String(localized: "Screen Recording permission needed (that is how macOS gates system audio). Allow sAiity in System Settings → Privacy & Security → Screen Recording, then relaunch.")
+                    String(localized: "Screen Recording permission needed (that is how macOS gates system audio). Allow Syllivra in System Settings → Privacy & Security → Screen Recording, then relaunch.")
             ])
         }
 

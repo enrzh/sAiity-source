@@ -648,6 +648,416 @@ import Testing
                              backing: .buffered, defer: false)
     }
 
+    private func withDUP8Feedback(_ body: (DictationToastWindow) throws -> Void) rethrows {
+        let preferences = DictationToastWindow.accessibilityPreferences
+        let post = DictationToastWindow.postAccessibility
+        DictationToastWindow.accessibilityPreferences = { (true, false, false) }
+        DictationToastWindow.postAccessibility = { _, _ in }
+        let window = makeWindow()
+        defer {
+            window.dismiss()
+            DictationToastWindow.accessibilityPreferences = preferences
+            DictationToastWindow.postAccessibility = post
+        }
+        window.show(resultText: "DUP8 selectable feedback", autoDismissAfter: .seconds(60))
+        window.updateMouseArming(atContentPoint: NSPoint(x: -1_000, y: -1_000))
+        window.makeFirstResponder(nil)
+        try body(window)
+    }
+
+    private func withDUP8KeyFeedback(_ body: (DictationToastWindow, NSWindow) throws -> Void) async throws {
+        try #require(LaunchSmokeTest.hasWindowServerSession,
+                     "Q3 setup requires a WindowServer-backed Aqua login session")
+        let app = NSApplication.shared
+        let policy = app.activationPolicy()
+        let wasActive = app.isActive
+        let previousKey = app.keyWindow
+        let other = NSWindow(contentRect: NSRect(x: 50, y: 50, width: 200, height: 100),
+                             styleMask: [.titled], backing: .buffered, defer: false)
+        defer {
+            other.orderOut(nil)
+            previousKey?.makeKeyAndOrderFront(nil)
+            if !wasActive { app.deactivate() }
+            if policy == .prohibited { _ = app.setActivationPolicy(policy) }
+        }
+        if policy == .prohibited {
+            try #require(app.setActivationPolicy(.accessory),
+                         "Q3 test host rejected transient accessory activation policy")
+        }
+        // Match SettingsWindow's native activation path; order-front alone cannot make an inactive host key.
+        app.activate(ignoringOtherApps: true)
+        other.makeKeyAndOrderFront(nil)
+        for _ in 0..<40 where !app.isActive || !other.isKeyWindow {
+            try await Task.sleep(for: .milliseconds(25))
+            if app.isActive, !other.isKeyWindow { other.makeKeyAndOrderFront(nil) }
+        }
+        try #require(app.isActive && other.isKeyWindow,
+                     "Q3 setup unavailable: active=\(app.isActive), policy=\(app.activationPolicy().rawValue), peerKey=\(other.isKeyWindow); main needs an activated isolated preview host")
+        try withDUP8Feedback { window in try body(window, other) }
+    }
+
+    @Test("DUP8 feedback survives hover and dismisses once hover ends")
+    func dup8AutoDismissPreservesHover() {
+        withDUP8Feedback { window in
+            let timeout = window.autoDismissActionForTests
+            let target = window.resetTargetAreaForTests
+            window.updateMouseArming(atContentPoint: NSPoint(x: target.midX, y: target.midY))
+            #expect(!window.ignoresMouseEvents)
+            #expect(window.isInteractingWithFeedback)
+            timeout()
+            #expect(window.isVisible, "feedback disappeared while its control was hovered")
+            #expect(window.resultTextForTests == "DUP8 selectable feedback")
+            window.updateMouseArming(atContentPoint: NSPoint(x: -1_000, y: -1_000))
+            #expect(!window.isInteractingWithFeedback)
+            timeout()
+            #expect(!window.isVisible)
+        }
+    }
+
+    @Test("DUP8 feedback survives selected text without needing hover or key focus")
+    func dup8AutoDismissPreservesSelection() {
+        withDUP8Feedback { window in
+            let text = window.resultTextViewForTests
+            let timeout = window.autoDismissActionForTests
+            text.setSelectedRange(NSRange(location: 0, length: 4))
+            #expect(text.selectedRange().length == 4)
+            #expect(window.isInteractingWithFeedback)
+            timeout()
+            #expect(window.isVisible, "selected feedback disappeared before it could be copied")
+            #expect(text.selectedRange().length == 4)
+            text.setSelectedRange(NSRange(location: 0, length: 0))
+            #expect(!window.isInteractingWithFeedback)
+            timeout()
+            #expect(!window.isVisible)
+        }
+    }
+
+    @Test("DUP8 feedback survives AppKit-owned text tracking outside the hover area")
+    func dup8AutoDismissPreservesTextGesture() {
+        withDUP8Feedback { window in
+            let timeout = window.autoDismissActionForTests
+            // Avoid entering NSTextView's blocking mouse-tracking loop in a synthetic test.
+            window.textGestureInFlightForTests = true
+            #expect(window.isInteractingWithFeedback)
+            timeout()
+            #expect(window.isVisible, "feedback disappeared during the text down/drag/up sequence")
+            window.textGestureInFlightForTests = false
+            #expect(!window.isInteractingWithFeedback)
+            timeout()
+            #expect(!window.isVisible)
+        }
+    }
+
+    @Test("DUP8 feedback survives an active window drag")
+    func dup8AutoDismissPreservesDrag() {
+        withDUP8Feedback { window in
+            let timeout = window.autoDismissActionForTests
+            window.beginDrag(atScreenPoint: NSPoint(x: 10, y: 10))
+            #expect(window.isInteractingWithFeedback)
+            timeout()
+            #expect(window.isVisible, "feedback disappeared before the window drag ended")
+            #expect(window.resultTextForTests == "DUP8 selectable feedback")
+            // Do not endDrag here: its existing production path persists the frame.
+        }
+    }
+
+    @Test("DUP8 feedback survives native keyboard focus and dismisses after focus leaves",
+          .enabled(if: ProcessInfo.processInfo.environment["SAIITY_NATIVE_FOCUS_TESTS"] == "1"))
+    func dup8AutoDismissPreservesKeyboardFocus() async throws {
+        try await withDUP8KeyFeedback { window, other in
+            let timeout = window.autoDismissActionForTests
+            let text = window.resultTextViewForTests
+            #expect(window.makeFirstResponder(text))
+            #expect(window.firstResponder === text)
+            try #require(window.canBecomeKey, "completed result must permit intentional keyboard focus")
+            window.makeKeyAndOrderFront(nil)
+            try #require(window.isKeyWindow, "a saved responder is not actual keyboard ownership")
+            #expect(window.isInteractingWithFeedback)
+            timeout()
+            #expect(window.isVisible, "feedback disappeared while a result control had keyboard focus")
+            other.makeKeyAndOrderFront(nil)
+            try #require(other.isKeyWindow)
+            #expect(!window.isKeyWindow)
+            // Keep the result's saved responder: focus ownership has moved elsewhere.
+            #expect(window.firstResponder === text)
+            #expect(!window.isInteractingWithFeedback)
+            timeout()
+            #expect(!window.isVisible)
+        }
+    }
+
+    @Test("DUP8 stored result responder does not keep idle feedback alive after focus leaves",
+          .enabled(if: ProcessInfo.processInfo.environment["SAIITY_NATIVE_FOCUS_TESTS"] == "1"))
+    func dup8AutoDismissStaleResponderResumesIdle() async throws {
+        try await withDUP8KeyFeedback { window, other in
+            let text = window.resultTextViewForTests
+            try #require(window.makeFirstResponder(text))
+            other.makeKeyAndOrderFront(nil)
+            try #require(other.isKeyWindow, "synthetic peer must actually own keyboard focus")
+            #expect(!window.isKeyWindow)
+            #expect(window.firstResponder === text)
+            text.setSelectedRange(NSRange(location: 0, length: 0))
+            window.textGestureInFlightForTests = false
+            window.setAccessibilityFocused(false)
+            text.setAccessibilityFocused(false)
+            window.updateMouseArming(atContentPoint: NSPoint(x: -1_000, y: -1_000))
+            #expect(window.ignoresMouseEvents)
+            #expect(text.selectedRange().length == 0)
+            #expect(!window.isInteractingWithFeedback, "stored responder outlived actual keyboard/AX interaction")
+            window.autoDismissActionForTests()
+            #expect(!window.isVisible, "ordinary idle dismissal stayed blocked by a saved responder")
+        }
+    }
+
+    @Test("DUP8 actual AX focus protects a non-key result despite a stored responder",
+          .enabled(if: ProcessInfo.processInfo.environment["SAIITY_NATIVE_FOCUS_TESTS"] == "1"))
+    func dup8AutoDismissAccessibilityFocusWithStaleResponder() async throws {
+        try await withDUP8KeyFeedback { window, other in
+            let text = window.resultTextViewForTests
+            try #require(window.makeFirstResponder(text))
+            text.setSelectedRange(NSRange(location: 0, length: 0))
+            other.makeKeyAndOrderFront(nil)
+            try #require(other.isKeyWindow)
+            #expect(!window.isKeyWindow)
+            window.setAccessibilityFocused(true)
+            #expect(window.isInteractingWithFeedback)
+            window.autoDismissActionForTests()
+            #expect(window.isVisible)
+            window.setAccessibilityFocused(false)
+            text.setAccessibilityFocused(false)
+            #expect(window.firstResponder === text)
+            #expect(!window.isInteractingWithFeedback, "leaving AX focus must not expose sticky responder protection")
+            window.autoDismissActionForTests()
+            #expect(!window.isVisible)
+        }
+    }
+
+    @Test("DUP8 showing feedback or recording never steals the dictation target's key ownership",
+          .enabled(if: ProcessInfo.processInfo.environment["SAIITY_NATIVE_FOCUS_TESTS"] == "1"))
+    func dup8AutoDismissPresentationDoesNotStealKey() async throws {
+        try await withDUP8KeyFeedback { window, other in
+            try #require(other.isKeyWindow)
+            window.show(phase: .dictating)
+            #expect(!window.canBecomeKey)
+            #expect(!window.canBecomeMain)
+            #expect(!window.isKeyWindow)
+            #expect(other.isKeyWindow)
+            window.show(resultText: "DUP8 live draft", autoDismissAfter: nil, allowsKeyboardFocus: false)
+            #expect(!window.canBecomeKey)
+            #expect(!window.isKeyWindow)
+            #expect(other.isKeyWindow)
+            window.show(resultText: "DUP8 completed feedback", autoDismissAfter: nil)
+            #expect(window.canBecomeKey)
+            #expect(!window.isKeyWindow)
+            #expect(other.isKeyWindow)
+            #expect(window.styleMask.contains(.nonactivatingPanel))
+        }
+    }
+
+    @Test("DUP8 only completed results permit intentional keyboard focus")
+    func dup8AutoDismissKeyboardEligibilityFollowsPresentation() {
+        withDUP8Feedback { window in
+            #expect(window.canBecomeKey)
+            #expect(!window.canBecomeMain)
+            window.show(resultText: "DUP8 live draft", autoDismissAfter: nil, allowsKeyboardFocus: false)
+            #expect(!window.canBecomeKey)
+            #expect(!window.canBecomeMain)
+            window.show(resultText: "DUP8 completed feedback", autoDismissAfter: nil)
+            #expect(window.canBecomeKey)
+            window.show(phase: .dictating)
+            #expect(!window.canBecomeKey)
+            window.show(phase: .ready)
+            #expect(!window.canBecomeKey)
+            window.show(resultText: "DUP8 completed feedback", autoDismissAfter: nil)
+            window.dismiss()
+            #expect(!window.canBecomeKey)
+            #expect(!window.canBecomeMain)
+        }
+    }
+
+    @Test("DUP8 feedback survives native accessibility focus and dismisses after it leaves")
+    func dup8AutoDismissPreservesAccessibilityFocus() {
+        withDUP8Feedback { window in
+            let timeout = window.autoDismissActionForTests
+            window.setAccessibilityFocused(true)
+            #expect(window.isInteractingWithFeedback)
+            timeout()
+            #expect(window.isVisible, "feedback disappeared while the accessibility cursor was on it")
+            window.setAccessibilityFocused(false)
+            #expect(!window.isInteractingWithFeedback)
+            timeout()
+            #expect(!window.isVisible)
+        }
+    }
+
+    @Test("DUP8 copy failure keeps feedback and its recovery action", arguments: [false, true])
+    func dup8AutoDismissPreservesCopyFailure(retryCopy: Bool) {
+        withDUP8Feedback { window in
+            window.show(resultText: "DUP8 retained output", autoDismissAfter: .seconds(60),
+                        retryCopy: retryCopy, canCopyOriginal: !retryCopy)
+            window.updateMouseArming(atContentPoint: NSPoint(x: -1_000, y: -1_000))
+            window.makeFirstResponder(nil)
+            if !retryCopy {
+                window.onCopyOriginal = { false }
+                window.copyOriginal()
+            }
+            #expect(window.isInteractingWithFeedback)
+            window.autoDismissActionForTests()
+            #expect(window.isVisible, "copy failure lost the result and recovery control")
+            #expect(window.resultTextForTests == "DUP8 retained output")
+            #expect(retryCopy ? window.offersCopyRetryForTests : window.originalTargetAreaForTests != nil)
+        }
+    }
+
+    @Test("DUP8 ordinary idle feedback still dismisses")
+    func dup8AutoDismissIdleFeedback() {
+        withDUP8Feedback { window in
+            #expect(window.isVisible)
+            #expect(!window.isInteractingWithFeedback)
+            window.autoDismissActionForTests()
+            #expect(!window.isVisible)
+            #expect(window.alphaValue == 1)
+        }
+    }
+
+    @Test("DUP8 stale feedback timeout cannot dismiss a newer recording")
+    func dup8AutoDismissStaleTimerAfterRecording() {
+        withDUP8Feedback { window in
+            let oldTimeout = window.autoDismissActionForTests
+            window.show(phase: .dictating)
+            oldTimeout()
+            #expect(window.isVisible)
+            #expect(window.alphaValue == 1)
+            #expect(window.waveformVisibleForTests)
+            #expect(!window.resultVisibleForTests)
+        }
+    }
+
+    @Test("DUP8 a paused timer resumes ordinary dismissal after hover leaves")
+    func dup8AutoDismissResumesAfterHoverEnds() async {
+        let preferences = DictationToastWindow.accessibilityPreferences
+        let post = DictationToastWindow.postAccessibility
+        DictationToastWindow.accessibilityPreferences = { (true, false, false) }
+        DictationToastWindow.postAccessibility = { _, _ in }
+        let window = makeWindow()
+        defer {
+            window.dismiss()
+            DictationToastWindow.accessibilityPreferences = preferences
+            DictationToastWindow.postAccessibility = post
+        }
+        window.show(resultText: "DUP8 selectable feedback", autoDismissAfter: .milliseconds(80))
+        window.stopArmingTickForTests()
+        window.makeFirstResponder(nil)
+        let target = window.resetTargetAreaForTests
+        window.updateMouseArming(atContentPoint: NSPoint(x: target.midX, y: target.midY))
+        try? await Task.sleep(for: .milliseconds(160))
+        #expect(window.isVisible, "the real timer dismissed feedback during hover")
+        window.updateMouseArming(atContentPoint: NSPoint(x: -1_000, y: -1_000))
+        for _ in 0..<20 where window.isVisible {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(!window.isVisible, "ordinary dismissal never resumed after hover ended")
+    }
+
+    @Test("DUP8 successful retry clears failed-original-copy protection")
+    func dup8AutoDismissCopySuccessClearsFailure() {
+        withDUP8Feedback { window in
+            window.show(resultText: "DUP8 retained output", autoDismissAfter: .seconds(60),
+                        canCopyOriginal: true)
+            window.updateMouseArming(atContentPoint: NSPoint(x: -1_000, y: -1_000))
+            var copied = false
+            window.onCopyOriginal = { copied }
+            window.copyOriginal()
+            #expect(window.isInteractingWithFeedback)
+            copied = true
+            window.copyOriginal()
+            #expect(!window.isInteractingWithFeedback)
+            window.autoDismissActionForTests()
+            #expect(!window.isVisible)
+        }
+    }
+
+    @Test("DUP8 a fresh result clears old selection and failed-copy state")
+    func dup8AutoDismissNewResultClearsInteraction() {
+        withDUP8Feedback { window in
+            window.show(resultText: "DUP8 prior feedback", autoDismissAfter: .seconds(60),
+                        canCopyOriginal: true)
+            window.resultTextViewForTests.setSelectedRange(NSRange(location: 0, length: 4))
+            window.onCopyOriginal = { false }
+            window.copyOriginal()
+            #expect(window.isInteractingWithFeedback)
+            window.show(resultText: "DUP8 new feedback", autoDismissAfter: .seconds(60))
+            window.updateMouseArming(atContentPoint: NSPoint(x: -1_000, y: -1_000))
+            window.makeFirstResponder(nil)
+            #expect(window.resultTextViewForTests.selectedRange().length == 0)
+            #expect(!window.isInteractingWithFeedback)
+            window.autoDismissActionForTests()
+            #expect(!window.isVisible)
+        }
+    }
+
+    @Test("DUP8 hovering click-through status text also preserves feedback")
+    func dup8AutoDismissPreservesClickThroughHover() throws {
+        try withDUP8Feedback { window in
+            window.show(text: "DUP8 ready feedback", animated: false, autoDismissAfter: .seconds(60))
+            let content = try #require(window.contentView)
+            let point = NSPoint(x: content.bounds.midX, y: content.bounds.minY + 20)
+            let windowPoint = content.convert(point, to: nil)
+            window.updateMouseArming(atScreenPoint: window.convertPoint(toScreen: windowPoint))
+            #expect(window.ignoresMouseEvents, "status text must remain click-through")
+            #expect(window.isInteractingWithFeedback)
+            window.autoDismissActionForTests()
+            #expect(window.isVisible)
+            window.updateMouseArming(atContentPoint: NSPoint(x: -1_000, y: -1_000))
+            #expect(!window.isInteractingWithFeedback)
+            window.autoDismissActionForTests()
+            #expect(!window.isVisible)
+        }
+    }
+
+    @Test("DUP8 a gesture or new recording interrupts a fade safely", arguments: [false, true])
+    func dup8AutoDismissFadeRace(newRecording: Bool) async {
+        let preferences = DictationToastWindow.accessibilityPreferences
+        let post = DictationToastWindow.postAccessibility
+        DictationToastWindow.accessibilityPreferences = { (false, false, false) }
+        DictationToastWindow.postAccessibility = { _, _ in }
+        let window = makeWindow()
+        defer {
+            window.dismiss()
+            DictationToastWindow.accessibilityPreferences = preferences
+            DictationToastWindow.postAccessibility = post
+        }
+        window.show(resultText: "DUP8 selectable feedback", autoDismissAfter: .seconds(60))
+        window.stopArmingTickForTests()
+        window.updateMouseArming(atContentPoint: NSPoint(x: -1_000, y: -1_000))
+        window.makeFirstResponder(nil)
+        let oldTimeout = window.autoDismissActionForTests
+        oldTimeout()
+        #expect(window.isAutoDismissFadingForTests)
+        if newRecording {
+            window.show(phase: .dictating)
+            window.stopArmingTickForTests()
+            oldTimeout()
+        } else {
+            window.textGestureInFlightForTests = true
+        }
+        try? await Task.sleep(for: .seconds(1))
+        #expect(window.isVisible, "an expired fade hid interacting feedback or a new recording")
+        #expect(window.alphaValue == 1)
+        #expect(!window.isAutoDismissFadingForTests)
+        if newRecording {
+            #expect(window.waveformVisibleForTests)
+            #expect(!window.resultVisibleForTests)
+        } else {
+            #expect(window.resultTextForTests == "DUP8 selectable feedback")
+            window.textGestureInFlightForTests = false
+            for _ in 0..<30 where window.isVisible {
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            #expect(!window.isVisible, "idle feedback stayed visible after the interrupted fade")
+        }
+    }
+
     @Test("initial dictation setup waits for the window server to settle")
     func initialSetupRunsAfterLaunchTurn() async {
         var events: [String] = []

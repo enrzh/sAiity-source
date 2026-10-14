@@ -4,6 +4,58 @@ import Testing
 @testable import sAiity
 
 @Suite struct DictationCleanupValidatorTests {
+    @Test("unhandled cleanup languages preserve borrowed English words and formatting phrases")
+    func pql4UnhandledLanguagePreservesWords() {
+        let cases = [
+            ("Well, ripoti hii inaeleza neno new line na maana yake.", "sw"),
+            ("یہ لفظ new line عام طور پر استعمال ہوتا ہے۔", "ur"),
+            ("এই বাক্যে new paragraph শব্দটির অর্থ ব্যাখ্যা করা হয়েছে।", "bn"),
+        ]
+        for (text, language) in cases {
+            #expect(DictationCleanupValidator.deterministicCleanup(text, sourceLanguage: language) == text)
+        }
+    }
+
+    @Test("meaningful emphasis and negation repetitions are preserved")
+    func pql4MeaningfulRepetitionSurvives() {
+        for text in ["This is very very important.", "No no, do not send this.", "Das ist sehr sehr wichtig."] {
+            #expect(DictationCleanupValidator.deterministicCleanup(text) == text)
+        }
+        #expect(DictationCleanupValidator.validate("No, do not send this.",
+                                                  preserving: "No no, do not send this.",
+                                                  sourceLanguage: "en") == nil)
+    }
+
+    @Test("a comma does not erase negation and mixed cleanup retains each meaningful span")
+    func pql4WholeSpanMeaning() {
+        #expect(DictationCleanupValidator.validate("I said yes, one may enter.",
+            preserving: "I said yes, no one may enter.", sourceLanguage: "en") == nil)
+        #expect(DictationCleanupValidator.validate("Ich sagte ja, jemand darf eintreten.",
+            preserving: "Ich sagte ja, nein niemand darf eintreten.", sourceLanguage: "de") == nil)
+        let input = "Bitte öffne die Rechnung. Then delete the backup permanently."
+        let metadata = DictationLanguageMetadata(regions: [
+            .init(text: "Bitte öffne die Rechnung.", language: "de"),
+            .init(text: "Then delete the backup permanently.", language: "en")
+        ])
+        #expect(DictationCleanupValidator.validate("Bitte öffne die Rechnung. Then.",
+            preserving: input, languageMetadata: metadata) == nil)
+        #expect(DictationCleanupValidator.validate(input, preserving: input, languageMetadata: metadata) != nil)
+    }
+
+    @Test("cleanup permits equivalent localized digits without dropping a repeated numeric fact")
+    func pql4NumericFactsSurviveCleanup() {
+        #expect(DictationCleanupValidator.validate("أرسل 1.5 لتر إلى الفريق غدا.",
+            preserving: "أرسل ١٫٥ لتر إلى الفريق غدا.", sourceLanguage: "ar") != nil)
+        #expect(DictationCleanupValidator.validate("أرسل 15 لتر إلى الفريق غدا.",
+            preserving: "أرسل ١٫٥ لتر إلى الفريق غدا.", sourceLanguage: "ar") == nil)
+        #expect(DictationCleanupValidator.validate("Send 2 copies to the team.",
+            preserving: "Send 2 copies to 2 teams.", sourceLanguage: "en") == nil)
+        #expect(DictationCleanupValidator.validate("Sende 1234 Liter an das Team.",
+            preserving: "Sende 1,234 Liter an das Team.", sourceLanguage: "de") == nil)
+        #expect(DictationCleanupValidator.validate("Sende 1.234 Liter an das Team.",
+            preserving: "Sende 1,234 Liter an das Team.", sourceLanguage: "de") == nil)
+    }
+
     @Test("clean dictation skips the cleanup model")
     func cleanTextSkipsModel() {
         #expect(!DictationCleanupValidator.needsModelCleanup("Please send the report today."))
@@ -14,6 +66,62 @@ import Testing
         #expect(!DictationCleanupValidator.needsModelCleanup("Envoyez le rapport.", sourceLanguage: "fr"))
         #expect(!DictationCleanupValidator.needsModelCleanup("Envía el informe mañana.", sourceLanguage: "es"))
         #expect(!DictationCleanupValidator.needsModelCleanup("明日レポートを送ってください。", sourceLanguage: "ja"))
+    }
+
+    @Test("internal pause dots need contextual cleanup without stripping source punctuation")
+    func pauseDotsNeedContext() {
+        for text in ["That shouldn't happen when you... are adding items to the card.",
+                     "That shouldn't happen when you… are adding items to the card."] {
+            let outcome = DictationCleanupValidator.deterministicOutcome(text, sourceLanguage: "en")
+            #expect(outcome.needsModel)
+            #expect(outcome.baseline == text)
+        }
+        #expect(!DictationCleanupValidator.needsModelCleanup("I'm not sure...", sourceLanguage: "en"))
+        #expect(!DictationCleanupValidator.needsModelCleanup("Wait ellipsis please.", sourceLanguage: "en"))
+        #expect(DictationCleanupValidator.needsModelCleanup("I can't... tell.", sourceLanguage: "en"))
+    }
+
+    @Test("pause punctuation inside quotes and code never triggers contextual editing")
+    func pauseDotsInLiterals() {
+        for literal in ["\"Wait... please\"", "“Wait... please”", "'Wait... please'",
+                        "‘Wait... please’", "«Wait... please»", "`wait...please`",
+                        "```\nwait...please\n```", "「待って…ください」", "'I can't... tell'",
+                        "‘I can’t... tell’", "“I mean... please”"] {
+            let text = "He wrote \(literal) on the sign."
+            #expect(!DictationCleanupValidator.needsModelCleanup(text, sourceLanguage: "en"))
+            #expect(DictationCleanupValidator.deterministicCleanup(text, sourceLanguage: "en") == text)
+        }
+    }
+
+    @Test("pause-only cleanup cannot invent gap words or alter quoted punctuation")
+    func pauseDotsOnlyPermitPunctuation() {
+        let input = "I need to... send the report. The label is “Wait... please”."
+        let cleaned = "I need to send the report. The label is “Wait... please”."
+        #expect(DictationCleanupValidator.validate(cleaned, preserving: input, sourceLanguage: "en") == cleaned)
+        for changed in [
+            "I need to urgently send the report. The label is “Wait... please”.",
+            "I need to send the report. The label is “Wait please”.",
+            "I need to send the report. The label is “Wait… please”.",
+        ] {
+            #expect(DictationCleanupValidator.validate(changed, preserving: input, sourceLanguage: "en") == nil)
+        }
+    }
+
+    @Test("pause-only editing keeps every literal occurrence and its exact Unicode bytes")
+    func pauseDotsLiteralIdentity() {
+        let input = "I need to... send the report. The label is “Cafe\u{301}... please”."
+        let normalized = "I need to send the report. The label is “Café... please”."
+        #expect(DictationCleanupValidator.validate(normalized, preserving: input, sourceLanguage: "en") == nil)
+        let repeated = "I need to... send the report. The labels are “Wait... please” and “Wait... please”."
+        let changed = "I need to send the report. The labels are “Wait please” and “Wait... please”."
+        #expect(DictationCleanupValidator.validate(changed, preserving: repeated, sourceLanguage: "en") == nil)
+    }
+
+    @Test("literal correction markers cannot permit invented pause words")
+    func pauseDotsQuotedRepairIsLiteral() {
+        let input = "I need to... send the report. The label is “I mean... please”."
+        let changed = "I need to urgently send the report. The label is “I mean... please”."
+        #expect(DictationCleanupValidator.validate(changed, preserving: input, sourceLanguage: "en") == nil)
     }
 
     @Test("cleanup validator applies only the documented plain-text rules")

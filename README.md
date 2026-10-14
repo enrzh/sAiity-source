@@ -1,12 +1,58 @@
-# sAiity
+# Syllivra
+
+Previously named sAiity. The app keeps its existing bundle identifier, local data/model directories and `saiity://` links for compatibility. The Swift module and source/test directory names remain internal; new app bundles and downloads use Syllivra.
+
+When upgrading, quit the old sAiity app and replace its app bundle with Syllivra. Keep only one installed copy; removing the old app bundle does not remove the separately stored settings, models or transcripts.
 
 Live subtitles for whatever your Mac is playing.
 
-sAiity captures system audio, recognises speech, and translates it on the Mac.
+Syllivra captures system audio, recognises speech, and translates it on the Mac.
 It can save bilingual transcripts locally and provide press-to-talk dictation
 to the app that currently has focus.
 
 **No account. No API key. No audio leaves the Mac.**
+
+## First use
+
+Install from the [Release downloads](#release), then choose captions, dictation,
+or both in setup. Download the recognition model offered for that feature and
+grant its permissions. Try a short sentence with **Try Dictation**, or play
+speech on the Mac with **Try Captions**; stop the trial when finished.
+
+Captions and Dictation keep everyday controls and bubble preset previews visible;
+**More options** starts collapsed and holds alternative engines, vocabulary,
+permissions and fine appearance controls. Dictation shows **Fast**, **Balanced**
+and **Accurate** processing presets; manually changed or unavailable-cleanup
+configurations can read **Custom**. These names describe processing choices,
+not measured accuracy guarantees. Existing saved preferences still apply.
+Bubble appearance offers **Minimal**, **Balanced**, **Readable** and **Liquid
+Glass**; fresh appearance defaults match Balanced. Preview cards illustrate
+appearance, independently of the dictation processing preset.
+
+For optional model cleanup, choose **Clean up with** on Dictation. If the selected
+model is missing, **Download & Use** downloads it directly; cleanup is enabled
+only after success, compatibility checks and an unchanged selection. Selecting
+a model is not proof that it is ready. Recognition and translation have their
+own installed/missing status and download controls. Translation is a separate,
+optional target-language choice; cleanup alone preserves the spoken languages.
+
+Try Dictation also shows the microphone name and observed quiet/clipping hints.
+These help investigate input problems; review the recognized words to check the
+result. The trial does not paste into another app or replace the clipboard.
+
+In Dictation’s More options, you can keep the last five completed results until
+quitting. This is off by default, stays in memory, and clears when disabled.
+Recent Dictations opens explicit Copy Result/Copy Original actions. Application
+Exceptions lets you choose apps that should receive original recognition text,
+with cleanup, vocabulary corrections and translation off for those recordings.
+This preserves recognition output; it does not correct recognition mistakes.
+
+Transcript search opens the matching spoken line in its full session. Rename
+changes only a session’s optional name, and the reader offers larger text.
+Troubleshooting groups recent dictation timings and outcomes without keeping
+the dictated words in diagnostics.
+
+## Features
 
 - Native SwiftUI/AppKit app for macOS 26 or later on Apple Silicon
 - Streaming captions from system audio
@@ -36,14 +82,34 @@ Mixed-language dictation keeps each spoken language when translation is off.
 Enabling translation asks for the entire message in the chosen target language.
 Cleanup fixes wording in place; it does not request translation.
 
+Recognition and translation have separate language coverage. Whisper's source
+choices come from its pinned recognition vocabulary. Nemotron and Qwen recognize
+automatically, but their adapters do not declare a complete source-language set;
+automatic recognition is not a promise of equal accuracy in every language.
+Qwen does not expose an audio-language tag; Nemotron exposes its first tag.
+
+Japanese kanji and kana stay in one phrase. Clear language switches keep separate
+source spans, while short shared-script names remain uncertain. Translation
+checks individual regions and the assembled result; rejection keeps the
+original available. Explicit Simplified/Traditional Chinese requests use local
+script conversion, without promising regional vocabulary changes.
+
+Cleanup uses language-specific rules where available and preserves unhandled
+language content. Its numeric, date, currency and omission checks catch concrete
+errors; they cannot prove that a model preserved every detail. Ambiguous short
+translations or unfamiliar currency spellings can be declined rather than
+reported as successful. Natural-speech quality and speed require the reviewed
+language evidence described in the [release checklist](docs/release-checklist.md).
+
 Models are downloaded on first use and stored locally. The app does not ship
 model weights.
 
 ## Realtime subtitles
 
-Under **Captions → Quick controls**, choose **Nemotron → Subtitle timing →
+With Nemotron selected, use **Captions → Quick controls → Subtitle timing →
 Realtime** for the 1.12-second streaming model, or **Balanced** for 2.24-second
-updates with lower processing cost. The two timing models are separate local
+updates. Alternative recognition engines are under **More options**.
+The two timing models are separate local
 downloads; the page offers Download when the selected one is missing. Spoken
 words appear while speech continues and may be revised. Qwen's captions remain
 pause-based; choose Nemotron for realtime word updates.
@@ -85,7 +151,7 @@ offers **Copy Original**. The menu bar also offers **Copy Original Dictation**,
 including after the bubble disappears. Both copy the retained recognition text
 without pasting into another app. It stays in memory until the next recording starts.
 
-Under Advanced settings on either page, **Names and terms** protects spelling
+Under **More options** on either page, **Names and terms** protects spelling
 and **Corrections** stores explicit phrase replacements such as `Ube Eats` →
 `Uber Eats`. The dictionary is shared, local, and bounded. Corrections match whole
 phrases once, before cleanup/translation; nothing is learned automatically.
@@ -94,8 +160,13 @@ Scrolling upward in the caption bubble pauses automatic scrolling while new
 speech continues. **Jump to latest**, or scrolling back to the bottom, resumes
 following new captions. Clearing the bubble also resumes following.
 
+The bubble displays the latest 50 lines. **Save transcript** saves all committed
+lines from the session at the time of the action, including lines outside that
+display window. Choose **Saved to Transcripts** in the bubble to open that session. Pending final
+translations for those lines are retained; interim preview words are not saved.
+
 Dictation is a separate microphone-only session. It does not write to saved
-caption transcripts and it does not require sAiity to be the frontmost app.
+caption transcripts and it does not require Syllivra to be the frontmost app.
 Captions and dictation do not own the microphone at the same time.
 
 ## Transcript summary
@@ -105,6 +176,12 @@ viewer to write a local recap, decisions, and action items. **Summarize Again**
 replaces that preface; **Remove Summary** deletes only the summary, keeping the
 spoken lines and exports. The session list marks sessions with a summary and
 keeps secondary actions in one menu. The reading sheet can be resized.
+
+A session with one clear spoken language keeps that language in its summary.
+For a session with confirmed language switches, choose the summary language in
+the reader before generating it. This choice is local to the reader. Its
+requested language is saved with the summary and included in Markdown export;
+older summaries without that field remain readable.
 
 The summary can miss or invent details. It uses the Gemma cleanup model already
 installed for dictation. It does not run while captions or dictation are using
@@ -165,7 +242,7 @@ To check that a bundle really launches — a real `NSApplication`, the real
 `AppDelegate`, one turn of the run loop, and a window the window server agrees
 exists — run:
 
-    build/sAiity.app/Contents/MacOS/sAiity --selftest
+    build/Syllivra.app/Contents/MacOS/Syllivra --selftest
 
 It exits 0 on success, 1 if a check failed, and 70 if the launch never
 finished. Over a plain ssh session, where there is no window server to launch
@@ -196,13 +273,21 @@ ZIP with `scripts/validate-appcast.sh`.
 The release workflow requires a verified local corpus and checks accuracy,
 language preservation and warm latency budgets before notarizing or tagging:
 
-    SAIITY_RELEASE_FIXTURES=/absolute/verified-fixtures scripts/quality-matrix.sh
+    SAIITY_RELEASE_FIXTURES=/absolute/verified-fixtures SAIITY_DICTATION_BENCHMARK_CLEANUP_MODEL=installed-cleanup.gguf scripts/quality-matrix.sh
 
 `scripts/release.sh <version>` runs this gate automatically. Missing recordings,
 reference text, model weights, speech categories or benchmark records fail the
 gate. See [the corpus and acceptance criteria](docs/benchmarks/README.md) and
 [the signed-app checklist](docs/release-checklist.md). These checks are local;
 they do not download models or send recordings anywhere.
+
+The [release policy](docs/benchmarks/release-quality.json) covers representative
+1120/2240 ms caption and dictation configurations, including enabled model
+cleanup and Hy-MT2/MADLAD translation. Translated runs score raw recognition
+against reviewed source text and translated output against a separate reviewed
+target reference. See [the PRR gates](docs/release-checklist.md) for exact settings
+and outstanding device/corpus acceptance; deterministic tests alone are a partial
+check, not a full release pass or evidence of improved accuracy/performance.
 
 For a real-time live-caption regression run, use the same fixture format with
 `scripts/caption-matrix.sh`. It records first volatile/final caption latency,
@@ -405,4 +490,4 @@ Summary, plus safer summary lifecycle controls. Build 2 also keeps setup window
 chrome opaque like Settings — still fully local recognition and translation on
 the Mac.
 
-sAiity is part of the [aiity](https://aiity.de) family.
+Syllivra is part of the [aiity](https://aiity.de) family.

@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-APP="${1:-build/sAiity.app}"
+APP="${1:-build/Syllivra.app}"
 EXPECTED_VERSION="${2:-}"
 [ -d "$APP" ] || { echo "FATAL: app bundle not found: $APP" >&2; exit 1; }
 

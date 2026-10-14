@@ -7,6 +7,117 @@ import Testing
 struct DictationCleanupSessionTests {
     private let repair = "Send the report, I mean the revised report."
 
+    @Test("pause dots reach the existing contextual editor and preserve words")
+    func pauseDotsReachModel() async throws {
+        let original = "It's weird because that shouldn't happen when you... are currently adding items to the card."
+        let expected = "It's weird because that shouldn't happen when you are currently adding items to the card."
+        let session = DictationCleanupSession(gate: TranslationInferenceGate())
+        var calls = 0
+        let result = try #require(await session.cleanup(.init(text: original, language: "en"),
+            modelKey: "pause-editor") {
+                .init(cleanup: { text, _, _ in
+                    calls += 1
+                    #expect(text == original)
+                    return expected
+                }, stop: {})
+            })
+        #expect(calls == 1)
+        #expect(result.text == expected)
+        #expect(result.modelAccepted == 1)
+        await session.invalidate()
+    }
+
+    @Test("unavailable contextual cleanup preserves pause dots and reports fallback")
+    func pauseDotsUnavailablePreservesOriginal() async throws {
+        let original = "That shouldn't happen when you... are adding items to the card."
+        let session = DictationCleanupSession(gate: TranslationInferenceGate())
+        let inputs = [DictationTranscriptionResult(text: original, language: "en"),
+                      DictationTranscriptionResult(regions: [
+                        .init(text: original, language: "en"),
+                        .init(text: "Je dois vérifier toutes les factures demain.", language: "fr")
+                      ])]
+        for input in inputs {
+            for key in [nil, "unavailable"] as [String?] {
+                let result = try #require(await session.cleanup(input, modelKey: key) {
+                    .init(cleanup: { _, _, _ in nil }, stop: {})
+                })
+                #expect(result.text == input.text)
+                #expect(result.languageMetadata.regionLanguages == input.languageMetadata.regionLanguages)
+                #expect(result.modelCleanupUnavailable)
+                #expect(result.modelCalls == (key == nil ? 0 : 1))
+            }
+        }
+        await session.invalidate()
+    }
+
+    @Test("cleanup timings distinguish actual cold load, warm calls and rules-only work")
+    func dupTimingCountsObservedInvocations() async throws {
+        var timings: [DiagnosticsRuntimeTiming] = []
+        let session = DictationCleanupSession(gate: TranslationInferenceGate(), onTiming: { timings.append($0) })
+        let id = UUID().uuidString
+        await LocalGeneration.$dictationRunID.withValue(id) {
+            for text in [repair, repair, "Please send the report today."] {
+                _ = await session.cleanup(.init(text: text, language: "en"), modelKey: "one-model") {
+                    .init(cleanup: { _, _, _ in "Send the revised report." }, stop: {})
+                }
+            }
+        }
+        await session.invalidate()
+        #expect(timings.count == 3)
+        #expect(timings.map(\.modelLoadCount) == [1, 0, 0])
+        #expect(timings.map(\.modelCallCount) == [1, 1, 0])
+        #expect(timings.map(\.cold) == [true, false, nil])
+        #expect(timings.allSatisfy { $0.runID == id && $0.seconds.isFinite && $0.seconds >= 0 })
+        #expect(!timings.contains { $0.operation.contains("report") })
+    }
+
+    @Test("cleanup evidence separates actual model calls, accepted output, fallback and rules skips")
+    func modelOutcomeCounts() async throws {
+        let session = DictationCleanupSession(gate: TranslationInferenceGate())
+        let input = DictationTranscriptionResult(text: repair, language: "en")
+        let outputs: [String?] = ["Send the revised report.", nil, ""]
+        for (index, output) in outputs.enumerated() {
+            let result = try #require(await session.cleanup(input, modelKey: "model-\(index)") {
+                .init(cleanup: { _, _, _ in output }, stop: {})
+            })
+            #expect(result.modelCalls == 1)
+            #expect(result.modelAccepted == (index == 0 ? 1 : 0))
+            #expect(result.modelFallbacks == (index == 0 ? 0 : 1))
+            #expect(result.rulesSkipped == 0)
+            #expect(result.modelCleanupUnavailable == (index != 0))
+        }
+        var loads = 0
+        let skipped = try #require(await session.cleanup(.init(text: "Please send the report today.", language: "en"),
+            modelKey: "rules-only") {
+                loads += 1
+                return .init(cleanup: { _, _, _ in nil }, stop: {})
+            })
+        #expect(loads == 0)
+        #expect(skipped.modelCalls == 0)
+        #expect(skipped.modelAccepted == 0)
+        #expect(skipped.modelFallbacks == 0)
+        #expect(skipped.rulesSkipped == 1)
+        await session.invalidate()
+    }
+
+    @Test("one batched model invocation may accept multiple regions without inventing extra calls")
+    func batchedModelOutcomeCounts() async throws {
+        let session = DictationCleanupSession(gate: TranslationInferenceGate())
+        let input = DictationTranscriptionResult(regions: [
+            .init(text: "Send the report, I mean the revised one.", language: "en-US"),
+            .init(text: "Schicke den Bericht, ich meine den revidierten.", language: "de-DE"),
+        ])
+        let mock = BatchMockModel(batchOutput: input.regions.map(\.text))
+        let result = try #require(await session.cleanup(input, modelKey: "batch") { mock.load("batch") })
+        #expect(mock.batchCalls == 1)
+        #expect(mock.singleCalls.isEmpty)
+        #expect(result.modelCalls == 1)
+        #expect(result.modelAccepted == 2)
+        #expect(result.modelFallbacks == 0)
+        #expect(result.rulesSkipped == 0)
+        await session.invalidate()
+    }
+
     @MainActor
     private final class MockModel {
         var events: [String] = []
@@ -213,7 +324,8 @@ struct DictationCleanupSessionTests {
             .init(text: "Sende den Bericht, ich meine den neuen Bericht.", language: "de-DE"),
         ])
         let result = await session.cleanup(input, modelKey: "1b") { mock.load("1b") }
-        #expect(result == input)
+        #expect(result?.text == input.text)
+        #expect(result?.regions == input.regions)
         #expect(result?.languageMetadata.containsMultipleLanguages == true)
         #expect(mock.calls.count == 2)
         for (call, region) in zip(mock.calls, input.regions) {
@@ -235,6 +347,7 @@ struct DictationCleanupSessionTests {
         #expect(mock.calls.count == 1)
         #expect(result?.text == "Send the report, I mean the revised report.")
         #expect(result?.regions.map(\.language) == ["en"])
+        #expect(result?.modelCleanupUnavailable == true)
         await session.invalidate()
     }
 

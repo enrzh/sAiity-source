@@ -1,6 +1,8 @@
 import AppKit
+import Carbon.HIToolbox
 import Observation
 import Testing
+import WhisperKit
 
 @testable import sAiity
 
@@ -8,6 +10,252 @@ extension SavedTranscriptOperationTests {
 
 @MainActor
 @Suite struct SettingsWindowTests {
+    private func key(_ type: NSEvent.EventType = .keyDown, code: Int, flags: NSEvent.ModifierFlags = [], window: NSWindow) throws -> NSEvent {
+        try #require(NSEvent.keyEvent(with: type, location: .zero, modifierFlags: flags,
+                                     timestamp: 0, windowNumber: window.windowNumber, context: nil,
+                                     characters: "q", charactersIgnoringModifiers: "q", isARepeat: false,
+                                     keyCode: UInt16(code)))
+    }
+
+    @Test("caption shortcut capture consumes Command combinations before menu handling")
+    func captionShortcutCapturesCommand() throws {
+        let view = ShortcutRecorder.RecorderView(frame: .init(x: 0, y: 0, width: 130, height: 28))
+        let window = NSWindow(contentRect: view.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = view
+        defer { window.makeFirstResponder(nil); window.orderOut(nil) }
+        var captured: Shortcut?
+        view.onChange = { captured = $0 }
+        #expect(view.accessibilityPerformPress())
+        #expect(window.firstResponder === view)
+        let event = try key(code: kVK_ANSI_Q, flags: .command, window: window)
+        #expect(view.performKeyEquivalent(with: event))
+        #expect(captured == Shortcut(keyCode: UInt32(kVK_ANSI_Q), modifiers: UInt32(cmdKey)))
+        #expect(!view.performKeyEquivalent(with: event), "ordinary menus work after capture ends")
+    }
+
+    @Test("dictation captures a Command chord and waits for its complete release")
+    func dictationShortcutCapturesCommandRelease() throws {
+        let view = DictationShortcutRecorder.RecorderView(frame: .init(x: 0, y: 0, width: 170, height: 28))
+        let window = NSWindow(contentRect: view.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = view
+        defer { window.makeFirstResponder(nil); window.orderOut(nil) }
+        var captured: DictationChord?
+        view.onChange = { captured = $0 }
+        #expect(view.accessibilityPerformPress())
+        view.flagsChanged(with: try key(.flagsChanged, code: kVK_Command, flags: .command, window: window))
+        #expect(view.performKeyEquivalent(with: try key(code: kVK_ANSI_Q, flags: .command, window: window)))
+        view.keyUp(with: try key(.keyUp, code: kVK_ANSI_Q, flags: .command, window: window))
+        #expect(captured == nil)
+        view.flagsChanged(with: try key(.flagsChanged, code: kVK_Command, window: window))
+        #expect(captured == DictationChord(keyCodes: [UInt16(kVK_Command), UInt16(kVK_ANSI_Q)]))
+    }
+
+    @Test("shortcut labels do not intercept clicks on the recorder")
+    func shortcutLabelsLeaveFullClickTarget() {
+        let views: [NSView] = [ShortcutRecorder.RecorderView(), DictationShortcutRecorder.RecorderView()]
+        for view in views {
+            view.frame = .init(x: 0, y: 0, width: 170, height: 28)
+            view.layoutSubtreeIfNeeded()
+            #expect(view.hitTest(.init(x: 85, y: 14)) === view)
+        }
+    }
+
+    @Test("caption shortcut recording suspends dictation and restores it on focus loss")
+    func captionShortcutSuspendsUntilFocusLeaves() {
+        let view = ShortcutRecorder.RecorderView(frame: .init(x: 0, y: 0, width: 130, height: 28))
+        let window = NSWindow(contentRect: view.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = view
+        var notifications: [Bool] = []
+        let observer = NotificationCenter.default.addObserver(forName: .saiityDictationShortcutRecordingChanged, object: nil, queue: .main) { note in
+            MainActor.assumeIsolated { notifications.append(note.object as? Bool ?? false) }
+        }
+        defer { NotificationCenter.default.removeObserver(observer); window.makeFirstResponder(nil); window.orderOut(nil) }
+        #expect(view.accessibilityPerformPress())
+        #expect(notifications == [true])
+        window.makeFirstResponder(nil)
+        #expect(notifications == [true, false])
+    }
+
+    @Test("shortcut recording ends when the settings window loses key focus")
+    func shortcutRecordingEndsWhenWindowDeactivates() {
+        let views: [NSView] = [ShortcutRecorder.RecorderView(), DictationShortcutRecorder.RecorderView()]
+        for view in views {
+            view.frame = .init(x: 0, y: 0, width: 170, height: 28)
+            let window = NSWindow(contentRect: view.frame, styleMask: [.titled], backing: .buffered, defer: false)
+            window.contentView = view
+            var notifications: [Bool] = []
+            let observer = NotificationCenter.default.addObserver(forName: .saiityDictationShortcutRecordingChanged, object: nil, queue: .main) { note in
+                MainActor.assumeIsolated { notifications.append(note.object as? Bool ?? false) }
+            }
+            #expect(view.accessibilityPerformPress())
+            #expect(notifications == [true])
+            NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: window)
+            #expect(notifications == [true, false], "switching apps must restore global shortcut handlers")
+            window.makeFirstResponder(nil)
+            window.orderOut(nil)
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    @Test("dictation shortcut recording can be armed with the keyboard")
+    func dictationShortcutKeyboardActivation() throws {
+        let view = DictationShortcutRecorder.RecorderView(frame: .init(x: 0, y: 0, width: 170, height: 28))
+        let window = NSWindow(contentRect: view.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = view
+        defer { window.makeFirstResponder(nil); window.orderOut(nil) }
+        #expect(window.makeFirstResponder(view))
+        view.keyDown(with: try key(code: kVK_Space, window: window))
+        #expect(view.accessibilityValue() as? String == String(localized: "Press the full chord, then release…"))
+        view.keyDown(with: try key(code: kVK_Escape, window: window))
+        #expect(view.accessibilityValue() as? String == view.chord.displayString)
+    }
+
+    @Test("transcript content is available while summary-language analysis is still pending")
+    func transcriptDisplaysBeforeLanguageAnalysis() async throws {
+        try await TranscriptTestLibrary.withTemporaryDirectory { root in
+            let lines = [Segment(i: 0, t0: 0, t1: 1, text: "Synthetic original 日本語", loc: "ja", tr: "Synthetic translation", trLoc: "en", words: nil)]
+            let session = try TranscriptStore.saveSession(lines, locale: "ja", translateTo: "en", in: root)
+            let (gate, release) = AsyncStream<[String]>.makeStream()
+            var entered = false
+            var displayed: [Segment] = []
+            var analyzed: [String]?
+            let loading = Task {
+                await TranscriptViewerSheet.load(session: session, analyze: { _ in
+                    await MainActor.run { entered = true }
+                    for await codes in gate { return codes }
+                    return []
+                }, content: { displayed = $0; #expect($1 == nil) }, languages: { analyzed = $0 })
+            }
+            let deadline = ContinuousClock.now + .seconds(2)
+            while !entered, ContinuousClock.now < deadline { try? await Task.sleep(for: .milliseconds(1)) }
+            #expect(entered)
+            #expect(displayed.map(\.text) == lines.map(\.text))
+            #expect(displayed.map(\.tr) == lines.map(\.tr))
+            #expect(analyzed == nil)
+            release.yield(["ja"]); release.finish()
+            await loading.value
+            #expect(analyzed == ["ja"])
+        }
+    }
+
+    @Test("closing a transcript cancels its detached language analysis")
+    func transcriptClosingCancelsLanguageAnalysis() async throws {
+        try await TranscriptTestLibrary.withTemporaryDirectory { root in
+            let session = try TranscriptStore.saveSession([Segment(i: 0, t0: 0, t1: 1, text: "Synthetic test", loc: "en", tr: nil, trLoc: nil, words: nil)], locale: "en", translateTo: nil, in: root)
+            let (gate, release) = AsyncStream<[String]>.makeStream()
+            var entered = false
+            var cancelled = false
+            var publishedLanguages = false
+            let loading = Task {
+                await TranscriptViewerSheet.load(session: session, analyze: { _ in
+                    await MainActor.run { entered = true }
+                    for await codes in gate { return codes }
+                    await MainActor.run { cancelled = Task.isCancelled }
+                    return []
+                }, content: { _, _ in }, languages: { _ in publishedLanguages = true })
+            }
+            var deadline = ContinuousClock.now + .seconds(2)
+            while !entered, ContinuousClock.now < deadline { try? await Task.sleep(for: .milliseconds(1)) }
+            #expect(entered)
+            loading.cancel()
+            deadline = ContinuousClock.now + .seconds(2)
+            while !cancelled, ContinuousClock.now < deadline { try? await Task.sleep(for: .milliseconds(1)) }
+            #expect(cancelled)
+            #expect(!publishedLanguages)
+            release.finish()
+            await loading.value
+        }
+    }
+
+    @Test("synthetic long-transcript timings retain every original and translated line")
+    func transcriptResponsivenessTimings() async throws {
+        try await TranscriptTestLibrary.withTemporaryDirectory { root in
+            let lines = (0..<2000).map { Segment(i: $0, t0: Double($0), t1: Double($0 + 1), text: "The project has 42 items. Keep the original facts and the complete sentence. Synthetic line \($0).", loc: "en", tr: "Das Projekt hat 42 Einträge. Synthetische Zeile \($0).", trLoc: "de", words: nil) }
+            let session = try TranscriptStore.saveSession(lines, locale: "en", translateTo: "de", in: root)
+            for run in 0..<3 {
+                let began = ContinuousClock.now
+                var ready: Duration = .zero
+                await TranscriptViewerSheet.load(session: session, content: { loaded, _ in
+                    ready = began.duration(to: .now)
+                    #expect(loaded.map(\.text) == lines.map(\.text))
+                    #expect(loaded.map(\.tr) == lines.map(\.tr))
+                }, languages: { #expect($0 == ["en"]) })
+                print("SYLLIVRA_PERF transcript lines=2000 run=\(run) ready=\(ready) total=\(began.duration(to: .now))")
+            }
+        }
+    }
+
+    @Test("search opens the selected transcript at its actual matched segment")
+    func dupSearchCarriesSegmentAnchor() {
+        let state = AppState()
+        let session = SessionRef(id: "synthetic", url: URL(fileURLWithPath: "/tmp/saiity-synthetic-unwritten"),
+                                 meta: .init(id: "synthetic", startedAt: Date(), locale: "ja", translateTo: nil))
+        state.openTranscript(session, revealing: 47)
+        #expect(state.transcriptToOpen?.id == session.id)
+        #expect(state.transcriptSegmentToReveal == 47)
+    }
+
+    @Test("normal transcript open clears a previous search anchor")
+    func dupSearchNormalOpenClearsAnchor() {
+        let state = AppState()
+        let session = SessionRef(id: "synthetic", url: URL(fileURLWithPath: "/tmp/saiity-synthetic-unwritten"),
+                                 meta: .init(id: "synthetic", startedAt: Date(), locale: "en", translateTo: nil))
+        state.transcriptSegmentToReveal = 47
+        state.openTranscript(session)
+        #expect(state.transcriptToOpen?.id == session.id)
+        #expect(state.transcriptSegmentToReveal == nil)
+    }
+
+    @Test("known model load failures offer repair even when installed bytes remain")
+    func installedModelFailureNeedsRepair() throws {
+        let state = AppState()
+        let asset = try #require(ASREngine.nemotron.assetDescriptors.first)
+        let installed = AssetStatus(asset: asset, isInstalled: true, isPartial: false, bytesOnDisk: 100)
+        state.loadFailures[asset.id] = nil
+        #expect(!state.needsModelRepair(installed))
+        state.loadFailures[asset.id] = "Synthetic damaged model"
+        #expect(state.needsModelRepair(installed))
+        state.loadFailures[asset.id] = nil
+        #expect(!state.needsModelRepair(installed))
+        #expect(state.needsModelRepair(.init(asset: asset, isInstalled: false, isPartial: true, bytesOnDisk: 50)))
+    }
+
+    @Test("cleanup download uses only the still-selected model after success")
+    func cleanupDownloadPreservesSelectionIntent() async {
+        for success in [false, true] {
+            for changed in [false, true] {
+                var current = "selected.gguf"
+                var enabled = false
+                await DictationView.cleanupDownloadAction(file: "selected.gguf", selected: { current }, download: {
+                    if changed { current = "other.gguf" }
+                    return success
+                }, enable: { enabled = true })
+                #expect(enabled == (success && !changed))
+            }
+        }
+    }
+
+    @Test("turning cleanup off while downloading does not enable it on completion")
+    func cleanupDownloadRespectsOffSelection() async {
+        var current: String? = "selected.gguf"
+        var enabled = false
+        await DictationView.cleanupDownloadAction(file: "selected.gguf", selected: { current }, download: {
+            current = nil
+            return true
+        }, enable: { enabled = true })
+        #expect(!enabled)
+    }
+
+    @Test("dictation readiness checks its model and microphone before calling it ready")
+    func dictationReadinessUsesRealPrerequisites() {
+        #expect(GeneralView.dictationStatusLabel(enabled: true, input: true, accessibility: true,
+                                              modelReady: false, microphone: .authorized) == String(localized: "Not downloaded yet — see Models."))
+        #expect(GeneralView.dictationStatusLabel(enabled: true, input: true, accessibility: true,
+                                              modelReady: true, microphone: .denied) == String(localized: "Microphone access needed"))
+        #expect(GeneralView.dictationStatusLabel(enabled: true, input: true, accessibility: true,
+                                              modelReady: true, microphone: .notDetermined) == String(localized: "Microphone requested on first use"))
+    }
+
     @Test("persist-only settings use existing keys and still invalidate observed bindings")
     func defaultsBackedPreferencesRemainObservable() {
         let defaults = UserDefaults.standard
@@ -165,9 +413,10 @@ extension SavedTranscriptOperationTests {
         #expect(WhisperDictationBackend.isSelected)
     }
 
-    @Test("dictation locale covers every catalog language")
+    @Test("dictation source coverage follows the pinned recognizer vocabulary")
     func dictationLocaleCoversLanguageCatalog() {
-        #expect(Set(WhisperDictationBackend.supportedLanguageCodes) == Set(LanguageCatalog.all.map(\.code)))
+        #expect(Set(WhisperDictationBackend.supportedLanguageCodes) == Set(Constants.languageCodes))
+        #expect(Set(WhisperDictationBackend.supportedLanguageCodes) != Set(LanguageCatalog.all.map(\.code)))
         #expect(WhisperDictationBackend.ModelChoice.allCases == [.base, .small])
         #expect(WhisperDictationBackend.isReady(.base, under: URL(fileURLWithPath: "/definitely-missing")) == false)
     }

@@ -239,6 +239,12 @@ struct WhisperModelCacheKey: Hashable, Sendable {
 actor LoadedWhisperDictationModel: WhisperModelResource {
     private let whisper: WhisperKit
 
+    static func transcription(from results: [Result<[TranscriptionResult], Error>]) throws
+        -> (text: String, language: String?) {
+        let decoded = try results.flatMap { try $0.get() }
+        return (decoded.map(\.text).joined(separator: " "), decoded.first?.language)
+    }
+
     init(identifier: String, folder: URL) async throws {
         let model = try await WhisperKit(model: identifier,
                                          modelRepo: nil,
@@ -251,7 +257,7 @@ actor LoadedWhisperDictationModel: WhisperModelResource {
                                         modelRepo: nil,
                                         modelFolder: folder.path,
                                         download: false)
-            try await model.loadModels(prewarmMode: true)
+            try await LocalGeneration.loadModel { try await model.loadModels(prewarmMode: true) }
         } catch {
             await model.unloadModels()
             throw error
@@ -260,17 +266,20 @@ actor LoadedWhisperDictationModel: WhisperModelResource {
     }
 
     func transcribe(_ samples: [Float],
-                    options: DecodingOptions) async -> (text: String, language: String?) {
-        await transcribe([samples], options: options)
+                    options: DecodingOptions) async throws -> (text: String, language: String?) {
+        try await transcribe([samples], options: options)
     }
 
     func transcribe(_ samples: [[Float]],
-                    options: DecodingOptions) async -> (text: String, language: String?) {
-        let results = await whisper.transcribe(audioArrays: samples,
-                                               decodeOptions: options,
-                                               callback: nil)
-        let decoded = results.compactMap { $0 }.flatMap { $0 }
-        return (decoded.map(\.text).joined(separator: " "), decoded.first?.language)
+                    options: DecodingOptions) async throws -> (text: String, language: String?) {
+        try Task.checkCancellation()
+        let decoding = ContinuousClock.now
+        let results = await whisper.transcribeWithResults(audioArrays: samples,
+                                                          decodeOptions: options,
+                                                          callback: nil)
+        await LocalGeneration.recordModelTiming("model.recognition", since: decoding, cold: false, calls: 1)
+        try Task.checkCancellation()
+        return try Self.transcription(from: results)
     }
 
     func unload() async {
@@ -333,7 +342,8 @@ struct WhisperDictationBackend {
         self.transcribeHook = transcribe
         self.segmentTranscribeHook = segmentTranscribe
     }
-    static let supportedLanguageCodes = Set(LanguageCatalog.all.map(\.code))
+    /// Recognition tokens from the pinned WhisperKit vocabulary, not translation targets.
+    static let supportedLanguageCodes = Constants.languageCodes
     @Defaults(rawKey: "whisperDictationModel") static var model = ModelChoice.base
     static var isSelected: Bool {
         get { UserDefaults.standard.bool(forKey: "whisperDictationSelected") }
@@ -343,8 +353,26 @@ struct WhisperDictationBackend {
         get { let stored = UserDefaults.standard.string(forKey: "whisperDictationLocale") ?? "auto"; let value = canonicalLocale(stored); if value != stored { UserDefaults.standard.set(value, forKey: "whisperDictationLocale") }; return value }
         set { UserDefaults.standard.set(canonicalLocale(newValue), forKey: "whisperDictationLocale") }
     }
-    private static func canonicalLocale(_ id: String) -> String { guard id != "auto" else { return id }; let c = Locale(identifier: id).identifier(.bcp47), b = c.split(separator: "-").first.map(String.init) ?? c; return supportedLanguageCodes.contains(c) || supportedLanguageCodes.contains(b) ? c : "auto" }
-    static func decodingOptions(for locale: Locale) throws -> DecodingOptions { if locale.identifier == "auto" { return DecodingOptions(language: nil, detectLanguage: true) }; let c = locale.identifier(.bcp47), b = c.split(separator: "-").first.map(String.init) ?? c; guard supportedLanguageCodes.contains(c) || supportedLanguageCodes.contains(b) else { throw WhisperDictationError.unsupportedLocale(locale.identifier) }; return DecodingOptions(language: b, detectLanguage: false) }
+    /// Preserve ICU's regional/script aliases while returning a model-native token.
+    static func sourceLanguageCode(for identifier: String) -> String? {
+        let canonical = Locale(identifier: identifier).identifier(.bcp47)
+        let base = canonical.split(separator: "-").first.map(String.init) ?? canonical
+        let native = ["fil": "tl", "nb": "no", "jv": "jw"][base] ?? base
+        return supportedLanguageCodes.contains(native) ? native : nil
+    }
+
+    private static func canonicalLocale(_ id: String) -> String {
+        guard id != "auto" else { return id }
+        return sourceLanguageCode(for: id) != nil ? Locale(identifier: id).identifier(.bcp47) : "auto"
+    }
+
+    static func decodingOptions(for locale: Locale) throws -> DecodingOptions {
+        if locale.identifier == "auto" { return DecodingOptions(language: nil, detectLanguage: true) }
+        guard let code = sourceLanguageCode(for: locale.identifier) else {
+            throw WhisperDictationError.unsupportedLocale(locale.identifier)
+        }
+        return DecodingOptions(language: code, detectLanguage: false)
+    }
     static func transcribe(locale: Locale, using body: () throws -> Void) throws { _ = try decodingOptions(for: locale); try body() }
     private static func folder(_ c: ModelChoice, _ root: URL) -> URL { root.appendingPathComponent(c.folderName, isDirectory: true) }
     private static func required(_ c: ModelChoice, _ root: URL) -> Bool {
@@ -551,7 +579,7 @@ struct WhisperDictationBackend {
                     try Task.checkCancellation()
                     let audio = Array(samples[region.audioRange])
                     guard !audio.isEmpty else { continue }
-                    let decoded = await loaded.transcribe(audio, options: options)
+                    let decoded = try await loaded.transcribe(audio, options: options)
                     let text = decoded.text.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !text.isEmpty {
                         transcripts.append(DictationRegionTranscript(text: text,
@@ -580,7 +608,7 @@ struct WhisperDictationBackend {
     private static let realTranscribe: Transcription = { id, f, s, o in
         let key = WhisperModelCacheKey(identifier: id, folderPath: f.path)
         return try await Self.modelCache.withModel(for: key) { loaded in
-            let result = await loaded.transcribe(s, options: o)
+            let result = try await loaded.transcribe(s, options: o)
             return result.text
         }
     }

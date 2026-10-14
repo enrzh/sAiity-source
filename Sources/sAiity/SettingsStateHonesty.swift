@@ -28,8 +28,8 @@ struct SettingsStateHonesty: Equatable {
             cleanupEnabled: cleanupEnabled && cleanupReady)
     }
 
-    /// "Not set" only while no recognizer is chosen. A model that identifies
-    /// the language from audio has no locale to display, so the row says Auto.
+    /// "Not set" only while no recognizer is chosen. Auto describes the
+    /// recognition mode, independently of declared coverage or exposed tags.
     static func languageLabel(for engine: ASREngine?) -> String {
         guard let engine else { return String(localized: "Not set") }
         // A legacy value is not a user-selectable English-only mode. Treat it
@@ -38,7 +38,7 @@ struct SettingsStateHonesty: Equatable {
         guard let visible = ASREngine.visibleSelection(engine) else {
             return String(localized: "Auto")
         }
-        if visible.identifiesLanguageFromAudio { return String(localized: "Auto") }
+        if visible.automaticallyRecognizesLanguage { return String(localized: "Auto") }
         return String(localized: "English only")
     }
 

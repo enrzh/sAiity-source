@@ -8,7 +8,7 @@
 # `NSBundle.allBundles()` looking for a resource bundle, and falls back to a path
 # resolved against the running binary. Under the test runner, `Bundle.main` is
 # Xcode's helper tool rather than the app, so the bundle that works perfectly in
-# `build/sAiity.app` is invisible. `build-app.sh` solves it for the app by running
+# `build/Syllivra.app` is invisible. `build-app.sh` solves it for the app by running
 # xcodebuild for the Cmlx target and embedding `mlx-swift_Cmlx.bundle`; nothing did
 # that for the test bundle, which is why `MADLADRealModelTests` recorded the same
 # failure as an unfixable dead end.
@@ -31,7 +31,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-APP_BUNDLE="build/sAiity.app/Contents/Resources/mlx-swift_Cmlx.bundle"
+APP_BUNDLE="build/Syllivra.app/Contents/Resources/mlx-swift_Cmlx.bundle"
 TESTS=".build/out/Products/Release/sAiityTests.xctest"
 MACOS_DIR="$TESTS/Contents/MacOS"
 

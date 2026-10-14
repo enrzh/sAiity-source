@@ -2,8 +2,8 @@ import AppKit
 import Foundation
 
 // Scriptable export, so transcripts are usable outside the menu:
-//   sAiity --list
-//   sAiity --export srt|md|txt [sessionId]     (default: most recent)
+//   Syllivra --list
+//   Syllivra --export srt|md|txt [sessionId]     (default: most recent)
 //
 // The dispatch table is `CommandLinePlan`, which is pure and tested. Only
 // --selftest needs the app itself: everything else answers from argv and exits
@@ -19,7 +19,7 @@ if let plan {
         // build that prints its version has proved it can start.
         let v = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
         let b = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
-        print("sAiity \(v ?? "unbundled") (\(b ?? "0"))")
+        print("Syllivra \(v ?? "unbundled") (\(b ?? "0"))")
     case .list:
         let df = ISO8601DateFormatter()
         for s in TranscriptStore.list() {
@@ -38,7 +38,7 @@ if let plan {
         case "vtt": print(Export.vtt(segs))
         case "md":  print(Export.markdown(segs, meta: session.meta,
                                           summary: TranscriptSummaryStore.read(session), localized: false))
-        default:    print(Export.txt(segs))
+        default:    print(Export.txt(segs, meta: session.meta))
         }
     case .openApp(let verb):
         // Routed through the saiity:// scheme so the verb lands in the RUNNING
@@ -83,6 +83,13 @@ nonisolated(unsafe) var delegateRef: AnyObject?
 // the process entry point — so assumeIsolated states that rather than
 // scheduling work that would not run until after `app.run()` takes over.
 let app = NSApplication.shared
+if smokeTimeout != nil {
+    var arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+    arguments["dictationEnabled"] = false
+    arguments["transcriptRetentionDays"] = 0
+    arguments["onboardingCompletedVersion"] = Onboarding.currentVersion
+    UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+}
 MainActor.assumeIsolated {
     // Even a menu-bar app needs a functioning Edit menu: without one, the
     // standard editing shortcuts do nothing in any text field the app shows —

@@ -98,10 +98,10 @@ jobs:
 
       - name: Smoke-test app bundle
         run: |
-          plutil -lint build/sAiity.app/Contents/Info.plist
-          test -x build/sAiity.app/Contents/MacOS/sAiity
-          codesign --verify --deep --strict build/sAiity.app
-          build/sAiity.app/Contents/MacOS/sAiity --version
+          plutil -lint build/Syllivra.app/Contents/Info.plist
+          test -x build/Syllivra.app/Contents/MacOS/Syllivra
+          codesign --verify --deep --strict build/Syllivra.app
+          build/Syllivra.app/Contents/MacOS/Syllivra --version
 
       # The step above proves the binary starts and can read its own bundle.
       # This one launches the app for real: a genuine NSApplication, the real
@@ -109,10 +109,10 @@ jobs:
       # run loop, and a window ordered in and out. Everything a menu-bar app
       # can get wrong while still answering --version.
       - name: Launch smoke test
-        run: build/sAiity.app/Contents/MacOS/sAiity --selftest
+        run: build/Syllivra.app/Contents/MacOS/Syllivra --selftest
 
       - name: Verify release bundle hardening
-        run: ./scripts/verify-release.sh build/sAiity.app
+        run: ./scripts/verify-release.sh build/Syllivra.app
 
       - name: Check model matrix harness
         run: ./scripts/model-matrix.sh --check-only

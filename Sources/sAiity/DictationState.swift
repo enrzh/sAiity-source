@@ -151,6 +151,30 @@ struct DictationToastPresentation: Equatable, Sendable {
     let value: String
 }
 
+struct RecentDictationResult: Equatable, Identifiable {
+    let id: UUID
+    let completedAt: Date
+    let result: DictationResultSnapshot
+    let delivery: TextInsertionResult
+
+    static func retaining(_ entry: Self, in current: [Self], enabled: Bool) -> [Self] {
+        guard enabled else { return [] }
+        guard !entry.delivery.secureTargetObserved,
+              !current.contains(where: { $0.id == entry.id }),
+              entry.result.rawText.count + entry.result.outputText.count <= 100_000 else { return current }
+        var values = Array((current + [entry]).suffix(5))
+        while values.reduce(0, { $0 + $1.result.rawText.count + $1.result.outputText.count }) > 100_000 {
+            values.removeFirst()
+        }
+        return values
+    }
+}
+
+func usesOriginalText(bundleIdentifier: String?, exceptions: Set<String>) -> Bool {
+    guard let bundleIdentifier else { return false }
+    return exceptions.contains(bundleIdentifier)
+}
+
 extension DictationPhase {
     var toastPresentation: DictationToastPresentation {
         switch self {

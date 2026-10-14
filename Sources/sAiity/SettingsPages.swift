@@ -1,8 +1,10 @@
 import AppKit
+import AVFoundation
 import ApplicationServices
 import Carbon.HIToolbox
 import CoreGraphics
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - Models
 
@@ -14,6 +16,7 @@ import SwiftUI
 /// honestly: they can be measured but no app can delete them.
 struct ModelsView: View {
     @Bindable var state: AppState
+    @State private var showsModelDetails = false
 
     /// Recommended first, otherwise registry order. The Recognition section
     /// used to open with the fast Nemotron tier — the ~640 MB variant whose own
@@ -49,7 +52,7 @@ struct ModelsView: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14) {
+            LazyVStack(alignment: .leading, spacing: 20) {
                 HStack(alignment: .center, spacing: 14) {
                     Image(systemName: "internaldrive")
                         .font(.title3)
@@ -87,18 +90,6 @@ struct ModelsView: View {
                                 .controlSize(.small)
                                 .help("Check downloaded models again")
                             }
-                            if !interruptedDownloads.isEmpty || state.retiredPartialBytes > 0 {
-                                Button("Clear Interrupted…", role: .destructive) {
-                                    confirmClearInterrupted()
-                                }
-                                .controlSize(.small)
-                                .disabled(state.isModelsLoading || state.hasActiveDownloads)
-                                .help("Delete interrupted downloads without removing completed models.")
-                            }
-                            if state.ownedBytes > 0 {
-                                Button("Remove All…", role: .destructive) { confirmRemoveAll() }
-                                    .controlSize(.small)
-                            }
                         }
                     }
                 }
@@ -128,6 +119,25 @@ struct ModelsView: View {
                     }
                 }
 
+                SettingsDisclosure(isExpanded: $showsModelDetails) {
+                    SettingsSection(title: "Models") {
+                        if !interruptedDownloads.isEmpty || state.retiredPartialBytes > 0 {
+                            Button("Clear Interrupted…", role: .destructive) {
+                                confirmClearInterrupted()
+                            }
+                            .controlSize(.small)
+                            .disabled(state.isModelsLoading || state.hasActiveDownloads)
+                            .help("Delete interrupted downloads without removing completed models.")
+                        }
+                        if state.ownedBytes > 0 {
+                            Button("Remove All…", role: .destructive) { confirmRemoveAll() }
+                                .controlSize(.small)
+                        }
+                        Button("Manage") { state.showLocalModels = true }
+                            .controlSize(.small)
+                    }
+                }
+
                 if let e = state.modelError {
                     SettingsSection(title: "Model issue",
                                     subtitle: "The last model operation needs attention.") {
@@ -142,6 +152,7 @@ struct ModelsView: View {
             .frame(maxWidth: 780, alignment: .leading)
         }
         .task { await state.refreshModelsAsync() }
+        .sheet(isPresented: $state.showLocalModels) { LocalModelsView(state: state) }
     }
 
     @ViewBuilder
@@ -258,9 +269,19 @@ struct DictationView: View {
     @State private var whisperReady: Bool?
     @State private var whisperBusy = false
     @State private var showsProcessingDetails = false
+    @State private var recentCopyNote: String?
 
     private func openModels() {
         SettingsWindowController.selectModelsPane()
+    }
+
+    private var whisperSourceLanguages: [AppLanguage] {
+        var codes = WhisperDictationBackend.supportedLanguageCodes
+        let chosen = WhisperDictationBackend.locale
+        if WhisperDictationBackend.sourceLanguageCode(for: chosen) != nil { codes.insert(chosen) }
+        return codes.map(AppLanguage.init(code:)).sorted {
+            $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+        }
     }
 
     internal static func cleanupAssets(from assets: [AssetStatus]) -> [AssetStatus] {
@@ -321,12 +342,18 @@ struct DictationView: View {
         "\(state.dictationRecognizer.rawValue)|\(WhisperDictationBackend.model.rawValue)"
     }
 
+    static func cleanupDownloadAction(file: String,
+                                      selected: () -> String?,
+                                      download: () async -> Bool,
+                                      enable: () -> Void) async {
+        guard await download(), selected() == file else { return }
+        enable()
+    }
+
     @ViewBuilder
     private var cleanupModelControls: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // The chooser lives in Quick controls now. What stays here is
-            // what is genuinely a detail: which model this is, whether its
-            // bytes are on this Mac, and the control that fetches them.
+            // Selection and repair stay in Quick controls; only model notes live here.
             if let model = state.llmModel {
                 HStack(alignment: .top, spacing: 8) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -334,20 +361,7 @@ struct DictationView: View {
                         Text(model.sizeText).font(.caption2).foregroundStyle(.tertiary)
                     }
                     Spacer(minLength: 8)
-                    if let asset = state.assets.first(where: { $0.id == AssetID.llm(file: model.file) }) {
-                        AssetControl(state: state, status: asset)
-                    }
                 }
-            } else {
-                // Not "Ready": with the chooser moved out of this section a
-                // bare checkmark no longer has a picker beside it to say what
-                // it is ready *for*, and the truth is that there is no
-                // cleanup model at all. This key was already translated and
-                // had no source use left.
-                Label("Download a compatible local cleanup model under Models.",
-                      systemImage: "arrow.down.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             Button("Manage") { state.showLocalModels = true }
@@ -377,7 +391,7 @@ struct DictationView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 20) {
                 quickSettings
                 SettingsDisclosure(isExpanded: $showsProcessingDetails) {
                     detailSettings
@@ -416,20 +430,135 @@ struct DictationView: View {
         .sheet(isPresented: $state.showLocalModels) {
             LocalModelsView(state: state)
         }
+        .sheet(isPresented: $state.showsRecentDictations) {
+            recentDictationsSheet.onAppear { recentCopyNote = nil }
+        }
+    }
+
+    private var recentDictationsSheet: some View {
+        SheetShell(title: "Recent Dictations", subtitle: "Kept only in memory until you quit Syllivra.",
+                   width: 600, height: 480, minimumSize: CGSize(width: 460, height: 320)) {
+            VStack(alignment: .leading, spacing: 12) {
+                if state.recentDictations.isEmpty {
+                    ContentUnavailableView("No Recent Dictations", systemImage: "clock",
+                        description: Text("Enable recent dictations in More options to keep your next results until quitting."))
+                } else {
+                    List(Array(state.recentDictations.reversed())) { entry in
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text(entry.completedAt.formatted(date: .omitted, time: .shortened))
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Text(entry.delivery.outcome == .insertedAndCopied ? String(localized: "Inserted and copied") :
+                                     entry.delivery.outcome == .copyFailed ? String(localized: "Copy failed") : String(localized: "Copied to Clipboard"))
+                                    .font(.callout)
+                            }
+                            Text(verbatim: entry.result.outputText).textSelection(.enabled)
+                            HStack {
+                                Button("Copy Result") { copyRecentText(entry.result.outputText) }
+                                if let original = entry.result.originalForRecovery {
+                                    Button("Copy Original") { copyRecentText(original) }
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                        .padding(.vertical, 8)
+                    }
+                    Button("Clear Recent Dictations") { state.recentDictations.removeAll() }
+                        .buttonStyle(.bordered)
+                }
+                if let note = recentCopyNote {
+                    Label(note, systemImage: "doc.on.clipboard").font(.callout)
+                }
+            }
+            .padding(16)
+        }
+    }
+
+    private func copyRecentText(_ text: String) {
+        recentCopyNote = TextInserter().copy(text).outcome == .copied
+            ? String(localized: "Copied to Clipboard") : String(localized: "Copy failed — try again.")
+    }
+
+    private func addOriginalTextApplication() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.applicationBundle]
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.prompt = String(localized: "Add Application")
+        guard panel.runModal() == .OK, let url = panel.url, let id = Bundle(url: url)?.bundleIdentifier else { return }
+        state.originalTextApplications.append(id)
+    }
+
+    private var recoveryAndApplications: some View {
+        SettingsSection(title: "Recovery") {
+            Toggle("Keep the last 5 dictations until quitting", isOn: $state.keepRecentDictations)
+            Text("Off by default. Results stay in memory only; turning this off clears the recent list.")
+                .font(.callout).foregroundStyle(.secondary)
+            Button("Recent Dictations…") {
+                recentCopyNote = nil
+                state.showsRecentDictations = true
+            }
+        }
+    }
+
+    private var applicationExceptions: some View {
+        SettingsSection(title: "Application Exceptions",
+                        subtitle: "Use original recognition text in these apps. Cleanup, corrections and translation are off for each recording started there.") {
+            ForEach(state.originalTextApplications, id: \.self) { id in
+                HStack {
+                    Text(verbatim: NSWorkspace.shared.urlForApplication(withBundleIdentifier: id)
+                        .map { FileManager.default.displayName(atPath: $0.path) } ?? id)
+                    Spacer()
+                    Button("Remove") { state.originalTextApplications.removeAll { $0 == id } }
+                }
+            }
+            Button("Add Application…", action: addOriginalTextApplication).buttonStyle(.bordered)
+        }
     }
 
     @ViewBuilder
     private var detailSettings: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            // The translation engine moved up to Quick controls, next to the
-            // target it translates into.
-
-            // Only Whisper Auto's own configuration is here. The path picker
-            // and the streaming model moved up because the model is only
-            // meaningful beside the fork that selects it; leaving either
-            // behind would split one choice across a disclosure boundary.
-            if state.dictationRecognizer == .whisper {
-                SettingsSection(title: "Recognition") {
+        VStack(alignment: .leading, spacing: 20) {
+            recoveryAndApplications
+            applicationExceptions
+            SettingsSection(title: "Recognition") {
+                HStack {
+                    Label("Dictation engine", systemImage: "arrow.triangle.branch")
+                    Spacer()
+                    Picker("Dictation engine", selection: $state.dictationRecognizer) {
+                        Text("Streaming").tag(DictationRecognizer.streaming)
+                        Text("Whisper Auto").tag(DictationRecognizer.whisper)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                }
+                if state.dictationRecognizer == .streaming {
+                    HStack {
+                        Label("Streaming model", systemImage: "cpu")
+                        Spacer()
+                        Picker("Streaming model", selection: $state.dictationEngine) {
+                            Text("Not set").tag(Optional<ASREngine>.none)
+                            ForEach(ASREngine.userSelectableCases, id: \.self) { engine in
+                                Text(verbatim: engine.displayName).tag(Optional(engine))
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .help(state.dictationEngine?.summary ?? ASREngine.recommended.summary)
+                    }
+                    if state.dictationEngine == .nemotron {
+                        Picker("Subtitle timing", selection: $state.dictationNemotronTier) {
+                            Text("Balanced").tag(2240)
+                            Text("Realtime").tag(1120)
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                    Toggle("Realtime text", isOn: $state.dictationRealtimeText)
+                        .help("The words appear as they are spoken, and the finished text replaces them when dictation ends.")
+                }
+                if state.dictationRecognizer == .whisper {
                     Picker("Whisper model", selection: Binding(
                         get: { WhisperDictationBackend.model },
                         set: { choice in
@@ -443,12 +572,14 @@ struct DictationView: View {
                     .pickerStyle(.segmented)
                     Picker("Language", selection: Binding(get: { WhisperDictationBackend.locale }, set: { WhisperDictationBackend.locale = $0 })) {
                         Text("Automatic").tag("auto")
-                        ForEach(LanguageCatalog.all, id: \.code) { language in
+                        ForEach(whisperSourceLanguages, id: \.code) { language in
                             Text(language.displayName).tag(language.code)
                         }
                     }
-                    whisperStatus
                 }
+            }
+            SettingsSection(title: "Translation") {
+                translationSettings.engineControls
             }
 
             SettingsSection(title: "Cleanup details") {
@@ -467,8 +598,6 @@ struct DictationView: View {
                                                    updated.hidden = !visible
                                                    state.dictationStyle = updated
                                              }))
-                BubbleStylePresetControl(style: $state.dictationStyle, context: .dictation)
-                MatchedFontSizeControl(style: $state.dictationStyle, context: .dictation)
                 Text("Layout").font(.subheadline.weight(.medium))
                 BubbleSurfaceControls(style: $state.dictationStyle)
                 HStack {
@@ -527,83 +656,56 @@ struct DictationView: View {
                 DictationShortcutRecorder(state: state)
                     .frame(width: 220, height: 30)
             }
+            Button("Try Dictation") { OnboardingWindowController.shared.show(state: state, trial: .dictation) }
+                .buttonStyle(.bordered)
+                .disabled(CaptionSession.shared.isRunning || CaptionSession.shared.isProcessingTranscript)
+            if state.dictationUsesOriginalText {
+                Label("Original text for this app · cleanup and translation off", systemImage: "text.quote")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
             Picker("Dictation profile", selection: Binding(
                 get: { state.dictationProfile },
                 set: { state.dictationProfile = $0 })) {
                 ForEach(DictationProfile.allCases.filter { $0 != .custom }, id: \.self) { profile in
                     Text(profile.displayName).tag(profile)
+                        .help(Self.profileExplanation(profile))
                 }
             }
             .pickerStyle(.segmented)
+            Text(Self.profileExplanation(state.dictationProfile))
+                .font(.caption).foregroundStyle(.secondary)
+            if state.dictationRecognizer == .whisper {
+                Text("Using Whisper Auto · \(WhisperDictationBackend.model.description.capitalized)")
+                    .font(.caption).foregroundStyle(.secondary)
+                whisperStatus
+            } else {
+                let engine = state.dictationEngine ?? ASREngine.dictationEffective
+                Text("Using \(engine.displayName)")
+                    .font(.caption).foregroundStyle(.secondary)
+                ForEach(engine.assetDescriptors.filter {
+                    engine != .nemotron || $0.id == AssetID.nemotron(chunkMs: state.dictationNemotronTier)
+                }, id: \.id) { asset in
+                    let status = state.assets.first(where: { $0.id == asset.id }) ?? ModelRegistry.status(of: asset)
+                    if state.needsModelRepair(status) {
+                        HStack {
+                            Text(asset.title).font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            AssetControl(state: state, status: status)
+                        }
+                    }
+                }
+            }
             if state.dictationProfile == .custom {
                 Label("Custom settings", systemImage: "slider.horizontal.3")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            // Both controls the Recognition section behind the disclosure used
-            // to hold. The path comes with the model rather than staying put:
-            // the model only decides anything on the Streaming path, so
-            // leaving the fork behind would make this row appear and vanish
-            // with no visible cause on this page.
-            //
-            // `arrow.triangle.branch` marks the fork. `cpu` below is the same
-            // symbol the Captions model row and both translator rows carry,
-            // so every "which model runs this job" control looks alike.
-            HStack {
-                Label("Dictation engine", systemImage: "arrow.triangle.branch")
-                Spacer()
-                Picker("Dictation engine", selection: $state.dictationRecognizer) {
-                    Text("Streaming").tag(DictationRecognizer.streaming)
-                    Text("Whisper Auto").tag(DictationRecognizer.whisper)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-            }
-            if state.dictationRecognizer == .streaming {
-                HStack {
-                    Label("Streaming model", systemImage: "cpu")
-                    Spacer()
-                    Picker("Streaming model", selection: $state.dictationEngine) {
-                        Text("Not set").tag(Optional<ASREngine>.none)
-                        ForEach(ASREngine.userSelectableCases, id: \.self) { engine in
-                            Text(verbatim: engine.displayName).tag(Optional(engine))
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .help(state.dictationEngine?.summary ?? ASREngine.recommended.summary)
-                }
-                // Travels with the picker for the same reason it does on the
-                // Captions page: it describes the row directly above.
-                if state.dictationEngine?.needsDownload == true {
-                    Label("Not downloaded yet — see Models.", systemImage: "arrow.down.circle")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                }
-
-                // Display, but it belongs to this block for the same reason the
-                // model row does: it only exists on Streaming, which has
-                // partials to show. Whisper Auto records the whole utterance
-                // before it recognises a word of it, so there is nothing to
-                // display until the result — and a switch that could do nothing
-                // would be worse than one that is not offered, which is the call
-                // the model row above makes for the same reason.
-                Toggle("Realtime text", isOn: $state.dictationRealtimeText)
-                    .help("The words appear as they are spoken, and the finished text replaces them when dictation ends.")
-            }
-
             Divider()
 
             Toggle("Translate dictated text", isOn: $state.translateDictation)
                 .disabled(state.dictationTranslateTo?.isEmpty != false)
-            TranslationSettingsRows(target: $state.dictationTranslateTo,
-                                    engine: Binding(
-                                        get: { state.dictationTranslationEngine ?? TranslationEngine.dictationEffective },
-                                        set: { state.dictationTranslationEngine = $0 }),
-                                    engines: TranslationEngine.userSelectableCases) {
-                state.showDictationTranslationPicker = true
-            }
+            translationSettings.targetControls
 
             Divider()
 
@@ -631,10 +733,48 @@ struct DictationView: View {
             // `dictationCleanupEnabled` false, so without this the row would
             // read as a live selection that quietly does nothing.
             if let model = state.llmModel, !model.isDownloaded {
-                Label("Not downloaded yet — see Models.", systemImage: "arrow.down.circle")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+                HStack {
+                    Text(model.sizeText).font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    if let asset = state.assets.first(where: { $0.id == AssetID.llm(file: model.file) }) {
+                        if state.activeDownload == asset.id {
+                            AssetControl(state: state, status: asset)
+                        } else {
+                            Button("Download & Use") {
+                                Task {
+                                    await Self.cleanupDownloadAction(file: model.file,
+                                        selected: { state.llmModel?.file },
+                                        download: { await state.download(asset.asset) },
+                                        enable: { state.dictationCleanupEnabled = model.isCleanupCompatible() })
+                                }
+                            }
+                            .disabled(state.activeDownload != nil)
+                        }
+                    }
+                }
             }
+        }
+        SettingsSection(title: "Bubble appearance") {
+            BubbleStylePresetControl(style: $state.dictationStyle, context: .dictation)
+        }
+    }
+
+    private var translationSettings: TranslationSettingsRows {
+        TranslationSettingsRows(target: $state.dictationTranslateTo,
+                                engine: Binding(
+                                    get: { state.dictationTranslationEngine ?? TranslationEngine.dictationEffective },
+                                    set: { state.dictationTranslationEngine = $0 }),
+                                engines: TranslationEngine.userSelectableCases, state: state) {
+            state.showDictationTranslationPicker = true
+        }
+    }
+
+    static func profileExplanation(_ profile: DictationProfile) -> String {
+        switch profile {
+        case .fast: String(localized: "Streams words with faster updates and skips model cleanup.")
+        case .balanced: String(localized: "Streams words with more context per update, then uses available cleanup.")
+        case .accurate: String(localized: "Recognizes the full recording after release, then uses available cleanup.")
+        case .custom: String(localized: "Uses your chosen recognition, timing and cleanup settings.")
         }
     }
 
@@ -770,7 +910,7 @@ struct DictationView: View {
     }
 }
 
-private struct DictationShortcutRecorder: NSViewRepresentable {
+struct DictationShortcutRecorder: NSViewRepresentable {
     @Bindable var state: AppState
 
     func makeNSView(context: Context) -> RecorderView {
@@ -790,6 +930,7 @@ private struct DictationShortcutRecorder: NSViewRepresentable {
         var onChange: ((DictationChord) -> Void)?
         private var recording = false
         private var capture = DictationChordCaptureState()
+        private var eventMonitor: Any?
         private let label = NSTextField(labelWithString: "")
 
         override init(frame: NSRect) {
@@ -816,6 +957,24 @@ private struct DictationShortcutRecorder: NSViewRepresentable {
         required init?(coder: NSCoder) { fatalError() }
         override var acceptsFirstResponder: Bool { true }
 
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            super.hitTest(point) == nil ? nil : self
+        }
+
+        override func viewWillMove(toWindow newWindow: NSWindow?) {
+            if newWindow == nil { endRecording() }
+            NotificationCenter.default.removeObserver(self, name: NSWindow.didResignKeyNotification, object: window)
+            if let newWindow {
+                NotificationCenter.default.addObserver(self, selector: #selector(stopRecordingWhenWindowDeactivates(_:)),
+                                                       name: NSWindow.didResignKeyNotification, object: newWindow)
+            }
+            super.viewWillMove(toWindow: newWindow)
+        }
+
+        @objc private func stopRecordingWhenWindowDeactivates(_ notification: Notification) {
+            endRecording()
+        }
+
         func refresh() {
             let assigned = chord.displayString
             let text = ShortcutRecorderChrome.label(
@@ -839,12 +998,13 @@ private struct DictationShortcutRecorder: NSViewRepresentable {
         }
 
         private func beginRecording() {
-            guard !recording else { return }
+            guard !recording, let window, window.makeFirstResponder(self) else { return }
             recording = true
             capture.reset()
+            HotKeyCenter.shared.setSuspended(true)
+            eventMonitor = Shortcut.monitorEvents(in: self)
             NotificationCenter.default.post(name: .saiityDictationShortcutRecordingChanged,
                                             object: true)
-            window?.makeFirstResponder(self)
             refresh()
         }
 
@@ -852,6 +1012,9 @@ private struct DictationShortcutRecorder: NSViewRepresentable {
             guard recording else { return }
             recording = false
             capture.reset()
+            if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
+            eventMonitor = nil
+            HotKeyCenter.shared.setSuspended(false)
             NotificationCenter.default.post(name: .saiityDictationShortcutRecordingChanged,
                                             object: false)
             refresh()
@@ -868,6 +1031,17 @@ private struct DictationShortcutRecorder: NSViewRepresentable {
         }
         override func accessibilityPerformPress() -> Bool {
             beginRecording()
+            return recording
+        }
+
+        override var focusRingMaskBounds: NSRect { bounds }
+        override func drawFocusRingMask() {
+            NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6).fill()
+        }
+
+        override func performKeyEquivalent(with event: NSEvent) -> Bool {
+            guard recording, window?.firstResponder === self else { return false }
+            keyDown(with: event)
             return true
         }
 
@@ -879,6 +1053,10 @@ private struct DictationShortcutRecorder: NSViewRepresentable {
         }
 
         override func keyDown(with event: NSEvent) {
+            if !recording, event.keyCode == UInt16(kVK_Space) || event.keyCode == UInt16(kVK_Return) {
+                beginRecording()
+                return
+            }
             guard recording else { super.keyDown(with: event); return }
             if event.keyCode == UInt16(kVK_Escape) {
                 endRecording()
@@ -917,7 +1095,7 @@ struct CaptionsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 20) {
                 primaryAction
                 quickSettings
                 SettingsDisclosure(isExpanded: $showsProcessingDetails) {
@@ -965,7 +1143,7 @@ struct CaptionsView: View {
             Button {
                 NotificationCenter.default.post(name: .saiityToggleCaptions, object: nil)
             } label: {
-                Label(state.isCaptioning ? "Stop captions" : "Start captions",
+                Label(CaptionSession.shared.isStopping ? "Stopping…" : state.isCaptioning ? "Stop captions" : "Start captions",
                       systemImage: state.isCaptioning ? "stop.fill" : "captions.bubble.fill")
                     .frame(minWidth: 132)
             }
@@ -977,18 +1155,61 @@ struct CaptionsView: View {
             // on the pane. This one is accent-filled and unambiguous.
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            Text(state.isCaptioning
-                 ? "Captions are running."
-                 : "Captions run on this Mac. Nothing is uploaded.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+            .disabled(CaptionSession.shared.isStopping)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(CaptionSession.shared.isStopping ? "Stopping…" : state.isCaptioning
+                     ? "Captions are running."
+                     : "Captions run on this Mac. Nothing is uploaded.")
+                    .font(.callout)
+                if CaptionSession.shared.translationBacklogged {
+                    Label("Translation is too slow; some lines are untranslated. Original captions continue.", systemImage: "clock")
+                        .font(.caption)
+                }
+            }
+            .foregroundStyle(.secondary)
             Spacer(minLength: 0)
         }
     }
 
     @ViewBuilder
     private var detailSettings: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 20) {
+            SettingsSection(title: "Recognition") {
+                HStack {
+                    Label("Recognition model", systemImage: "cpu")
+                    Spacer()
+                    Picker("Recognition model", selection: $state.engine) {
+                        Text("Not set").tag(Optional<ASREngine>.none)
+                        ForEach(ASREngine.userSelectableCases, id: \.self) { engine in
+                            Text(verbatim: engine.displayName).tag(Optional(engine))
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    // The long version — why one model over another — is too long
+                    // for a menu item and would become an interpolated key
+                    // retranslated in four languages on every word change. It lives
+                    // in the tooltip, on the Models page, and in the caption below.
+                    .help(state.engine?.summary ?? ASREngine.recommended.summary)
+                }
+            }
+            SettingsSection(title: "Translation") {
+                translationSettings.engineControls
+            }
+            SettingsSection(title: "Shortcuts",
+                            subtitle: "Global controls for starting and stopping captions.") {
+                ForEach(HotKeyCenter.Action.allCases, id: \.self) { action in
+                    HStack {
+                        Text(action.title)
+                        Spacer()
+                        ShortcutRecorder(action: action, state: state)
+                    }
+                }
+                if let e = state.shortcutError {
+                    Text(e).font(.caption).foregroundStyle(.orange)
+                }
+            }
+
             SettingsSection(title: "Capture",
                             subtitle: "Choose which audio reaches the caption engine.") {
                 Picker("Capture audio from", selection: $state.captureApp) {
@@ -998,7 +1219,7 @@ struct CaptionsView: View {
                     }
                 }
                 LabeledToggle("Include my microphone",
-                              "Off by default. System audio on a call carries only the other participants — your own voice never enters the mix, so a saved transcript is missing your half of the conversation. On, sAiity also opens the microphone (macOS asks once) and mixes it into recognition. Audio still never leaves this Mac. Takes effect immediately, including mid-session: switching it off releases the microphone straight away.",
+                              "Off by default. System audio on a call carries only the other participants — your own voice never enters the mix, so a saved transcript is missing your half of the conversation. On, Syllivra also opens the microphone (macOS asks once) and mixes it into recognition. Audio still never leaves this Mac. Takes effect immediately, including mid-session: switching it off releases the microphone straight away.",
                                                             isOn: $state.includeMic)
                 LabeledToggle("Identify speakers",
                               "Adds local voice labels to captions and saved transcripts. Overlapping voices are marked; their words cannot be separated. Applies to the next caption session.",
@@ -1081,7 +1302,7 @@ struct CaptionsView: View {
 
     @ViewBuilder
     private var quickSettings: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 20) {
             SettingsSection(title: "Quick controls") {
                 LabeledToggle("Show the caption bubble",
                               "Hides the subtitles without stopping recognition, so you can keep a transcript running with nothing on screen.",
@@ -1092,38 +1313,9 @@ struct CaptionsView: View {
                                                 updated.hidden = !visible
                                                 state.style = updated
                                             }))
-                // The recognizer sits here rather than behind the disclosure for
-                // the same reason the translator does: it is the control that
-                // decides what the row below it reads, and "Language" is a
-                // read-out of this choice. Split across a disclosure boundary the
-                // two disagree whenever the model changes — you would edit one
-                // screen and see the consequence on another.
-                //
-                // `cpu` deliberately repeats the icon the translator row uses.
-                // Both rows pick which model runs a job, and saying so with one
-                // symbol is worth more here than giving every row a unique one.
-                HStack {
-                    Label("Recognition model", systemImage: "cpu")
-                    Spacer()
-                    Picker("Recognition model", selection: $state.engine) {
-                        Text("Not set").tag(Optional<ASREngine>.none)
-                        ForEach(ASREngine.userSelectableCases, id: \.self) { engine in
-                            Text(verbatim: engine.displayName).tag(Optional(engine))
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    // The long version — why one model over another — is too long
-                    // for a menu item and would become an interpolated key
-                    // retranslated in four languages on every word change. It lives
-                    // in the tooltip, on the Models page, and in the caption below.
-                    .help(state.engine?.summary ?? ASREngine.recommended.summary)
-                }
-                // These travel with the picker, not with the disclosure. Each one
-                // describes the state of the choice directly above; leaving them
-                // behind would strand every warning from the control that causes
-                // it, which is the mistake this row is the correction for.
                 if let engine = state.engine {
+                    Text("Using \(engine.displayName)")
+                        .font(.caption).foregroundStyle(.secondary)
                     Text(verbatim: engine.shortSummary)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -1135,13 +1327,21 @@ struct CaptionsView: View {
                             .font(.caption).foregroundStyle(.orange)
                     }
                 } else {
-                    Label("No recognition model chosen yet. \(ASREngine.recommended.displayName) is the one to start with: it handles any language and identifies it from the audio. Download it under Models.",
+                    Label("No recognition model chosen yet. \(ASREngine.recommended.displayName) is the recommended starting point for automatic multilingual recognition. Download it under Models.",
                           systemImage: "sparkles")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                if state.engine?.needsDownload == true {
-                    Label("Not downloaded yet — see Models.", systemImage: "arrow.down.circle")
-                        .font(.caption).foregroundStyle(.orange)
+                if let engine = state.engine, engine != .nemotron {
+                    ForEach(engine.assetDescriptors, id: \.id) { asset in
+                        let status = state.assets.first(where: { $0.id == asset.id }) ?? ModelRegistry.status(of: asset)
+                        if state.needsModelRepair(status) {
+                            HStack {
+                                Text(asset.title).font(.caption).foregroundStyle(.secondary)
+                                Spacer()
+                                AssetControl(state: state, status: status)
+                            }
+                        }
+                    }
                 }
                 if state.engine == .nemotron {
                     Picker("Subtitle timing", selection: $state.nemotronTier) {
@@ -1153,13 +1353,17 @@ struct CaptionsView: View {
                          ? "Words appear while speech continues, using the faster local model. Uses more processing power; text can still be revised."
                          : "Streaming words with more context per update and lower processing cost.")
                         .font(.caption).foregroundStyle(.secondary)
-                    if !NemotronEngine.isDownloaded(chunkMs: state.nemotronTier),
-                       let asset = ASREngine.nemotron.assetDescriptors.first(where: { $0.id == AssetID.nemotron(chunkMs: state.nemotronTier) }) {
-                        HStack {
-                            Text("Download this timing model before starting captions.")
-                                .font(.caption).foregroundStyle(.secondary)
-                            Spacer()
-                            AssetControl(state: state, status: state.assets.first(where: { $0.id == asset.id }) ?? ModelRegistry.status(of: asset))
+                    if let asset = ASREngine.nemotron.assetDescriptors.first(where: { $0.id == AssetID.nemotron(chunkMs: state.nemotronTier) }) {
+                        let status = state.assets.first(where: { $0.id == asset.id }) ?? ModelRegistry.status(of: asset)
+                        if state.needsModelRepair(status) {
+                            HStack {
+                                if !status.isInstalled {
+                                    Text("Download this timing model before starting captions.")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                    Spacer()
+                                }
+                                AssetControl(state: state, status: status)
+                            }
                         }
                     }
                 } else if state.engine == .qwen06 || state.engine == .qwen17 {
@@ -1187,17 +1391,7 @@ struct CaptionsView: View {
                                     state.style = updated
                                 }))
                     .disabled(state.translateTo?.isEmpty != false)
-                TranslationSettingsRows(target: $state.translateTo,
-                                        engine: Binding(
-                                            get: { state.translationEngine ?? .recommended },
-                                            set: { state.translationEngine = $0 }),
-                                        engines: TranslationEngine.userSelectableCases) {
-                    state.showTranslationPicker = true
-                }
-                // This notice warns about the engine-and-target pair, so it belongs
-                // with both of them. It came out of the detail section with the
-                // picker, and leaving it there would strand the warning from the
-                // control that causes it.
+                translationSettings.targetControls
                 if let t = state.translateTo, !state.targetSupportedByEngine {
                     TargetUnsupportedNotice(state: state, target: t)
                 }
@@ -1219,19 +1413,19 @@ struct CaptionsView: View {
                 }
             }
 
-            SettingsSection(title: "Shortcuts",
-                            subtitle: "Global controls for starting and stopping captions.") {
-                ForEach(HotKeyCenter.Action.allCases, id: \.self) { action in
-                    HStack {
-                        Text(action.title)
-                        Spacer()
-                        ShortcutRecorder(action: action, state: state)
-                    }
-                }
-                if let e = state.shortcutError {
-                    Text(e).font(.caption).foregroundStyle(.orange)
-                }
+            SettingsSection(title: "Bubble appearance") {
+                BubbleStylePresetControl(style: $state.style, context: .captions)
             }
+        }
+    }
+
+    private var translationSettings: TranslationSettingsRows {
+        TranslationSettingsRows(target: $state.translateTo,
+                                engine: Binding(
+                                    get: { state.translationEngine ?? .recommended },
+                                    set: { state.translationEngine = $0 }),
+                                engines: TranslationEngine.userSelectableCases, state: state) {
+            state.showTranslationPicker = true
         }
     }
 
@@ -1239,8 +1433,6 @@ struct CaptionsView: View {
     private var appearanceSections: some View {
         SettingsSection(title: "Bubble behavior",
                         subtitle: "Fine-tune the caption bubble and its interaction.") {
-            BubbleStylePresetControl(style: $state.style, context: .captions)
-            MatchedFontSizeControl(style: $state.style, context: .captions)
             LabeledToggle("Let clicks pass through the bubble",
                           "On, only the bubble's top strip can be grabbed and everything else clicks straight through to the video underneath — which matters, because the bubble sits over the scrubber. Off, you can drag it by any part of it.",
                                                     isOn: $state.captionClickThrough)
@@ -1338,16 +1530,18 @@ struct ResetButton: View {
 struct BubbleStylePresetControl: View {
     @Binding var style: CaptionStyle
     let context: BubbleStyleContext
+    @Environment(\.colorSchemeContrast) private var contrast
+    @State private var hoveredPreset: BubbleStylePreset?
 
     private var selectedPreset: BubbleStylePreset? {
         style.matchingPreset(for: context)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Preset")
-                    .font(.subheadline.weight(.medium))
+                    .font(.body.weight(.medium))
                 Spacer()
                 if selectedPreset == nil {
                     Label("Custom", systemImage: "slider.horizontal.3")
@@ -1356,72 +1550,107 @@ struct BubbleStylePresetControl: View {
                 }
             }
 
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: 8)], spacing: 8) {
-                ForEach(BubbleStylePreset.allCases, id: \.self) { preset in
-                    Button {
-                        style = preset.applying(to: style, context: context)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 8) {
-                            presetPreview(preset)
-                            HStack(spacing: 6) {
-                                Text(preset.title)
-                                    .font(.callout.weight(.medium))
-                                    .lineLimit(1)
-                                Spacer(minLength: 4)
-                                if selectedPreset == preset {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(.tint)
-                                }
-                            }
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
-                        .padding(10)
-                        .contentShape(RoundedRectangle(cornerRadius: 8))
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 12) {
+                    ForEach(BubbleStylePreset.allCases, id: \.self) { preset in
+                        presetButton(preset).frame(width: 150)
                     }
-                    .buttonStyle(.plain)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(selectedPreset == preset
-                                  ? Color.accentColor.opacity(0.12)
-                                  : Color(nsColor: .controlBackgroundColor))
-                    )
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(selectedPreset == preset
-                                    ? Color.accentColor
-                                    : Color.primary.opacity(0.12),
-                                    lineWidth: selectedPreset == preset ? 1.5 : 1)
+                }
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible())], spacing: 12) {
+                    ForEach(BubbleStylePreset.allCases, id: \.self) { preset in
+                        presetButton(preset)
                     }
-                    .accessibilityLabel(Text(preset.title))
-                    .accessibilityAddTraits(selectedPreset == preset ? .isSelected : [])
                 }
             }
 
+            MatchedFontSizeControl(style: $style, context: context)
+
             Text("Presets change appearance only. Behavior and translation settings stay unchanged.")
-                .font(.caption)
+                .font(.callout)
                 .foregroundStyle(.secondary)
         }
     }
 
+    private func presetButton(_ preset: BubbleStylePreset) -> some View {
+        Button {
+            style = preset.applying(to: style, context: context)
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                presetPreview(preset)
+                HStack(spacing: 6) {
+                    Text(preset.title)
+                        .font(.body.weight(.medium))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 4)
+                    if selectedPreset == preset {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.tint)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 100, alignment: .leading)
+            .padding(12)
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .background {
+            RoundedRectangle(cornerRadius: 10)
+                .fill(selectedPreset == preset
+                      ? Color.accentColor.opacity(0.12)
+                      : Color(nsColor: .controlBackgroundColor))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(selectedPreset == preset
+                        ? Color.accentColor
+                        : Color.primary.opacity(contrast == .increased ? 0.55 : hoveredPreset == preset ? 0.3 : 0.12),
+                        lineWidth: selectedPreset == preset ? 1.5 : 1)
+        }
+        .onHover { hoveredPreset = $0 ? preset : nil }
+        .help(Text(preset.title))
+        .accessibilityLabel(Text(preset.title))
+        .accessibilityAddTraits(selectedPreset == preset ? .isSelected : [])
+    }
+
     @ViewBuilder
     private func presetPreview(_ preset: BubbleStylePreset) -> some View {
-        HStack(spacing: 3) {
-            Capsule()
-                .fill(preset == .readable ? Color.primary : Color.primary.opacity(0.65))
-                .frame(width: preset == .readable ? 34 : 24, height: 5)
-            Capsule()
-                .fill(preset == .liquidGlass ? Color.accentColor : Color.secondary.opacity(0.65))
-                .frame(width: preset == .minimal ? 14 : 22, height: 5)
-            if preset == .liquidGlass {
-                Image(systemName: "drop.fill")
-                    .font(.caption2)
-                    .foregroundStyle(.tint)
+        let preview = preset.applying(to: style, context: context)
+        let scale = context == .captions ? 0.45 : 0.75
+        let shape = RoundedRectangle(cornerRadius: preview.cornerRadius * scale)
+        let width = context == .captions
+            ? 120 * preview.widthFraction : min(120, preview.dictationWidth * 0.24)
+        VStack(alignment: .leading, spacing: preview.lineGap * scale) {
+            if context == .dictation {
+                HStack(alignment: .center, spacing: 3) {
+                    ForEach(0..<9) { index in
+                        Capsule()
+                            .fill(.secondary)
+                            .frame(width: 3, height: CGFloat([4, 9, 15, 7, 20, 12, 17, 8, 4][index]))
+                    }
+                }
+            }
+            Text("See you tomorrow.")
+                .font(Font(NSFont.systemFont(ofSize: max(10, preview.original.fontSize * scale),
+                                             weight: .init(preview.original.weight))))
+                .foregroundStyle(.primary)
+            if context == .captions {
+                Text(verbatim: "Bis morgen.")
+                    .font(Font(NSFont.systemFont(ofSize: max(10, preview.translation.fontSize * scale),
+                                                 weight: .init(preview.translation.weight))))
+                    .foregroundStyle(.secondary)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 8)
-        .frame(height: 24)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+        .padding(8)
+        .frame(width: width, alignment: .leading)
+        .background {
+            if preview.glassStyle == CaptionStyle.liquidGlass {
+                shape.fill(Color.clear).glassEffect(.regular, in: shape)
+            } else {
+                shape.fill(.regularMaterial)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 80, alignment: .leading)
+        .accessibilityHidden(true)
     }
 }
 
@@ -1471,6 +1700,9 @@ struct BubbleSurfaceControls: View {
 
     var body: some View {
         Group {
+            LabeledToggle("Transparent background",
+                          "Use a translucent background. Turn off for a solid background. macOS accessibility settings take precedence.",
+                          isOn: styleBinding(\.backgroundIsTransparent))
             if includePositioning {
                 Picker("Sizing", selection: styleBinding(\.autoResize)) {
                     Text("Auto adjust").tag(true)
@@ -1577,7 +1809,7 @@ struct LabeledToggle: View {
 /// Click to arm, then the next keypress becomes the shortcut. Implemented as an
 /// NSView because SwiftUI has no way to intercept a raw keyDown with modifiers
 /// before the system interprets it.
-private struct ShortcutRecorder: NSViewRepresentable {
+struct ShortcutRecorder: NSViewRepresentable {
     let action: HotKeyCenter.Action
     @Bindable var state: AppState
 
@@ -1601,6 +1833,7 @@ private struct ShortcutRecorder: NSViewRepresentable {
         var action: HotKeyCenter.Action = .toggleCaptions
         var onChange: ((Shortcut?) -> Void)?
         private var recording = false
+        private var eventMonitor: Any?
         private let label = NSTextField(labelWithString: "")
 
         override init(frame: NSRect) {
@@ -1638,13 +1871,44 @@ private struct ShortcutRecorder: NSViewRepresentable {
         }
 
         override var acceptsFirstResponder: Bool { true }
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            super.hitTest(point) == nil ? nil : self
+        }
+
+        override func viewWillMove(toWindow newWindow: NSWindow?) {
+            if newWindow == nil { endRecording() }
+            NotificationCenter.default.removeObserver(self, name: NSWindow.didResignKeyNotification, object: window)
+            if let newWindow {
+                NotificationCenter.default.addObserver(self, selector: #selector(stopRecordingWhenWindowDeactivates(_:)),
+                                                       name: NSWindow.didResignKeyNotification, object: newWindow)
+            }
+            super.viewWillMove(toWindow: newWindow)
+        }
+
+        @objc private func stopRecordingWhenWindowDeactivates(_ notification: Notification) {
+            endRecording()
+        }
+
         override func mouseDown(with event: NSEvent) {
             arm()
         }
 
         private func arm() {
+            guard !recording, let window, window.makeFirstResponder(self) else { return }
             recording = true
-            window?.makeFirstResponder(self)
+            HotKeyCenter.shared.setSuspended(true)
+            eventMonitor = Shortcut.monitorEvents(in: self)
+            NotificationCenter.default.post(name: .saiityDictationShortcutRecordingChanged, object: true)
+            refresh()
+        }
+
+        private func endRecording() {
+            guard recording else { return }
+            recording = false
+            if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
+            eventMonitor = nil
+            HotKeyCenter.shared.setSuspended(false)
+            NotificationCenter.default.post(name: .saiityDictationShortcutRecordingChanged, object: false)
             refresh()
         }
 
@@ -1672,6 +1936,12 @@ private struct ShortcutRecorder: NSViewRepresentable {
         }
         override func accessibilityPerformPress() -> Bool {
             arm()
+            return recording
+        }
+
+        override func performKeyEquivalent(with event: NSEvent) -> Bool {
+            guard recording, window?.firstResponder === self else { return false }
+            keyDown(with: event)
             return true
         }
 
@@ -1687,22 +1957,21 @@ private struct ShortcutRecorder: NSViewRepresentable {
             guard recording else { super.keyDown(with: event); return }
             // ⌫ clears.
             if event.keyCode == UInt16(kVK_Delete) {
-                recording = false; onChange?(nil); refresh(); return
+                endRecording(); onChange?(nil); refresh(); return
             }
             if event.keyCode == UInt16(kVK_Escape) {
-                recording = false; refresh(); return
+                endRecording(); return
             }
             let mods = Shortcut.carbonModifiers(from: event.modifierFlags)
             let s = Shortcut(keyCode: UInt32(event.keyCode), modifiers: mods)
             guard s.isUsable else { return }   // keep listening until it is valid
-            recording = false
+            endRecording()
             onChange?(s)
             refresh()
         }
 
         override func resignFirstResponder() -> Bool {
-            recording = false
-            refresh()
+            endRecording()
             return true
         }
     }
@@ -1726,7 +1995,7 @@ struct TranscriptsView: View {
     @State private var searchHits: [SearchHit] = []
     @State private var isSearching = false
     /// The session open in the transcript viewer sheet.
-    @State private var viewing: SessionRef?
+    @State private var showsLibraryDetails = false
     @State private var retentionDays = TranscriptRetention.days
     @State private var retranslator = Retranslator()
     @State private var retranslateProgress: Retranslator.Progress?
@@ -1738,47 +2007,16 @@ struct TranscriptsView: View {
     @State private var summaryFailure: (sessionID: String, message: String)?
     @State private var summaryIDs: Set<String> = []
     @State private var libraryRevision = 0
+    @State private var renamingSession: SessionRef?
+    @State private var nameDraft = ""
+    @State private var renameFailure: String?
+    @State private var renameBusy = false
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14) {
+            LazyVStack(alignment: .leading, spacing: 20) {
             SettingsSection(title: "Recording") {
                 Toggle("Save transcripts of sessions", isOn: $state.saveTranscript)
-                Picker("Keep transcripts", selection: $retentionDays) {
-                    ForEach(TranscriptRetention.choices, id: \.self) { d in
-                        Text(TranscriptRetention.label(d)).tag(d)
-                    }
-                }
-                .disabled(CaptionSession.shared.isProcessingTranscript || summarizing != nil)
-                .onChange(of: retentionDays) { old, new in
-                    // Ask first. Choosing "7 days" used to delete every older
-                    // transcript the instant the menu closed — irreversible,
-                    // unannounced, and from a control that reads like a
-                    // preference rather than a command. Deleting all
-                    // transcripts has always required a confirmation; this
-                    // deletes a subset and had none.
-                    let doomed = TranscriptStore.sessionsOlderThan(days: new)
-                    guard !doomed.isEmpty else {
-                        TranscriptRetention.days = new
-                        return
-                    }
-                    let a = NSAlert()
-                    a.messageText = String(localized: "Delete \(doomed.count) transcripts now?")
-                    a.informativeText = String(localized: "Keeping transcripts for \(new) days means \(doomed.count) already older than that are deleted immediately, and any future session is deleted once it reaches that age. This cannot be undone.")
-                    a.alertStyle = .warning
-                    a.addButton(withTitle: String(localized: "Delete and Keep Setting"))
-                    a.addButton(withTitle: String(localized: "Cancel"))
-                    guard a.runModal() == .alertFirstButtonReturn else {
-                        retentionDays = old      // put the control back
-                        return
-                    }
-                    TranscriptRetention.days = new
-                    Task {
-                        let n = await TranscriptRetention.sweep()
-                        retranslateNote = "✓ " + String(localized: "Deleted \(n) transcripts.")
-                        await state.refreshLibraryAsync(force: true)
-                    }
-                }
             }
 
             SettingsSection(title: "Saved sessions") {
@@ -1808,10 +2046,10 @@ struct TranscriptsView: View {
                     }
                     ForEach(searchHits) { hit in
                         Button {
-                            viewing = hit.session
+                            state.openTranscript(hit.session, revealing: hit.seg.i)
                         } label: {
                             VStack(alignment: .leading, spacing: 1) {
-                                Text(hit.session.meta.startedAt.formatted(date: .abbreviated, time: .shortened))
+                                Text(verbatim: hit.session.meta.title ?? hit.session.meta.startedAt.formatted(date: .abbreviated, time: .shortened))
                                     .font(.caption).foregroundStyle(.secondary)
                                 Text(hit.seg.text).lineLimit(2)
                                 if let tr = hit.seg.tr, !tr.isEmpty {
@@ -1845,42 +2083,88 @@ struct TranscriptsView: View {
                                          ? AnyShapeStyle(.secondary)
                                          : AnyShapeStyle(Color.orange))
                 }
-                if !state.sessions.isEmpty, trimmedQuery.isEmpty {
-                    HStack {
-                        Menu("Export all…") {
-                            Button("Plain text") { exportLibrary("txt") }
-                            Button("Markdown") { exportLibrary("md") }
-                            Button("SRT") { exportLibrary("srt") }
-                            Button("WebVTT") { exportLibrary("vtt") }
-                        }
-                        .controlSize(.small)
-                        .fixedSize()
-                        .disabled(retranslateProgress != nil || retranslating != nil || summarizing != nil)
-                    }
-                    Button("Delete all…", role: .destructive) {
-                        let a = NSAlert()
-                        a.messageText = String(localized: "Delete all transcripts?")
-                        a.informativeText = String(localized: "Permanently removes \(state.sessions.count) sessions.")
-                        a.addButton(withTitle: String(localized: "Delete All"))
-                        a.addButton(withTitle: String(localized: "Cancel"))
-                        a.alertStyle = .warning
-                        if a.runModal() == .alertFirstButtonReturn {
-                            TranscriptStore.deleteAll()
-                            SessionCatalog.invalidate()
-                            Task { await state.refreshLibraryAsync(force: true) }
-                        }
-                    }
-                    .controlSize(.small)
-                    .disabled(CaptionSession.shared.isProcessingTranscript || summarizing != nil || retranslating != nil)
-                }
             }
 
+            SettingsDisclosure(isExpanded: $showsLibraryDetails) {
+                SettingsSection(title: "Recording") {
+                    Picker("Keep transcripts", selection: $retentionDays) {
+                        ForEach(TranscriptRetention.choices, id: \.self) { d in
+                            Text(TranscriptRetention.label(d)).tag(d)
+                        }
+                    }
+                    .disabled(CaptionSession.shared.isProcessingTranscript || summarizing != nil)
+                    .onChange(of: retentionDays) { old, new in
+                        // Ask first. Choosing "7 days" used to delete every older
+                        // transcript the instant the menu closed — irreversible,
+                        // unannounced, and from a control that reads like a
+                        // preference rather than a command. Deleting all
+                        // transcripts has always required a confirmation; this
+                        // deletes a subset and had none.
+                        let doomed = TranscriptStore.sessionsOlderThan(days: new)
+                        guard !doomed.isEmpty else {
+                            TranscriptRetention.days = new
+                            return
+                        }
+                        let a = NSAlert()
+                        a.messageText = String(localized: "Delete \(doomed.count) transcripts now?")
+                        a.informativeText = String(localized: "Keeping transcripts for \(new) days means \(doomed.count) already older than that are deleted immediately, and any future session is deleted once it reaches that age. This cannot be undone.")
+                        a.alertStyle = .warning
+                        a.addButton(withTitle: String(localized: "Delete and Keep Setting"))
+                        a.addButton(withTitle: String(localized: "Cancel"))
+                        guard a.runModal() == .alertFirstButtonReturn else {
+                            retentionDays = old      // put the control back
+                            return
+                        }
+                        TranscriptRetention.days = new
+                        Task {
+                            let result = await TranscriptRetention.sweep()
+                            retranslateNote = result.failed == 0
+                                ? "✓ " + String(localized: "Deleted \(result.deleted) transcripts.")
+                                : String(localized: "Deleted \(result.deleted) transcripts; \(result.failed) could not be removed.")
+                            await state.refreshLibraryAsync(force: true)
+                        }
+                    }
+                }
+                SettingsSection(title: "Saved sessions") {
+                    if !state.sessions.isEmpty, trimmedQuery.isEmpty {
+                        HStack {
+                            Menu("Export all…") {
+                                Button("Plain text") { exportLibrary("txt") }
+                                Button("Markdown") { exportLibrary("md") }
+                                Button("SRT") { exportLibrary("srt") }
+                                Button("WebVTT") { exportLibrary("vtt") }
+                            }
+                            .controlSize(.small)
+                            .fixedSize()
+                            .disabled(retranslateProgress != nil || retranslating != nil || summarizing != nil)
+                        }
+                        Button("Delete all…", role: .destructive) {
+                            let a = NSAlert()
+                            a.messageText = String(localized: "Delete all transcripts?")
+                            a.informativeText = String(localized: "Permanently removes \(state.sessions.count) sessions.")
+                            a.addButton(withTitle: String(localized: "Delete All"))
+                            a.addButton(withTitle: String(localized: "Cancel"))
+                            a.alertStyle = .warning
+                            if a.runModal() == .alertFirstButtonReturn {
+                                let result = TranscriptStore.deleteAll()
+                                retranslateNote = result.failed == 0
+                                    ? "✓ " + String(localized: "Deleted \(result.deleted) transcripts.")
+                                    : String(localized: "Deleted \(result.deleted) transcripts; \(result.failed) could not be removed.")
+                                SessionCatalog.invalidate()
+                                Task { await state.refreshLibraryAsync(force: true) }
+                            }
+                        }
+                        .controlSize(.small)
+                        .disabled(CaptionSession.shared.isProcessingTranscript || summarizing != nil || retranslating != nil)
+                    }
+                }
+            }
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 8)
             .frame(maxWidth: 780, alignment: .leading)
         }
-        .task(id: "\(trimmedQuery)|\(state.sessions.count)") {
+        .task(id: "\(trimmedQuery)|\(state.sessions.map(\.id))|\(state.sessions.map(\.meta.title))|\(libraryRevision)") {
             await refreshSearch()
         }
         .task(id: "\(state.sessions.map(\.id))|\(libraryRevision)") {
@@ -1894,7 +2178,25 @@ struct TranscriptsView: View {
         .onReceive(NotificationCenter.default.publisher(for: .saiityTranscriptLibraryChanged)) { _ in
             libraryRevision += 1
         }
-        .sheet(item: $viewing) { s in
+        .sheet(item: $renamingSession) { session in
+            SheetShell(title: "Rename Transcript", subtitle: "Only the session name changes. Spoken lines stay unchanged.",
+                       width: 480, height: 230, dismissTitle: "Cancel", dismissIsDefaultAction: false) {
+                VStack(alignment: .leading, spacing: 12) {
+                    TextField("Session name", text: $nameDraft).textFieldStyle(.roundedBorder)
+                        .disabled(renameBusy)
+                    Text("Up to 80 characters. Leave blank to show the date.")
+                        .font(.callout).foregroundStyle(.secondary)
+                    if let renameFailure {
+                        Label(renameFailure, systemImage: "exclamationmark.triangle").font(.callout)
+                            .foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                    }
+                    Button("Save Name") { rename(session) }
+                        .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                        .disabled(renameBusy || nameDraft.trimmingCharacters(in: .whitespacesAndNewlines).count > 80 || CaptionSession.shared.isProcessingTranscript)
+                }.padding(16)
+            }
+        }
+        .sheet(item: $state.transcriptToOpen, onDismiss: { state.transcriptSegmentToReveal = nil }) { s in
             TranscriptViewerSheet(
                 session: s,
                 summaryProgress: summarizing?.id == s.id ? summaryProgress : nil,
@@ -1906,18 +2208,26 @@ struct TranscriptsView: View {
                 onCancel: { Task { await summarizer.cancelAndWait() } },
                 onRemove: { removeSummary(s) },
                 onShowDictation: {
-                    viewing = nil
+                    state.transcriptToOpen = nil
                     NotificationCenter.default.post(name: .saiitySelectSettingsPane, object: SettingsPane.dictation.rawValue)
-                })
+                },
+                onSummarizeWithLanguage: { startSummary(s, outputLanguage: $0) },
+                initialSegmentIndex: state.transcriptSegmentToReveal)
         }
     }
 
     private func sessionRow(_ s: SessionRef) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
-                Button { viewing = s } label: {
+                Button { state.openTranscript(s) } label: {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(s.meta.startedAt.formatted(date: .abbreviated, time: .shortened))
+                        if let title = s.meta.title {
+                            Text(verbatim: title).font(.body.weight(.medium))
+                            Text(s.meta.startedAt.formatted(date: .abbreviated, time: .shortened))
+                                .font(.callout).foregroundStyle(.secondary)
+                        } else {
+                            Text(s.meta.startedAt.formatted(date: .abbreviated, time: .shortened))
+                        }
                         Text("\(s.meta.lineCount) lines · \(s.meta.locale)")
                             .font(.caption).foregroundStyle(.secondary)
                         if summaryIDs.contains(s.id) {
@@ -1941,11 +2251,21 @@ struct TranscriptsView: View {
                         }
                     }
                     .disabled(retranslateProgress != nil || retranslating != nil || summarizing != nil || CaptionSession.shared.isProcessingTranscript)
+                    Button("Rename…") {
+                        nameDraft = s.meta.title ?? ""
+                        renameFailure = nil
+                        renamingSession = s
+                    }
+                    .disabled(CaptionSession.shared.isRunning || CaptionSession.shared.isProcessingTranscript)
                     Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([s.url]) }
                     Divider()
                     Button("Delete", role: .destructive) {
                         guard summarizing?.id != s.id, retranslating?.id != s.id else { return }
-                        TranscriptStore.delete(s)
+                        guard TranscriptStore.delete(s) else {
+                            retranslateNote = String(localized: "Could not delete this transcript.")
+                            Task { await state.refreshLibraryAsync(force: true) }
+                            return
+                        }
                         SessionCatalog.invalidate()
                         Task { await state.refreshLibraryAsync(force: true) }
                     }
@@ -2045,12 +2365,28 @@ struct TranscriptsView: View {
         }
     }
 
-    private func startSummary(_ s: SessionRef) {
+    private func rename(_ session: SessionRef) {
+        guard !renameBusy, !CaptionSession.shared.isRunning, !CaptionSession.shared.isProcessingTranscript else { return }
+        let title = nameDraft
+        renameBusy = true
+        Task {
+            defer { renameBusy = false }
+            do {
+                try await TranscriptStore.shared.renameSession(session, title: title)
+                await state.refreshLibraryAsync(force: true)
+                renamingSession = nil
+            } catch {
+                renameFailure = error.localizedDescription
+            }
+        }
+    }
+
+    private func startSummary(_ s: SessionRef, outputLanguage: String? = nil) {
         guard summarizing == nil, retranslateProgress == nil, retranslating == nil else { return }
         summaryFailure = nil
         summarizing = s
         Task {
-            await summarizer.run(session: s) { p in
+            await summarizer.run(session: s, outputLanguage: outputLanguage) { p in
                 summaryProgress = p
             } onFinish: { err in
                 if let err {
@@ -2133,6 +2469,8 @@ struct GeneralView: View {
     @State private var inputMonitoringGranted: Bool?
     @State private var accessibilityGranted: Bool?
     @State private var credits = String(localized: "Loading credits…")
+    @State private var dictationModelReady = false
+    @State private var microphoneAuthorization = AVAuthorizationStatus.notDetermined
     @State private var showsDiagnostics = false
 
     private var version: String {
@@ -2152,6 +2490,8 @@ struct GeneralView: View {
         screenRecordingGranted = CGPreflightScreenCaptureAccess()
         inputMonitoringGranted = CGPreflightListenEventAccess()
         accessibilityGranted = AXIsProcessTrusted()
+        dictationModelReady = AppDelegate.dictationModelIsInstalled()
+        microphoneAuthorization = AVCaptureDevice.authorizationStatus(for: .audio)
     }
 
     private func permissionLabel(_ granted: Bool?) -> String {
@@ -2159,15 +2499,18 @@ struct GeneralView: View {
         return granted ? String(localized: "Ready") : String(localized: "Permission required")
     }
 
-    private func dictationStatusLabel(enabled: Bool,
+    static func dictationStatusLabel(enabled: Bool,
                                      input: Bool?,
-                                     accessibility: Bool?) -> String {
+                                     accessibility: Bool?,
+                                     modelReady: Bool,
+                                     microphone: AVAuthorizationStatus) -> String {
         guard enabled else { return String(localized: "Off") }
-        guard input == true else { return permissionLabel(input) }
+        guard modelReady else { return String(localized: "Not downloaded yet — see Models.") }
+        if microphone == .denied || microphone == .restricted { return String(localized: "Microphone access needed") }
+        guard input == true else { return input == nil ? String(localized: "Checking…") : String(localized: "Permission required") }
         guard let accessibility else { return String(localized: "Checking…") }
-        return accessibility
-            ? String(localized: "Ready")
-            : String(localized: "Shortcut ready — Accessibility needed")
+        guard accessibility else { return String(localized: "Shortcut ready — Accessibility needed") }
+        return microphone == .notDetermined ? String(localized: "Microphone requested on first use") : String(localized: "Ready")
     }
 
     private func openAccessibilitySettings() {
@@ -2195,7 +2538,7 @@ struct GeneralView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 20) {
                 primarySettings
                 SettingsDisclosure(isExpanded: $showsDiagnostics) {
                     detailSettings
@@ -2222,6 +2565,7 @@ struct GeneralView: View {
         .onReceive(NotificationCenter.default.publisher(for: Diagnostics.changed)) { _ in
             diagnosticsRevision += 1
         }
+        .onChange(of: state.ownedBytes) { refreshPermissions() }
     }
 
     @ViewBuilder
@@ -2248,28 +2592,26 @@ struct GeneralView: View {
             setupStatusRow(
                 title: "Dictation",
                 symbol: "mic",
-                value: dictationStatusLabel(enabled: state.dictationEnabled,
+                value: Self.dictationStatusLabel(enabled: state.dictationEnabled,
                                             input: inputMonitoringGranted,
-                                            accessibility: accessibilityGranted),
-                actionTitle: state.dictationEnabled
-                    && (inputMonitoringGranted == false || accessibilityGranted == false)
-                    ? "Open Settings" : nil) {
-                    if inputMonitoringGranted == false {
+                                            accessibility: accessibilityGranted,
+                                            modelReady: dictationModelReady,
+                                            microphone: microphoneAuthorization),
+                actionTitle: state.dictationEnabled && !dictationModelReady ? "Models"
+                    : state.dictationEnabled && (microphoneAuthorization == .denied || microphoneAuthorization == .restricted
+                        || inputMonitoringGranted == false || accessibilityGranted == false) ? "Open Settings" : nil) {
+                    if !dictationModelReady {
+                        SettingsWindowController.selectModelsPane()
+                    } else if microphoneAuthorization == .denied || microphoneAuthorization == .restricted {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    } else if inputMonitoringGranted == false {
                         InputMonitoringPermission.openSettings()
                     } else {
                         openAccessibilitySettings()
                     }
                 }
-        }
-
-        SettingsSection(title: "Startup") {
-            LabeledToggle("Start sAiity when you log in",
-                          "Registers the app as a login item so captions are one keypress away after a restart. Off by default — this app can capture system audio, so being running should be your choice.",
-                                                    isOn: Binding(get: { state.launchAtLogin },
-                                        set: { state.setLaunchAtLogin($0) }))
-            if !state.launchAtLoginNote.isEmpty {
-                Text(state.launchAtLoginNote).font(.caption).foregroundStyle(.orange)
-            }
         }
 
         SettingsSection(title: "Privacy") {
@@ -2280,6 +2622,16 @@ struct GeneralView: View {
 
     @ViewBuilder
     private var detailSettings: some View {
+        SettingsSection(title: "Startup") {
+            LabeledToggle("Start Syllivra when you log in",
+                          "Registers the app as a login item so captions are one keypress away after a restart. Off by default — this app can capture system audio, so being running should be your choice.",
+                                                    isOn: Binding(get: { state.launchAtLogin },
+                                        set: { state.setLaunchAtLogin($0) }))
+            if !state.launchAtLoginNote.isEmpty {
+                Text(state.launchAtLoginNote).font(.caption).foregroundStyle(.orange)
+            }
+        }
+
         SettingsSection(title: "Troubleshooting",
                         subtitle: "Repair permissions, save diagnostics, or review app information.") {
             if let failure = Diagnostics.latestFailure {
@@ -2292,6 +2644,43 @@ struct GeneralView: View {
                 Text("No recent runtime failures.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+            let lastRun = Diagnostics.recentLatestRun
+            if !lastRun.isEmpty {
+                Divider()
+                Text("Last dictation").font(.headline)
+                if let terminal = lastRun.first(where: { $0.outcome != nil }) {
+                    switch terminal.outcome {
+                    case "inserted": Label("Inserted and copied", systemImage: "checkmark.circle")
+                    case "copied": Label("Copied to Clipboard", systemImage: "doc.on.clipboard")
+                    case "copy-failed": Label("Copy failed", systemImage: "exclamationmark.triangle")
+                    case "cancelled": Label("Cancelled", systemImage: "xmark.circle")
+                    case "failed": Label("Failed", systemImage: "exclamationmark.triangle")
+                    default: EmptyView()
+                    }
+                }
+                if let slowest = DiagnosticsTimingSummarizer.slowestStage(lastRun) {
+                    Text(verbatim: DiagnosticsTimingSummarizer.slowestExplanation(slowest.operation))
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                ForEach(Array(lastRun.reversed().enumerated()), id: \.offset) { _, timing in
+                    VStack(alignment: .leading, spacing: 4) {
+                        LabeledContent(DiagnosticsTimingSummarizer.stageTitle(timing.operation),
+                                       value: CaptionPerformanceCopy.duration(timing.seconds))
+                        if let cold = timing.cold {
+                            Text(cold ? String(localized: "Model loading was needed") : String(localized: "Model was already prepared"))
+                                .font(.callout).foregroundStyle(.secondary)
+                        }
+                        if let loads = timing.modelLoadCount {
+                            Text("Loads requested: \(loads)").font(.callout).foregroundStyle(.secondary)
+                        }
+                        if let calls = timing.modelCallCount {
+                            Text("Model calls: \(calls)").font(.callout).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                Text("Contains timings and outcomes, never your dictated words.")
+                    .font(.callout).foregroundStyle(.secondary)
             }
             let timings = Array(Diagnostics.recentTimings.prefix(5))
             if !timings.isEmpty {
@@ -2325,7 +2714,7 @@ struct GeneralView: View {
         }
         .id(diagnosticsRevision)
 
-        SettingsSection(title: "About sAiity",
+        SettingsSection(title: "About Syllivra",
                         subtitle: "Version, licence, and the credits for the models and libraries used here.") {
             LabeledContent("Version", value: version)
             Text(credits)
@@ -2368,9 +2757,28 @@ struct TranscriptViewerSheet: View {
     let onCancel: () -> Void
     let onRemove: () -> Void
     let onShowDictation: () -> Void
+    var onSummarizeWithLanguage: ((String?) -> Void)? = nil
+    var initialSegmentIndex: Int? = nil
     @State private var segments: [Segment] = []
     @State private var summary: TranscriptSummary?
     @State private var query = ""
+    @State private var spokenLanguages: [String] = []
+    @State private var selectedSummaryLanguage: String?
+    @State private var hasLoaded = false
+    @State private var reloadRevision = 0
+    @State private var readingSize = 13.0
+    @FocusState private var searchFocused: Bool
+
+    private var summaryLanguageChoices: [String] {
+        var choices = spokenLanguages
+        if let raw = Bundle.main.preferredLocalizations.first,
+           let code = TranscriptSummaryPlan.languageCode(raw)
+            ?? TranscriptSummaryPlan.languageCode(TranslationLanguage.baseCode(raw)),
+           !choices.contains(code) {
+            choices.append(code)
+        }
+        return choices
+    }
 
     private var shown: [Segment] {
         let q = query.trimmingCharacters(in: .whitespaces)
@@ -2382,14 +2790,29 @@ struct TranscriptViewerSheet: View {
     }
 
     var body: some View {
-        SheetShell(title: "Transcript — \(session.meta.startedAt.formatted(date: .abbreviated, time: .shortened))",
+        SheetShell(title: "Transcript — \(session.meta.title ?? session.meta.startedAt.formatted(date: .abbreviated, time: .shortened))",
                    subtitle: "Times count from the session start. Text can be selected and copied.",
                    width: 640, height: 680, minimumSize: CGSize(width: 560, height: 480),
                    headerAccessory: {
+                       Menu {
+                           ForEach([13.0, 16.0, 20.0, 26.0], id: \.self) { size in
+                               Button(String(format: "%.0f pt", size)) { readingSize = size }
+                           }
+                       } label: {
+                           Label("Text size", systemImage: "textformat.size").labelStyle(.iconOnly)
+                       }
+                       .help("Text size")
+                       Button { searchFocused = true } label: {
+                           Label("Search", systemImage: "magnifyingglass").labelStyle(.iconOnly)
+                       }
+                       .keyboardShortcut("f", modifiers: .command)
+                       .help("Search")
                        TextField("Search", text: $query)
                            .textFieldStyle(.roundedBorder)
                            .frame(width: 160)
+                           .focused($searchFocused)
                    }) {
+            ScrollViewReader { proxy in
             List {
                 VStack(alignment: .leading, spacing: 10) {
                     ViewThatFits(in: .horizontal) {
@@ -2406,6 +2829,19 @@ struct TranscriptViewerSheet: View {
                     Text("Written on this Mac by the dictation cleanup model. It can miss or invent details. The spoken lines below are unchanged.")
                         .font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                    if spokenLanguages.count > 1 {
+                        Text("This transcript uses more than one language. Choose the language for its summary.")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Picker("Summary language", selection: $selectedSummaryLanguage) {
+                            Text("Choose a language").tag(Optional<String>.none)
+                            ForEach(summaryLanguageChoices, id: \.self) { code in
+                                Text(verbatim: AppLanguage(code: code).displayName).tag(Optional(code))
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .disabled(summaryUnavailable || isSummarizing)
+                    }
                     if !modelAvailable {
                         Text(String(localized: TranscriptSummarizer.modelRequiredMessage))
                             .font(.caption).foregroundStyle(.secondary)
@@ -2423,20 +2859,24 @@ struct TranscriptViewerSheet: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     if let summary {
+                        if let code = summary.outputLanguage {
+                            LabeledContent("Summary language", value: AppLanguage(code: code).displayName)
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                         if !summary.recap.isEmpty {
                             Text("Recap").font(.caption).foregroundStyle(.secondary)
-                            Text(verbatim: summary.recap).textSelection(.enabled)
+                            Text(verbatim: summary.recap).font(.system(size: readingSize)).textSelection(.enabled)
                         }
                         if !summary.decisions.isEmpty {
                             Text("Decisions").font(.caption).foregroundStyle(.secondary)
                             ForEach(Array(summary.decisions.enumerated()), id: \.offset) { _, line in
-                                Text(verbatim: line).textSelection(.enabled)
+                                Text(verbatim: line).font(.system(size: readingSize)).textSelection(.enabled)
                             }
                         }
                         if !summary.actions.isEmpty {
                             Text("Actions").font(.caption).foregroundStyle(.secondary)
                             ForEach(Array(summary.actions.enumerated()), id: \.offset) { _, line in
-                                Text(verbatim: line).textSelection(.enabled)
+                                Text(verbatim: line).font(.system(size: readingSize)).textSelection(.enabled)
                             }
                         }
                         if summary.omittedLineCount > 0 {
@@ -2459,9 +2899,9 @@ struct TranscriptViewerSheet: View {
                             if let label = seg.speakerLabel {
                                 Text(verbatim: label).font(.caption).foregroundStyle(.secondary)
                             }
-                            Text(seg.text).textSelection(.enabled)
+                            Text(seg.text).font(.system(size: readingSize)).textSelection(.enabled)
                             if let tr = seg.tr, !tr.isEmpty {
-                                Text(tr).foregroundStyle(.secondary)
+                                Text(tr).font(.system(size: readingSize)).foregroundStyle(.secondary)
                                     .textSelection(.enabled)
                             }
                         }
@@ -2469,16 +2909,31 @@ struct TranscriptViewerSheet: View {
                     // Extra air above a turn break — the reader sees the pause.
                     .padding(.top, seg.turn == true ? 12 : 1)
                     .padding(.bottom, 1)
+                    .id(seg.i)
+                    .listRowBackground(initialSegmentIndex == seg.i
+                                       ? Color(nsColor: .findHighlightColor).opacity(0.2) : Color.clear)
                 }
             }
-            .task {
+            .task(id: "\(session.id)|\(reloadRevision)") {
                 // A full read plus a JSON decode per line, off the main actor.
                 // The viewer is a sheet the user can leave open, so a long
                 // session must not freeze the UI on first open.
-                await reload()
+                #if SAIITY_TEST_HOOKS
+                if ProcessInfo.processInfo.environment["SAIITY_CAPTURE_READER_LARGE"] == "1" {
+                    readingSize = 26
+                }
+                #endif
+                await reload {
+                    await Task.yield()
+                    guard !Task.isCancelled else { return }
+                    if let initialSegmentIndex, segments.contains(where: { $0.i == initialSegmentIndex }) {
+                        proxy.scrollTo(initialSegmentIndex, anchor: .center)
+                    }
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: .saiityTranscriptLibraryChanged)) { _ in
-                Task { await reload() }
+                reloadRevision += 1
+            }
             }
         }
         .presentationSizing(.fitted)
@@ -2486,11 +2941,18 @@ struct TranscriptViewerSheet: View {
 
     private var summaryActions: some View {
         HStack(spacing: 12) {
-            Button(action: onSummarize) {
+            Button {
+                if let onSummarizeWithLanguage {
+                    onSummarizeWithLanguage(selectedSummaryLanguage)
+                } else {
+                    onSummarize()
+                }
+            } label: {
                 if summary == nil { Text("Summarize") }
                 else { Text("Summarize Again") }
             }
-            .disabled(!modelAvailable || summaryUnavailable || isSummarizing)
+            .disabled(!hasLoaded || !modelAvailable || summaryUnavailable || isSummarizing
+                      || (spokenLanguages.count > 1 && selectedSummaryLanguage == nil))
             if summary != nil {
                 Button("Remove Summary", role: .destructive, action: onRemove)
                     .disabled(isSummarizing || CaptionSession.shared.isSummarizing)
@@ -2500,13 +2962,43 @@ struct TranscriptViewerSheet: View {
         .fixedSize()
     }
 
-    private func reload() async {
+    private func reload(afterContentLoaded: @escaping () async -> Void) async {
+        hasLoaded = false
         let session = session
-        let loaded = await Task.detached { () -> ([Segment], TranscriptSummary?) in
-            (TranscriptStore.segments(of: session), TranscriptSummaryStore.read(session))
-        }.value
-        segments = loaded.0
-        summary = loaded.1
+        await Self.load(session: session, content: { lines, savedSummary in
+            segments = lines
+            summary = savedSummary
+            await afterContentLoaded()
+        }, languages: { codes in
+            spokenLanguages = codes
+            if let selectedSummaryLanguage, !summaryLanguageChoices.contains(selectedSummaryLanguage) {
+                self.selectedSummaryLanguage = nil
+            }
+            hasLoaded = true
+        })
+    }
+
+    @MainActor
+    static func load(session: SessionRef,
+                     analyze: @escaping @Sendable ([Segment]) async -> [String] = { TranscriptSummaryPlan.sessionLanguages($0) },
+                     content: ([Segment], TranscriptSummary?) async -> Void,
+                     languages: ([String]) -> Void) async {
+        let reading = Task.detached(priority: .userInitiated) { () -> ([Segment], TranscriptSummary?) in
+            let segments = TranscriptStore.segments(of: session)
+            return (segments, TranscriptSummaryStore.read(session))
+        }
+        let loaded = await withTaskCancellationHandler {
+            await reading.value
+        } onCancel: { reading.cancel() }
+        guard !Task.isCancelled else { return }
+        await content(loaded.0, loaded.1)
+        guard !Task.isCancelled else { return }
+        let analysis = Task.detached(priority: .utility) { await analyze(loaded.0) }
+        let codes = await withTaskCancellationHandler {
+            await analysis.value
+        } onCancel: { analysis.cancel() }
+        guard !Task.isCancelled else { return }
+        languages(codes)
     }
 }
 

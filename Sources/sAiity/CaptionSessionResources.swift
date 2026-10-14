@@ -13,15 +13,27 @@ final class CaptionSessionResources {
     var startTask: Task<Void, Never>?
     var gapTask: Task<Void, Never>?
 
+    #if SAIITY_TEST_HOOKS
+    var onCaptureStoppedForTests: (() -> Void)?
+    #endif
+
     init(makeBackend: @escaping () -> TranscriptionBackend) {
         pool = ASRBackendPool(makeBackend: makeBackend)
     }
 
-    /// Does not await startTask: failed startup calls this from inside that task.
-    func stopAudio() async -> CaptionSpeakerTimeline? {
+    /// Stop new input before waiting on native work; keep the backend for its final flush.
+    func stopCapture() async {
         gapTask?.cancel()
         gapTask = nil
         await capture.stop()
+        #if SAIITY_TEST_HOOKS
+        onCaptureStoppedForTests?()
+        #endif
+    }
+
+    /// Does not await startTask: failed startup calls this from inside that task.
+    func stopAudio() async -> CaptionSpeakerTimeline? {
+        await stopCapture()
         speakerSink.point(at: nil)
         speakerPreparation?.cancel()
         await speakerPreparation?.value

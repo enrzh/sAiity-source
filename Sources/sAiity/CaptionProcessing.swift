@@ -70,7 +70,7 @@ enum CaptionTextMerger {
         guard let scalar = character.unicodeScalars.first else { return false }
         switch scalar.value {
         case 0x3000...0x30FF, 0x3400...0x4DBF, 0x4E00...0x9FFF,
-             0x0E00...0x0E7F, 0xFF00...0xFFEF:
+             0x20000...0x323AF, 0x0E00...0x0E7F, 0xFF00...0xFFEF:
             return true
         default:
             return false
@@ -127,21 +127,35 @@ enum CaptionLanguageSpanDetector {
 
     static func analyze(_ text: String,
                         fallbackLanguage: String? = nil) -> [CaptionLanguageSpan] {
-        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else { return [] }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
+
+        // Sentence boundaries give Han phrases local context. Do not label
+        // Chinese elsewhere in the line Japanese merely because kana occurs.
+        var clauses: [String] = []
+        var clause = ""
+        for character in text {
+            clause.append(character)
+            if "。！？.!?\n".contains(character) {
+                clauses.append(clause)
+                clause = ""
+            }
+        }
+        if !clause.isEmpty { clauses.append(clause) }
+        return coalesce(clauses.flatMap { analyzeClause($0, fallbackLanguage: fallbackLanguage) })
+    }
+
+    private static func analyzeClause(_ value: String,
+                                      fallbackLanguage: String?) -> [CaptionLanguageSpan] {
 
         var spans: [CaptionLanguageSpan] = []
         spans.reserveCapacity(4)
         var current = ""
         current.reserveCapacity(value.count)
         var currentScript: Script?
+        let eastAsian: Set<Script> = [.han, .kana, .hangul]
 
         func flush() {
-            guard !current.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                current.removeAll(keepingCapacity: true)
-                currentScript = nil
-                return
-            }
+            guard !current.isEmpty else { return }
             spans.append(contentsOf: splitScriptRun(current,
                                                     script: currentScript,
                                                     fallbackLanguage: fallbackLanguage))
@@ -151,7 +165,8 @@ enum CaptionLanguageSpanDetector {
 
         for character in value {
             let next = script(for: character)
-            if let next, let currentScript, next != currentScript {
+            if let next, let currentScript, next != currentScript,
+               !(eastAsian.contains(next) && eastAsian.contains(currentScript)) {
                 flush()
             }
             if currentScript == nil, let next { currentScript = next }
@@ -159,16 +174,24 @@ enum CaptionLanguageSpanDetector {
         }
         flush()
 
+        // Short technical identifiers inside a Japanese/Korean phrase are not
+        // a language switch. A real multiword Latin clause keeps its own span.
+        let source = LanguageDetector.sourceLanguage(in: value, hint: fallbackLanguage)
+        if ["ja", "ko"].contains(source.map(TranslationLanguage.baseCode) ?? ""),
+           spans.filter({ script(for: $0.text) == .latin }).allSatisfy({
+               $0.text.split(whereSeparator: { $0.isWhitespace }).count <= 2
+           }) {
+            return [.init(text: value, language: source)]
+        }
+
         return coalesce(spans)
     }
 
     static func isMixed(_ spans: [CaptionLanguageSpan]) -> Bool {
         let languages = Set(spans.compactMap { language in
             language.language.map(TranslationLanguage.baseCode)
-        }.filter { !$0.isEmpty && $0 != "auto" })
-        if languages.count > 1 { return true }
-        let scripts = Set(spans.compactMap { script(for: $0.text) })
-        return scripts.count > 1
+        }.filter { !$0.isEmpty && $0 != "auto" && $0 != "und" })
+        return languages.count > 1
     }
 
     private static func splitScriptRun(_ text: String,
@@ -176,24 +199,30 @@ enum CaptionLanguageSpanDetector {
                                        fallbackLanguage: String?) -> [CaptionLanguageSpan] {
         guard script == .latin else {
             return [CaptionLanguageSpan(text: text,
-                                        language: language(for: script, text: text))]
+                                        language: LanguageDetector.sourceLanguage(in: text, hint: fallbackLanguage))]
         }
 
         let words = text.split(whereSeparator: { $0.isWhitespace })
         guard words.count >= 4 else {
             return [CaptionLanguageSpan(text: text,
-                                        language: reading(of: text)?.language ?? fallbackLanguage)]
+                                        language: LanguageDetector.sourceLanguage(in: text, hint: fallbackLanguage)
+                                            ?? lexicalReading(of: text)?.language)]
         }
 
         let pieces = splitLatin(words)
         if pieces.count > 1 {
+            var start = text.startIndex
+            var consumed = 0
             return pieces.map { part in
-                CaptionLanguageSpan(text: part.text,
-                                    language: part.language)
+                consumed += part.text.split(whereSeparator: { $0.isWhitespace }).count
+                let end = consumed < words.count ? words[consumed].startIndex : text.endIndex
+                defer { start = end }
+                return CaptionLanguageSpan(text: String(text[start..<end]), language: part.language)
             }
         }
         return [CaptionLanguageSpan(text: text,
-                                    language: reading(of: text)?.language ?? fallbackLanguage)]
+                                    language: LanguageDetector.sourceLanguage(in: text, hint: fallbackLanguage)
+                                        ?? lexicalReading(of: text)?.language)]
     }
 
     /// Candidates a run may have before the scan is allowed to subsample.
@@ -207,7 +236,10 @@ enum CaptionLanguageSpanDetector {
     private static let scanStride = 2
 
     private static func splitLatin(_ words: [Substring]) -> [(text: String, language: String?)] {
-        guard words.count >= 4 else {
+        // Repetition length can change a classifier's guess; it cannot create
+        // a language boundary between identical lexical tokens.
+        let firstWord = words.first?.lowercased()
+        guard words.count >= 4, !words.dropFirst().allSatisfy({ $0.lowercased() == firstWord }) else {
             let text = words.map(String.init).joined(separator: " ")
             return [(text, reading(of: text)?.language)]
         }
@@ -362,28 +394,16 @@ enum CaptionLanguageSpanDetector {
 
     private static func coalesce(_ spans: [CaptionLanguageSpan]) -> [CaptionLanguageSpan] {
         spans.reduce(into: []) { result, span in
-            guard !span.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            guard !span.text.isEmpty else { return }
             if let last = result.last,
-               TranslationLanguage.isSame(last.language, as: span.language ?? "") {
+               last.text.allSatisfy(\.isWhitespace) || span.text.allSatisfy(\.isWhitespace)
+                || TranslationLanguage.isSame(last.language, as: span.language ?? "") {
                 result[result.count - 1] = CaptionLanguageSpan(
-                    text: CaptionTextMerger.join(last.text, span.text),
-                    language: last.language)
+                    text: last.text + span.text,
+                    language: last.text.allSatisfy(\.isWhitespace) ? span.language : last.language)
             } else {
                 result.append(span)
             }
-        }
-    }
-
-    private static func language(for scriptFamily: Script?, text: String) -> String? {
-        switch scriptFamily {
-        case .han:
-            return text.contains(where: { script(for: $0) == .kana }) ? "ja" : "zh"
-        case .kana: return "ja"
-        case .hangul: return "ko"
-        case .cyrillic: return "ru"
-        case .arabic: return "ar"
-        case .devanagari: return "hi"
-        case .latin, nil: return reading(of: text)?.language
         }
     }
 
@@ -399,8 +419,8 @@ enum CaptionLanguageSpanDetector {
             case 0x0600...0x06FF, 0x0750...0x077F, 0x08A0...0x08FF: return .arabic
             case 0x0900...0x097F: return .devanagari
             case 0x1100...0x11FF, 0xAC00...0xD7AF: return .hangul
-            case 0x3040...0x30FF, 0x31F0...0x31FF: return .kana
-            case 0x3400...0x4DBF, 0x4E00...0x9FFF, 0xF900...0xFAFF: return .han
+            case 0x3040...0x30FF, 0x31F0...0x31FF, 0xFF66...0xFF9F: return .kana
+            case 0x3400...0x4DBF, 0x4E00...0x9FFF, 0xF900...0xFAFF, 0x20000...0x323AF: return .han
             default: continue
             }
         }

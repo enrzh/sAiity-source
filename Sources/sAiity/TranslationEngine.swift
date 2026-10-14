@@ -53,6 +53,7 @@ struct TranslationRegion: Equatable, Sendable {
 /// automatic translation; one source-language hint cannot skip an entire line.
 enum TranslationProcedure {
     static func isAlreadyInTarget(_ text: String, target: String) -> Bool {
+        guard TranslationLanguage.satisfiesOutputVariant(in: text, target: target) else { return false }
         // A high-confidence dominant reading can hide a short foreign word
         // ("Can you bitte send it today?"). Such words must reach translation.
         let protected = DictationVocabulary.termsPresent(in: text)
@@ -71,6 +72,7 @@ enum TranslationProcedure {
 
     static func translate(_ regions: [TranslationRegion], to target: String,
                           engine: any Translating) async throws -> String? {
+        try Task.checkCancellation()
         var output = Array<String?>(repeating: nil, count: regions.count)
         var pending: [Int] = []
         for index in regions.indices {
@@ -80,22 +82,33 @@ enum TranslationProcedure {
         if pending.count > 1,
            let batch = try await engine.translateRegions(pending.map { regions[$0] }, to: target),
            batch.count == pending.count {
-            for (index, text) in zip(pending, batch) where !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                output[index] = text
+            for (index, text) in zip(pending, batch) {
+                if case .ok(let valid) = TranslationOutputValidator.sanitize(text, input: regions[index].text,
+                                                                            target: target, source: regions[index].source) {
+                    output[index] = valid
+                }
             }
         }
         for index in pending where output[index] == nil {
             try Task.checkCancellation()
             let region = regions[index]
             guard let text = try await engine.translate(region.text, from: region.source, to: target),
-                  !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                  case .ok(let valid) = TranslationOutputValidator.sanitize(text, input: region.text,
+                                                                          target: target, source: region.source) else {
                 NSLog("sAiity translation: incomplete region output, original preserved")
                 return nil
             }
-            output[index] = text
+            output[index] = valid
         }
         try Task.checkCancellation()
-        return regions.isEmpty ? nil : output.compactMap { $0 }.reduce("") { CaptionTextMerger.concatenate($0, $1) }
+        guard !regions.isEmpty else { return nil }
+        let original = regions.map(\.text).reduce("") { CaptionTextMerger.concatenate($0, $1) }
+        let combined = output.compactMap { $0 }.reduce("") { CaptionTextMerger.concatenate($0, $1) }
+        // Numeric source locales were checked per region. A mixed dominant
+        // language must not reinterpret those already-validated values.
+        guard case .ok(let valid) = TranslationOutputValidator.sanitize(combined, input: original,
+                                                                      target: target, source: "auto") else { return nil }
+        return valid
     }
 }
 
@@ -155,6 +168,21 @@ enum TranslationBatchMarkers {
 /// time, some local engines can fail on that path when their Metal runtime is
 /// unavailable.
 enum TranslationLanguage {
+    /// Language identity alone cannot prove a requested output script. Keep
+    /// short neutral Han uncertain, and never aggregate variant probabilities.
+    static func satisfiesOutputVariant(in text: String, target: String) -> Bool {
+        let parts = target.replacingOccurrences(of: "_", with: "-").lowercased()
+            .split(separator: "-").map(String.init)
+        guard baseCode(target) == "zh", parts.contains("hans") || parts.contains("hant") else {
+            return true
+        }
+        guard text.unicodeScalars.filter({ CharacterSet.letters.contains($0) }).count >= 6,
+              let reading = LanguageRecognizerPool.shared.classify(text),
+              reading.probability >= 0.9 else { return false }
+        let expected = parts.contains("hant") ? "zh-hant" : "zh-hans"
+        return reading.language.rawValue.lowercased() == expected
+    }
+
     static func baseCode(_ code: String) -> String {
         code.replacingOccurrences(of: "_", with: "-")
             .split(separator: "-")

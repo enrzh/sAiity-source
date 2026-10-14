@@ -113,12 +113,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         onIssue: { operation, reason in
             Diagnostics.recordFailure(operation: operation, reason: reason)
         },
-        onTiming: { operation, seconds, cold in
-            Diagnostics.recordTiming(operation: "dictation.\(operation)", seconds: seconds, cold: cold)
-        },
         onPhaseChanged: { [weak self] phase in
             self?.updateDictationToast(phase)
             self?.scheduleTranslatorEvictionIfIdle()
+        },
+        originalTextApplications: { Set(SettingsWindowController.state.originalTextApplications) },
+        onDelivered: { result, delivery, id in
+            let state = SettingsWindowController.state
+            state.recentDictations = RecentDictationResult.retaining(
+                .init(id: id, completedAt: Date(), result: result, delivery: delivery),
+                in: state.recentDictations, enabled: state.keepRecentDictations)
+        },
+        onRunTiming: { timing in
+            Diagnostics.recordTiming(operation: timing.operation, seconds: timing.seconds, cold: timing.cold,
+                                     runID: timing.runID, outcome: timing.outcome, fallbackReason: timing.fallbackReason,
+                                     modelLoadCount: timing.modelLoadCount, modelCallCount: timing.modelCallCount)
         })
     }()
     private let dictationHotkeyMonitor = DictationHotkeyMonitor()
@@ -126,6 +135,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var lastDictationResult: DictationResultSnapshot?
     private weak var onboardingTrialModel: OnboardingModel?
     private var onboardingTrialPreparation: Task<Void, Never>?
+    private var onboardingHealthTask: Task<Void, Never>?
     private var dictationFeedbackTask: Task<Void, Never>?
     private var engine = ASREngine.effective
 
@@ -169,6 +179,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    @objc private func showRecentDictations() {
+        SettingsWindowController.selectedPane = .dictation
+        SettingsWindowController.show()
+        NotificationCenter.default.post(name: .saiitySelectSettingsPane, object: SettingsPane.dictation.rawValue)
+        SettingsWindowController.state.showsRecentDictations = true
+    }
+
     func tryOnboarding(_ kind: OnboardingModel.UseCase, model: OnboardingModel) async {
         if onboardingTrialModel === model, model.trial == kind, model.trialBusy {
             if kind == .dictation {
@@ -188,6 +205,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         model.trialText = ""
+        model.trialInputHealth = nil
+        model.trialMicrophoneName = nil
         model.trialPermissionPane = nil
         guard kind == .dictation ? Self.dictationModelIsInstalled() : !(ASREngine.selected?.needsDownload ?? true) else {
             model.trialStatus = String(localized: "Download the selected recognition model under Setup or Models, then try again.")
@@ -253,6 +272,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func cancelOnboardingTrial() {
+        onboardingHealthTask?.cancel()
+        onboardingHealthTask = nil
         onboardingTrialPreparation?.cancel()
         onboardingTrialPreparation = nil
         guard let model = onboardingTrialModel else { return }
@@ -274,7 +295,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         await cleanupDictatedText(DictationTranscriptionResult(text: text, language: sourceLanguage))?.text
     }
 
-    private lazy var dictationCleanupSession = DictationCleanupSession(gate: translationRuntime.gate)
+    private lazy var dictationCleanupSession = DictationCleanupSession(gate: translationRuntime.gate, onTiming: { timing in
+        Diagnostics.recordTiming(operation: timing.operation, seconds: timing.seconds, cold: timing.cold,
+                                 runID: timing.runID, modelLoadCount: timing.modelLoadCount,
+                                 modelCallCount: timing.modelCallCount)
+    })
 
     private func cleanupDictatedText(_ transcription: DictationTranscriptionResult) async -> DictationTranscriptionResult? {
         await translationRuntime.swap?.value
@@ -357,6 +382,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var captionEngineForTests: ASREngine { engine }
     func startCaptionsForTests() { start() }
     var captionsActiveForTests: Bool { state.isActive }
+    func setCaptionStateForTests(_ value: SessionState) { state = value }
+    var captionResourcesForTests: CaptionSessionResources { captionResources }
+    var captionStatusForTests: String { statusLine }
     var captionPoolPreparedForTests: Bool { captionResources.pool.preparedForTests }
     var captionPoolLeaseForTests: Bool { captionResources.pool.hasActiveLeaseForTests }
     /// The sentence still being assembled, as the recogniser sees it. Empty once
@@ -371,7 +399,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     /// Close it, exactly as punctuation or teardown would.
     func closeSentenceForTests() { closeSentence() }
+    func clearCaptionForTests() { clearCaption() }
+    func stopCaptionsForTests() async { await stopAsync() }
+    func commitCaptionGapForTests(_ range: Range<Int>, backend: any TranscriptionBackend) async {
+        captionResources.backend = backend
+        await commitAtSpeechGap(range, generation: sessionGeneration)
+        captionResources.backend = nil
+    }
+    func renderCaptionForTests(_ chunk: TranscriptChunk) { renderCaptionText(chunk.text, chunk: chunk) }
+    var captionHistoryForTests: [CaptionHistoryEntry] { overlay.historyEntriesForTests }
+    func configureCaptionTranslatorForTests(_ translator: any Translating, target: String) {
+        translationRuntime.active = translator
+        translationRuntime.engine = .hyMT2
+        translationRuntime.ready = true
+        translateTo = target
+    }
+    func waitForCaptionTranslationsForTests() async {
+        let pending = Array(captionTranslationTasks.values)
+        for task in pending { _ = await task.value }
+        overlay.orderOut(nil)
+    }
     func beginRecordingForTests() async { await beginRecording() }
+    func saveSubtitlesForTests() async -> SessionRef? { await saveSubtitlesTranscript() }
     /// The lines this session has recorded, whether or not saving is on.
     var sessionLinesForTests: [Segment] { sessionLines }
     var pendingTranscriptWritesForTests: Int { pendingTranscriptWrites }
@@ -1185,6 +1234,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         /// What the menu offers, and what a caller may do next.
         var isActive: Bool { self == .starting || self == .running }
+        var occupiesResources: Bool { self != .idle }
     }
 
     private var state: SessionState = .idle {
@@ -1200,7 +1250,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // The Settings window gates model deletion on this: deleting weights
             // out from under a loading engine is exactly as bad as under a
             // running one, so `starting` counts as busy.
-            CaptionSession.shared.setRunning(state.isActive)
+            CaptionSession.shared.setRunning(state.occupiesResources, stopping: state == .stopping)
             // And the Captions pane's Start/Stop button reads this, so its label
             // cannot disagree with what the menu bar item says — both come from
             // here. Hopped to the main actor because this class is not isolated
@@ -1430,9 +1480,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Deliberately not localised: a two-glyph fallback that only appears if
         // icon rendering fails, and a stable marker beats a per-locale one.
         if statusItem.button?.image == nil { statusItem.button?.title = "CC" }
-        statusItem.button?.toolTip = String(localized: "sAiity — on-device live subtitles")
+        statusItem.button?.toolTip = String(localized: "Syllivra — on-device live subtitles")
         overlay.onCopy = { [weak self] in self?.copyCurrentLine() }
-        overlay.onSaveTranscript = { [weak self] in self?.saveSubtitlesTranscript() }
+        overlay.onSaveTranscript = { [weak self] in
+            Task { @MainActor in _ = await self?.saveSubtitlesTranscript() }
+        }
         overlay.onClear = { [weak self] in self?.clearCaption() }
         bindDictationToastActions()
         NotificationCenter.default.addObserver(
@@ -1476,11 +1528,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
         NotificationCenter.default.addObserver(forName: .saiityDictationShortcutRecordingChanged,
-                                               object: nil, queue: .main) { [weak self] note in
+                                               object: nil, queue: .main) { [weak monitor = dictationHotkeyMonitor] note in
             let suspended = note.object as? Bool ?? false
-            Task { @MainActor [weak self] in
-                self?.dictationHotkeyMonitor.setSuspended(suspended)
-            }
+            monitor?.setSuspended(suspended)
         }
 
         // Lets the Settings window stop the session and drop loaded models
@@ -1508,7 +1558,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 case .mixing:
                     self.setStatus("Microphone added to the captions")
                 case .denied:
-                    self.setStatus("Captions run without your microphone — allow sAiity under System Settings → Privacy & Security → Microphone")
+                    self.setStatus("Captions run without your microphone — allow Syllivra under System Settings → Privacy & Security → Microphone")
                 case .failed:
                     self.setStatus("Captions run without your microphone — it could not be started")
                 default:
@@ -1661,7 +1711,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return true
     }
 
-    private static func dictationModelIsInstalled() -> Bool {
+    static func dictationModelIsInstalled() -> Bool {
         if DictationRecognizer.selected == .whisper {
             return WhisperDictationBackend.isReady(WhisperDictationBackend.model)
         }
@@ -1676,7 +1726,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 NemotronEngine.isDownloaded(chunkMs: $0)
             }
         }
-        return false
+        return !engine.needsDownload
     }
 
     /// AppKit can accept a panel order request during application launch while
@@ -1823,6 +1873,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func updateDictationToast(_ phase: DictationPhase) {
+        SettingsWindowController.state.dictationUsesOriginalText = dictationController.isUsingOriginalText
         if let model = onboardingTrialModel, model.trial == .dictation {
             switch phase {
             case .starting, .preparing:
@@ -1830,12 +1881,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case .dictating:
                 model.trialRecording = true
                 model.trialStatus = String(localized: "Listening — speak, then choose Stop & Transcribe.")
+                onboardingHealthTask?.cancel()
+                onboardingHealthTask = Task { @MainActor [weak self, weak model] in
+                    while let self, let model, !Task.isCancelled,
+                          self.onboardingTrialModel === model, model.trialRecording {
+                        model.trialInputHealth = self.dictationController.inputHealth
+                        model.trialMicrophoneName = self.dictationCapture.inputDeviceName
+                        try? await Task.sleep(for: .seconds(1))
+                    }
+                }
             case .result:
+                model.trialInputHealth = dictationController.inputHealth
+                onboardingHealthTask?.cancel()
                 model.trialBusy = false
                 model.trialRecording = false
                 model.trialStatus = String(localized: "Dictation worked. Your result is shown below.")
                 onboardingTrialModel = nil
             case .failure(let reason), .recovery(let reason):
+                onboardingHealthTask?.cancel()
                 model.trialBusy = false
                 model.trialRecording = false
                 model.trialStatus = reason
@@ -1844,6 +1907,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 model.trialRecording = false
                 model.trialStatus = String(localized: "Recording limit reached — finishing the result.")
             case .transcribing, .cleaning, .translating, .inserting:
+                model.trialInputHealth = dictationController.inputHealth
+                onboardingHealthTask?.cancel()
                 model.trialStatus = String(localized: "Processing on your Mac…")
             default: break
             }
@@ -1874,12 +1939,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         case .recovery, .failure:
             dictationToast.show(phase: phase)
-            Task { @MainActor in
-                try? await Task.sleep(for: .seconds(2))
-                if self.dictationController.phase.automaticallyDismissesToast {
-                    self.dictationController.markReadyAfterFeedback()
-                }
-            }
+            scheduleDictationFeedbackDismissal(after: .seconds(2))
         case .result(let message):
             if let output = lastDictationResult?.outputText.trimmingCharacters(in: .whitespacesAndNewlines),
                !output.isEmpty {
@@ -1906,18 +1966,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // The toast draws either the waveform or the text, never both.
             // This is the handover the option asks for, and why no layout
             // change was needed to make it.
-            dictationToast.show(resultText: text, autoDismissAfter: nil)
+            dictationToast.show(resultText: text, autoDismissAfter: nil, allowsKeyboardFocus: false)
         case .transcribing, .cleaning, .translating, .inserting:
-            dictationToast.show(resultText: text, autoDismissAfter: nil)
+            dictationToast.show(resultText: text, autoDismissAfter: nil, allowsKeyboardFocus: false)
         default:
             break
         }
     }
 
-    private func scheduleDictationFeedbackDismissal() {
+    private func scheduleDictationFeedbackDismissal(after delay: Duration = .seconds(4.5)) {
         dictationFeedbackTask?.cancel()
         dictationFeedbackTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(4.5))
+            try? await Task.sleep(for: delay)
+            while self?.dictationToast.isInteractingWithFeedback == true, !Task.isCancelled {
+                do { try await Task.sleep(for: .milliseconds(250)) }
+                catch { return }
+            }
             guard let self, !Task.isCancelled else { return }
             if self.dictationController.phase.automaticallyDismissesToast {
                 self.dictationController.markReadyAfterFeedback()
@@ -1958,8 +2022,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(setup)
             menu.addItem(.separator())
         }
-        let toggleItem = NSMenuItem(title: state.isActive ? String(localized: "Stop captions") : String(localized: "Start captions"),
+        let toggleItem = NSMenuItem(title: state == .stopping ? String(localized: "Stopping…")
+                                    : state.isActive ? String(localized: "Stop captions") : String(localized: "Start captions"),
                                     action: #selector(toggle), keyEquivalent: "")
+        toggleItem.isEnabled = state != .stopping
         if let sc = HotKeyCenter.shortcut(for: .toggleCaptions), sc.isUsable {
             // Shown for discoverability. The real binding is the global hot key —
             // a menu keyEquivalent only fires while this app is frontmost, which
@@ -2002,6 +2068,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let original = NSMenuItem(title: String(localized: "Copy Original Dictation"),
                                   action: #selector(copyOriginalDictationFromMenu), keyEquivalent: "")
         original.tag = Self.copyOriginalMenuTag
+        let recent = NSMenuItem(title: String(localized: "Recent Dictations…"),
+                                action: #selector(showRecentDictations), keyEquivalent: "")
+        recent.image = Self.menuSymbol("clock.arrow.circlepath")
+        menu.addItem(recent)
         original.isEnabled = !dictationController.isBusy && lastDictationResult?.originalForRecovery != nil
         menu.addItem(original)
 
@@ -2023,7 +2093,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // terminate(_:) lives on NSApplication, not on this delegate. Without an
         // explicit target, assignTargets below would point it at AppDelegate,
         // which does not implement it — and the item silently does nothing.
-        let quit = NSMenuItem(title: String(localized: "Quit sAiity"), action: #selector(NSApplication.terminate(_:)),
+        let quit = NSMenuItem(title: String(localized: "Quit Syllivra"), action: #selector(NSApplication.terminate(_:)),
                               keyEquivalent: "q")
         quit.target = NSApp
         menu.addItem(quit)
@@ -2184,41 +2254,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Save the current live session directly into the transcript library. This
     /// is intentionally independent of the opt-in persistent recorder.
-    private func saveSubtitlesTranscript() {
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            // Freeze the tapped session, including its outstanding translations.
-            // A stop/start during the await must not save a different session.
-            var segments = self.sessionLines
-            let translations = self.captionTranslationTasks
-            let targets = self.captionTranslationTargets
-            let locale = self.locale.identifier(.bcp47)
-            let target = self.translateTo
-            let startedAt = self.subtitleSessionStartedAt ?? Date()
-            for index in segments.indices {
-                if let task = translations[segments[index].i], let text = await task.value {
-                    segments[index].tr = text
-                    segments[index].trLoc = targets[segments[index].i]
-                }
+    private var savingSubtitles = false
+    private func saveSubtitlesTranscript() async -> SessionRef? {
+        guard !savingSubtitles else { return nil }
+        savingSubtitles = true
+        defer { savingSubtitles = false }
+        overlay.showTranscriptSaveStatus(String(localized: "Saving transcript…"))
+        // Freeze the tapped session and library before waiting for translations.
+        var segments = sessionLines
+        let library = TranscriptStore.sessionsDir
+        let translations = captionTranslationTasks
+        let targets = captionTranslationTargets
+        let locale = locale.identifier(.bcp47)
+        let target = translateTo
+        let startedAt = subtitleSessionStartedAt ?? Date()
+        for index in segments.indices {
+            if let task = translations[segments[index].i], let text = await task.value {
+                segments[index].tr = text
+                segments[index].trLoc = targets[segments[index].i]
             }
-            guard !segments.isEmpty else {
-                self.setStatus("That transcript has no lines.")
-                return
+        }
+        guard !segments.isEmpty else {
+            setStatus("That transcript has no lines.")
+            overlay.showTranscriptSaveStatus(String(localized: "That transcript has no lines."))
+            return nil
+        }
+        let savedSegments = segments
+        let work = Task.detached(priority: .userInitiated) {
+            Result { try TranscriptStore.saveSession(savedSegments, locale: locale,
+                                                      translateTo: target,
+                                                      startedAt: startedAt, in: library) }
+        }
+        switch await work.value {
+        case .success(let session):
+            SessionCatalog.invalidate()
+            setStatus("Transcript saved to library")
+            overlay.showTranscriptSaveStatus(String(localized: "Saved to Transcripts")) {
+                SettingsWindowController.openTranscript(session)
             }
-            let savedSegments = segments
-            let work = Task.detached(priority: .userInitiated) {
-                Result { try TranscriptStore.saveSession(savedSegments, locale: locale,
-                                                          translateTo: target,
-                                                          startedAt: startedAt) }
-            }
-            switch await work.value {
-            case .success:
-                SessionCatalog.invalidate()
-                self.setStatus("Transcript saved to library")
-            case .failure(let error):
-                NSLog("sAiity transcript library save failed: \(error.localizedDescription)")
-                self.setStatus("Could not save transcript")
-            }
+            return session
+        case .failure(let error):
+            NSLog("sAiity transcript library save failed: \(error.localizedDescription)")
+            setStatus("Could not save transcript")
+            overlay.showTranscriptSaveStatus(String(localized: "Could not save transcript"))
+            return nil
         }
     }
 
@@ -2312,7 +2391,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Never a template: templates are flattened to a silhouette, which would
         // throw away the whole point of using the app icon.
         img.isTemplate = source == nil
-        img.accessibilityDescription = recording ? String(localized: "sAiity, recording") : "sAiity"
+        img.accessibilityDescription = recording ? String(localized: "Syllivra, recording") : "Syllivra"
         // There is no status item before launch finishes — the quit flush ends
         // recording, and ending recording repaints the icon.
         guard let statusItem else { return }
@@ -2694,6 +2773,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
 
                 if saveTranscript { await beginRecording() }
+                // Stop may have arrived while capture or recording was starting.
+                try Task.checkCancellation()
                 state = .running
                 setStatus("Listening · \(Self.coverageNote())")
                 // ASR must be visible while the optional translator warms up.
@@ -2706,7 +2787,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 // the transcript the user turned it on for.
                 switch captionResources.capture.micStatus {
                 case .denied:
-                    setStatus("Captions run without your microphone — allow sAiity under System Settings → Privacy & Security → Microphone")
+                    setStatus("Captions run without your microphone — allow Syllivra under System Settings → Privacy & Security → Microphone")
                 case .failed:
                     setStatus("Captions run without your microphone — it could not be started")
                 case .off, .mixing:
@@ -2827,8 +2908,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// So the constraint is stated when captions start, not discovered later.
     private static func coverageNote() -> String {
         switch ASREngine.effective.coverage {
-        case .manyDetectedFromAudio:
-            return String(localized: "detecting language")
+        case .unknown:
+            return String(localized: "automatic recognition")
         case .only(let codes):
             let names = codes.sorted().map {
                 Locale.current.localizedString(forLanguageCode: $0) ?? $0
@@ -2843,7 +2924,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // fluent nonsense, which looks like the app working badly rather than
         // being pointed at the wrong model. Say so plainly.
         let engine = ASREngine.effective
-        guard engine.canHear(code) else {
+        if case .only = engine.coverage, !engine.canHear(code) {
             let supported: String
             if case .only(let codes) = engine.coverage {
                 supported = codes.sorted().map {
@@ -2875,27 +2956,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // for deleting weights while idle.
         let wasRunning = state.isActive
         state = .stopping
-        await liveTranslation.stop()
-        if wasRunning { announce(String(localized: "Captions stopped")) }
         // Not "Idle". Cancelling a model download in flight can take a moment,
         // and this await used to sit behind a menu that already said Idle and
         // offered Start — while `start()` bailed on `guard state == .idle`, so
         // every press was silently ignored.
         setStatus("Stopping…")
+        overlay.clear()
+        captionResources.startTask?.cancel()
+        translationRuntime.swap?.cancel()
+        await captionResources.stopCapture()
+        if wasRunning { announce(String(localized: "Captions stopped")) }
+        await liveTranslation.stop()
 
         // Cancel an in-flight start and WAIT for it. Cancellation alone is not
         // enough: the start Task may be suspended inside a model download, and
         // if we tore down here without waiting it would resume afterwards and
         // bring the audio stream up behind our back — capture running with the
         // menu reading "Start captions".
-        captionResources.startTask?.cancel()
         await captionResources.startTask?.value
         captionResources.startTask = nil
 
         // A translator swap is fired and forgotten from the notification, so it
         // can be mid-load right now and would otherwise finish onto a session
         // that no longer exists.
-        translationRuntime.swap?.cancel()
         await translationRuntime.swap?.value
         translationRuntime.swap = nil
 
@@ -2932,8 +3015,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             refreshCaptionSpeakers()
         }
         closeSentence()
-        if await TranscriptStore.shared.isRecording {
-            await transcriptWriteChain?.value
+        let translations = Array(captionTranslationTasks.values)
+        for translation in translations { _ = await translation.value }
+        await transcriptWriteChain?.value
+        // Final translations patch independently of the original append chain.
+        while pendingTranscriptWrites > 0 {
+            await Task.yield()
         }
         await endRecording()
         MemoryPolicy.releaseCaches()
@@ -3055,7 +3142,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // The user cleared this sentence off the screen. Keep tracking it —
         // the transcript still gets it — but do not paint it back.
-        let suppressed = displayLifecycle.isCleared(displayLifecycle.sentenceID)
+        let suppressed = state == .stopping || displayLifecycle.isCleared(displayLifecycle.sentenceID)
 
         guard chunk.isFinal else {
             // Still being revised: show it after the part of the sentence that
@@ -3218,9 +3305,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func captionSourceLanguage(for text: String) -> String {
-        LanguageDetector.languageCode(in: text)
-            ?? detectedLanguage
-            ?? locale.identifier(.bcp47)
+        LanguageDetector.sourceLanguage(in: text) ?? "auto"
     }
 
     /// Translate a mixed-language caption span by span. A dominant language is
@@ -3235,7 +3320,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             fallbackLanguage: fallbackSource)
         guard !spans.isEmpty else { return nil }
         guard CaptionLanguageSpanDetector.isMixed(spans) else {
-            return try await TranslationProcedure.translate([.init(text: text, source: fallbackSource)],
+            return try await TranslationProcedure.translate([.init(text: text, source: spans.first?.language ?? "auto")],
                 to: target, engine: engine)
         }
 
@@ -3305,6 +3390,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if translating {
             pendingTranslations += 1
         } else if wantsTranslation {
+            if translationRuntime.ready {
+                CaptionSession.shared.setTranslationBacklogged(true)
+            }
             NSLog("sAiity translate: skipped, ready=\(translationRuntime.ready), \(pendingTranslations) queued")
         }
 
@@ -3341,6 +3429,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 // decrement the new session or remove its cancellation entry.
                 if self.sessionGeneration == generation {
                     self.pendingTranslations -= 1
+                    if self.pendingTranslations == 0 {
+                        CaptionSession.shared.setTranslationBacklogged(false)
+                    }
                     self.captionTranslationTasks[idx] = nil
                     self.captionTranslationTargets[idx] = nil
                 }
@@ -3392,20 +3483,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 // Assigned beside `tr`, never before it.
                 self.sessionLines[idx].trLoc = target
             }
-            // Current sentence: show it plainly. One sentence late: still show
-            // it, dimmed — the viewer just read that line, and a slightly late
-            // translation they can attach to it beats the empty row that
-            // discarding produced. Older than that: drop, it helps nobody.
-            // A sentence the user cleared does not get its translation painted
-            // back under the empty line a moment later.
-            if CaptionStyle.current.showTranslation,
-               !self.displayLifecycle.isCleared(sentenceID) {
+            // Patch every retained row; cleared and evicted rows stay absent.
+            if !self.displayLifecycle.isCleared(sentenceID) {
                 let behind = self.displayLifecycle.sentenceID - sentenceID
-                if behind <= 0 {
-                    self.overlay.showTranslation(out, forSentenceID: sentenceID)
-                    self.shownTranslationID = sentenceID
-                } else if behind == 1 {
-                    self.overlay.showTranslation(out, forSentenceID: sentenceID, stale: true)
+                self.overlay.showTranslation(out, forSentenceID: sentenceID, stale: behind > 0)
+                if CaptionStyle.current.showTranslation, behind <= 1 {
                     self.shownTranslationID = sentenceID
                 }
             }

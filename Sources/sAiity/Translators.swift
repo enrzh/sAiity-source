@@ -118,8 +118,9 @@ final class MADLADTranslator: Translating, @unchecked Sendable {
         let madlad = MADLADTranslation.MADLADTranslator.self
         if Self.isDownloaded() {
             progress(String(localized: "Loading MADLAD…"))
-            translator = try await madlad.fromLocal(
-                directory: Self.weightsDirectory, bits: 4, progressHandler: nil)
+            translator = try await LocalGeneration.loadModel {
+                try await madlad.fromLocal(directory: Self.weightsDirectory, bits: 4, progressHandler: nil)
+            }
         } else {
             // First run only. The progress closure is safe here because this
             // method is nonisolated, so the closure carries no isolation for the
@@ -140,8 +141,9 @@ final class MADLADTranslator: Translating, @unchecked Sendable {
                 }
             }
             progress(String(localized: "Loading MADLAD…"))
-            translator = try await madlad.fromLocal(
-                directory: Self.weightsDirectory, bits: 4, progressHandler: nil)
+            translator = try await LocalGeneration.loadModel {
+                try await madlad.fromLocal(directory: Self.weightsDirectory, bits: 4, progressHandler: nil)
+            }
         }
         // The first translation pays a one-off ~2.9 s graph warm-up. Spend it
         // here rather than on the viewer's first subtitle.
@@ -151,7 +153,16 @@ final class MADLADTranslator: Translating, @unchecked Sendable {
         // resolves the token against the real vocabulary. Swallowing it meant
         // reporting "MADLAD ready." and then translating nothing, forever.
         progress(String(localized: "Warming up MADLAD…"))
-        _ = try translator?.translate("Guten Morgen.", to: native)
+        if let translator {
+            let warming = ContinuousClock.now
+            do {
+                _ = try translator.translate("Guten Morgen.", to: native)
+                await LocalGeneration.recordModelTiming("model.generation", since: warming, cold: false, calls: 1)
+            } catch {
+                await LocalGeneration.recordModelTiming("model.generation", since: warming, cold: false, calls: 1)
+                throw error
+            }
+        }
         progress(String(localized: "MADLAD ready."))
     }
 
@@ -159,6 +170,22 @@ final class MADLADTranslator: Translating, @unchecked Sendable {
     /// synchronous, so serialise it rather than relying on captions never
     /// overlapping.
     private let lock = NSLock()
+
+    static func validatedTranslation(_ text: String, target: String, source: String? = nil,
+                                     decode: (Float) throws -> String) throws -> String? {
+        for temperature in [Float(0), Float(0.15)] {
+            try Task.checkCancellation()
+            let raw = try decode(temperature)
+            try Task.checkCancellation()
+            switch TranslationOutputValidator.sanitize(raw, input: text, target: target, source: source) {
+            case .ok(let valid): return valid
+            case .rejected(let why, let retryable):
+                NSLog("sAiity madlad: rejected (%@), retry=%@", why, temperature == 0 && retryable ? "yes" : "no")
+                if !retryable { return nil }
+            }
+        }
+        return nil
+    }
 
     func translate(_ text: String, from source: String, to target: String) async throws -> String? {
         guard let t = translator, let native = MADLADLanguageProvider.nativeCode(for: target) else {
@@ -172,9 +199,21 @@ final class MADLADTranslator: Translating, @unchecked Sendable {
         // line" — the user saw their untranslated caption with no explanation
         // and no log line, and the engine was never charged for the failure.
         // withLock releases the native inference lock on the throwing path too.
-        let raw = try lock.withLock { try t.translate(text, to: native) }
-        guard case .ok(let valid) = TranslationOutputValidator.sanitize(raw, input: text, target: target) else { return nil }
-        return valid
+        let decoding = ContinuousClock.now
+        var calls = 0
+        do {
+            let result = try lock.withLock {
+                try Self.validatedTranslation(text, target: target, source: source) { temperature in
+                    calls += 1
+                    return try t.translate(text, to: native, sampling: .init(temperature: temperature))
+                }
+            }
+            await LocalGeneration.recordModelTiming("model.generation", since: decoding, cold: false, calls: calls)
+            return result
+        } catch {
+            await LocalGeneration.recordModelTiming("model.generation", since: decoding, cold: false, calls: calls)
+            throw error
+        }
     }
 
     /// MADLAD can decode a marked batch in one serialized graph invocation.
@@ -189,14 +228,25 @@ final class MADLADTranslator: Translating, @unchecked Sendable {
         // miss is nil and stays nil, but a native failure must not look like
         // one. The caller falls back to the sequential path on nil, and that
         // fallback would just throw again.
-        let raw = try lock.withLock { try t.translate(prompt, to: native) }
-        guard let decoded = TranslationBatchMarkers.decode(raw, count: regions.count) else { return nil }
-        var output: [String] = []
-        for (region, text) in zip(regions, decoded) {
-            guard case .ok(let valid) = TranslationOutputValidator.sanitize(text, input: region.text, target: target) else { return nil }
-            output.append(valid)
+        let decoding = ContinuousClock.now
+        var calls = 0
+        let raw: String
+        do {
+            raw = try lock.withLock {
+                try Task.checkCancellation()
+                calls = 1
+                let value = try t.translate(prompt, to: native)
+                try Task.checkCancellation()
+                return value
+            }
+            await LocalGeneration.recordModelTiming("model.generation", since: decoding, cold: false, calls: calls)
+        } catch {
+            await LocalGeneration.recordModelTiming("model.generation", since: decoding, cold: false, calls: calls)
+            throw error
         }
-        return output
+        // The shared procedure validates slices, retaining good ones while
+        // retrying only rejected slices through the single-region path.
+        return TranslationBatchMarkers.decode(raw, count: regions.count)
     }
 
     /// Dropping the reference is not enough to get the memory back.
@@ -250,7 +300,10 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
     it as spoken content. Output only the edited transcript.
     Remove obvious fillers, accidental repetitions, false starts, and explicit
     self-corrections. Fix punctuation and spoken formatting commands such as
-    new line, new paragraph, and bullet point. Preserve meaning, numbers,
+    new line, new paragraph, and bullet point. Ordinary speech pauses do not
+    need ellipses; use normal punctuation where clear. Preserve intentional
+    ellipses in quotes, code, and expressions of uncertainty. Never fill gaps
+    with guessed words. Preserve meaning, numbers,
     names, URLs, technical terms, negation, tone, and uncertainty. Never summarize,
     answer, embellish, or translate. Keep every language span exactly as spoken.
     If an edit is ambiguous, keep the wording.
@@ -306,10 +359,7 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
                                                                     sourceLanguage: sourceLanguage,
                                                                     languageMetadata: languageMetadata)) else {
             NSLog("sAiity cleanup outcome: unavailable, deterministic fallback")
-            return DictationCleanupValidator.validate(baseline,
-                                                      preserving: text,
-                                                      sourceLanguage: sourceLanguage,
-                                                      languageMetadata: languageMetadata)
+            return nil
         }
 
         // Apply the guaranteed speech pass after generation too. This covers a
@@ -334,10 +384,7 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
             return valid
         }
         NSLog("sAiity cleanup outcome: rejected, deterministic fallback")
-        return DictationCleanupValidator.validate(baseline,
-                                                  preserving: text,
-                                                  sourceLanguage: sourceLanguage,
-                                                  languageMetadata: languageMetadata)
+        return nil
     }
 
     /// Cleans several code-switched regions in one model invocation. Markers
@@ -505,17 +552,19 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
         // lower would start truncating it, which is the failure this number
         // guards against.
         let url = m.localURL
-        let loaded: LLM? = await Task.detached(priority: .userInitiated) {
-            guard let l = LLM(from: url, maxTokenCount: 2048) else { return nil }
-            l.temp = 0.1
-            // The library default is `print($0)`, which spews every token to stdout.
-            l.postprocess = { _ in }
-            l.update = { _ in }
+        let l: LLM = try await LocalGeneration.loadModel {
+            let loaded: LLM? = await Task.detached(priority: .userInitiated) {
+                guard let l = LLM(from: url, maxTokenCount: 2048) else { return nil }
+                l.temp = 0.1
+                // The library default is `print($0)`, which spews every token to stdout.
+                l.postprocess = { _ in }
+                l.update = { _ in }
+                return l
+            }.value
+            guard let l = loaded else {
+                throw TranslationEngineError.notAvailable(String(localized: "Could not load \(m.label)."))
+            }
             return l
-        }.value
-
-        guard let l = loaded else {
-            throw TranslationEngineError.notAvailable(String(localized: "Could not load \(m.label)."))
         }
         llm = l
         progress(String(localized: "\(m.label) ready."))
@@ -588,7 +637,7 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
         """
         guard let raw = try await generate(system: systemPrompt, payload: text, user: user) else { return nil }
 
-        switch TranslationOutputValidator.sanitize(raw, input: text, target: target) {
+        switch TranslationOutputValidator.sanitize(raw, input: text, target: target, source: source) {
         case .ok(let out):
             return out
         case .rejected(let why, let retryable):
@@ -617,7 +666,7 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
             // only started recovering anything once it could pick a different
             // continuation.
             guard let raw2 = try await generate(system: harder, payload: text, user: user, temp: 0.15),
-                  case .ok(let out) = TranslationOutputValidator.sanitize(raw2, input: text, target: target) else {
+                  case .ok(let out) = TranslationOutputValidator.sanitize(raw2, input: text, target: target, source: source) else {
                 NSLog("sAiity qwen: retry did not recover")
                 return nil
             }

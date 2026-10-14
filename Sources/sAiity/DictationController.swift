@@ -2,6 +2,7 @@ import AVFoundation
 import Foundation
 
 protocol DictationAudioCapture: AnyObject {
+    var inputHealth: DictationInputHealth? { get }
     func start(targetFormat: AVAudioFormat,
                onBuffer: @escaping @Sendable (AVAudioPCMBuffer) -> Void) throws
     func stop()
@@ -11,6 +12,7 @@ protocol DictationAudioCapture: AnyObject {
 }
 
 extension DictationAudioCapture {
+    var inputHealth: DictationInputHealth? { nil }
     func takeCollectedSamples() -> [Float] { [] }
     func setLimitHandler(_ handler: (@Sendable () -> Void)?) {}
     func setWaveformHandler(_ handler: (@Sendable ([Float]) -> Void)?) {}
@@ -37,6 +39,7 @@ final class DictationController {
     typealias CleanupHandler = (String, String) async -> String?
     typealias DetailedCleanupHandler = (DictationTranscriptionResult) async -> DictationTranscriptionResult?
     typealias ResultHandler = (DictationResultSnapshot) -> Void
+    typealias DeliveryHandler = (DictationResultSnapshot, TextInsertionResult, UUID) -> Void
     typealias DraftHandler = (String) -> Void
     typealias WaveformHandler = @Sendable ([Float]) -> Void
     typealias WhisperTranscriptionHandler = ([[Float]], Locale) async throws -> String?
@@ -69,6 +72,9 @@ final class DictationController {
     private let segmenter: SpeechRegionSegmenter
     private let onIssue: IssueHandler
     private let onTiming: TimingHandler
+    private let originalTextApplications: () -> Set<String>
+    private let onDelivered: DeliveryHandler
+    private let onRunTiming: (DiagnosticsRuntimeTiming) -> Void
 
     private var state = DictationSessionState()
     private var generation = 0
@@ -86,6 +92,10 @@ final class DictationController {
     private var sessionUsesWhisper = false
     private var sessionIsTrial = false
     private var sessionFocus: DictationFocusToken?
+    private var sessionUsesOriginalText = false
+    private(set) var currentRunID: UUID?
+    private var runStarted: ContinuousClock.Instant?
+    private var runFallbackReason: String?
     private var sessionUsesStreamingDraft = false
     private var sessionLocale = Locale.current
     private var sessionSampleRate = 16_000.0
@@ -96,11 +106,14 @@ final class DictationController {
     private(set) var phase: DictationPhase = .idle {
         didSet {
             guard phase != oldValue else { return }
+            if case .failure = phase { finishRun(outcome: "failed") }
             onPhaseChanged(phase)
         }
     }
 
     var isActive: Bool { state.isActive }
+    var inputHealth: DictationInputHealth? { capture.inputHealth }
+    var isUsingOriginalText: Bool { sessionUsesOriginalText && (isActive || isFinishing) }
 
     /// True while a previous session still owns work that has not finished:
     /// transcription, cleanup, translation, insertion.
@@ -155,7 +168,10 @@ final class DictationController {
          segmenter: SpeechRegionSegmenter = .default,
          onIssue: @escaping IssueHandler = { _, _ in },
          onTiming: @escaping TimingHandler = { _, _, _ in },
-         onPhaseChanged: @escaping (DictationPhase) -> Void = { _ in }) {
+         onPhaseChanged: @escaping (DictationPhase) -> Void = { _ in },
+         originalTextApplications: @escaping () -> Set<String> = { [] },
+         onDelivered: @escaping DeliveryHandler = { _, _, _ in },
+         onRunTiming: @escaping (DiagnosticsRuntimeTiming) -> Void = { _ in }) {
         self.backendProvider = SingleBackendProvider(makeBackend: makeBackend)
         self.capture = capture
         self.inserter = inserter
@@ -179,6 +195,9 @@ final class DictationController {
         self.onIssue = onIssue
         self.onTiming = onTiming
         self.onPhaseChanged = onPhaseChanged
+        self.originalTextApplications = originalTextApplications
+        self.onDelivered = onDelivered
+        self.onRunTiming = onRunTiming
     }
 
     init(backendProvider: any ASRBackendProvider,
@@ -203,7 +222,10 @@ final class DictationController {
          segmenter: SpeechRegionSegmenter = .default,
          onIssue: @escaping IssueHandler = { _, _ in },
          onTiming: @escaping TimingHandler = { _, _, _ in },
-         onPhaseChanged: @escaping (DictationPhase) -> Void = { _ in }) {
+         onPhaseChanged: @escaping (DictationPhase) -> Void = { _ in },
+         originalTextApplications: @escaping () -> Set<String> = { [] },
+         onDelivered: @escaping DeliveryHandler = { _, _, _ in },
+         onRunTiming: @escaping (DiagnosticsRuntimeTiming) -> Void = { _ in }) {
         self.backendProvider = backendProvider
         self.capture = capture
         self.inserter = inserter
@@ -227,6 +249,9 @@ final class DictationController {
         self.onIssue = onIssue
         self.onTiming = onTiming
         self.onPhaseChanged = onPhaseChanged
+        self.originalTextApplications = originalTextApplications
+        self.onDelivered = onDelivered
+        self.onRunTiming = onRunTiming
     }
 
     /// Starts ASR preparation without opening the microphone. Calling this more
@@ -283,6 +308,12 @@ final class DictationController {
 
         sessionIsTrial = previewOnly
         sessionFocus = previewOnly ? nil : inserter.captureFocus()
+        sessionUsesOriginalText = !previewOnly && usesOriginalText(bundleIdentifier: sessionFocus?.bundleIdentifier,
+                                                                  exceptions: originalTextApplications())
+        let runID = previewOnly ? nil : UUID()
+        currentRunID = runID
+        runStarted = previewOnly ? nil : .now
+        runFallbackReason = nil
         generation += 1
         let session = generation
         sessionUsesWhisper = dictationUsesWhisper()
@@ -302,7 +333,9 @@ final class DictationController {
             beginPreparation()
         }
         startupTask = Task { @MainActor [weak self] in
-            await self?.start(session: session)
+            await LocalGeneration.$dictationRunID.withValue(runID?.uuidString) {
+                await self?.start(session: session)
+            }
         }
     }
 
@@ -310,11 +343,14 @@ final class DictationController {
         guard state.release(), terminal.accept(.released) else { return }
         releaseStarted = .now
         let session = generation
+        let runID = currentRunID
         phase = .transcribing
         releaseTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            await self.startupTask?.value
-            await self.finish(session: session)
+            await LocalGeneration.$dictationRunID.withValue(runID?.uuidString) {
+                await self.startupTask?.value
+                await self.finish(session: session)
+            }
         }
     }
 
@@ -322,6 +358,7 @@ final class DictationController {
     /// backend. The async companion below is used when model files are about to
     /// be deleted and must not return until the backend has really stopped.
     func cancel() {
+        finishRun(outcome: "cancelled")
         guard state.isActive || preparationTask != nil || phase == .ready || isBusy else {
             phase = .idle
             return
@@ -372,7 +409,12 @@ final class DictationController {
         // truncated with nothing on screen explaining why the result was short.
         // `finish` moves on to `.transcribing` as soon as it starts working.
         phase = .limit
-        releaseTask = Task { @MainActor [weak self] in await self?.finish(session: session) }
+        let runID = currentRunID
+        releaseTask = Task { @MainActor [weak self] in
+            await LocalGeneration.$dictationRunID.withValue(runID?.uuidString) {
+                await self?.finish(session: session)
+            }
+        }
     }
 
     /// Synchronous callers can initiate cancellation; model deletion awaits
@@ -385,15 +427,20 @@ final class DictationController {
     private func beginPreparation() {
         guard preparationTask == nil else { return }
         let token = preparationGeneration
+        let runID = currentRunID
         let previousCleanup = cleanupTask
         preparationTask = Task { @MainActor [weak self, previousCleanup] in
             await previousCleanup?.value
             guard !Task.isCancelled else { return }
-            await self?.runPreparation(token: token)
+            await LocalGeneration.$dictationRunID.withValue(runID?.uuidString) {
+                await self?.runPreparation(token: token, runID: runID)
+            }
         }
     }
 
-    private func runPreparation(token: Int) async {
+    private func runPreparation(token: Int, runID: UUID?) async {
+        let started = ContinuousClock.now
+        defer { logDuration("preparation", since: started, runID: runID) }
         do {
             try await backendProvider.prepare(locale: Locale.current) { _ in }
             try Task.checkCancellation()
@@ -425,7 +472,12 @@ final class DictationController {
 
     private func start(session: Int) async {
         guard session == generation else { return }
-        await preparationTask?.value
+        let runID = currentRunID
+        if let preparationTask {
+            let waiting = ContinuousClock.now
+            await preparationTask.value
+            logDuration("preparation-wait", since: waiting, runID: runID)
+        }
         guard session == generation else { return }
         guard state.isActive else {
             if phase == .starting || phase == .transcribing {
@@ -444,7 +496,9 @@ final class DictationController {
                     Task { @MainActor in self?.limit(session: session) }
                 }
                 capture.setWaveformHandler(onWaveform)
+                let captureStarted = ContinuousClock.now
                 try capture.start(targetFormat: format) { _ in }
+                logDuration("capture-start", since: captureStarted, runID: runID)
                 guard session == generation else {
                     capture.stop()
                     return
@@ -466,6 +520,7 @@ final class DictationController {
             acquired.setFailureHandler { [weak self] reason in
                 Task { @MainActor in
                     guard let self, session == self.generation else { return }
+                    self.finishRun(outcome: "failed")
                     self.cancel()
                     self.reportIssue("dictation.transcription", reason)
                     self.phase = .failure(reason)
@@ -491,10 +546,12 @@ final class DictationController {
                 Task { @MainActor in self?.limit(session: session) }
             }
             capture.setWaveformHandler(onWaveform)
+            let captureStarted = ContinuousClock.now
             try capture.start(targetFormat: format) { [weak acquired] buffer in
                 guard !deferred else { return }
                 acquired?.feed(buffer)
             }
+            logDuration("capture-start", since: captureStarted, runID: runID)
             guard session == generation else {
                 capture.stop()
                 return
@@ -520,6 +577,7 @@ final class DictationController {
 
     private func finish(session: Int) async {
         guard session == generation else { return }
+        let runID = currentRunID
         // The cap explains itself, then gets out of the way. Only the limited
         // path needs this — a normal release already said `.transcribing` when
         // the key came up.
@@ -537,7 +595,7 @@ final class DictationController {
                     let transcription = try await transcribeWhisperSegments(samples,
                                                                               regions,
                                                                               sessionLocale)
-                    logDuration("transcription", since: transcriptionStarted)
+                    logDuration("transcription", since: transcriptionStarted, runID: runID)
                     guard session == generation else { return }
                     await finish(transcription: transcription,
                                  session: session,
@@ -548,7 +606,7 @@ final class DictationController {
                 guard session == generation, !Task.isCancelled else { return }
                 let transcriptionStarted = ContinuousClock.now
                 let authoritative = try await transcribeWhisper(whisperSamples, sessionLocale)
-                logDuration("transcription", since: transcriptionStarted)
+                logDuration("transcription", since: transcriptionStarted, runID: runID)
                 guard session == generation else { return }
                 await finish(authoritative: authoritative, session: session, sourceLanguage: sessionLocale.identifier(.bcp47))
             } catch is CancellationError {
@@ -561,6 +619,7 @@ final class DictationController {
             return
         }
         guard let backend else {
+            finishRun(outcome: "failed")
             if phase == .transcribing {
                 reportIssue("dictation.transcription", "No prepared recognition backend was available.")
                 phase = .idle
@@ -580,7 +639,7 @@ final class DictationController {
                 let transcriptionStarted = ContinuousClock.now
                 let transcription = try await segmented.transcribeDictation(samples: samples,
                                                                               regions: regions)
-                logDuration("transcription", since: transcriptionStarted)
+                logDuration("transcription", since: transcriptionStarted, runID: runID)
                 await releaseOwnedBackend(session: session, discard: false)
                 guard session == generation else { return }
                 await finish(transcription: transcription,
@@ -600,7 +659,7 @@ final class DictationController {
             ?? Locale.current.identifier(.bcp47)
         let transcriptionStarted = ContinuousClock.now
         let authoritative = await backend.finishDictation()
-        logDuration("transcription", since: transcriptionStarted)
+        logDuration("transcription", since: transcriptionStarted, runID: runID)
         await releaseOwnedBackend(session: session, discard: false)
         guard session == generation else { return }
 
@@ -619,14 +678,16 @@ final class DictationController {
                         session: Int,
                         fallbackSourceLanguage: String) async {
         guard session == generation else { return }
+        let runID = currentRunID
         let authoritativeText = transcription.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !authoritativeText.isEmpty else {
+            finishRun(outcome: "failed")
             phase = .result(String(localized: "No speech detected"))
             return
         }
-        let transcription = DictationVocabulary.applying(to: transcription)
+        let transcription = sessionUsesOriginalText ? transcription : DictationVocabulary.applying(to: transcription)
         let text = transcription.text
-        let configuration = translationConfiguration()
+        let configuration = sessionUsesOriginalText ? .disabled : translationConfiguration()
         let metadata = transcription.languageMetadata
         let sourceLanguage = metadata.dominantLanguage ?? fallbackSourceLanguage
         var output = text
@@ -635,9 +696,9 @@ final class DictationController {
         var cleanupUnavailable = false
         var translated = false
         var translationFailed = false
-        if cleanupConfiguration().enabled {
+        if !sessionUsesOriginalText, cleanupConfiguration().enabled {
             let cleanupStarted = ContinuousClock.now
-            defer { logDuration("cleanup", since: cleanupStarted) }
+            defer { logDuration("cleanup", since: cleanupStarted, runID: runID) }
             phase = .cleaning
             // Both cleanup shapes answer the same question — does this candidate
             // keep the transcript's meaning? — so they share one validation.
@@ -658,6 +719,8 @@ final class DictationController {
                 candidate = (value, transcription)
             }
 
+            guard session == generation, !Task.isCancelled else { return }
+
             if let candidate,
                let valid = DictationCleanupValidator.validate(candidate.text,
                                                                preserving: text,
@@ -666,11 +729,14 @@ final class DictationController {
                 output = valid
                 transcriptionForTranslation = candidate.transcription
                 cleaned = true
+                cleanupUnavailable = candidate.transcription.modelCleanupUnavailable
             } else {
                 cleanupUnavailable = true
             }
             if cleanupUnavailable {
-                reportIssue("dictation.cleanup", "Cleanup unavailable; original transcript preserved.")
+                runFallbackReason = candidate == nil || candidate?.transcription.modelCleanupUnavailable == true
+                    ? "cleanup-unavailable" : "validation-rejected"
+                reportIssue("dictation.cleanup", "Model cleanup unavailable; safe text preserved.")
             }
         }
         guard session == generation, !Task.isCancelled else { return }
@@ -679,7 +745,7 @@ final class DictationController {
            !target.isEmpty {
             phase = .translating
             let translationStarted = ContinuousClock.now
-            defer { logDuration("translation", since: translationStarted) }
+            defer { logDuration("translation", since: translationStarted, runID: runID) }
             let value: String?
             if let detailedTranslate {
                 value = await detailedTranslate(output, transcriptionForTranslation, target)
@@ -699,6 +765,7 @@ final class DictationController {
                 translationFailed = true
             }
             if translationFailed {
+                runFallbackReason = "translation-unavailable"
                 reportIssue("dictation.translation", "Translation unavailable; original output preserved.")
             }
         }
@@ -709,21 +776,26 @@ final class DictationController {
                 .init(text: output, language: configuration.target)
             ])
             : transcriptionForTranslation.languageMetadata
-        if let releaseStarted { logDuration("release-to-result", since: releaseStarted) }
-        onResult(DictationResultSnapshot(rawText: authoritativeText,
+        if let releaseStarted { logDuration("release-to-result", since: releaseStarted, runID: runID) }
+        let snapshot = DictationResultSnapshot(rawText: authoritativeText,
                                          outputText: output,
                                          wasCleaned: cleaned,
                                          wasTranslated: translated,
                                          languageMetadata: resultMetadata,
-                                         cleanupUnavailable: cleanupUnavailable))
+                                         cleanupUnavailable: cleanupUnavailable)
+        onResult(snapshot)
+        guard session == generation, !Task.isCancelled else { return }
         // Setup trials use the complete pipeline without touching another app
         // or replacing the person's clipboard.
         if sessionIsTrial {
             phase = .result(String(localized: "Trial complete"))
             return
         }
+        guard let deliveryID = currentRunID else { return }
+        let deliveryStarted = ContinuousClock.now
         let result = inserter.insert(output, expecting: sessionFocus)
-        if let releaseStarted { logDuration("release-to-insert", since: releaseStarted) }
+        logDuration("delivery", since: deliveryStarted, runID: runID)
+        if let releaseStarted { logDuration("release-to-insert", since: releaseStarted, runID: runID) }
         switch result.outcome {
         case .copyFailed:
             reportIssue("dictation.clipboard", "Clipboard write failed; result retained in the bubble.")
@@ -740,18 +812,40 @@ final class DictationController {
             if translated {
                 phase = .result(String(localized: "Translated and copied"))
             } else if translationFailed {
-                phase = .result(String(localized: cleaned ? "Translation unavailable — cleaned text inserted and copied" : "Translation unavailable — original copied to Clipboard"))
+                phase = .result(String(localized: cleaned ? "Translation unavailable — cleaned text copied to Clipboard" : "Translation unavailable — original copied to Clipboard"))
             } else {
                 phase = .result(String(localized: "Copied to Clipboard"))
             }
         }
+        let outcome: String
+        switch result.outcome {
+        case .insertedAndCopied: outcome = "inserted"
+        case .copied: outcome = "copied"
+        case .copyFailed: outcome = "copy-failed"
+        }
+        finishRun(outcome: outcome)
+        onDelivered(snapshot, result, deliveryID)
     }
 
-    private func logDuration(_ phase: String, since start: ContinuousClock.Instant) {
+    private func logDuration(_ phase: String, since start: ContinuousClock.Instant, runID: UUID?) {
         let elapsed = start.duration(to: .now).components
         let seconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
         NSLog("sAiity dictation timing: %@ %.3fs", phase, seconds)
         onTiming(phase, seconds, nil)
+        guard let runID, runID == currentRunID, !Task.isCancelled else { return }
+        onRunTiming(.init(date: Date(), operation: "dictation.\(phase)", seconds: seconds,
+                          runID: runID.uuidString))
+    }
+
+    private func finishRun(outcome: String, fallback: String? = nil) {
+        guard let id = currentRunID, let started = runStarted else { return }
+        currentRunID = nil
+        runStarted = nil
+        let elapsed = started.duration(to: .now).components
+        let seconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+        onRunTiming(.init(date: Date(), operation: "dictation.total", seconds: seconds,
+                          runID: id.uuidString, outcome: outcome,
+                          fallbackReason: fallback ?? runFallbackReason))
     }
 
     private func reportIssue(_ operation: String, _ reason: String) {

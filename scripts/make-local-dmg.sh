@@ -32,7 +32,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VERSION="${1:?usage: scripts/make-local-dmg.sh <version>}"
-NAME="sAiity"
+NAME="Syllivra"
 APP="build/$NAME.app"
 DMG="build/$NAME-$VERSION-local.dmg"
 STAGE="build/dmg-stage"

@@ -111,6 +111,9 @@ final class SegmentCache: @unchecked Sendable {
 /// user's data on a schedule they did not ask for would be its own kind of
 /// wrong — but one setting away.
 enum TranscriptRetention {
+    #if SAIITY_TEST_HOOKS
+    @MainActor static var afterListingForTests: (() async -> Void)?
+    #endif
     static let choices = [0, 7, 30, 90]
 
     /// Days to keep; 0 means keep everything.
@@ -145,24 +148,34 @@ enum TranscriptRetention {
 
     /// Apply the policy. Called at launch, on change, and every six hours.
     ///
-    /// The listing, the per-session `meta.json` reads, and the `removeItem` per
-    /// expired session are file I/O that scales with library size, so they run in
-    /// a detached task. Only the cache invalidation afterwards is
-    /// main-actor-shaped, and that is a posted notification plus a lock — both
-    /// safe from any context. The main actor is suspended, not blocked, while
-    /// the detached work runs.
+    /// List away from the main actor using the captured library root. Final
+    /// admission and removal share a main-actor turn: a summary, retranslation
+    /// or caption start cannot slip into a suspended check/deletion gap.
     @MainActor
     @discardableResult
-    static func sweep() async -> Int {
+    static func sweep() async -> (deleted: Int, failed: Int) {
         let d = days
-        guard d > 0 else { return 0 }
-        let n = await Task.detached {
-            await TranscriptStore.deleteOlderThan(days: d)
+        guard d > 0, !CaptionSession.shared.isProcessingTranscript,
+              !CaptionSession.shared.isRunning else { return (0, 0) }
+        let library = TranscriptStore.sessionsDir
+        let doomed = await Task.detached {
+            TranscriptStore.sessionsOlderThan(days: d, in: library)
         }.value
-        if n > 0 {
-            SessionCatalog.invalidate()
-            SegmentCache.shared.invalidate()
+        #if SAIITY_TEST_HOOKS
+        await afterListingForTests?()
+        #endif
+        var deleted = 0, failed = 0
+        for session in doomed {
+            // No await after this final check. Notification observers may
+            // reenter between removals, so admit each session individually.
+            guard days == d, TranscriptStore.sessionsDir == library,
+                  !CaptionSession.shared.isProcessingTranscript,
+                  !CaptionSession.shared.isRunning else { break }
+            if TranscriptStore.delete(session) { deleted += 1 } else { failed += 1 }
         }
-        return n
+        if deleted > 0 {
+            SessionCatalog.invalidate()
+        }
+        return (deleted, failed)
     }
 }

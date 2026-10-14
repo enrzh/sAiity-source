@@ -266,7 +266,7 @@ final class LaunchSmokeTest {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 320, height: 200),
                               styleMask: [.titled, .closable],
                               backing: .buffered, defer: false)
-        window.title = "sAiity selftest"
+        window.title = "Syllivra selftest"
         window.orderFront(nil)
         let shown = window.isVisible
         window.orderOut(nil)

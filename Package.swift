@@ -2,9 +2,10 @@
 import PackageDescription
 
 let package = Package(
-    name: "sAiity",
+    name: "Syllivra",
     // SpeechAnalyzer / SpeechTranscriber are @available(anyAppleOS 26, *).
     platforms: [.macOS("26.0")],
+    products: [.executable(name: "Syllivra", targets: ["sAiity"])],
     dependencies: [
         // Nemotron is a genuinely streaming RNN-T on CoreML/ANE. The package
         // also carries the legacy EOU implementation used only by old local

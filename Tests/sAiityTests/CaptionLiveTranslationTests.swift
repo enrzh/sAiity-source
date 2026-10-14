@@ -30,12 +30,14 @@ struct CaptionLiveTranslationTests {
               translatorGeneration: generation, source: "en", target: target, engine: engine)
     }
 
-    private final class Gate {
+    @MainActor private final class Gate {
         var entered = false
         var continuation: CheckedContinuation<Void, Never>?
         func wait() async {
-            entered = true
-            await withCheckedContinuation { continuation = $0 }
+            await withCheckedContinuation {
+                continuation = $0
+                entered = true
+            }
         }
         func open() { continuation?.resume(); continuation = nil }
     }

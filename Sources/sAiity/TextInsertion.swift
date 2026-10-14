@@ -29,6 +29,7 @@ struct TextInsertionResult: Equatable {
     }
 
     let outcome: Outcome
+    var secureTargetObserved = false
 }
 
 /// The accessibility snapshot used for one dictation insertion. Keeping role,
@@ -143,7 +144,10 @@ final class TextInserter {
     /// ask for.
     func insert(_ text: String, expecting expected: DictationFocusToken?) -> TextInsertionResult {
         guard let expected, isStillFrontmost(expected) else {
-            return copy(text)
+            let target = accessibilityTrusted() ? focusedElement() : nil
+            var result = copy(text)
+            result.secureTargetObserved = target?.isSecure == true
+            return result
         }
         return insert(text, shouldPaste: { self.isStillFrontmost(expected) })
     }
@@ -166,7 +170,7 @@ final class TextInserter {
 
     /// Retry copies only; it must never paste into a newly focused destination.
     func copy(_ text: String) -> TextInsertionResult {
-        let copied = pasteboard.setString(text.trimmingCharacters(in: .whitespacesAndNewlines))
+        let copied = pasteboard.setString(text)
         return TextInsertionResult(outcome: copied ? .copied : .copyFailed)
     }
 
@@ -185,11 +189,11 @@ final class TextInserter {
         // document even when the paste that follows it fails.
         let payload = Self.needsSeparator(before: target?.value) ? " " + cleaned : cleaned
         guard pasteboard.setString(payload) else {
-            return TextInsertionResult(outcome: .copyFailed)
+            return TextInsertionResult(outcome: .copyFailed, secureTargetObserved: target?.isSecure == true)
         }
 
         guard canPaste, shouldPaste() else {
-            return TextInsertionResult(outcome: .copied)
+            return TextInsertionResult(outcome: .copied, secureTargetObserved: target?.isSecure == true)
         }
 
         guard sendPaste() else { return TextInsertionResult(outcome: .copied) }

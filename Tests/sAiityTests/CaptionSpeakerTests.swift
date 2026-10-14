@@ -5,6 +5,17 @@ import Testing
 @testable import sAiity
 
 @Suite struct CaptionSpeakerTests {
+    @Test("duplicate and invalid speaker frames cannot invent coverage across a hole")
+    func incompleteTimelineDoesNotLabel() {
+        var timeline = CaptionSpeakerTimeline()
+        timeline.append([.init(start: 0, end: 0.3, speakers: [0])])
+        timeline.append([.init(start: 0, end: 0.3, speakers: [1]),
+                         .init(start: 0.45, end: 0.5, speakers: []),
+                         .init(start: .nan, end: .infinity, speakers: [0])])
+        #expect(timeline.annotation(start: 0, end: 0.5) == nil)
+        #expect(timeline.frames.count == 2)
+        #expect(timeline.confirmedThrough == 0.5)
+    }
     private struct Reference: Decodable {
         struct Turn: Decodable {
             let start: Double

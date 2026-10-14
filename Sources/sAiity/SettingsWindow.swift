@@ -34,6 +34,30 @@ extension Notification.Name {
 final class AppState {
 
     var sessions: [SessionRef] = []
+    var transcriptToOpen: SessionRef?
+    var transcriptSegmentToReveal: Int?
+
+    func openTranscript(_ session: SessionRef, revealing segment: Int? = nil) {
+        transcriptSegmentToReveal = segment
+        transcriptToOpen = session
+    }
+
+    var recentDictations: [RecentDictationResult] = []
+    var showsRecentDictations = false
+    var dictationUsesOriginalText = false
+    @ObservationIgnored @Defaults("keepRecentDictations") private var recentDictationsPreference = false
+    var keepRecentDictations: Bool {
+        get { access(keyPath: \.keepRecentDictations); return recentDictationsPreference }
+        set {
+            withMutation(keyPath: \.keepRecentDictations) { recentDictationsPreference = newValue }
+            if !newValue { recentDictations.removeAll() }
+        }
+    }
+    @ObservationIgnored @Defaults("originalTextApplications") private var applicationPreference: [String] = []
+    var originalTextApplications: [String] {
+        get { access(keyPath: \.originalTextApplications); return applicationPreference }
+        set { withMutation(keyPath: \.originalTextApplications) { applicationPreference = Array(Set(newValue)).sorted() } }
+    }
 
     /// Routed through AppDelegate rather than written directly: enabling
     /// recording has to raise the one-time notice and, if a session is already
@@ -165,6 +189,9 @@ final class AppState {
     /// Fed by LoadHealth; the observer keeps an open Models page truthful when
     /// a session fails in the background.
     var loadFailures: [String: String] = LoadHealth.all
+    func needsModelRepair(_ status: AssetStatus) -> Bool {
+        !status.isInstalled || loadFailures[status.id] != nil
+    }
     @ObservationIgnored private var loadHealthObserver: NSObjectProtocol?
 
     @ObservationIgnored private var gapObserver: NSObjectProtocol?
@@ -590,8 +617,9 @@ final class AppState {
         libraryRefreshGeneration &+= 1
         let generation = libraryRefreshGeneration
         isLibraryLoading = true
+        let library = TranscriptStore.sessionsDir
         let task = Task.detached(priority: .userInitiated) {
-            TranscriptStore.list()
+            TranscriptStore.list(in: library)
         }
         libraryRefreshTask = task
         let loadedSessions = await task.value
@@ -653,18 +681,19 @@ final class AppState {
 
     /// The in-flight download, so Cancel can actually cancel it. Before this a
     /// misclick on a multi-gigabyte model had no exit short of quitting the app.
-    @ObservationIgnored private var downloadTask: Task<Void, Never>?
+    @ObservationIgnored private var downloadTask: Task<Bool, Never>?
 
     /// Download one asset. Progress is whatever the underlying API can honestly
     /// report — some give bytes, some a fraction, some nothing at all.
-    func download(_ asset: ModelAsset) async {
-        guard activeDownload == nil, let install = asset.install else { return }
+    @discardableResult
+    func download(_ asset: ModelAsset) async -> Bool {
+        guard activeDownload == nil, let install = asset.install else { return false }
         if let required = asset.advertisedBytes,
            let available = ModelRegistry.availableDiskBytes(),
            available < required {
             modelError = String(localized: "Not enough free space for \(asset.title). Need about \(ModelRegistry.format(required)); only \(ModelRegistry.format(available)) is available.")
             await refreshModelsAsync(force: true)
-            return
+            return false
         }
         activeDownload = asset.id
         downloadProgress = DownloadProgress(note: "Starting…")
@@ -685,6 +714,7 @@ final class AppState {
                 // the old ones. Only on success — a cancelled or failed fetch
                 // changed nothing about the files the record describes.
                 LoadHealth.clear(id)
+                return true
             } catch is CancellationError {
                 // The user pressed Cancel; not an error, so no red text.
             } catch let e as URLError where e.code == .cancelled {
@@ -692,13 +722,15 @@ final class AppState {
             } catch {
                 self.modelError = error.localizedDescription
             }
+            return false
         }
         downloadTask = task
-        await task.value
+        let installed = await task.value
         downloadTask = nil
         activeDownload = nil
         downloadProgress = nil
         await refreshModelsAsync(force: true)
+        return installed
     }
 
     /// Delete the damaged files, then fetch fresh — the one recovery path for
@@ -991,7 +1023,7 @@ final class AppState {
         case .requiresApproval:
             launchAtLogin = true
             if !keepNote {
-                launchAtLoginNote = String(localized: "Approve sAiity in System Settings → General → Login Items.")
+                launchAtLoginNote = String(localized: "Approve Syllivra in System Settings → General → Login Items.")
             }
         case .notFound, .notRegistered:
             // Both are simply "not a login item yet" — NOT a signing failure.
@@ -1130,6 +1162,14 @@ enum SettingsWindowController {
     /// Shared, so the menu bar can raise a specific sheet in this window.
     static let state = AppState()
     static var selectedPane: SettingsPane = .captions
+
+    static func openTranscript(_ session: SessionRef) {
+        state.openTranscript(session)
+        selectedPane = .transcripts
+        NotificationCenter.default.post(name: .saiitySelectSettingsPane,
+                                        object: SettingsPane.transcripts.rawValue)
+        show()
+    }
 
     static func show() {
         if let w = window {
@@ -1464,16 +1504,18 @@ struct SettingsSection<Content: View>: View {
 
     var body: some View {
         GroupBox {
-            content
+            VStack(alignment: .leading, spacing: 12) {
+                content
+            }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 4)
+                .padding(.vertical, 4)
         } label: {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.headline)
                 if let subtitle {
                     Text(subtitle)
-                        .font(.footnote)
+                        .font(.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -1487,6 +1529,7 @@ struct SettingsSection<Content: View>: View {
 /// macOS `DisclosureGroup` can leave the label inert and make only the tiny
 /// chevron clickable, which is especially easy to miss in a settings page.
 struct SettingsDisclosure<Content: View>: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Binding private var isExpanded: Bool
     let title: LocalizedStringKey
     private let content: () -> Content
@@ -1502,7 +1545,7 @@ struct SettingsDisclosure<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Button {
-                withAnimation(.easeInOut(duration: 0.18)) {
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
                     isExpanded.toggle()
                 }
             } label: {

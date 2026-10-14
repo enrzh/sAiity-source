@@ -30,7 +30,7 @@ struct CaptionBoundaryPlacementTests {
 
         #expect(!CaptionLanguageSpanDetector.isMixed(spans))
         #expect(spans.count == 1)
-        #expect(spans[0].text == text.trimmingCharacters(in: .whitespaces))
+        #expect(spans[0].text == text)
     }
 
     /// A boundary at the very start. The coarse grid steps by four, so this is

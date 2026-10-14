@@ -55,11 +55,12 @@ final class Retranslator {
     /// checks — an engine chosen, its files present — stay in force for every
     /// real run; only the engine itself is substituted.
     var engineOverrideForTests: (any Translating)?
+    /// Hold the snapshot read to exercise cancellation before native work.
+    var beforeSnapshotReadForTests: (@MainActor @Sendable () async -> Void)?
     #endif
 
     func cancel() {
         task?.cancel()
-        task = nil
     }
 
     /// Cancel and wait until the run has actually unwound.
@@ -147,18 +148,34 @@ final class Retranslator {
                           onFinish: @escaping @MainActor (String?) -> Void) async {
         running = true
         CaptionSession.shared.beginRetranslation()
-        // The read is a full-file parse that scales with the session's length.
-        // It happens before the main-actor work, so a multi-hour transcript
-        // costs a detached read rather than a frozen window. Repeat reads are
-        // served by SegmentCache; this is the first one.
-        let segments = await Task.detached {
-            await TranscriptStore.segments(of: session)
-        }.value
+        #if SAIITY_TEST_HOOKS
+        let snapshotHook = beforeSnapshotReadForTests
+        #endif
         task = Task { @MainActor [weak self] in
             defer {
                 CaptionSession.shared.endRetranslation()
                 self?.running = false
                 self?.task = nil
+            }
+            let snapshot: Data
+            let segments: [Segment]
+            do {
+                // Capture once, bypassing the search cache. The task is already
+                // owned, so cancellation cannot escape during the disk read.
+                (snapshot, segments) = try await Task.detached {
+                    #if SAIITY_TEST_HOOKS
+                    await snapshotHook?()
+                    #endif
+                    let bytes = try Data(contentsOf: session.url.appendingPathComponent("segments.jsonl"))
+                    return (bytes, TranscriptStore.segments(from: bytes))
+                }.value
+                try Task.checkCancellation()
+            } catch {
+                await stopAndRelease(engine)
+                onFinish(Task.isCancelled
+                    ? String(localized: "Cancelled — the transcript was not changed.")
+                    : error.localizedDescription)
+                return
             }
             guard !segments.isEmpty else {
                 onFinish(String(localized: "That transcript has no lines."))
@@ -241,16 +258,15 @@ final class Retranslator {
                 onFinish(String(localized: "Cancelled — the transcript was not changed."))
                 return
             }
-            if let err = Self.write(out, to: session) {
-                onFinish(err)
+            do {
+                try await TranscriptStore.shared.publishRetranslation(out, to: session,
+                                                                      source: snapshot, target: target)
+            } catch {
+                onFinish(error is CancellationError
+                    ? String(localized: "Cancelled — the transcript was not changed.")
+                    : error.localizedDescription)
                 return
             }
-            // The session's own record of what language it holds. Without
-            // this the Markdown export keeps printing the language from the
-            // original recording — a document that states the wrong thing
-            // about its own contents.
-            Self.updateMeta(of: session, translateTo: target)
-            SegmentCache.shared.invalidate()
             SessionCatalog.invalidate()
             // Say what actually happened. "Done" over a transcript where the
             // translator declined half the lines is the kind of report that
@@ -263,40 +279,4 @@ final class Retranslator {
         }
     }
 
-    /// Record the transcript's new translation language in its own meta.json.
-    /// Best-effort: the lines are already written and correct, so a failure
-    /// here is a stale header, not lost work.
-    private static func updateMeta(of session: SessionRef, translateTo: String) {
-        var meta = session.meta
-        meta.translateTo = translateTo
-        let enc = JSONEncoder()
-        enc.outputFormatting = [.prettyPrinted, .sortedKeys]
-        enc.dateEncodingStrategy = .iso8601
-        guard let data = try? enc.encode(meta) else { return }
-        try? data.write(to: session.url.appendingPathComponent("meta.json"), options: .atomic)
-    }
-
-    /// Rewrite segments.jsonl atomically. Returns a message on failure.
-    private static func write(_ segments: [Segment], to session: SessionRef) -> String? {
-        let dest = session.url.appendingPathComponent("segments.jsonl")
-        let tmp = session.url.appendingPathComponent("segments.jsonl.new")
-        let enc = JSONEncoder()
-        var blob = Data()
-        for s in segments {
-            guard var line = try? enc.encode(s) else { continue }
-            line.append(0x0A)
-            blob.append(line)
-        }
-        do {
-            try blob.write(to: tmp, options: .atomic)
-            _ = try FileManager.default.replaceItemAt(dest, withItemAt: tmp)
-            try? FileManager.default.setAttributes([.posixPermissions: 0o600],
-                                                   ofItemAtPath: dest.path)
-            return nil
-        } catch {
-            try? FileManager.default.removeItem(at: tmp)
-            NSLog("sAiity retranslate write failed: \(error.localizedDescription)")
-            return error.localizedDescription
-        }
-    }
 }

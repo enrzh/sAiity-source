@@ -209,18 +209,15 @@ final class QwenASREngine: FluidStreamingEngine, @unchecked Sendable {
         }
         progress(String(localized: "Loading Qwen3-ASR…"))
         let dir = Self.directory(for: size)
-        let model = try await Qwen3ASRModel.fromPretrained(
-            modelId: size.modelId,
-            cacheDir: dir,
-            offlineMode: true
-        ) { _, note in
-            progress(note)
+        let model = try await LocalGeneration.loadModel {
+            try await Qwen3ASRModel.fromPretrained(modelId: size.modelId, cacheDir: dir, offlineMode: true) { _, note in
+                progress(note)
+            }
         }
-        let vadWeights = try await SileroVADModel.fromPretrained(
-            cacheDir: Self.vadDirectory(for: size),
-            offlineMode: true
-        ) { _, note in
-            progress(note)
+        let vadWeights = try await LocalGeneration.loadModel {
+            try await SileroVADModel.fromPretrained(cacheDir: Self.vadDirectory(for: size), offlineMode: true) { _, note in
+                progress(note)
+            }
         }
         lock.withLock {
             asr = model
@@ -274,6 +271,8 @@ final class QwenASREngine: FluidStreamingEngine, @unchecked Sendable {
         }
     }
 
+    /// The pinned transcribe API strips the language prefix and returns text.
+    /// Automatic recognition therefore exposes no audio language tag here.
     func detectedLanguage() async -> String? { nil }
 
     private func dropModel() {
@@ -291,7 +290,9 @@ final class QwenASREngine: FluidStreamingEngine, @unchecked Sendable {
         let slices = lock.withLock { audio.append(samples, events: events, flush: flushOpenSpeech) }
 
         for slice in slices where !slice.isEmpty {
+            let decoding = ContinuousClock.now
             let text = model.transcribe(audio: slice, sampleRate: Int(sampleRate))
+            await LocalGeneration.recordModelTiming("model.recognition", since: decoding, cold: false, calls: 1)
             let update = lock.withLock { () -> (callback: (@Sendable (String) -> Void)?, text: String)? in
                 let next = Self.extending(committed, with: text)
                 guard next != committed else { return nil }

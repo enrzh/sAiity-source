@@ -15,6 +15,9 @@ final class CaptionSession {
     static let shared = CaptionSession()
 
     private(set) var isRunning = false
+    private(set) var isStopping = false
+    private(set) var translationBacklogged = false
+    func setTranslationBacklogged(_ on: Bool) { translationBacklogged = on }
 
     /// Installed by `AppDelegate` at launch: stop the session and release every
     /// loaded model. Kept as a closure so the Settings window does not need a
@@ -24,7 +27,11 @@ final class CaptionSession {
 
     private init() {}
 
-    func setRunning(_ on: Bool) { isRunning = on }
+    func setRunning(_ on: Bool, stopping: Bool = false) {
+        isRunning = on
+        isStopping = on && stopping
+        if !on { translationBacklogged = false }
+    }
 
     /// True while a saved transcript is being re-translated.
     ///

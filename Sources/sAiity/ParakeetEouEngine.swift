@@ -67,13 +67,15 @@ final class ParakeetEouEngine: FluidStreamingEngine, @unchecked Sendable {
         let base = Self.downloadBase
         let mgr = manager
         if Self.isDownloaded() {
-            try await mgr.loadModels(to: base, progressHandler: { _ in })
+            try await LocalGeneration.loadModel { try await mgr.loadModels(to: base, progressHandler: { _ in }) }
         } else {
             progress(String(localized: "Downloading Parakeet EOU…"))
             try await DownloadCoordinator.shared.run(AssetID.parakeetEou) {
-                try await mgr.loadModels(to: base, progressHandler: { p in
-                    progress(String(localized: "Downloading Parakeet EOU… \(Int(p.fractionCompleted * 100))%"))
-                })
+                try await LocalGeneration.loadModel {
+                    try await mgr.loadModels(to: base, progressHandler: { p in
+                        progress(String(localized: "Downloading Parakeet EOU… \(Int(p.fractionCompleted * 100))%"))
+                    })
+                }
             }
         }
         progress(String(localized: "Parakeet ready."))

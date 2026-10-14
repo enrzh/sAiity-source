@@ -35,9 +35,12 @@ struct CaptionSpeakerTimeline: Sendable {
     static let retainedSeconds = 120.0
 
     mutating func append(_ newFrames: [Frame]) {
-        guard let end = newFrames.last?.end else { return }
-        frames.append(contentsOf: newFrames)
-        confirmedThrough = max(confirmedThrough, end)
+        for frame in newFrames {
+            guard frame.start.isFinite, frame.end.isFinite, frame.start >= 0,
+                  frame.end > frame.start, frame.start >= confirmedThrough - 0.000001 else { continue }
+            frames.append(frame)
+            confirmedThrough = frame.end
+        }
         frames.removeAll { $0.end < confirmedThrough - Self.retainedSeconds }
     }
 
@@ -48,7 +51,10 @@ struct CaptionSpeakerTimeline: Sendable {
         var covered = 0.0
         var speech = 0.0
         var overlap = 0.0
+        var through = start
         for frame in frames where frame.end > start && frame.start < end {
+            guard max(frame.start, start) <= through + 0.000001 else { return nil }
+            through = max(through, min(frame.end, end))
             let duration = max(0, min(frame.end, end) - max(frame.start, start))
             covered += duration
             guard !frame.speakers.isEmpty else { continue }
@@ -56,7 +62,7 @@ struct CaptionSpeakerTimeline: Sendable {
             if frame.speakers.count > 1 { overlap += duration }
             for speaker in frame.speakers { durations[speaker, default: 0] += duration }
         }
-        guard covered >= (end - start) * 0.8, speech >= 0.2 else { return nil }
+        guard through >= end - 0.000001, covered >= (end - start) * 0.8, speech >= 0.2 else { return nil }
         if overlap >= max(0.2, speech * 0.15) { return .init(speaker: nil, overlapping: true) }
         // ASR without word timestamps cannot place a voice boundary inside a
         // sentence. Name both voices on that row instead of guessing the words.

@@ -121,13 +121,13 @@ enum ASREngine: String, CaseIterable, Sendable {
     var summary: String {
         switch self {
         case .nemotron:
-            return String(localized: "One multilingual model, 634 MB, downloaded once. Its own metadata declares 121 language tags — European, Asian and African — and it identifies the spoken language from audio rather than being told, so there is no per-language switching. Better on noisy and music-backed audio; slightly higher latency.")
+            return String(localized: "634 MB. Automatic recognition with continuous caption updates. The adapter can expose the first audio language tag; complete source-language coverage is not declared here.")
         case .whisperTurbo:
-            return String(localized: "626 MB. A larger, more widely trained model that is often the more accurate of the two on the languages it is good at, and the only one here that transcribes accented and non-native speech as well as native speech. It is not a streaming model: it re-reads a window of audio every time it produces an update, so it costs more work per second of captions and can fall behind on a fast speaker. It covers fewer languages than Nemotron, and identifies the language from the audio.")
+            return String(localized: "626 MB. Re-reads a window of audio for each update and can fall behind continuous speech. Its declared caption language set is listed separately; the adapter exposes an audio language tag.")
         case .qwen06:
-            return String(localized: "700 MB. Word error was 0 on the three measured clips, against Nemotron's 0.05 to 0.07, and it still runs faster than realtime. A caption appears when the speaker pauses, or every 10 seconds if they do not. Live partials are not shown: the first partial of each clip ended in a period that was not the sentence, and committing it dropped the rest.")
+            return String(localized: "700 MB. Automatic recognition with a line when the speaker pauses, or after 10 seconds of continuous speech. This adapter exposes no audio language tag, and its complete source-language coverage is not declared here.")
         case .qwen17:
-            return String(localized: "2.1 GB. The larger Qwen3-ASR, with the same pause-based captions as the 0.6B. It has not been measured on these clips. Heavier on memory, and slower to load than Nemotron.")
+            return String(localized: "2.1 GB. The same pause-based automatic recognition as Qwen3-ASR 0.6B, with larger weights. This adapter exposes no audio language tag, and its complete source-language coverage is not declared here.")
         case .parakeetEou:
             return String(localized: "English only, 437 MB. A fifth of Nemotron's parameters, so it reaches the first word sooner, and it detects the end of an utterance itself, so sentences break where the speaker actually stopped. Pick this if you only caption English; it will produce confident nonsense on anything else.")
         }
@@ -165,52 +165,38 @@ enum ASREngine: String, CaseIterable, Sendable {
         }
     }
 
-    /// What this engine can actually recognise. Nemotron reads its own list from
-    /// the metadata it downloaded; before that we have nothing honest to say, so
-    /// the answer is "unknown" rather than a guess.
+    /// Declared source coverage, independent of installation and measured quality.
+    /// The pinned Nemotron/Qwen libraries do not expose a complete static code
+    /// set here. Automatic recognition alone does not establish that set.
     var coverage: LanguageCoverage {
         switch self {
-        case .nemotron, .qwen06, .qwen17: return .manyDetectedFromAudio
+        case .nemotron, .qwen06, .qwen17: return .unknown
         case .whisperTurbo: return .only(WhisperTurboEngine.reliableLanguages)
         case .parakeetEou: return .only(["en"])
         }
     }
 
-    /// True when the engine settles on the spoken language by itself, so there
-    /// is no locale for the user to choose.
-    ///
-    /// Derived from `coverage` rather than listed per case. This is the same
-    /// declaration `canHear` and the Models page read, and maintaining a second
-    /// list beside it is exactly how the two Qwen sizes shipped labelled
-    /// "English only" in Quick controls while the summary underneath promised
-    /// 52 languages — a false statement about which languages this app can
-    /// caption, in the row a user checks to decide that.
-    ///
-    /// Whisper still qualifies through its 41-language set, and it reports a
-    /// language tag from the decode itself — but that tag is a per-window guess
-    /// that can change between passes, a weaker promise than Nemotron's and one
-    /// the translation path has to survive. Parakeet's single English tag is the
-    /// case that means English only.
-    ///
-    /// Capability, not the runtime answer: `QwenASREngine.detectedLanguage()`
-    /// returns nil because this adapter does not surface the model's tag, so the
-    /// app learns the language from the transcript instead. The user still picks
-    /// nothing, which is what this label is for — but see `detectedLanguage()`
-    /// for what that costs the translation path.
+    /// Auto recognition does not require a source-language selection, even when
+    /// complete coverage or an audio language tag is unavailable to the app.
+    var automaticallyRecognizesLanguage: Bool { self != .parakeetEou }
+
+    /// Whether this adapter can expose an audio language tag. Nemotron returns
+    /// its first tag; Whisper's per-window tag can change. Neither promises a
+    /// language for every region. Qwen recognizes automatically but returns nil.
     var identifiesLanguageFromAudio: Bool {
-        switch coverage {
-        case .manyDetectedFromAudio: return true
-        case .only(let codes): return codes.count > 1
+        switch self {
+        case .nemotron, .whisperTurbo: return true
+        case .qwen06, .qwen17, .parakeetEou: return false
         }
     }
 
-    /// Whether speech in this language would be recognised at all. An
-    /// English-only engine pointed at German does not fail — it produces
-    /// confident nonsense, which is worse.
+    /// Whether source support is declared. False for unknown coverage means
+    /// unconfirmed, not known unsupported; callers must check `coverage` before
+    /// warning that an engine cannot recognize a language.
     func canHear(_ bcp47: String) -> Bool {
         let base = bcp47.split(separator: "-").first.map(String.init) ?? bcp47
         switch coverage {
-        case .manyDetectedFromAudio: return true
+        case .unknown: return false
         case .only(let codes): return codes.contains(base)
         }
     }
@@ -309,7 +295,7 @@ enum ASREngine: String, CaseIterable, Sendable {
                 // A deliberate second opinion, never a first choice. The Models
                 // page sorts recommended rows to the top of each group, and
                 // claiming this would put a 626 MB model above the Nemotron tier
-                // that genuinely streams and covers 121 languages.
+                // that genuinely streams with automatic multilingual recognition.
                 recommended: false,
                 licence: "MIT · huggingface.co/argmaxinc/whisperkit-coreml",
                 advertisedBytes: 626 * 1_048_576,
@@ -381,9 +367,9 @@ enum DictationRecognizer: String, CaseIterable, Sendable {
     }
 }
 
-/// What languages a recognition engine can handle.
+/// Declared source languages, not installation or measured recognition quality.
 enum LanguageCoverage: Sendable {
-    /// Multilingual, with the language identified from the audio itself.
-    case manyDetectedFromAudio
+    /// No complete source code set is available from the pinned declarations.
+    case unknown
     case only(Set<String>)
 }

@@ -196,6 +196,8 @@ final class BubbleContentView: NSView {
     private let saveButton = AccessibleIconButton()
     private let clearButton = AccessibleIconButton()
     private let jumpButton = AccessibleIconButton()
+    private let transcriptStatus = NSButton(title: "", target: nil, action: nil)
+    private var openTranscript: (() -> Void)?
     private let recordDot = NSView()
     private var copyFlashWork: DispatchWorkItem?
 
@@ -224,6 +226,16 @@ final class BubbleContentView: NSView {
         saveButton.contentTintColor = NSColor.white.withAlphaComponent(0.75)
         saveButton.alphaValue = 0
         saveButton.toolTip = String(localized: "Save transcript")
+        saveButton.setAccessibilityHelp(String(localized: "Bubble history shows the latest 50 lines. Saving includes all committed lines."))
+
+        transcriptStatus.isBordered = false
+        transcriptStatus.font = .systemFont(ofSize: 13)
+        transcriptStatus.contentTintColor = .white
+        transcriptStatus.isHidden = true
+        transcriptStatus.target = self
+        transcriptStatus.action = #selector(openSavedTranscript)
+        transcriptStatus.cell?.lineBreakMode = .byTruncatingTail
+        transcriptStatus.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         // Wipe what is on screen without stopping recognition — for the moment
         // a caption is still sitting over something you want to see, or a line
@@ -275,7 +287,7 @@ final class BubbleContentView: NSView {
             b.onAccessibilityFocus = { [weak self] in self?.setControls(visible: true) }
         }
 
-        for v in [copyButton, saveButton, clearButton, jumpButton, recordDot] {
+        for v in [copyButton, saveButton, clearButton, jumpButton, recordDot, transcriptStatus] {
             v.translatesAutoresizingMaskIntoConstraints = false
             addSubview(v)
         }
@@ -312,8 +324,27 @@ final class BubbleContentView: NSView {
             jumpButton.centerYAnchor.constraint(equalTo: recordDot.centerYAnchor),
             jumpButton.widthAnchor.constraint(equalToConstant: 20),
             jumpButton.heightAnchor.constraint(equalToConstant: 20),
+            transcriptStatus.leadingAnchor.constraint(greaterThanOrEqualTo: recordDot.trailingAnchor, constant: 12),
+            transcriptStatus.trailingAnchor.constraint(equalTo: jumpButton.leadingAnchor, constant: -12),
+            transcriptStatus.centerYAnchor.constraint(equalTo: recordDot.centerYAnchor),
+            transcriptStatus.heightAnchor.constraint(equalToConstant: 28),
         ])
     }
+
+    func showTranscriptSaveStatus(_ message: String, open: (() -> Void)? = nil) {
+        openTranscript = open
+        transcriptStatus.title = message
+        transcriptStatus.isHidden = false
+        transcriptStatus.isEnabled = open != nil
+        transcriptStatus.toolTip = open == nil ? message : String(localized: "Open transcript")
+        transcriptStatus.setAccessibilityLabel(message)
+        transcriptStatus.setAccessibilityHelp(transcriptStatus.toolTip)
+        NSAccessibility.post(element: transcriptStatus, notification: .announcementRequested,
+                             userInfo: [.announcement: message,
+                                        .priority: NSAccessibilityPriorityLevel.medium.rawValue])
+    }
+
+    @objc private func openSavedTranscript() { openTranscript?() }
 
     // MARK: - Hit regions
 
@@ -374,7 +405,8 @@ final class BubbleContentView: NSView {
         guard interactive else { return }
         if let resize = resizeCursor(at: p) {
             resize.set()
-        } else if copyRect.contains(p) || saveRect.contains(p) || clearRect.contains(p) || jumpRect.contains(p) {
+        } else if copyRect.contains(p) || saveRect.contains(p) || clearRect.contains(p) || jumpRect.contains(p)
+                    || (!transcriptStatus.isHidden && transcriptStatus.frame.contains(p)) {
             NSCursor.arrow.set()
         } else {
             NSCursor.openHand.set()
@@ -437,6 +469,11 @@ final class BubbleContentView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
+
+        if !transcriptStatus.isHidden, transcriptStatus.frame.contains(p) {
+            transcriptStatus.performClick(nil)
+            return
+        }
 
         if !jumpButton.isHidden, jumpRect.contains(p) {
             jumpButton.onPress?()
@@ -710,6 +747,10 @@ final class OverlayWindow: NSPanel {
         set { host.onSaveTranscript = newValue }
     }
 
+    func showTranscriptSaveStatus(_ message: String, open: (() -> Void)? = nil) {
+        host.showTranscriptSaveStatus(message, open: open)
+    }
+
     var onClear: (() -> Void)? {
         get { host.onClear }
         set { host.onClear = newValue }
@@ -975,6 +1016,8 @@ final class OverlayWindow: NSPanel {
     private var volatileSentenceID: Int?
     #if SAIITY_TEST_HOOKS
     private var renderPassCount = 0
+    private var historyLayoutPassCount = 0
+    private var presentationRequestCount = 0
     #endif
 
     /// Gated on an actual size change: glass costs more per resize than a
@@ -1175,8 +1218,11 @@ final class OverlayWindow: NSPanel {
     var usesLiquidGlassForTests: Bool { surface.usesLiquidGlassForTests }
     var renderedStyleForTests: CaptionStyle { effectiveStyle }
     var renderPassesForTests: Int { renderPassCount }
+    var historyLayoutPassesForTests: Int { historyLayoutPassCount }
+    var presentationRequestsForTests: Int { presentationRequestCount }
     var followsLatestForTests: Bool { followsLatest }
     var historyScrollOffsetForTests: CGFloat { scrollView.contentView.bounds.minY }
+    var historyEntriesForTests: [CaptionHistoryEntry] { history.entries }
     var historyScrollMaximumForTests: CGFloat { max(0, historyStack.bounds.height - scrollView.contentView.bounds.height) }
     func scrollHistoryForTests(to offset: CGFloat) {
         scrollView.contentView.scroll(to: NSPoint(x: 0, y: offset))
@@ -1217,7 +1263,12 @@ final class OverlayWindow: NSPanel {
                                             respectMargin: CaptionStyle.current.autoResize || userWidth == nil)
         if repaired != frame { setFrameInternal(repaired, display: false) }
         alphaValue = 1
-        orderFrontRegardless()
+        if !isVisible {
+            #if SAIITY_TEST_HOOKS
+            presentationRequestCount += 1
+            #endif
+            orderFrontRegardless()
+        }
     }
 
     /// Show sample text so legibility can be judged without waiting for someone
@@ -1361,6 +1412,9 @@ final class OverlayWindow: NSPanel {
     /// discover a scroll document's height during the same event that created
     /// the first subtitle bubble.
     private func layoutHistory() {
+        #if SAIITY_TEST_HOOKS
+        historyLayoutPassCount += 1
+        #endif
         let width = max(1, frame.width - Self.hPadding * 2)
         let st = effectiveStyle
         var y: CGFloat = 0
@@ -1474,7 +1528,6 @@ final class OverlayWindow: NSPanel {
         historyStack.needsLayout = true
         scrollView.needsLayout = true
         sizeToFit()
-        layoutHistory()
         if !followsLatest {
             let offset = anchor.flatMap { id, inset in rowViews[id].map { $0.frame.minY + inset } } ?? oldOffset
             let maximum = max(0, historyStack.bounds.height - scrollView.contentView.bounds.height)

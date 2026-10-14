@@ -5,6 +5,23 @@ import Testing
 @testable import sAiity
 
 @Suite struct LanguageRecognizerPoolTests {
+    @Test("repeated and concurrent hypothesis queries retain fresh recognizer evidence")
+    func hypothesisEvidenceIsStable() async {
+        let pool = LanguageRecognizerPool()
+        let texts = ["", "日本語の字幕を確認してください。", "这是中文，请先检查发票。",
+                     "يرجى مراجعة التقرير قبل الاجتماع غدا.", "we should ship this today"]
+        let expected = texts.map { text in
+            let recognizer = NLLanguageRecognizer()
+            recognizer.processString(text)
+            return recognizer.languageHypotheses(withMaximum: 8)
+        }
+        await withTaskGroup(of: [[NLLanguage: Double]].self) { group in
+            for _ in 0..<16 { group.addTask { texts.map { pool.hypotheses(in: $0) } } }
+            for await result in group { #expect(result == expected) }
+        }
+        #expect(pool.classify("") == nil)
+    }
+
     /// A borrowed recognizer still holds the previous caller's `processString`
     /// state. If any of it leaked, a classify could report the *previous*
     /// string's language — a caption labelled in the wrong language, or a

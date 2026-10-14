@@ -64,6 +64,22 @@ struct Shortcut: Equatable, Codable, Sendable {
         modifiers & UInt32(controlKey | optionKey | cmdKey) != 0
             && Self.keyName(keyCode) != nil
     }
+
+    /// Capture before menus, including Command-key releases AppKit otherwise consumes.
+    @MainActor
+    static func monitorEvents(in view: NSView) -> Any? {
+        NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { [weak view] event in
+            guard let view, let window = view.window,
+                  event.window === window, window.firstResponder === view else { return event }
+            switch event.type {
+            case .keyDown: view.keyDown(with: event)
+            case .keyUp: view.keyUp(with: event)
+            case .flagsChanged: view.flagsChanged(with: event)
+            default: return event
+            }
+            return nil
+        }
+    }
 }
 
 /// Registers global hot keys and routes them to handlers.
@@ -124,6 +140,7 @@ final class HotKeyCenter {
     private var refs: [Action: EventHotKeyRef] = [:]
     private var handlers: [Action: () -> Void] = [:]
     private var installed = false
+    private var suspended = false
 
     /// Persisted shortcut for an action, falling back to its default. A stored
     /// empty value means the user deliberately cleared it.
@@ -154,6 +171,7 @@ final class HotKeyCenter {
     /// nil or unusable shortcut is a deliberate state, not a registration error.
     @discardableResult
     func rebind(_ action: Action) -> Bool {
+        guard !suspended else { return true }
         if let existing = refs[action] {
             UnregisterEventHotKey(existing)
             refs[action] = nil
@@ -179,6 +197,17 @@ final class HotKeyCenter {
 
     func rebindAll() { Action.allCases.forEach { rebind($0) } }
 
+    func setSuspended(_ value: Bool) {
+        guard suspended != value else { return }
+        suspended = value
+        if value {
+            refs.values.forEach { UnregisterEventHotKey($0) }
+            refs.removeAll()
+        } else {
+            for action in handlers.keys { rebind(action) }
+        }
+    }
+
     private func installHandlerIfNeeded() {
         guard !installed else { return }
         installed = true
@@ -191,6 +220,7 @@ final class HotKeyCenter {
                               MemoryLayout<EventHotKeyID>.size, nil, &id)
             let idx = Int(id.id)
             Task { @MainActor in
+                guard !HotKeyCenter.shared.suspended else { return }
                 guard idx < HotKeyCenter.Action.allCases.count else { return }
                 let action = HotKeyCenter.Action.allCases[idx]
                 NSLog("sAiity hotkey fired: \(action.rawValue)")

@@ -16,14 +16,16 @@ enum Clipboard {
 enum Export {
     // MARK: - Plain text / Markdown
 
-    static func txt(_ segments: [Segment]) -> String {
-        segments.map { seg in
+    static func txt(_ segments: [Segment], meta: SessionMeta? = nil) -> String {
+        let body = segments.map { seg in
             var line = labelled(seg.text, for: seg)
             if let tr = seg.tr, !tr.isEmpty { line += "\n\(tr)" }
             // A turn break reads as a paragraph break — the silence was real,
             // the paragraph is how text spells it.
             return (seg.turn == true ? "\n" : "") + line
         }.joined(separator: "\n")
+        if let title = meta?.title { return title + "\n\n" + body }
+        return body
     }
 
     /// The Markdown a person reads.
@@ -44,7 +46,7 @@ enum Export {
         df.dateStyle = .long
         df.timeStyle = .short
         let started = df.string(from: meta.startedAt)
-        var out = "# " + t("Transcript — \(started)", "Transcript — \(started)") + "\n\n"
+        var out = "# " + (meta.title ?? t("Transcript — \(started)", "Transcript — \(started)")) + "\n\n"
         out += "- " + t("Language", "Language") + ": `\(meta.locale)`\n"
         if let tr = meta.translateTo {
             out += "- " + t("Translated to", "Translated to") + ": `\(tr)`\n"
@@ -52,6 +54,9 @@ enum Export {
         out += "- " + t("Lines: \(segments.count)", "Lines: \(segments.count)") + "\n\n"
         if let summary {
             out += "## " + t("Summary", "Summary") + "\n\n"
+            if let language = summary.outputLanguage {
+                out += "- " + t("Summary language", "Summary language") + ": `\(language)`\n\n"
+            }
             out += "**" + t("Recap", "Recap") + "**\n\n" + summary.recap + "\n\n"
             if !summary.decisions.isEmpty {
                 out += "**" + t("Decisions", "Decisions") + "**\n\n"
@@ -78,8 +83,8 @@ enum Export {
             if let tr = seg.tr, !tr.isEmpty { out += "> \(tr)\n" }
             out += "\n"
         }
-        out += "\n_" + t("Transcribed on device by sAiity.",
-                          "Transcribed on device by sAiity.") + "_\n"
+        out += "\n_" + t("Transcribed on device by Syllivra.",
+                          "Transcribed on device by Syllivra.") + "_\n"
         return out
     }
 
@@ -511,9 +516,9 @@ enum Export {
             case "srt": body = srt(segs)
             case "vtt": body = vtt(segs)
             case "md":  body = markdown(segs, meta: s.meta, summary: TranscriptSummaryStore.read(s))
-            default:    body = txt(segs)
+            default:    body = txt(segs, meta: s.meta)
             }
-            let name = "sAiity-\(df.string(from: s.meta.startedAt))-\(s.id).\(format)"
+            let name = "Syllivra-\(df.string(from: s.meta.startedAt))-\(s.id).\(format)"
             if write(body, named: name, in: folder) != nil { written += 1 } else { failed += 1 }
         }
         return (written, failed)

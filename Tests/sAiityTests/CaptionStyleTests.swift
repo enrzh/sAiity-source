@@ -15,6 +15,31 @@ import Testing
 @MainActor
 struct CaptionStyleTests {
 
+    @Test("the background toggle persists through the existing style without changing text or layout")
+    func backgroundTransparencyToggle() throws {
+        for material in [CaptionStyle.regularGlass, CaptionStyle.clearGlass,
+                         CaptionStyle.solidGlass, CaptionStyle.liquidGlass] {
+            var style = CaptionStyle()
+            style.glassStyle = material
+            let original = style.original
+            #expect(style.backgroundIsTransparent == (material != CaptionStyle.solidGlass))
+            if style.backgroundIsTransparent {
+                style.backgroundIsTransparent = true
+                #expect(style.glassStyle == material)
+            }
+            style.backgroundIsTransparent = false
+            #expect(style.glassStyle == CaptionStyle.solidGlass)
+            let persisted = try JSONDecoder().decode(CaptionStyle.self,
+                from: JSONEncoder().encode(style))
+            #expect(!persisted.backgroundIsTransparent)
+            style.backgroundIsTransparent = true
+            #expect(style.glassStyle == CaptionStyle.regularGlass)
+            #expect(style.original == original)
+            #expect(style.translation == CaptionStyle().translation)
+            #expect(style.widthFraction == CaptionStyle().widthFraction)
+        }
+    }
+
     /// Every property, paired with a mutation. If a field is added without being
     /// added here the test stops compiling, which is the point.
     private static let mutations: [(String, (inout CaptionStyle) -> Void)] = [

@@ -137,6 +137,14 @@ struct CaptionStyle: Equatable, Codable, Sendable {
     var glassStyle: Int = regularGlass // regular, clear, solid, or Liquid Glass
     var tintHex: String = ""           // empty = untinted glass
 
+    var backgroundIsTransparent: Bool {
+        get { glassStyle != Self.solidGlass }
+        set {
+            if !newValue { glassStyle = Self.solidGlass }
+            else if glassStyle == Self.solidGlass { glassStyle = Self.regularGlass }
+        }
+    }
+
     /// Width as a fraction of the screen's usable width.
     ///
     /// The bubble's width is a SETTING, deliberately, not a measurement. Sizing

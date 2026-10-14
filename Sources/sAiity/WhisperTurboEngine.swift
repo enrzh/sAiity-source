@@ -273,7 +273,7 @@ final class WhisperTurboEngine: FluidStreamingEngine, @unchecked Sendable {
                                         modelRepo: nil,
                                         modelFolder: Self.assetDirectory.path,
                                         download: false)
-            try await model.loadModels(prewarmMode: true)
+            try await LocalGeneration.loadModel { try await model.loadModels(prewarmMode: true) }
         } catch {
             await model.unloadModels()
             throw error
@@ -318,7 +318,9 @@ final class WhisperTurboEngine: FluidStreamingEngine, @unchecked Sendable {
         let options = DecodingOptions(language: nil,
                                       detectLanguage: true,
                                       wordTimestamps: true)
+        let decoding = ContinuousClock.now
         let results = await model.transcribe(audioArrays: [audio], decodeOptions: options, callback: nil)
+        await LocalGeneration.recordModelTiming("model.recognition", since: decoding, cold: false, calls: 1)
         // `transcribe` returns `[[TranscriptionResult]?]` — one optional array per
         // input buffer, and we passed one buffer. `compactMap` flattens that
         // outer layer; `first` alone would still be optional-of-optional.
@@ -437,7 +439,9 @@ final class WhisperTurboEngine: FluidStreamingEngine, @unchecked Sendable {
             return lock.withLock { committedText.isEmpty ? nil : committedText }
         }
         let options = DecodingOptions(language: nil, detectLanguage: true, wordTimestamps: false)
+        let decoding = ContinuousClock.now
         let results = await model.transcribe(audioArrays: [audio], decodeOptions: options, callback: nil)
+        await LocalGeneration.recordModelTiming("model.recognition", since: decoding, cold: false, calls: 1)
         let segments = results.compactMap { $0 }.first ?? []
         let tail = segments.map(\.text).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
         return lock.withLock {

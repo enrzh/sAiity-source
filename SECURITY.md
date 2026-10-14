@@ -1,6 +1,6 @@
 # Security
 
-sAiity has no server, no account and no telemetry, which removes most of the
+Syllivra has no server, no account and no telemetry, which removes most of the
 attack surface an app like this would normally have. What is left is worth being
 precise about.
 
@@ -67,5 +67,5 @@ The repository contains no Developer ID certificate or notarization credentials.
 The build script signs with an identity available in your local keychain when one
 exists; signing is not the same as notarization. Treat an artifact as notarized
 only after that exact file has passed notarization and has a valid staple. Do not
-run a "sAiity" binary you did not build yourself from this source or obtain from
+run a "Syllivra" binary you did not build yourself from this source or obtain from
 the signed release channel.

@@ -6,6 +6,54 @@ import Testing
 
 @MainActor
 @Suite struct TextInsertionTests {
+    @Test("focus-mismatch copy observes secure targets before admitting recent recovery", arguments: [true, false])
+    func dupFocusMismatchExcludesSecureRecent(copySucceeds: Bool) {
+        let board = FakePasteboard()
+        board.succeeds = copySucceeds
+        let captured = DictationFocusToken(processIdentifier: 1, bundleIdentifier: "test.original",
+                                          field: AXUIElementCreateApplication(1))
+        var snapshots = 0
+        let inserter = TextInserter(pasteboard: board, accessibilityTrusted: { true },
+            focusedElement: {
+                snapshots += 1
+                return .init(role: "AXSecureTextField", value: nil, isEditable: true)
+            }, sendPaste: { Issue.record("must not paste after focus changed"); return true },
+            currentFocus: { .init(processIdentifier: 2, bundleIdentifier: "test.other") })
+        let delivery = inserter.insert("synthetic sensitive result", expecting: captured)
+        #expect(delivery.outcome == (copySucceeds ? .copied : .copyFailed))
+        #expect(delivery.secureTargetObserved)
+        #expect(snapshots == 1)
+        let entry = RecentDictationResult(id: UUID(), completedAt: Date(),
+            result: .init(rawText: "synthetic sensitive result", outputText: "synthetic sensitive result",
+                          wasCleaned: false, wasTranslated: false), delivery: delivery)
+        #expect(RecentDictationResult.retaining(entry, in: [], enabled: true).isEmpty)
+    }
+
+    @Test("explicit copy preserves the exact selected Unicode text and never pastes")
+    func dupCopyPreservesExactUnicode() {
+        let board = FakePasteboard()
+        var pastes = 0
+        let inserter = TextInserter(pasteboard: board, accessibilityTrusted: { false },
+            focusedElement: { nil }, sendPaste: { pastes += 1; return true })
+        let text = "\n  cafe\u{301} 字幕\nمرحبا 👩🏽‍💻\n"
+        #expect(inserter.copy(text).outcome == .copied)
+        #expect(board.value == text)
+        #expect(pastes == 0)
+    }
+
+    @Test("delivery observes a secure target even when copying fails")
+    func dupDeliveryRecordsSecureObservation() {
+        let board = FakePasteboard()
+        let inserter = TextInserter(pasteboard: board, accessibilityTrusted: { true },
+            focusedElement: { .init(role: "AXTextField", value: "", isEditable: true, subrole: "AXSecureTextField") },
+            sendPaste: { Issue.record("must not paste into a secure field"); return true })
+        #expect(inserter.insert("private").secureTargetObserved)
+        board.succeeds = false
+        let failed = inserter.insert("private")
+        #expect(failed.outcome == .copyFailed)
+        #expect(failed.secureTargetObserved)
+    }
+
     final class FakePasteboard: DictationPasteboard {
         var value: String?
         var succeeds = true

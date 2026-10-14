@@ -37,7 +37,7 @@ func drawCentered(_ text: String, y: CGFloat, font: NSFont, color: NSColor) {
 
 // Keep the copy quiet and centered, like a native macOS installer rather than
 // turning the disk image into a marketing panel.
-drawCentered("sAiity", y: 365,
+drawCentered("Syllivra", y: 365,
              font: .systemFont(ofSize: 28, weight: .semibold),
              color: NSColor(srgbRed: 0.04, green: 0.42, blue: 0.42, alpha: 1))
 drawCentered("Drag to install", y: 326,

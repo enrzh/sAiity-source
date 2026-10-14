@@ -33,6 +33,13 @@ enum TranscriptTestLibrary {
     /// The library this task is using, or nil for the real one.
     static var sessionsDir: URL? { scopedDirectory.wrappedValue }
 
+    /// A forgotten task-local must never send a test to the person's library.
+    static var unscopedDirectory: URL? {
+        guard ProcessInfo.processInfo.processName == "swiftpm-testing-helper" else { return nil }
+        return FileManager.default.temporaryDirectory.appendingPathComponent(
+            "saiity-unscoped-tests-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
+    }
+
     /// Create a throwaway library, run `body` against it, and remove it.
     static func withTemporaryDirectory<T>(
         _ body: (URL) async throws -> T) async throws -> T {
@@ -59,7 +66,7 @@ private final class TranscriptListCache: @unchecked Sendable {
     private let lock = NSLock()
     private var entries: [String: Entry] = [:]
 
-    func snapshot(names: [String], load: (String) -> SessionRef?) -> [SessionRef] {
+    func snapshot(names: [String], directory: URL, load: (String) -> SessionRef?) -> [SessionRef] {
         lock.lock()
         defer { lock.unlock() }
 
@@ -67,7 +74,7 @@ private final class TranscriptListCache: @unchecked Sendable {
         var currentKeys = Set<String>()
         result.reserveCapacity(names.count)
         for name in names {
-            let url = TranscriptStore.sessionsDir.appendingPathComponent(name, isDirectory: true)
+            let url = directory.appendingPathComponent(name, isDirectory: true)
                 .appendingPathComponent("meta.json")
             let key = url.deletingLastPathComponent().path
             currentKeys.insert(key)
@@ -137,6 +144,7 @@ struct SessionMeta: Codable, Sendable {
     var locale: String
     var translateTo: String?
     var lineCount: Int = 0
+    var title: String? = nil
 }
 
 /// A saved session on disk, as listed in the menu.
@@ -197,6 +205,7 @@ actor TranscriptStore {
         #if SAIITY_TEST_HOOKS
         if let scoped = TranscriptTestLibrary.sessionsDir { return scoped }
         if let processWide = sessionsDirOverride { return processWide }
+        if let unscoped = TranscriptTestLibrary.unscopedDirectory { return unscoped }
         // Route layout previews before launch retention can touch real sessions.
         if let capture = SelfCapture.directory,
            ProcessInfo.processInfo.environment["SAIITY_CAPTURE_TRANSCRIPTS"] == "1" {
@@ -364,16 +373,16 @@ actor TranscriptStore {
 
     // MARK: - Reading back
 
-    nonisolated static func list() -> [SessionRef] {
+    nonisolated static func list(in directory: URL = sessionsDir) -> [SessionRef] {
         let fm = FileManager.default
-        guard let names = try? fm.contentsOfDirectory(atPath: sessionsDir.path) else {
+        guard let names = try? fm.contentsOfDirectory(atPath: directory.path) else {
             listCache.removeAll()
             return []
         }
         let dec = JSONDecoder()
         dec.dateDecodingStrategy = .iso8601
-        let sessionsDirectory = sessionsDir
-        return listCache.snapshot(names: names.sorted(by: >)) { name in
+        let sessionsDirectory = directory
+        return listCache.snapshot(names: names.sorted(by: >), directory: directory) { name in
             let d = sessionsDirectory.appendingPathComponent(name, isDirectory: true)
             guard let data = try? Data(contentsOf: d.appendingPathComponent("meta.json")),
                   let m = try? dec.decode(SessionMeta.self, from: data) else { return nil }
@@ -385,17 +394,18 @@ actor TranscriptStore {
     /// by the subtitle bubble's Save action, so saving does not create an
     /// export file or require persistent recording to have been enabled.
     nonisolated static func saveSession(_ segments: [Segment], locale: String,
-                                        translateTo: String?, startedAt: Date = Date()) throws -> SessionRef {
+                                        translateTo: String?, startedAt: Date = Date(),
+                                        in library: URL = sessionsDir) throws -> SessionRef {
         let fmt = DateFormatter()
         fmt.locale = Locale(identifier: "en_US_POSIX")
         fmt.dateFormat = "yyyy-MM-dd'T'HHmmss"
         let stamp = fmt.string(from: startedAt)
         var id = stamp
-        var directory = sessionsDir.appendingPathComponent(id, isDirectory: true)
+        var directory = library.appendingPathComponent(id, isDirectory: true)
         var suffix = 2
         while FileManager.default.fileExists(atPath: directory.path) {
             id = "\(stamp)-\(suffix)"
-            directory = sessionsDir.appendingPathComponent(id, isDirectory: true)
+            directory = library.appendingPathComponent(id, isDirectory: true)
             suffix += 1
         }
 
@@ -470,29 +480,30 @@ actor TranscriptStore {
         return segs
     }
 
-    /// Delete sessions older than `days`. Returns how many went.
+    /// Delete sessions older than `days`, counting only successful removals.
     ///
     /// A transcript is a durable record of a conversation other people were
     /// part of, and until now nothing ever expired one. Age is taken from the
     /// session's own start date rather than the file's mtime, which an export
     /// written into the session directory would otherwise reset.
     @discardableResult
-    nonisolated static func deleteOlderThan(days: Int) -> Int {
+    nonisolated static func deleteOlderThan(days: Int) -> (deleted: Int, failed: Int) {
         let doomed = sessionsOlderThan(days: days)
-        for s in doomed { delete(s) }
-        if !doomed.isEmpty {
-            NSLog("sAiity retention: removed \(doomed.count) session(s) older than \(days) days")
+        var deleted = 0
+        for s in doomed { if delete(s) { deleted += 1 } }
+        if deleted > 0 {
+            NSLog("sAiity retention: removed \(deleted) session(s) older than \(days) days")
         }
-        return doomed.count
+        return (deleted, doomed.count - deleted)
     }
 
     /// What a retention setting WOULD delete. Separated from the deletion so
     /// the UI can name the number before doing it — a count after the fact is
     /// no use for a decision that cannot be undone.
-    nonisolated static func sessionsOlderThan(days: Int) -> [SessionRef] {
+    nonisolated static func sessionsOlderThan(days: Int, in directory: URL = sessionsDir) -> [SessionRef] {
         guard days > 0 else { return [] }
         let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
-        return list().filter { $0.meta.startedAt < cutoff }
+        return list(in: directory).filter { $0.meta.startedAt < cutoff }
     }
 
     /// Whether the policy would take this session, on its own dates.
@@ -508,7 +519,14 @@ actor TranscriptStore {
 
     /// Deletion is real: the directory goes, no tombstone, nothing else refers
     /// to it.
-    nonisolated static func delete(_ session: SessionRef) {
+    @discardableResult
+    nonisolated static func delete(_ session: SessionRef) -> Bool {
+        guard isLibrarySession(session) else { return false }
+        do {
+            try FileManager.default.removeItem(at: session.url)
+        } catch {
+            return false
+        }
         listCache.remove(session.id)
         // Drop the cached lines with the file. Nothing else would: the stamp
         // check only catches a file that still EXISTS and changed, so a
@@ -516,11 +534,128 @@ actor TranscriptStore {
         // quit — and be served if a new session ever reused the path.
         SegmentCache.shared.invalidate(
             path: session.url.appendingPathComponent("segments.jsonl").path)
-        try? FileManager.default.removeItem(at: session.url)
+        return true
     }
 
-    nonisolated static func deleteAll() {
-        for s in list() { delete(s) }
+    @discardableResult
+    nonisolated static func deleteAll() -> (deleted: Int, failed: Int) {
+        let sessions = list()
+        var deleted = 0
+        for s in sessions { if delete(s) { deleted += 1 } }
+        return (deleted, sessions.count - deleted)
+    }
+
+    /// Resolve paths before mutating: aliases must not escape the library or
+    /// point at the library root itself.
+    nonisolated private static func isLibrarySession(_ session: SessionRef) -> Bool {
+        let directory = session.url.standardizedFileURL
+        let root = sessionsDir.standardizedFileURL.resolvingSymlinksInPath()
+        return directory.lastPathComponent == session.id
+            && directory.resolvingSymlinksInPath().deletingLastPathComponent() == root
+            && directory.deletingLastPathComponent().resolvingSymlinksInPath() == root
+            && (try? directory.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]))
+                .map { $0.isDirectory == true && $0.isSymbolicLink != true } == true
+    }
+
+    func renameSession(_ session: SessionRef, title: String?) throws {
+        let raw = title ?? ""
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count <= 80, !raw.unicodeScalars.contains(where: {
+            switch $0.properties.generalCategory {
+            case .control, .lineSeparator, .paragraphSeparator: return true
+            default: return false
+            }
+        }) else {
+            throw NSError(domain: "sAiity.TranscriptStore", code: 3,
+                          userInfo: [NSLocalizedDescriptionKey: String(localized: "Use a single-line name of at most 80 characters.")])
+        }
+        guard Self.isLibrarySession(session) else {
+            throw NSError(domain: "sAiity.TranscriptStore", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: String(localized: "That transcript is no longer in the saved library.")])
+        }
+        let directory = session.url.standardizedFileURL.resolvingSymlinksInPath()
+        let metadata = session.url.appendingPathComponent("meta.json")
+        let spoken = session.url.appendingPathComponent("segments.jsonl")
+        guard [metadata, spoken].allSatisfy({
+            $0.standardizedFileURL.resolvingSymlinksInPath().deletingLastPathComponent() == directory
+                && (try? $0.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]))
+                    .map { $0.isRegularFile == true && $0.isSymbolicLink != true } == true
+        }) else {
+            throw CocoaError(.fileReadNoSuchFile)
+        }
+        guard dir?.standardizedFileURL.resolvingSymlinksInPath() != directory else {
+            throw NSError(domain: "sAiity.TranscriptStore", code: 4,
+                          userInfo: [NSLocalizedDescriptionKey: String(localized: "Stop recording before renaming this transcript.")])
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        var current = try decoder.decode(SessionMeta.self, from: Data(contentsOf: metadata))
+        guard current.id == session.id else { throw CocoaError(.fileReadCorruptFile) }
+        current.title = trimmed.isEmpty ? nil : trimmed
+        let metadataEncoder = JSONEncoder()
+        metadataEncoder.dateEncodingStrategy = .iso8601
+        metadataEncoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try metadataEncoder.encode(current)
+        let staging = session.url.appendingPathComponent("meta-\(UUID().uuidString).new")
+        defer { try? FileManager.default.removeItem(at: staging) }
+        try data.write(to: staging, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: staging.path)
+        try Task.checkCancellation()
+        // Use the private staging permissions rather than inheriting the old file's mode.
+        _ = try FileManager.default.replaceItemAt(metadata, withItemAt: staging, options: .usingNewMetadataOnly)
+        Self.listCache.remove(session.id)
+        NotificationCenter.default.post(name: .saiityTranscriptLibraryChanged, object: nil)
+    }
+
+    /// Compare and replace without suspending, in the same actor turn as app
+    /// appends/patches. A stale run never replaces the newer spoken record.
+    func publishRetranslation(_ segments: [Segment], to session: SessionRef,
+                              source: Data, target: String) throws {
+        guard Self.isLibrarySession(session) else {
+            throw NSError(domain: "sAiity.TranscriptStore", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: String(localized: "That transcript is no longer in the saved library.")])
+        }
+        let destination = session.url.appendingPathComponent("segments.jsonl")
+        let metadata = session.url.appendingPathComponent("meta.json")
+        let directory = session.url.standardizedFileURL.resolvingSymlinksInPath()
+        guard [destination, metadata].allSatisfy({
+            $0.standardizedFileURL.resolvingSymlinksInPath().deletingLastPathComponent() == directory
+                && (try? $0.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]))
+                    .map { $0.isRegularFile == true && $0.isSymbolicLink != true } == true
+        }) else {
+            throw CocoaError(.fileReadNoSuchFile)
+        }
+        guard try Data(contentsOf: destination) == source,
+              dir?.standardizedFileURL.resolvingSymlinksInPath() != directory else {
+            throw NSError(domain: "sAiity.TranscriptStore", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: String(localized: "The transcript changed during translation. The current transcript was kept.")])
+        }
+        var blob = Data()
+        for segment in segments {
+            blob.append(try encoder.encode(segment))
+            blob.append(0x0A)
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        var currentMeta = try decoder.decode(SessionMeta.self, from: Data(contentsOf: metadata))
+        currentMeta.translateTo = target
+        let metadataEncoder = JSONEncoder()
+        metadataEncoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        metadataEncoder.dateEncodingStrategy = .iso8601
+        let metadataBytes = try metadataEncoder.encode(currentMeta)
+        let staging = session.url.appendingPathComponent("segments-\(UUID().uuidString).new")
+        defer { try? FileManager.default.removeItem(at: staging) }
+        try blob.write(to: staging, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: staging.path)
+        try Task.checkCancellation()
+        _ = try FileManager.default.replaceItemAt(destination, withItemAt: staging)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: destination.path)
+        // Metadata remains best-effort after the spoken file commits. Preserve
+        // its latest counters/dates rather than rewriting a stale SessionRef.
+        try? metadataBytes.write(to: metadata, options: .atomic)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: metadata.path)
+        Self.listCache.remove(session.id)
+        SegmentCache.shared.invalidate(path: destination.path)
     }
 }
 

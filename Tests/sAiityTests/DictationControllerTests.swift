@@ -6,6 +6,33 @@ import Testing
 
 @MainActor
 @Suite struct DictationControllerTests {
+    @Test("dictation corrects a stale Chinese tag before translating coherent Japanese")
+    func pql3JapaneseDelivery() async throws {
+        let original = "日本語の字幕を確認してください。"
+        let translated = "Please check the Japanese subtitles."
+        let backend = FakeBackend(log: EventLog())
+        backend.authoritativeResult = original
+        backend.detectedLanguageResult = "zh"
+        let engine = TranslationProcedureTests.Engine()
+        engine.outputs = [translated]
+        let inserter = FakeInserter()
+        let controller = DictationController(makeBackend: { backend }, capture: FakeCapture(log: EventLog()),
+            inserter: inserter, captionsActive: { false },
+            translationConfiguration: { .init(enabled: true, target: "en") },
+            detailedTranslate: { _, result, target in
+                try? await TranslationProcedure.translate(result.translationRuns.map {
+                    .init(text: $0.text, source: $0.language ?? "auto")
+                }, to: target, engine: engine)
+            }, cleanupConfiguration: { .disabled })
+        controller.press()
+        await controller.waitForWorkForTests()
+        controller.release()
+        await controller.waitForWorkForTests()
+        #expect(engine.inputs == [.init(text: original, source: "ja")])
+        #expect(inserter.inserted == [translated])
+        #expect(backend.finishDictationCalls == 1)
+    }
+
     final class EventLog {
         var values: [String] = []
     }
@@ -58,6 +85,7 @@ import Testing
         var detectedLanguageResult: String? = "en"
         var authoritativeResult: String? = "hello from dictation"
         var finishDictationCalls = 0
+        var failureHandler: (@Sendable (String) -> Void)?
 
         init(log: EventLog) { self.log = log }
 
@@ -81,6 +109,7 @@ import Testing
             self.onChunk = onChunk
         }
         func feed(_ buffer: AVAudioPCMBuffer) {}
+        func setFailureHandler(_ handler: (@Sendable (String) -> Void)?) { failureHandler = handler }
         func flushPending() async {
             log.values.append("backend.flushPending")
             onChunk?(TranscriptChunk(text: "hello from dictation", isFinal: true))
@@ -936,6 +965,24 @@ import Testing
         #expect(controller.phase == .result(
             "Translation unavailable — original copied to Clipboard"))
         #expect(issues == ["dictation.translation"])
+    }
+
+    @Test("translation failure describes cleaned copy-only delivery honestly")
+    func cleanedCopyAfterTranslationFailure() async {
+        let inserter = FakeInserter()
+        let controller = DictationController(makeBackend: { FakeBackend(log: EventLog()) },
+            capture: FakeCapture(log: EventLog()), inserter: inserter,
+            captionsActive: { false },
+            translationConfiguration: { .init(enabled: true, target: "de") },
+            translate: { _, _, _ in nil },
+            cleanupConfiguration: { .init(enabled: true) },
+            cleanup: { text, _ in text })
+        controller.press()
+        await controller.waitForWorkForTests()
+        controller.release()
+        await controller.waitForWorkForTests()
+        #expect(inserter.inserted == ["hello from dictation"])
+        #expect(controller.phase == .result(String(localized: "Translation unavailable — cleaned text copied to Clipboard")))
     }
 
     @Test("transcription failure is visible to diagnostics")

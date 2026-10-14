@@ -1,9 +1,8 @@
 # sAiity 2.0 — Windows and caption quality
 
-Written 2026-08-14, against v1.3.0. Everything here is grounded in a research
-pass over the current tree and the current state of the relevant projects;
-where something is unverified it says so, because the difference between
-"verified" and "sounds right" is the difference between a quarter and a year.
+Originally written 2026-08-14 against v1.3.0; Mac feature status updated
+2026-10-09 from source. Windows research below is historical planning, not a
+current device verification or a shipped Windows release.
 
 ---
 
@@ -21,45 +20,51 @@ translation, transcripts, and the live subtitle bubble.
 
 ## Part 1 — Features (Mac first)
 
-### 1. Speaker identification — removed from the product
+### 1. Anonymous speaker labels — available, optional
 
-The earlier diarization experiment is no longer part of sAiity. It added a
-second model, another inference pass, extra settings, and a misleading promise
-about knowing who spoke. The app now keeps the simpler local path: recognition
-and translation, with turn breaks only when the audio clock shows a real pause.
-Old transcript metadata is retained for safe decode/re-encode compatibility,
-but no new labels are produced or displayed.
+**Captions → More options → Capture → Identify speakers** defaults off and
+requires an explicit Speaker identification model download. It adds CPU work
+and session-local anonymous labels such as Speaker 1; it does not identify real
+people. Confirmed labels appear in history, saved sessions and exports. Multiple
+voices in one sentence can share a label row; overlap is marked without
+separating overlapping words. Pending audio/evidence are bounded, and overload
+or failure disables labels rather than blocking captions. Legacy metadata stays
+readable. Real two-person/overlap trials remain a release acceptance requirement.
 
-### 2. Summarise a session — nearly free
+### 2. Summarise a saved session — shipped
 
-`LLM.swift` is already a dependency and a GGUF model is already shipped as
-translator #2. A one-shot "summarise this transcript" — TL;DR, decisions,
-and action items — is mostly prompt work
-and a map-reduce for long sessions that will not fit a small local context.
+The saved-session reader offers Summarize, Summarize Again and Remove Summary.
+It uses the already-installed compatible Gemma cleanup model, downloads nothing,
+and waits for shared-model availability. Summaries may omit or invent details;
+long input keeps only the latest portion that fits and reports omitted lines.
+Spoken lines and SRT/WebVTT remain unchanged; Markdown includes the preface.
 
-This is the feature that changes what the app is *for*: from "I can read what
-was said" to "I do not have to."
+### 3. Outgoing captions — proposed, unshipped
 
-### 3. Caption output — the audience multiplier
-
-Push captions outward: a localhost page consumable as an **OBS browser
+Proposed routes are a localhost page consumable as an **OBS browser
 source**, and Zoom's third-party closed-caption API (the host generates a URL,
 the app POSTs to it). This turns a personal accessibility tool into "caption
 this meeting for everyone."
 
-**This is the one feature that sends text off the machine.** The consent UI has
+**Remote caption output would send text off the machine.** The consent UI has
 to be explicit and per-session, or it breaks the promise the whole app is built
 on. Treat Teams as best-effort; its CART ingestion has poor public reliability
 reports.
 
-### 4. Glossary — if the schedule holds
+### 4. Shared dictionary — shipped
 
-Names, product names, jargon. **Not** acoustic biasing: FluidAudio's
-`CustomVocabularyContext` exists but is wired only into the Parakeet CTC path,
-not the Nemotron streaming manager sAiity actually runs. Do it as a text layer
-instead — fuzzy correction on committed sentences plus do-not-translate terms
-injected into the translator. Cheaper, and it solves the actual complaint
-("it keeps spelling my company wrong").
+Names and terms plus explicit Corrections live under More options on both pages.
+The bounded local dictionary protects spelling and applies approved whole-phrase
+replacements once before cleanup/translation. It does not learn automatically,
+perform acoustic biasing or promise fuzzy recognition improvements.
+
+### 5. Realtime captions and translation — shipped
+
+Nemotron offers separate 1120 ms Realtime and 2240 ms Balanced downloads;
+Qwen captions remain pause-based. Realtime translation coalesces interim
+requests and can slow previews under power, thermal or memory pressure. Final
+translations retain priority and only final sentence translations are saved.
+These timing choices do not establish measured accuracy or latency on a new Mac.
 
 ### Deliberately not in 2.0
 
@@ -74,6 +79,11 @@ injected into the translator. Cheaper, and it solves the actual complaint
 
 ## Part 2 — Windows
 
+The repository contains an experimental Windows overlay and manually dispatched
+build/package workflows. Desktop visual acceptance, complete capture/inference
+integration and a supported installer/update release remain unshipped. The
+following stack and extraction discussion is a proposal, not current delivery.
+
 ### What changed since the last time this was estimated
 
 The ASR swap was assumed to be the schedule risk. It is not.
@@ -85,8 +95,8 @@ in v1.13.5, 2026-08-11). At least one cross-platform desktop app already ships
 it on Windows, CPU-only, with partial results well under a second behind
 speech.
 
-That means: **same weights, same languages, same transcript behaviour on both
-platforms.** One product story, not two.
+The goal is comparable language coverage; identical transcript behaviour across
+CoreML and ONNX runtimes is not established by that research.
 
 ### The real risk: click-through vs. acrylic
 
@@ -119,7 +129,7 @@ degrade or vanish on layered windows. **No definitive answer was found.**
 
 ### Architecture: a core, but a *small* one
 
-Measured, not guessed: 11,328 lines — **6,244 pure UI**, **3,084 Apple-bound
+Historical research counted 11,328 lines — **6,244 pure UI**, **3,084 Apple-bound
 engine glue**, **2,000 Foundation-only**.
 
 Extract a shared core, but draw the line much further in than "capture → ASR →
@@ -156,16 +166,16 @@ argument is quality and native feel.
 
 ## Sequencing
 
-1. **Glossary on Mac** shipped in 2.6.4 as the shared dictionary. **Session summary** is the next Mac feature: one explicit summary of a saved transcript, using the installed Gemma cleanup model. It does not run by itself and it does not send the transcript anywhere.
+1. **Mac features already available:** shared dictionary, explicit saved-session summaries, realtime caption/translation timing and optional anonymous speaker labels. Complete current-build PRR gates before claiming release readiness.
 2. **The acrylic/click-through spike** — the Windows overlay source compiles; the visual check on a Windows 11 desktop is still open and gates everything below
 3. **Extract the core** (no behaviour change, Mac stays green throughout)
 4. **Windows: capture → sherpa-onnx → overlay** — the prototype
 5. **Windows: settings, transcripts, updates, installer** — the long tail
 6. **2.0** = both platforms, caption output
 
-Steps 1–2 are weeks. Steps 4–6 are months, and step 6 is where the schedule
-actually goes: settings, five languages, transcripts, updates and an installer
-are what took this Mac app from working to shippable.
+Windows steps and outgoing captions have no verified delivery date. Settings,
+localizations, transcripts, updates and installer/device acceptance remain real
+work, rather than evidence that the prototype is ready to release.
 
 ### Version-pinning hazard, noted once
 

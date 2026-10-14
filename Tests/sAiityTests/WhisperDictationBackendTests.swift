@@ -8,6 +8,45 @@ import WhisperKit
 @Suite(.serialized)
 struct WhisperDictationBackendTests {
 
+    @Test("Whisper decoding failure cannot become an empty or partial successful transcript")
+    func nativeDecodeFailureIsNotSilence() {
+        let expected = NSError(domain: "WhisperDecodeRegression", code: 7)
+        let decoded = TranscriptionResult(text: "The first phrase.", segments: [],
+                                          language: "en", timings: .init())
+        let fixtures: [[Result<[TranscriptionResult], Error>]] = [
+            [.failure(expected)], [.success([decoded]), .failure(expected)]
+        ]
+        for results in fixtures {
+            do {
+                _ = try LoadedWhisperDictationModel.transcription(from: results)
+                Issue.record("The native decoding error was discarded")
+            } catch {
+                #expect((error as NSError) === expected)
+            }
+        }
+    }
+
+    @Test("Whisper preserves cancellation instead of returning no speech")
+    func nativeDecodeCancellation() {
+        #expect(throws: CancellationError.self) {
+            try LoadedWhisperDictationModel.transcription(from: [.failure(CancellationError())])
+        }
+    }
+
+    @Test("Whisper joins successful output in order without rewriting source punctuation")
+    func nativeDecodeSuccessfulText() throws {
+        let texts = ["That shouldn't happen when you...", "are currently adding items to the card."]
+        let results = texts.map {
+            Result<[TranscriptionResult], Error>.success([
+                .init(text: $0, segments: [], language: "en", timings: .init())
+            ])
+        }
+        let decoded = try LoadedWhisperDictationModel.transcription(from: results)
+        #expect(decoded.text == texts.joined(separator: " "))
+        #expect(decoded.language == "en")
+        #expect(try LoadedWhisperDictationModel.transcription(from: []).text.isEmpty)
+    }
+
     private func makeModel(at root: URL, _ choice: WhisperDictationBackend.ModelChoice = .base) throws {
         let folder = WhisperDictationBackend.modelFolder(for: choice, under: root)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -569,6 +608,69 @@ struct WhisperDictationBackendTests {
         let chinese = try WhisperDictationBackend.decodingOptions(for: Locale(identifier: "zh-Hant-TW"))
         #expect(chinese.language == "zh")
         #expect(chinese.detectLanguage == false)
+    }
+
+    @Test("Whisper source coverage is exactly the pinned recognition vocabulary")
+    func sourceCoverageMatchesPinnedVocabulary() {
+        #expect(WhisperDictationBackend.supportedLanguageCodes == Constants.languageCodes)
+        #expect(!WhisperDictationBackend.supportedLanguageCodes.contains("ig"))
+        #expect(WhisperDictationBackend.supportedLanguageCodes.contains("tl"))
+        #expect(WhisperDictationBackend.supportedLanguageCodes.contains("jw"))
+    }
+
+    @Test("Every pinned Whisper language decodes with its model-native token")
+    func everyPinnedSourceCodeDecodes() throws {
+        for code in Constants.languageCodes.sorted() {
+            let options = try WhisperDictationBackend.decodingOptions(for: Locale(identifier: code))
+            #expect(options.language == code, "Whisper token must survive ICU canonicalization: \(code)")
+            #expect(options.detectLanguage == false)
+        }
+    }
+
+    @Test("Source aliases and regional script choices keep Whisper-native language tokens")
+    func sourceAliasesKeepNativeTokens() throws {
+        for (identifier, expected) in [
+            ("fil-PH", "tl"), ("tl-PH", "tl"),
+            ("nb-NO", "no"), ("nn-NO", "nn"),
+            ("jv-ID", "jw"), ("jw-ID", "jw"),
+            ("zh-Hans-CN", "zh"), ("zh-Hant-TW", "zh"),
+            ("sr-Latn-RS", "sr"), ("sr-Cyrl-RS", "sr"),
+            ("pt-BR", "pt"), ("de_DE", "de")
+        ] {
+            let options = try WhisperDictationBackend.decodingOptions(for: Locale(identifier: identifier))
+            #expect(options.language == expected, "\(identifier) must use \(expected)")
+            #expect(options.detectLanguage == false)
+        }
+    }
+
+    @Test("Translation-only sources are rejected before any transcription work")
+    func translationOnlyLocaleDoesNotCallTranscription() {
+        #expect(LanguageCatalog.all.contains { $0.code == "ig" })
+        var called = false
+        #expect(throws: WhisperDictationError.unsupportedLocale("ig-NG")) {
+            try WhisperDictationBackend.transcribe(locale: Locale(identifier: "ig-NG")) {
+                called = true
+            }
+        }
+        #expect(!called)
+    }
+
+    @Test("Every translation catalog entry is checked against Whisper source vocabulary")
+    func translationCatalogDoesNotExpandSourceCoverage() throws {
+        for language in LanguageCatalog.all {
+            let locale = Locale(identifier: language.code)
+            let base = locale.identifier(.bcp47).split(separator: "-").first.map(String.init) ?? ""
+            let native = ["fil": "tl", "nb": "no", "jv": "jw"][base] ?? base
+            if Constants.languageCodes.contains(native) {
+                let options = try WhisperDictationBackend.decodingOptions(for: locale)
+                #expect(options.language == native, "\(language.code) must use a source token")
+                #expect(options.detectLanguage == false)
+            } else {
+                #expect(throws: WhisperDictationError.unsupportedLocale(locale.identifier)) {
+                    try WhisperDictationBackend.decodingOptions(for: locale)
+                }
+            }
+        }
     }
 
     @Test("Only the exact auto locale enables detection")

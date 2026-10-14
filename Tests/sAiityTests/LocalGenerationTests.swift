@@ -5,6 +5,31 @@ import Testing
 @testable import sAiity
 
 @Suite struct LocalGenerationTests {
+    @MainActor @Test("native model load attempts are timed even when the loader throws", arguments: [true, false])
+    func dupLoadAttemptIncludesFailure(fails: Bool) async throws {
+        enum Expected: Error { case failed }
+        var timings: [DiagnosticsRuntimeTiming] = []
+        let id = UUID().uuidString
+        var attempts = 0
+        do {
+            let value = try await LocalGeneration.$dictationRunID.withValue(id) {
+                try await LocalGeneration.loadModel({
+                    attempts += 1
+                    if fails { throw Expected.failed }
+                    return "synthetic model"
+                }, onTiming: { timings.append($0) })
+            }
+            #expect(!fails && value == "synthetic model")
+        } catch Expected.failed { #expect(fails) }
+        #expect(attempts == 1)
+        #expect(timings.count == 1)
+        let timing = timings.first
+        #expect(timing?.operation == "model.load")
+        #expect(timing?.runID == id && timing?.cold == true && timing?.modelLoadCount == 1)
+        #expect(timing?.modelCallCount == nil)
+        #expect(timing.map { $0.seconds.isFinite && $0.seconds >= 0 } == true)
+    }
+
     @Test("installed native model enforces budgets and acknowledges cancellation",
           .enabled(if: ProcessInfo.processInfo.environment["SAIITY_NATIVE_GENERATION_BENCHMARK"] == "1"))
     func nativeLimits() async throws {

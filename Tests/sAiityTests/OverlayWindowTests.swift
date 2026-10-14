@@ -5,6 +5,63 @@ import Testing
 
 @MainActor
 @Suite struct OverlayWindowTests {
+    @Test("a visible caption update performs one history layout and no window reordering")
+    func captionUpdatesAvoidRepeatedLayoutAndPresentation() {
+        let previous = CaptionStyle.current
+        var style = previous
+        style.hidden = false
+        CaptionStyle.current = style
+        let window = OverlayWindow()
+        defer { window.orderOut(nil); CaptionStyle.current = previous }
+        window.showHistory((0..<40).map { CaptionHistoryEntry(sentenceID: $0, original: "Synthetic caption \($0).") })
+        let layouts = window.historyLayoutPassesForTests
+        let presentations = window.presentationRequestsForTests
+        let began = ContinuousClock.now
+        for index in 0..<200 { window.show(text: "Synthetic caption updated \(index).", isFinal: true, sentenceID: 39) }
+        #expect(window.historyLayoutPassesForTests - layouts == 200)
+        #expect(window.presentationRequestsForTests == presentations)
+        #expect(window.historyEntriesForTests.count == 40)
+        #expect(window.historyEntriesForTests.last?.original == "Synthetic caption updated 199.")
+        print("SYLLIVRA_PERF bubble updates=200 rows=40 layouts=\(window.historyLayoutPassesForTests - layouts) presentations=\(window.presentationRequestsForTests - presentations) elapsed=\(began.duration(to: .now))")
+    }
+
+    @Test("the shared bubble surface changes background material without fading its content")
+    func backgroundTransparencyToggleKeepsContent() {
+        let frame = NSRect(x: 0, y: 0, width: 320, height: 110)
+        let content = NSView(frame: frame)
+        let surface = BubbleSurfaceView(contentView: content)
+        surface.frame = frame
+        var style = CaptionStyle()
+        style.backgroundIsTransparent = false
+        surface.apply(style: style)
+        #expect(surface.renderedStyle == CaptionStyle.solidGlass)
+        #expect(surface.contentAttachedForTests)
+        #expect(content.alphaValue == 1)
+        style.backgroundIsTransparent = true
+        surface.apply(style: style)
+        #expect(surface.renderedStyle == CaptionStyle.regularGlass)
+        #expect(surface.contentAttachedForTests)
+        surface.apply(style: style, forceSolid: true)
+        #expect(surface.renderedStyle == CaptionStyle.solidGlass)
+        #expect(content.alphaValue == 1)
+    }
+
+    @Test("the saved caption confirmation opens its transcript and pending status does not")
+    func saveConfirmationOpensTranscript() throws {
+        let view = BubbleContentView(frame: .init(x: 0, y: 0, width: 500, height: 110))
+        var opened = 0
+        view.showTranscriptSaveStatus(String(localized: "Saved to Transcripts")) { opened += 1 }
+        let button = try #require(view.subviews.compactMap { $0 as? NSButton }.first)
+        #expect(!button.isHidden && button.isEnabled)
+        #expect(button.toolTip == String(localized: "Open transcript"))
+        button.performClick(nil)
+        #expect(opened == 1)
+        view.showTranscriptSaveStatus(String(localized: "Saving transcript…"))
+        #expect(!button.isEnabled)
+        button.performClick(nil)
+        #expect(opened == 1)
+    }
+
     @Test("reading history survives incoming captions and translation until Jump to latest")
     func readerControlsScrolling() async throws {
         let previous = CaptionStyle.current

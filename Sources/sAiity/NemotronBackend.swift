@@ -16,8 +16,8 @@ import Foundation
 ///     checkpoint is reachable through MLX, but that drags in a 17-package tree.
 ///   - `languageCode: "auto"` gives a genuinely multilingual model plus
 ///     audio-level language identification — something Apple's Speech framework
-///     exposes no public API for at all. Its own metadata declares 121 language
-///     tags, well beyond the eight FluidAudio's README advertises.
+///     exposes no public API for at all. The pinned library loads the language
+///     prompts/tags from model metadata; it has no complete static source list.
 ///
 /// The honest trade: this needs a 634 MB download where Apple's is a system
 /// asset, and it is stronger on noisy or music-backed audio but not magic.
@@ -209,7 +209,7 @@ final class NemotronEngine: FluidStreamingEngine, @unchecked Sendable {
         Self.markDownloaded(chunkMs: ms)
 
         progress(String(localized: "Loading Nemotron…"))
-        try await manager.loadModels(from: dir)
+        try await LocalGeneration.loadModel { try await manager.loadModels(from: dir) }
         // nil = let the model identify the language itself, rather than forcing
         // one. Forcing is available via setLanguage if we ever want it.
         await manager.setLanguage(nil)
@@ -236,10 +236,8 @@ final class NemotronEngine: FluidStreamingEngine, @unchecked Sendable {
         await manager.cleanup()
     }
 
-    /// The language the model heard, identified from audio rather than inferred
-    /// from the transcript's spelling. Strictly better than the text-based
-    /// detector for the case that defeats it: a language whose model emits
-    /// almost no text at all.
+    /// The first language tag the model emitted from audio, if any. This is not
+    /// a language declaration for every region or for the complete session.
     func detectedLanguage() async -> String? {
         await manager.detectedLanguage()
     }

@@ -5,6 +5,68 @@ import WhisperKit
 @testable import sAiity
 
 @Suite struct DictationTranscriptionTests {
+    @Test("language refinement cannot remove original code-switch paragraph boundaries")
+    func pql4RawParagraphs() {
+        for text in ["Please check the invoice.\n\n日本語の字幕を確認してください。",
+                     "Ich  denke we should ship this today.", "Hello.\n\nHello."] {
+            let result = DictationTranscriptionResult(text: text, language: "en")
+            #expect(result.text.utf8.elementsEqual(text.utf8))
+            #expect(result.languageMetadata.regionTexts.joined().utf8.elementsEqual(text.utf8))
+        }
+    }
+
+    @Test("PQL2 Japanese text corrects stale tags regardless of first script", arguments: [
+        "日本語の字幕を確認してください。", "これは日本語の文章です。",
+        "ｶﾀｶﾅの字幕を確認してください。", "Swift APIの結果を3回確認してください。"
+    ])
+    func pql2JapaneseTag(_ text: String) {
+        for hint in [nil, "zh", "zh-Hans", "en"] as [String?] {
+            let result = DictationTranscriptionResult(text: text, language: hint)
+            #expect(result.text == text)
+            #expect(result.regions.map(\.language) == ["ja"])
+            #expect(result.translationRuns.map(\.text) == [text])
+            #expect(!result.languageMetadata.containsMultipleLanguages)
+        }
+        let compatible = DictationTranscriptionResult(text: text, language: "ja-JP")
+        #expect(compatible.regions.map(\.language) == ["ja-JP"])
+    }
+
+    @Test("PQL2 clear Chinese text corrects a stale Japanese tag")
+    func pql2ChineseTag() {
+        let text = "我们今天需要仔细检查所有发票，然后讨论明天会议的具体安排。"
+        let result = DictationTranscriptionResult(text: text, language: "ja")
+        #expect(result.text == text)
+        #expect(result.regions.map { $0.language.map(TranslationLanguage.baseCode) } == ["zh"])
+        #expect(!result.languageMetadata.containsMultipleLanguages)
+    }
+
+    @Test("PQL2 unknown Han remains unknown and disjoint Japanese repeats survive")
+    func pql2UnknownAndRepeatedRegions() {
+        let unknown = DictationTranscriptionResult(text: "字幕", language: "en")
+        #expect(unknown.text == "字幕")
+        #expect(unknown.regions.map(\.language) == [nil])
+        #expect(unknown.languageMetadata.dominantLanguage == nil)
+        let repeated = DictationTranscriptionResult(regions: [
+            .init(text: "はい、はい。", language: "ja"),
+            .init(text: "はい、はい。", language: "ja")
+        ])
+        #expect(repeated.text == "はい、はい。はい、はい。")
+        #expect(repeated.translationRuns.map(\.text) == [repeated.text])
+        #expect(!repeated.languageMetadata.containsMultipleLanguages)
+    }
+
+    @Test("PQL2 translation runs preserve genuine Chinese Japanese Chinese switches")
+    func pql2TranslationSwitches() {
+        let chinese = "这是中文，请先检查发票。"
+        let japanese = "これは日本語の説明です。"
+        let ending = "然后我们继续讨论明天的会议安排。"
+        let result = DictationTranscriptionResult(text: chinese + japanese + ending, language: "zh")
+        #expect(result.text == chinese + japanese + ending)
+        #expect(result.translationRuns.map(\.text) == [chinese, japanese, ending])
+        #expect(result.translationRuns.map { $0.language.map(TranslationLanguage.baseCode) } == ["zh", "ja", "zh"])
+        #expect(result.languageMetadata.containsMultipleLanguages)
+    }
+
     @Test("an empty overlapped decode cannot deduplicate a disjoint repetition")
     func emptyRegionDoesNotInventOverlap() async throws {
         actor Counter {

@@ -1,5 +1,127 @@
 # Local ASR fixtures
 
+## 10 October 2026 — local PQL implementation and text timing
+
+The reviewed local source passed 728 registered Swift tests / 81 suites, with
+20 explicit native-model/device probes skipped, 30 Python checks and 32 signed
+native smoke checks. The hook-free `2.7.0-rc.2/225` candidate is local and not
+notarized. This does not establish natural-speech quality or model latency.
+
+The following same-input comparison used 50 warm repetitions of each public
+canned text in a Swift interpreter on Apple M4 / 16 GB / macOS 27.0.1 (26A434).
+It measures the shared text-span helper only, with no audio, ASR, cleanup,
+translation weights or delivery. Values are **p95 milliseconds**, not release
+budgets. The accepted cached sample ran after Swift tests finished; an earlier
+sample that briefly overlapped a build is excluded.
+
+| Text case | Prior heuristic | New policy, uncached hypotheses | New policy, bounded cache |
+| --- | ---: | ---: | ---: |
+| Japanese | 0.0118 | 0.1405 | 0.0304 |
+| English/Japanese | 0.0224 | 0.9518 | 0.0918 |
+| German/English | 0.0210 | 0.5321 | 0.0520 |
+| Arabic/Latin identifier | 0.0067 | 0.3657 | 0.0717 |
+| Longer German/English | 0.0758 | 0.9187 | 0.1122 |
+
+Correct phrase/uncertainty checks add work compared with the old heuristic.
+Caching removes repeated hypothesis processing while retaining those checks;
+Japanese false script spans fell from six to one, and the mixed English/Japanese
+case from eight to three. This is text-policy evidence, not measured audio
+accuracy. The cache uses the existing bounded cache and lock, retains at most
+256 snapshots, and excludes input keys above 16 KiB.
+
+Logs and layout/build artifacts are in `build/product-language-20261010/`.
+Model load/reload cost, cold/warm end-to-end processing, physical footprint,
+target-caption timing calibration, natural corpus/reference quality and device
+workflows remain **UNVERIFIED**. No decoding/segmentation thresholds or model
+recommendations were changed on the strength of these microbenchmarks.
+
+## 9 October 2026 — PQL7 multilingual evidence contract
+
+The initial natural-speech cohorts are **UNVERIFIED**: `en`, `de`, `ja`,
+`zh-Hans`, `zh-Hant`, `fr`, `es`, `pt`, `ar`, `ru`, `hi`, `ko`.
+German/English-only reports cannot pass the checked-in expanded policy. No new
+authorized recordings, independent native reviewers or native measurements are
+supplied by this change. Passing synthetic Python/Swift contract tests is not a
+speech-quality pass.
+
+`languageEvidence.requiredCohorts` names the exact release subset; the policy's
+existing models/configurations name the measured engine/settings/target subset.
+An explicitly selected local policy via `SAIITY_RELEASE_POLICY` may require a
+smaller reviewed subset, and the verifier prints its `verifiedCohorts` and
+`qualityScope: bounded-release-subset` on each case. Such a pass certifies only
+those cases. Every selected fixture is measured, all selected combinations and
+both preview states remain required, and skipped/unsupported rows cannot pass.
+Do not remove hard budgets to accommodate a subset.
+
+The native harness retains its **1...12 WAVs per batch**, 60-second clip bound,
+five warm release repetitions, installed-only models and unchanged accuracy,
+latency, completion and source/model/hardware checks. One reviewed clip/speaker
+per selected cohort is the bounded release minimum, not complete natural-speech
+coverage. The separate `corpusGoal` remains 20 clips/three speakers per cohort:
+12 clean, four difficult/noisy and four critical names/numbers/negation/repair or
+continuous-speech cases. Build this larger corpus in separate authorized batches;
+warm repetitions do not count as independent clips or speakers. Genuine within
+utterance switches and each tested language's own/common target need separately
+named fixtures/configurations; a German target does not certify untested pairs.
+
+Each local fixture adds the following metadata (contract example only; these
+values are not reviewed corpus evidence):
+
+```json
+{
+  "cohort": "ja",
+  "provenance": {
+    "reviewed": true, "source": "local authorized collection",
+    "license": "documented permitted use", "consent": "documented permission",
+    "speechType": "natural", "speaker": "anonymous speaker ID", "reviewer": "curator ID"
+  },
+  "referenceReview": {"reviewed": true, "independent": true, "reviewer": "native listener ID"},
+  "scoring": {"language": "ja", "wordUnit": "natural-language", "normalization": "nfc-grapheme-v1"}
+}
+```
+
+The cohort must match an explicit `expectedLanguages` entry, retaining the
+Chinese script distinction. Reference/scoring language comes from independent
+review, never the recognizer's guess. `natural-language` means Foundation's
+existing NaturalLanguage word tokenizer with that reviewed language; CER uses
+NFC canonical graphemes and includes combining marks, independently of WER and
+missing-word deletions. No stemming, transliteration, compatibility folding or
+whitespace-only/scalar-as-word flattening is a reviewed word metric. Legacy
+fixtures without scoring metadata keep the legacy word-tokenization contract;
+they cannot satisfy the new multilingual policy. Unknown/extra nonadjacent
+language labels fail exact ordered language evidence; adjacent duplicate tags
+and regional labels remain normalized for base language identity only.
+
+Every measured row for a multilingual gate must echo `scoring`, `cer`,
+`scoredLanguages` and `outputSHA256`. Untranslated pipeline rows additionally
+carry `outputCER` and `scoredOutputLanguages`. A separately supplied
+`qualityReview` must name an independent reviewer, `reviewed: true`,
+`independent: true`, the exact `outputSHA256`, and explicit true outcomes for
+`meaning`, `names`, `numbers`, `negation`, `omissions`, `naturalness`. Numeric
+scores do not manufacture that review. Missing review remains a gate, even when
+all WER values are zero. Private outputs stay local; public evidence contains
+hashes and review outcomes. The harness cannot certify meaning automatically.
+
+Target references retain `text`/`reviewed` and may add at most eight distinct
+nonempty `alternatives`; all alternatives require the independent target
+reference review. Scoring uses one complete reference, chosen by lowest WER,
+then CER; metrics must not take unrelated minima from different references.
+The original `translationReferenceSHA256` continues to hash primary UTF-8 text.
+`translationReferencesSHA256` hashes the newline-joined ordered SHA-256 hashes
+of primary text and alternatives. The complete byte-exact manifest hash binds
+all reference/review/scoring fields, so changed alternatives invalidate old
+evidence. Target references under the multilingual policy also include
+`referenceReview` and their own `scoring` using the exact target language;
+rows echo it as `translationScoring` and retain independent translation CER.
+Chinese script targets require `targetVariantPreserved` separately: base `zh`
+identity alone cannot certify `zh-Hans` → `zh-Hant`. Ambiguous output remains
+unverified.
+
+Provenance/cohort preflight runs before native commands. The normal release
+matrix will therefore fail until a reviewed corpus exists. Python unit tests
+use clearly synthetic temporary bytes only to test rejection and binding;
+they neither load installed weights nor establish measured quality.
+
 ## 7 October 2026 — transcript reading controls
 
 On `339f295` plus the preserved local changes, session rows now keep the date,
@@ -135,7 +257,7 @@ Verification on this Mac mini M1 / 16 GB / macOS 27.0 / Xcode 27.0:
   signature verification. Its `--selftest 20` passed **32 native checks**,
   including Copy Original actions across all four bubble presets. Logs:
   `/tmp/saiity-product-improvements-build.log` and
-  `/tmp/saiity-product-improvements-smoke.log`. The app is at `build/sAiity.app`.
+  `/tmp/saiity-product-improvements-smoke.log`. The app is at `build/Syllivra.app`.
 - Resident Hy-MT2 processed 80 revisable updates per cohort, three paired runs.
   Simulated constrained mode reduced native calls from **8 to 4** every run.
   Median accumulated decode time was **5.247 → 2.393 s**; final translation after

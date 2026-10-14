@@ -4,6 +4,27 @@ import Testing
 @testable import sAiity
 
 @Suite struct SettingsStateHonestyTests {
+    @Test("Multilingual recognition never promises arbitrary source codes")
+    func multilingualCoverageIsNotUniversal() {
+        for engine in ASREngine.allCases {
+            for code in ["xx-YY", "zz", "", "auto"] {
+                #expect(!engine.canHear(code), "\(engine) must not declare source coverage for \(code)")
+            }
+        }
+    }
+
+    @Test("Automatic recognition stays Auto independently of exposed audio language evidence")
+    func automaticModeDoesNotPromiseAudioTag() {
+        for engine in [ASREngine.qwen06, .qwen17] {
+            #expect(SettingsStateHonesty.languageLabel(for: engine) == "Auto")
+            #expect(!engine.identifiesLanguageFromAudio,
+                    "Qwen adapter returns nil from detectedLanguage(), so no audio tag is exposed")
+        }
+        #expect(ASREngine.nemotron.identifiesLanguageFromAudio)
+        #expect(ASREngine.whisperTurbo.identifiesLanguageFromAudio)
+        #expect(!ASREngine.parakeetEou.identifiesLanguageFromAudio)
+    }
+
     @Test("recommended recognition is selected only when its weights are on disk")
     func recommendedRecognitionStaysUnsetUntilInstalled() {
         let missing = SettingsStateHonesty.reconcile(
@@ -69,28 +90,22 @@ import Testing
         #expect(ready.cleanupEnabled)
     }
 
-    @Test("caption language says Auto only when the recognizer detects it from audio")
+    @Test("caption language says Auto for automatic recognition even without an audio tag")
     func languageLabelMatchesTheRecognizer() {
         #expect(SettingsStateHonesty.languageLabel(for: nil) == "Not set")
         #expect(SettingsStateHonesty.languageLabel(for: .nemotron) == "Auto")
         #expect(SettingsStateHonesty.languageLabel(for: .parakeetEou) == "Auto")
-        // Every selectable engine has to agree with its own coverage row. The
-        // two Qwen sizes were added to `userSelectableCases` without being added
-        // to `identifiesLanguageFromAudio`, so both read "English only" while
-        // declaring 52 languages — the row contradicting the summary under it.
+        // Qwen's recognition is automatic even though its adapter exposes no tag.
         #expect(SettingsStateHonesty.languageLabel(for: .qwen06) == "Auto")
         #expect(SettingsStateHonesty.languageLabel(for: .qwen17) == "Auto")
     }
 
-    /// The label and the coverage must never disagree for an engine the user
-    /// can actually pick: "English only" beside `manyDetectedFromAudio` is a
-    /// false statement about which languages the app can caption.
-    @Test("no selectable engine is labelled English only while covering every language")
+    @Test("no automatic selectable engine is labelled English only with unknown coverage")
     func labelAgreesWithCoverage() {
         for engine in ASREngine.userSelectableCases {
-            if case .manyDetectedFromAudio = engine.coverage {
+            if engine.automaticallyRecognizesLanguage {
                 #expect(SettingsStateHonesty.languageLabel(for: engine) == "Auto",
-                        "\(engine) covers many languages but is labelled \(SettingsStateHonesty.languageLabel(for: engine))")
+                        "\(engine) recognizes automatically but is labelled \(SettingsStateHonesty.languageLabel(for: engine))")
             }
         }
     }

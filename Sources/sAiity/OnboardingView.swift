@@ -70,6 +70,14 @@ final class OnboardingModel {
     var trialStatus = ""
     var trialText = ""
     var trialPermissionPane: String?
+    var trialInputHealth: DictationInputHealth?
+    var trialMicrophoneName: String?
+
+    func openTrial(_ kind: UseCase) {
+        guard !trialBusy else { return }
+        step = .finish
+        trial = kind
+    }
 
     /// Which way the last step change went, so the transition can match it.
     var goingBack = false
@@ -82,13 +90,13 @@ final class OnboardingModel {
     init(state: AppState, defaults: UserDefaults = .standard) {
         self.state = state
         wantsAutoUpdates = defaults.bool(forKey: "SUEnableAutomaticChecks")
-        if let resume = Onboarding.resumeStep {
+        if let resume = defaults.string(forKey: Onboarding.resumeKey).flatMap(OnboardingStep.init(rawValue:)) {
             switch resume {
             case .purpose, .models: step = .setup
             case .welcome: step = .permission
             default: step = resume
             }
-            Onboarding.resumeStep = nil
+            defaults.removeObject(forKey: Onboarding.resumeKey)
         }
     }
 
@@ -227,7 +235,7 @@ struct OnboardingView: View {
                     title: "Screen Recording",
                     symbol: "rectangle.dashed.badge.record",
                     granted: model.screenRecordingGranted,
-                    explanation: "macOS has no separate permission for system audio — Screen Recording is the one that gates it. sAiity records no video and takes no screenshots.") {
+                    explanation: "macOS has no separate permission for system audio — Screen Recording is the one that gates it. Syllivra records no video and takes no screenshots.") {
                         ScreenRecordingPermission.request()
                         model.askedOnce = true
                         Task { await model.refreshPermission() }
@@ -414,15 +422,15 @@ struct OnboardingView: View {
                     Text("For dictation, record a short sentence, then stop to see the result here. For captions, play speech on your Mac.")
                         .font(.callout).foregroundStyle(.secondary)
                     HStack {
-                        if model.useCase.includesDictation {
-                            Button(model.trial == .dictation && model.trialRecording ? "Stop & Transcribe" : "Try Dictation") {
+                        if model.useCase.includesDictation || model.trial == .dictation {
+                            Button(model.trial == .dictation && model.trialRecording ? String(localized: "Stop & Transcribe") : String(localized: "Try Dictation")) {
                                 Task { await (NSApp.delegate as? AppDelegate)?.tryOnboarding(.dictation, model: model) }
                             }
                             .buttonStyle(.bordered)
                             .disabled(model.trialBusy && !(model.trial == .dictation && model.trialRecording))
                         }
-                        if model.useCase.includesCaptions {
-                            Button(model.trial == .captions && model.trialBusy ? "Stop Captions" : "Try Captions") {
+                        if model.useCase.includesCaptions || model.trial == .captions {
+                            Button(model.trial == .captions && model.trialBusy ? String(localized: "Stop Captions") : String(localized: "Try Captions")) {
                                 Task { await (NSApp.delegate as? AppDelegate)?.tryOnboarding(.captions, model: model) }
                             }
                             .buttonStyle(.bordered)
@@ -432,6 +440,23 @@ struct OnboardingView: View {
                     if !model.trialStatus.isEmpty {
                         Text(model.trialStatus).font(.callout)
                             .accessibilityAddTraits(.updatesFrequently)
+                    }
+                    if model.trial == .dictation {
+                        Label(model.trialMicrophoneName ?? String(localized: "Microphone name unavailable"), systemImage: "mic")
+                            .font(.callout).foregroundStyle(.secondary)
+                        Text(model.trialInputHealth?.trialHint
+                             ?? String(localized: "Speak a short sentence to check this microphone."))
+                            .font(.callout).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let health = model.trialInputHealth, health.observedDuration >= 2,
+                           health.clippedSampleFraction > 0.01 || (health.rmsDBFS ?? 0) < -50 {
+                            Button("Open Sound Settings") {
+                                if let url = URL(string: "x-apple.systempreferences:com.apple.Sound-Settings.extension") {
+                                    NSWorkspace.shared.open(url)
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                        }
                     }
                     if !model.trialText.isEmpty {
                         Text(model.trialText).textSelection(.enabled)
@@ -473,9 +498,9 @@ struct OnboardingView: View {
             if model.useCase.includesCaptions,
                let shortcut = HotKeyCenter.shortcut(for: .toggleCaptions)?.displayString {
                 bullet("captions.bubble",
-                       "Start captions from the sAiity icon in the menu bar, or press \(shortcut).")
+                       "Start captions from the Syllivra icon in the menu bar, or press \(shortcut).")
             } else if model.useCase.includesCaptions {
-                bullet("captions.bubble", "Start captions from the sAiity icon in the menu bar.")
+                bullet("captions.bubble", "Start captions from the Syllivra icon in the menu bar.")
             }
             if model.useCase.includesDictation {
                 let shortcut = model.state.dictationChord.displayString
@@ -556,18 +581,24 @@ struct OnboardingView: View {
 final class OnboardingWindowController: NSObject, NSWindowDelegate {
     static let shared = OnboardingWindowController()
     private var window: NSWindow?
+    private var model: OnboardingModel?
 
-    func show(state: AppState) {
+    func show(state: AppState, initialStep: OnboardingStep? = nil, trial: OnboardingModel.UseCase? = nil) {
         if let w = window {
-            ForegroundActivation.begin()
+            if let initialStep, model?.trialBusy != true { model?.step = initialStep }
+            if let trial { model?.openTrial(trial) }
+            NSApp.activate()
             w.makeKeyAndOrderFront(nil)
             return
         }
         let model = OnboardingModel(state: state)
+        if let initialStep { model.step = initialStep }
+        if let trial { model.openTrial(trial) }
+        self.model = model
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 600),
                          styleMask: [.titled, .closable],
                          backing: .buffered, defer: false)
-        w.title = String(localized: "Set up sAiity")
+        w.title = String(localized: "Set up Syllivra")
         // Give the native titlebar and window controls a solid system surface.
         w.makeOpaqueSettingsSurface()
         w.center()
@@ -589,6 +620,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
         // Closing without finishing is a decision, not a completion.
         if Onboarding.needsRun { Onboarding.dismiss() }
         ForegroundActivation.end()
+        model = nil
         window = nil
     }
 }

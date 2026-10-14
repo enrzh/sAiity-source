@@ -6,6 +6,37 @@ import SaiityLLM
 /// `outputTokens` because its output is short and must not grow with the meeting.
 enum LocalGeneration {
     @TaskLocal static var deadline: ContinuousClock.Instant?
+    @TaskLocal static var dictationRunID: String?
+
+    static func loadModel<T>(_ load: () async throws -> T,
+                             onTiming: (@MainActor (DiagnosticsRuntimeTiming) -> Void)? = nil) async rethrows -> T {
+        let started = ContinuousClock.now
+        let runID = dictationRunID
+        let record: @MainActor () -> Void = {
+            let timing = DiagnosticsRuntimeTiming(date: Date(), operation: "model.load",
+                seconds: seconds(started.duration(to: .now)), cold: true, runID: runID, modelLoadCount: 1)
+            if let onTiming { onTiming(timing) }
+            else {
+                Diagnostics.recordTiming(operation: timing.operation, seconds: timing.seconds, cold: timing.cold,
+                                         runID: timing.runID, modelLoadCount: timing.modelLoadCount)
+            }
+        }
+        do {
+            let model = try await load()
+            await record()
+            return model
+        } catch {
+            await record()
+            throw error
+        }
+    }
+
+    @MainActor
+    static func recordModelTiming(_ operation: String, since started: ContinuousClock.Instant,
+                                  cold: Bool, loads: Int? = nil, calls: Int? = nil) {
+        Diagnostics.recordTiming(operation: operation, seconds: seconds(started.duration(to: .now)), cold: cold,
+                                 modelLoadCount: loads, modelCallCount: calls)
+    }
 
     static func outputLimit(inputTokens: Int, promptTokens: Int) -> Int? {
         let requested = min(1_024, max(96, inputTokens * 3 + 32))
@@ -58,7 +89,7 @@ enum LocalGeneration {
             let elapsed = seconds(started.duration(to: .now))
             NSLog("sAiity generation: prompt=%d output=%d limited=%@ elapsed=%.3fs", promptTokens, tokens, limited.description, elapsed)
             await MainActor.run {
-                Diagnostics.recordTiming(operation: "model.generation", seconds: elapsed, cold: false)
+                Diagnostics.recordTiming(operation: "model.generation", seconds: elapsed, cold: false, modelCallCount: 1)
                 Diagnostics.recordTiming(operation: "model.prompt", seconds: prefill, cold: false)
                 Diagnostics.recordTiming(operation: "model.decode", seconds: max(0, elapsed - prefill), cold: false)
                 if limited { Diagnostics.recordFailure(operation: "model.generation", reason: "generation budget exhausted") }

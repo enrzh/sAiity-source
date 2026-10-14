@@ -8,6 +8,54 @@ import Testing
 /// the time it claims. Both fail silently: a player renders an unreadable cue
 /// without complaint, and out-of-order cues look like the video is skipping.
 struct ExportCueTests {
+    @Test("DUP7 a metadata title changes only the human-readable Markdown heading")
+    func dup7TitleChangesMarkdownHeadingOnly() throws {
+        let title = "製品レビュー — Café 👩🏽‍💻"
+        let legacy = Data(#"{"v":1,"id":"legacy","startedAt":"2026-10-09T12:00:00Z","endedAt":null,"locale":"ja","translateTo":"de","lineCount":1}"#.utf8)
+        var fields = try #require(JSONSerialization.jsonObject(with: legacy) as? [String: Any])
+        fields["title"] = title
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let untitled = try decoder.decode(SessionMeta.self, from: legacy)
+        let titled = try decoder.decode(SessionMeta.self, from: JSONSerialization.data(withJSONObject: fields))
+        let segments = [Segment(i: 0, t0: 0, t1: 2, text: "日本語の原文。", loc: "ja",
+                                tr: "Deutsche Übersetzung.", trLoc: "de", words: nil,
+                                speaker: "voice-2")]
+        let summary = TranscriptSummary(recap: "要約", decisions: ["決定"], actions: ["確認"],
+                                        omittedLineCount: 0, createdAt: Date(timeIntervalSince1970: 0), outputLanguage: "ja")
+        let original = Export.markdown(segments, meta: untitled, summary: summary, localized: false)
+        let named = Export.markdown(segments, meta: titled, summary: summary, localized: false)
+        #expect(named.hasPrefix("# \(title)\n\n"), "new Markdown must display the saved session title")
+        #expect(original.hasPrefix("# Transcript — "))
+        #expect(named.split(separator: "\n", omittingEmptySubsequences: false).dropFirst()
+                == original.split(separator: "\n", omittingEmptySubsequences: false).dropFirst(),
+                "naming must leave metadata, summary and every spoken line unchanged")
+        #expect(Export.txt(segments) == "[Speaker 2] 日本語の原文。\nDeutsche Übersetzung.")
+        #expect(Export.txt(segments, meta: untitled) == Export.txt(segments))
+        #expect(Export.txt(segments, meta: titled) == title + "\n\n" + Export.txt(segments))
+        #expect(Export.txt([], meta: titled) == title + "\n\n")
+        #expect(Export.markdown(segments, meta: titled, localized: true).hasPrefix("# \(title)\n\n"))
+        for subtitles in [Export.srt(segments), Export.vtt(segments)] {
+            #expect(subtitles.contains("日本語の原文。") && subtitles.contains("Deutsche Übersetzung."))
+            #expect(!subtitles.contains(title) && !subtitles.contains(summary.recap))
+        }
+    }
+
+    @Test("Markdown identifies a summary's output language while spoken subtitle text stays unchanged")
+    func pql6SummaryLanguageExport() {
+        let spoken = "日本語の字幕を確認してください。"
+        let segments = [Segment(i: 0, t0: 0, t1: 2, text: spoken, loc: "ja", tr: nil)]
+        let meta = SessionMeta(id: "test", startedAt: Date(timeIntervalSince1970: 0), endedAt: nil,
+                               locale: "ja", translateTo: nil, lineCount: 1)
+        let summary = TranscriptSummary(recap: "字幕を確認します。", decisions: [], actions: [],
+                                        omittedLineCount: 0, createdAt: Date(), outputLanguage: "ja")
+        let markdown = Export.markdown(segments, meta: meta, summary: summary, localized: false)
+        #expect(markdown.contains("Summary language: `ja`"))
+        #expect(markdown.contains(spoken))
+        #expect(!Export.srt(segments).contains(summary.recap))
+        #expect(!Export.vtt(segments).contains(summary.recap))
+    }
+
 
     private func segment(_ text: String, _ t0: Double, _ t1: Double,
                          words: [TimedWord]? = nil,

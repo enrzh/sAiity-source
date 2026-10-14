@@ -1,10 +1,19 @@
 import Foundation
+import NaturalLanguage
 
 struct DictationBenchmarkFixture: Codable, Equatable, Sendable {
+    struct TranslationReference: Codable, Equatable, Sendable {
+        let text: String
+        let reviewed: Bool
+        var alternatives: [String]? = nil
+        var scoring: [String: String]? = nil
+    }
     let audio: String
     let expectedText: String?
     let expectedLanguages: [String]?
     let maxWER: Double?
+    var expectedTranslations: [String: TranslationReference]? = nil
+    var scoring: [String: String]? = nil
 }
 
 struct DictationBenchmarkManifest: Codable, Equatable, Sendable {
@@ -41,20 +50,20 @@ enum DictationBenchmarkScorer {
         var total: Int { substitutions + deletions + insertions }
     }
 
-    static func wordErrors(reference: String, hypothesis: String) -> Errors {
-        alignment(tokens(reference), tokens(hypothesis))
+    static func wordErrors(reference: String, hypothesis: String, language: String? = nil) -> Errors {
+        alignment(tokens(reference, language: language), tokens(hypothesis, language: language))
     }
 
     static func characterErrorRate(reference: String, hypothesis: String) -> Double {
-        let left = reference.lowercased().filter { $0.isLetter || $0.isNumber }.map(String.init)
-        let right = hypothesis.lowercased().filter { $0.isLetter || $0.isNumber }.map(String.init)
+        let left = reference.precomposedStringWithCanonicalMapping.lowercased().filter { $0.isLetter || $0.isNumber }.map(String.init)
+        let right = hypothesis.precomposedStringWithCanonicalMapping.lowercased().filter { $0.isLetter || $0.isNumber }.map(String.init)
         guard !left.isEmpty else { return right.isEmpty ? 0 : 1 }
         return Double(alignment(left, right).total) / Double(left.count)
     }
 
-    static func wordErrorRate(reference: String, hypothesis: String) -> Double {
-        let referenceTokens = tokens(reference)
-        let hypothesisTokens = tokens(hypothesis)
+    static func wordErrorRate(reference: String, hypothesis: String, language: String? = nil) -> Double {
+        let referenceTokens = tokens(reference, language: language)
+        let hypothesisTokens = tokens(hypothesis, language: language)
         guard !referenceTokens.isEmpty else { return hypothesisTokens.isEmpty ? 0 : 1 }
         return Double(alignment(referenceTokens, hypothesisTokens).total) / Double(referenceTokens.count)
     }
@@ -64,12 +73,9 @@ enum DictationBenchmarkScorer {
     static func preservesLanguageSequence(expected: [String], actual: [String]) -> Bool {
         let expected = compactLanguages(expected)
         let actual = compactLanguages(actual)
-        guard !expected.isEmpty else { return actual.isEmpty }
-        var index = 0
-        for language in actual where index < expected.count {
-            if language == expected[index] { index += 1 }
-        }
-        return index == expected.count
+        guard !expected.contains(where: { ["", "auto", "und", "unknown"].contains($0) }),
+              !actual.contains(where: { ["", "auto", "und", "unknown"].contains($0) }) else { return false }
+        return expected == actual
     }
 
     private static func compactLanguages(_ languages: [String]) -> [String] {
@@ -77,13 +83,22 @@ enum DictationBenchmarkScorer {
         for language in languages {
             let base = language.replacingOccurrences(of: "_", with: "-")
                 .split(separator: "-").first?.lowercased() ?? ""
-            guard !base.isEmpty, base != "auto" else { continue }
             if result.last != base { result.append(base) }
         }
         return result
     }
 
-    private static func tokens(_ text: String) -> [String] {
+    private static func tokens(_ text: String, language: String? = nil) -> [String] {
+        let text = text.precomposedStringWithCanonicalMapping
+        if let language {
+            let tokenizer = NLTokenizer(unit: .word)
+            tokenizer.setLanguage(NLLanguage(rawValue: language))
+            tokenizer.string = text
+            return tokenizer.tokens(for: text.startIndex..<text.endIndex).compactMap { range in
+                let word = String(text[range]).lowercased()
+                return word.contains(where: { $0.isLetter || $0.isNumber }) ? word : nil
+            }
+        }
         var result: [String] = []
         var word = ""
         func flush() {

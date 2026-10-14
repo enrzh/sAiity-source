@@ -3,7 +3,7 @@
 #
 #   scripts/release.sh 1.2.0
 #
-# Produces build/sAiity.zip and build/appcast.xml. The archive is uploaded to
+# Produces build/Syllivra.zip and build/appcast.xml. The archive is uploaded to
 # the public GitHub release, and the signed appcast is published to the public
 # repository root after that asset is available. The script does not publish
 # either one as a side effect of a local build.
@@ -21,7 +21,7 @@ cd "$(dirname "$0")/.."
 VERSION="${1:?usage: scripts/release.sh <version>   (git tag vX.Y.Z is created)}"
 KEY="scripts/sparkle_ed25519_private.pem"
 RELEASE_REPO="enrzh/sAiity"
-RELEASE_ASSET_URL="https://github.com/$RELEASE_REPO/releases/download/v$VERSION/sAiity-$VERSION.zip"
+RELEASE_ASSET_URL="https://github.com/$RELEASE_REPO/releases/download/v$VERSION/Syllivra-$VERSION.zip"
 [ -f "$KEY" ] || { echo "FATAL: $KEY missing — generate with: openssl genpkey -algorithm ED25519 -out $KEY"; exit 1; }
 
 # Sparkle's signer expects its base64-encoded Ed25519 seed, while the checked
@@ -64,17 +64,17 @@ SAIITY_VERSION="$VERSION" ./build-app.sh --notarize
 
 # Refuse to create release metadata for a bundle that is structurally invalid or
 # no longer passes Apple's local signature verifier.
-plutil -lint build/sAiity.app/Contents/Info.plist >/dev/null
-test -x build/sAiity.app/Contents/MacOS/sAiity
-codesign --verify --deep --strict build/sAiity.app
-./scripts/verify-release.sh build/sAiity.app "$VERSION"
-build/sAiity.app/Contents/MacOS/sAiity --selftest 20 2>&1 | tee build/release-launch-smoke.log
+plutil -lint build/Syllivra.app/Contents/Info.plist >/dev/null
+test -x build/Syllivra.app/Contents/MacOS/Syllivra
+codesign --verify --deep --strict build/Syllivra.app
+./scripts/verify-release.sh build/Syllivra.app "$VERSION"
+build/Syllivra.app/Contents/MacOS/Syllivra --selftest 20 2>&1 | tee build/release-launch-smoke.log
 grep -q '^saiity-selftest: ok$' build/release-launch-smoke.log || {
     echo "FATAL: release requires a completed GUI smoke test, not a headless skip." >&2
     exit 1
 }
 
-ZIP="build/sAiity.zip"
+ZIP="build/Syllivra.zip"
 [ -f "$ZIP" ] || { echo "FATAL: $ZIP missing after notarize"; exit 1; }
 
 # Sparkle's edSignature is a raw Ed25519 signature of the archive, base64.
@@ -86,9 +86,9 @@ cat > build/appcast.xml <<XML
 <?xml version="1.0" encoding="utf-8"?>
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
   <channel>
-    <title>sAiity</title>
+    <title>Syllivra</title>
     <item>
-      <title>sAiity $VERSION</title>
+      <title>Syllivra $VERSION</title>
       <pubDate>$DATE</pubDate>
       <sparkle:version>$(git rev-list --count HEAD)</sparkle:version>
       <sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>
@@ -102,17 +102,17 @@ cat > build/appcast.xml <<XML
 </rss>
 XML
 
-cp "$ZIP" "build/sAiity-$VERSION.zip"
-./scripts/validate-appcast.sh build/appcast.xml "build/sAiity-$VERSION.zip" "$VERSION"
+cp "$ZIP" "build/Syllivra-$VERSION.zip"
+./scripts/validate-appcast.sh build/appcast.xml "build/Syllivra-$VERSION.zip" "$VERSION"
 
 # Only create the tag after the notarised archive, signature, appcast, and
 # release copy have all completed. A failed release must not leave a tag
 # behind.
-git tag -a "v$VERSION" -m "sAiity $VERSION"
+git tag -a "v$VERSION" -m "Syllivra $VERSION"
 
 echo
 echo "Release artifacts ready:"
-echo "  build/sAiity-$VERSION.zip   ($LEN bytes, notarised, stapled)"
+echo "  build/Syllivra-$VERSION.zip   ($LEN bytes, notarised, stapled)"
 echo "  build/appcast.xml           (Ed25519-signed entry)"
 echo
 echo "Publish the GitHub release assets first, then publish the appcast last"

@@ -23,12 +23,15 @@ final class DictationCleanupSession {
     private let gate: TranslationInferenceGate
     private let idleDelay: Duration
     private let idle = IdleEviction()
+    private let onTiming: (DiagnosticsRuntimeTiming) -> Void
     private var model: Model?
     private var modelKey: String?
 
-    init(gate: TranslationInferenceGate, idleDelay: Duration = .seconds(300)) {
+    init(gate: TranslationInferenceGate, idleDelay: Duration = .seconds(300),
+         onTiming: @escaping (DiagnosticsRuntimeTiming) -> Void = { _ in }) {
         self.gate = gate
         self.idleDelay = idleDelay
+        self.onTiming = onTiming
     }
 
     func cleanup(_ input: DictationTranscriptionResult,
@@ -72,15 +75,22 @@ final class DictationCleanupSession {
                          load: @MainActor () async throws -> Model) async throws -> DictationTranscriptionResult {
         let start = ContinuousClock.now
         var modelCalls = 0
+        var modelLoads = 0
         var loadSeconds = 0.0
         var skipped = 0
         var accepted = 0
         var rejected = 0
+        var modelUnavailable = false
         defer {
             let elapsed = start.duration(to: .now).components
             NSLog("sAiity cleanup: regions=%d modelCalls=%d skipped=%d accepted=%d rejected=%d load=%.3fs total=%.3fs",
                   input.regions.count, modelCalls, skipped, accepted, rejected, loadSeconds,
                   Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18)
+            onTiming(.init(date: Date(), operation: "dictation.cleanup.requests",
+                           seconds: Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18,
+                           cold: modelLoads > 0 ? true : modelCalls > 0 ? false : nil,
+                           runID: LocalGeneration.dictationRunID,
+                           modelLoadCount: modelLoads, modelCallCount: modelCalls))
         }
         if modelKey != key { await releaseModel() }
 
@@ -100,9 +110,12 @@ final class DictationCleanupSession {
                 input.text, sourceLanguage: source)
             let baseline = outcome.baseline
             var candidate = baseline
+            var modelReturnedOutput = false
+            if outcome.needsModel, key == nil { modelUnavailable = true }
             if key != nil, outcome.needsModel {
                 if model == nil {
                     let loading = ContinuousClock.now
+                    modelLoads += 1
                     model = try await load()
                     modelKey = key
                     let elapsed = loading.duration(to: .now).components
@@ -110,7 +123,11 @@ final class DictationCleanupSession {
                 }
                 try Task.checkCancellation()
                 modelCalls = 1
-                candidate = await model?.cleanup(input.text, source, metadata) ?? baseline
+                if let value = await model?.cleanup(input.text, source, metadata) {
+                    candidate = value
+                    modelReturnedOutput = true
+                }
+                else { modelUnavailable = true }
                 try Task.checkCancellation()
             }
             let cleaned = DictationCleanupValidator.validate(candidate,
@@ -119,12 +136,18 @@ final class DictationCleanupSession {
                     preserving: input.text, sourceLanguage: source, languageMetadata: metadata)
                 ?? input.text
             if modelCalls == 0 { skipped += 1 }
-            else if cleaned == candidate { accepted += 1 }
-            else { rejected += 1 }
+            else if modelReturnedOutput, cleaned == candidate { accepted += 1 }
+            else { rejected += 1; modelUnavailable = true }
             let language = source ?? input.regions.first?.language
-            return DictationTranscriptionResult(regions: [
+            var result = DictationTranscriptionResult(regions: [
                 .init(text: cleaned, language: language)
             ])
+            result.modelCleanupUnavailable = modelUnavailable
+            result.modelCalls = modelCalls
+            result.modelAccepted = accepted
+            result.modelFallbacks = rejected
+            result.rulesSkipped = skipped
+            return result
         }
 
         // Computed once per region and kept, because the loop below needs the
@@ -132,16 +155,17 @@ final class DictationCleanupSession {
         // running the deterministic pass twice over every region.
         var baselines: [Int: String] = [:]
         let modelIndexes: [Int] = input.regions.indices.filter { index in
-            guard key != nil else { return false }
             let region = input.regions[index]
             let outcome = DictationCleanupValidator.deterministicOutcome(
                 region.text,
                 sourceLanguage: region.language == "auto" ? nil : region.language)
             baselines[index] = outcome.baseline
-            return outcome.needsModel
+            if outcome.needsModel, key == nil { modelUnavailable = true }
+            return key != nil && outcome.needsModel
         }
         if !modelIndexes.isEmpty, model == nil {
             let loading = ContinuousClock.now
+            modelLoads += 1
             model = try await load()
             modelKey = key
             let elapsed = loading.duration(to: .now).components
@@ -187,11 +211,17 @@ final class DictationCleanupSession {
                 ?? DictationCleanupValidator.deterministicCleanup(
                     region.text, sourceLanguage: source)
             var candidate = baseline
+            var modelReturnedOutput = false
             if let value = batched[index] {
                 candidate = value
+                modelReturnedOutput = true
             } else if modelIndexSet.contains(index) {
                 modelCalls += 1
-                candidate = await model?.cleanup(region.text, source, metadata) ?? baseline
+                if let value = await model?.cleanup(region.text, source, metadata) {
+                    candidate = value
+                    modelReturnedOutput = true
+                }
+                else { modelUnavailable = true }
                 try Task.checkCancellation()
             }
             let cleaned = DictationCleanupValidator.validate(candidate,
@@ -200,14 +230,25 @@ final class DictationCleanupSession {
                     preserving: region.text, sourceLanguage: source, languageMetadata: metadata)
                 ?? region.text
             if !modelIndexSet.contains(index) { skipped += 1 }
-            else if cleaned == candidate { accepted += 1 }
-            else { rejected += 1 }
+            else if modelReturnedOutput, cleaned == candidate { accepted += 1 }
+            else { rejected += 1; modelUnavailable = true }
             regions.append(.init(text: cleaned, language: region.language))
         }
-        let result = DictationTranscriptionResult(regions: regions)
-        return DictationCleanupValidator.validate(result.text, preserving: input.text,
+        var result = DictationTranscriptionResult(regions: regions)
+        if DictationCleanupValidator.validate(result.text, preserving: input.text,
             sourceLanguage: input.languageMetadata.dominantLanguage,
-            languageMetadata: input.languageMetadata) == nil ? input : result
+            languageMetadata: input.languageMetadata) == nil {
+            result = input
+            modelUnavailable = true
+            accepted = 0
+            rejected = modelIndexes.count
+        }
+        result.modelCleanupUnavailable = modelUnavailable
+        result.modelCalls = modelCalls
+        result.modelAccepted = accepted
+        result.modelFallbacks = rejected
+        result.rulesSkipped = skipped
+        return result
     }
 
 }

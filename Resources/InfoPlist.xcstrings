@@ -1,0 +1,16 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "NSMicrophoneUsageDescription": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Used while dictating, and optionally to include your voice in captions. Audio stays on this Mac." } },
+        "de": { "stringUnit": { "state": "translated", "value": "Wird beim Diktieren verwendet und optional, um deine Stimme in Untertitel einzubeziehen. Audio bleibt auf diesem Mac." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Utilisé pendant la dictée et, si vous le souhaitez, pour inclure votre voix dans les sous-titres. L’audio reste sur ce Mac." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Se usa al dictar y, opcionalmente, para incluir tu voz en los subtítulos. El audio permanece en este Mac." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ディクテーション中に使用し、必要に応じて自分の声を字幕に含めるためにも使用します。音声はこのMac内にとどまります。" } }
+      }
+    }
+  },
+  "version": "1.0"
+}

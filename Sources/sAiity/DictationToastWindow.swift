@@ -178,11 +178,15 @@ final class DictationToastWindow: NSPanel {
     private let originalButton = NSButton()
     private let host = DictationToastContentView()
     private var autoDismissTask: Task<Void, Never>?
+    private var isAutoDismissFading = false
     private var presentationGeneration = 0
     private var hasPlacedToast = false
     private var suppressFrameSave = false
     private var isShowingResult = false
+    private var resultAllowsKeyboardFocus = false
     private var offersCopyRetry = false
+    private var originalCopyFailed = false
+    private var feedbackAccessibilityFocused = false
     private var labelPointSize: CGFloat?
     private var resultPointSize: CGFloat?
     private var dragStart: NSPoint?
@@ -195,6 +199,7 @@ final class DictationToastWindow: NSPanel {
     /// Whether the panel is currently taking clicks, so arming only writes the
     /// flag on a change.
     private var mouseArmed = false
+    private var feedbackHovered = false
     /// Backs up the hover tracking; see `startArmingTick`.
     private var armingTimer: Timer?
     var onResetPosition: (() -> Void)?
@@ -293,7 +298,10 @@ final class DictationToastWindow: NSPanel {
         host.onHover = { [weak self] point in
             self?.updateMouseArming(atContentPoint: point)
         }
-        host.onExit = { [weak self] in self?.armMouseEvents(false) }
+        host.onExit = { [weak self] in
+            self?.feedbackHovered = false
+            self?.armMouseEvents(false)
+        }
         host.addSubview(spinner)
         host.addSubview(resetButton)
         host.addSubview(originalButton)
@@ -512,7 +520,11 @@ final class DictationToastWindow: NSPanel {
         FrameStore.saveDictation(frame)
     }
 
-    func beginDrag(atScreenPoint point: NSPoint) { dragStart = point; dragOrigin = frame.origin }
+    func beginDrag(atScreenPoint point: NSPoint) {
+        dragStart = point
+        dragOrigin = frame.origin
+        keepFeedbackVisibleIfInteracting()
+    }
     func drag(toScreenPoint point: NSPoint) {
         guard let dragStart else { return }
         setFrameOrigin(NSPoint(x: dragOrigin.x + point.x - dragStart.x, y: dragOrigin.y + point.y - dragStart.y))
@@ -556,6 +568,7 @@ final class DictationToastWindow: NSPanel {
         case .leftMouseDown:
             let claimed = claimsTextGesture(atWindowPoint: event.locationInWindow)
             textGestureInFlight = claimed
+            keepFeedbackVisibleIfInteracting()
             guard claimed else { mouseDown(with: event); return }
             super.sendEvent(event)
         case .leftMouseDragged:
@@ -602,6 +615,8 @@ final class DictationToastWindow: NSPanel {
     @objc func copyOriginal() {
         guard !originalButton.isHidden, let onCopyOriginal else { return }
         let copied = onCopyOriginal()
+        originalCopyFailed = !copied
+        keepFeedbackVisibleIfInteracting()
         let title = copied ? String(localized: "Original copied") : String(localized: "Copy failed — try again")
         originalButton.image = NSImage(systemSymbolName: copied ? "checkmark" : "exclamationmark.circle",
                                       accessibilityDescription: nil)
@@ -630,7 +645,10 @@ final class DictationToastWindow: NSPanel {
 
     /// The one arming decision, asked on hover, on presentation, and by tests.
     func updateMouseArming(atContentPoint point: NSPoint) {
-        guard let inContent = armingPoint(forContentPoint: point),
+        let inContent = armingPoint(forContentPoint: point)
+        feedbackHovered = inContent.map { contentBounds.contains($0) } ?? false
+        keepFeedbackVisibleIfInteracting()
+        guard let inContent,
               isInteractive(inContent) else {
             armMouseEvents(false)
             return
@@ -650,13 +668,16 @@ final class DictationToastWindow: NSPanel {
     /// that never moves, and a click-through panel that swallows nothing is
     /// right while one that swallows everything is the bug this exists to fix.
     func updateMouseArming(atScreenPoint point: NSPoint) {
-        updateMouseArming(atContentPoint: host.convert(point, from: nil))
+        updateMouseArming(atContentPoint: host.convert(convertPoint(fromScreen: point), from: nil))
     }
 
     /// The same decision, without touching the cursor: for a caller that is not a
     /// hover, where forcing a cursor under a stationary pointer would be noise.
     private func arm(atContentPoint point: NSPoint) {
-        guard let inContent = armingPoint(forContentPoint: point) else {
+        let inContent = armingPoint(forContentPoint: point)
+        feedbackHovered = inContent.map { contentBounds.contains($0) } ?? false
+        keepFeedbackVisibleIfInteracting()
+        guard let inContent else {
             armMouseEvents(false)
             return
         }
@@ -692,7 +713,8 @@ final class DictationToastWindow: NSPanel {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 guard self.isVisible else { self.armMouseEvents(false); return }
-                self.arm(atContentPoint: self.host.convert(NSEvent.mouseLocation, from: nil))
+                self.arm(atContentPoint: self.host.convert(
+                    self.convertPoint(fromScreen: NSEvent.mouseLocation), from: nil))
             }
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -703,9 +725,37 @@ final class DictationToastWindow: NSPanel {
         guard mouseArmed != interactive else { return }
         mouseArmed = interactive
         ignoresMouseEvents = !interactive
+        keepFeedbackVisibleIfInteracting()
     }
 
-    override var canBecomeKey: Bool { false }
+    var isInteractingWithFeedback: Bool {
+        guard isVisible else { return false }
+        if feedbackHovered || mouseArmed || textGestureInFlight || dragging || dragStart != nil
+            || offersCopyRetry || originalCopyFailed || feedbackAccessibilityFocused { return true }
+        if isShowingResult, resultTextView.selectedRanges.contains(where: { $0.rangeValue.length > 0 }) {
+            return true
+        }
+        if isKeyWindow, let focused = firstResponder as? NSView,
+           focused.window === self, !focused.isHiddenOrHasHiddenAncestor { return true }
+        let controls: [NSView] = [resultTextView, resetButton, originalButton]
+        return controls.contains {
+            !$0.isHiddenOrHasHiddenAncestor && $0.isAccessibilityFocused()
+        }
+    }
+
+    override func makeFirstResponder(_ responder: NSResponder?) -> Bool {
+        let accepted = super.makeFirstResponder(responder)
+        keepFeedbackVisibleIfInteracting()
+        return accepted
+    }
+
+    override func setAccessibilityFocused(_ flag: Bool) {
+        super.setAccessibilityFocused(flag)
+        feedbackAccessibilityFocused = flag
+        keepFeedbackVisibleIfInteracting()
+    }
+
+    override var canBecomeKey: Bool { isShowingResult && resultAllowsKeyboardFocus }
     override var canBecomeMain: Bool { false }
 
     func resetPosition() {
@@ -754,6 +804,20 @@ final class DictationToastWindow: NSPanel {
         resultDocumentHeightForTests > resultClipHeightForTests + 0.5
     }
     var resultSelectableForTests: Bool { resultTextView.isSelectable }
+    var resultTextViewForTests: NSTextView { resultTextView }
+    var textGestureInFlightForTests: Bool {
+        get { textGestureInFlight }
+        set { textGestureInFlight = newValue }
+    }
+    var autoDismissActionForTests: () -> Void {
+        let generation = presentationGeneration
+        return { [weak self] in self?.finishAutoDismiss(generation: generation) }
+    }
+    var isAutoDismissFadingForTests: Bool { isAutoDismissFading }
+    func stopArmingTickForTests() {
+        armingTimer?.invalidate()
+        armingTimer = nil
+    }
     /// The result area in content coordinates, or nil when no result is shown.
     var resultAreaForTests: NSRect? { resultArea }
     var originalTargetAreaForTests: NSRect? { originalTargetArea }
@@ -763,9 +827,11 @@ final class DictationToastWindow: NSPanel {
 
     func show(text: String, animated: Bool, autoDismissAfter: Duration? = nil) {
         cancelAutoDismiss()
+        originalCopyFailed = false
         originalButton.isHidden = true
         configureCopyRetry(false)
         isShowingResult = false
+        resultAllowsKeyboardFocus = false
         labelPointSize = nil
         label.isHidden = false
         resultScrollView.isHidden = true
@@ -785,14 +851,16 @@ final class DictationToastWindow: NSPanel {
     /// Displays the completed dictation, after insertion/clipboard handling has
     /// finished. Long results stay inside the bubble and scroll vertically.
     func show(resultText: String, autoDismissAfter: Duration? = .seconds(4.5), retryCopy: Bool = false,
-              canCopyOriginal: Bool = false) {
+              canCopyOriginal: Bool = false, allowsKeyboardFocus: Bool = true) {
         cancelAutoDismiss()
+        originalCopyFailed = false
         originalButton.isHidden = !canCopyOriginal
         originalButton.image = NSImage(systemSymbolName: "doc.text", accessibilityDescription: nil)
         originalButton.toolTip = String(localized: "Copy Original")
         originalButton.setAccessibilityLabel(String(localized: "Copy Original"))
         configureCopyRetry(retryCopy)
         isShowingResult = true
+        resultAllowsKeyboardFocus = allowsKeyboardFocus
         resultPointSize = nil
         label.isHidden = true
         waveform.stopAnimating()
@@ -800,6 +868,7 @@ final class DictationToastWindow: NSPanel {
         spinner.stopAnimation(nil)
         spinner.isHidden = true
         resultTextView.string = resultText
+        resultTextView.setSelectedRange(NSRange(location: 0, length: 0))
         applyTextStyle()
         resultScrollView.isHidden = false
         setAccessibilityLabel(String(localized: "Dictation result"))
@@ -877,45 +946,84 @@ final class DictationToastWindow: NSPanel {
         }
 
         guard let autoDismissAfter else { return }
-        let generation = presentationGeneration
+        scheduleAutoDismiss(after: autoDismissAfter, generation: presentationGeneration)
+    }
+
+    private func scheduleAutoDismiss(after delay: Duration, generation: Int) {
+        autoDismissTask?.cancel()
         autoDismissTask = Task { @MainActor [weak self] in
             do {
-                try await Task.sleep(for: autoDismissAfter)
+                try await Task.sleep(for: delay)
             } catch {
                 return
             }
-            guard let self,
-                  self.presentationGeneration == generation,
-                  self.isVisible else { return }
-
-            if Self.accessibilityPreferences().0 {
-                self.dismiss()
-                return
-            }
-            NSAnimationContext.runAnimationGroup { [weak self] context in
-                guard let self else { return }
-                context.duration = 0.85
-                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                self.animator().alphaValue = 0
-            } completionHandler: { [weak self] in
-                Task { @MainActor [weak self] in
-                    guard let self, self.presentationGeneration == generation else { return }
-                    self.orderOut(nil)
-                    self.alphaValue = 1
-                    self.autoDismissTask = nil
-                }
-            }
-            // A borderless nonactivating panel can skip the AppKit animation
-            // completion callback when the window server is settling or a
-            // test host has no active app. Keep the dismissal deterministic.
-            Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .seconds(0.9))
-                guard let self, self.presentationGeneration == generation else { return }
-                self.orderOut(nil)
-                self.alphaValue = 1
-                self.autoDismissTask = nil
-            }
+            guard !Task.isCancelled else { return }
+            self?.finishAutoDismiss(generation: generation)
         }
+    }
+
+    private func finishAutoDismiss(generation: Int) {
+        guard presentationGeneration == generation, isVisible else { return }
+        if isInteractingWithFeedback {
+            restoreFeedbackVisibility()
+            scheduleAutoDismiss(after: .milliseconds(250), generation: generation)
+            return
+        }
+        guard !isAutoDismissFading else { return }
+        if Self.accessibilityPreferences().0 {
+            dismiss()
+            return
+        }
+        isAutoDismissFading = true
+        NSAnimationContext.runAnimationGroup { [weak self] context in
+            guard let self else { return }
+            context.duration = 0.85
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            self.animator().alphaValue = 0
+        }
+        autoDismissTask?.cancel()
+        autoDismissTask = Task { @MainActor [weak self] in
+            let deadline = ContinuousClock.now + .milliseconds(850)
+            repeat {
+                do { try await Task.sleep(for: .milliseconds(50)) }
+                catch { return }
+                guard !Task.isCancelled, let self,
+                      self.presentationGeneration == generation, self.isVisible else { return }
+                if self.isInteractingWithFeedback {
+                    self.restoreFeedbackVisibility()
+                    self.scheduleAutoDismiss(after: .milliseconds(250), generation: generation)
+                    return
+                }
+            } while ContinuousClock.now < deadline
+            guard !Task.isCancelled, let self, self.presentationGeneration == generation else { return }
+            self.finishAutoDismissFade(generation: generation)
+        }
+    }
+
+    private func finishAutoDismissFade(generation: Int) {
+        guard presentationGeneration == generation, isVisible else { return }
+        if isInteractingWithFeedback {
+            restoreFeedbackVisibility()
+            scheduleAutoDismiss(after: .milliseconds(250), generation: generation)
+        } else {
+            dismiss()
+        }
+    }
+
+    private func restoreFeedbackVisibility() {
+        guard isAutoDismissFading else { return }
+        isAutoDismissFading = false
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0
+            self.animator().alphaValue = 1
+        }
+        alphaValue = 1
+    }
+
+    private func keepFeedbackVisibleIfInteracting() {
+        guard isAutoDismissFading, isInteractingWithFeedback else { return }
+        restoreFeedbackVisibility()
+        scheduleAutoDismiss(after: .milliseconds(250), generation: presentationGeneration)
     }
 
     func updateWaveform(_ values: [Float]) {
@@ -937,6 +1045,7 @@ final class DictationToastWindow: NSPanel {
 
     func dismiss() {
         cancelAutoDismiss()
+        resultAllowsKeyboardFocus = false
         originalButton.isHidden = true
         waveform.stopAnimating()
         spinner.stopAnimation(nil)
@@ -949,6 +1058,11 @@ final class DictationToastWindow: NSPanel {
         armingTimer?.invalidate()
         armingTimer = nil
         textGestureInFlight = false
+        dragging = false
+        dragStart = nil
+        originalCopyFailed = false
+        feedbackAccessibilityFocused = false
+        feedbackHovered = false
         orderOut(nil)
     }
 
@@ -956,6 +1070,7 @@ final class DictationToastWindow: NSPanel {
         presentationGeneration += 1
         autoDismissTask?.cancel()
         autoDismissTask = nil
+        restoreFeedbackVisibility()
     }
 
     deinit {

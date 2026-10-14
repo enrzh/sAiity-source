@@ -48,7 +48,7 @@ enum CommandLinePlan: Equatable {
     static let maximumSmokeTimeout: TimeInterval = 600
 
     static let usage = """
-        usage: sAiity [--version | --list | --export srt|vtt|md|txt [id] | \
+        usage: Syllivra [--version | --list | --export srt|vtt|md|txt [id] | \
         --toggle | --start | --stop | --copy | --selftest [seconds]]
         """
 

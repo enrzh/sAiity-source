@@ -1,6 +1,897 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Transparent background": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Transparenter Hintergrund" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Arrière-plan transparent" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Fondo transparente" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "背景を半透明にする" } }
+      }
+    },
+    "Use a translucent background. Turn off for a solid background. macOS accessibility settings take precedence.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Einen durchscheinenden Hintergrund verwenden. Für einen deckenden Hintergrund ausschalten. Die macOS-Bedienungshilfen haben Vorrang." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Utiliser un arrière-plan translucide. Désactiver pour un arrière-plan opaque. Les réglages d’accessibilité de macOS sont prioritaires." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Usar un fondo translúcido. Desactivar para un fondo opaco. Los ajustes de accesibilidad de macOS tienen prioridad." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "背景を半透明にします。オフにすると不透明になります。macOSのアクセシビリティ設定が優先されます。" } }
+      }
+    },
+    "Waiting for recognition": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Auf die Spracherkennung warten" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Attente de la reconnaissance vocale" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Esperando la preparación del reconocimiento" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "音声認識の準備を待機中" } }
+      }
+    },
+    "Microphone name unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Mikrofonname nicht verfügbar" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Nom du microphone indisponible" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Nombre del micrófono no disponible" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "マイク名を取得できません" } }
+      }
+    },
+    "Preparing recognition": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Erkennung vorbereiten" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Préparation de la reconnaissance" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Preparando el reconocimiento" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "音声認識を準備" } }
+      }
+    },
+    "Starting microphone": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Mikrofon starten" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Démarrage du microphone" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Iniciando el micrófono" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "マイクを開始" } }
+      }
+    },
+    "Recognizing speech": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Sprache erkennen" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Reconnaissance vocale" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Reconociendo el habla" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "音声を認識" } }
+      }
+    },
+    "Cleaning text": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Text bereinigen" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Nettoyage du texte" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Limpiando el texto" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "テキストをクリーンアップ" } }
+      }
+    },
+    "Translating text": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Text übersetzen" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Traduction du texte" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Traduciendo el texto" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "テキストを翻訳" } }
+      }
+    },
+    "Delivering result": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Ergebnis übergeben" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Remise du résultat" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Entregando el resultado" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "結果を渡す" } }
+      }
+    },
+    "Whole dictation": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Gesamtes Diktat" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Dictée complète" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Dictado completo" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "音声入力全体" } }
+      }
+    },
+    "From release to result": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Vom Loslassen bis zum Ergebnis" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Du relâchement de la touche au résultat" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Desde que sueltas la tecla hasta el resultado" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "キーを離してから結果が出るまで" } }
+      }
+    },
+    "From release to delivery": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Vom Loslassen bis zur Ergebnisübergabe" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Du relâchement de la touche à la remise du résultat" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Desde que sueltas la tecla hasta la entrega" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "キーを離してから結果を渡すまで" } }
+      }
+    },
+    "Cleanup model requests": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Anfragen an das Bereinigungsmodell" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Requêtes au modèle de nettoyage" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Solicitudes al modelo de limpieza" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "クリーンアップモデルへの要求" } }
+      }
+    },
+    "Loading a local model": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Lokales Modell laden" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Chargement d’un modèle local" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Cargando un modelo local" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ローカルモデルを読み込み" } }
+      }
+    },
+    "Generating text": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Text erzeugen" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Génération du texte" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Generando texto" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "テキストを生成" } }
+      }
+    },
+    "Reading model input": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Modelleingabe lesen" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Lecture de l’entrée du modèle" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Leyendo la entrada del modelo" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "モデルの入力を読み取り" } }
+      }
+    },
+    "Decoding text": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Text dekodieren" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Décodage du texte" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Decodificando el texto" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "テキストをデコード" } }
+      }
+    },
+    "Most time was spent preparing speech recognition.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Die meiste Zeit wurde für die Vorbereitung der Spracherkennung benötigt." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "La préparation de la reconnaissance vocale a pris le plus de temps." } },
+        "es": { "stringUnit": { "state": "translated", "value": "La mayor parte del tiempo se dedicó a preparar el reconocimiento de voz." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "音声認識の準備に最も時間がかかりました。" } }
+      }
+    },
+    "Most time was spent starting the microphone.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Die meiste Zeit wurde für das Starten des Mikrofons benötigt." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Le démarrage du microphone a pris le plus de temps." } },
+        "es": { "stringUnit": { "state": "translated", "value": "La mayor parte del tiempo se dedicó a iniciar el micrófono." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "マイクの開始に最も時間がかかりました。" } }
+      }
+    },
+    "Most time was spent recognizing speech.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Die meiste Zeit wurde für die Spracherkennung benötigt." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "La reconnaissance vocale a pris le plus de temps." } },
+        "es": { "stringUnit": { "state": "translated", "value": "La mayor parte del tiempo se dedicó a reconocer el habla." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "音声の認識に最も時間がかかりました。" } }
+      }
+    },
+    "Most time was spent cleaning text.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Die meiste Zeit wurde für die Textbereinigung benötigt." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Le nettoyage du texte a pris le plus de temps." } },
+        "es": { "stringUnit": { "state": "translated", "value": "La mayor parte del tiempo se dedicó a limpiar el texto." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "テキストのクリーンアップに最も時間がかかりました。" } }
+      }
+    },
+    "Most time was spent translating text.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Die meiste Zeit wurde für die Textübersetzung benötigt." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "La traduction du texte a pris le plus de temps." } },
+        "es": { "stringUnit": { "state": "translated", "value": "La mayor parte del tiempo se dedicó a traducir el texto." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "テキストの翻訳に最も時間がかかりました。" } }
+      }
+    },
+    "Most time was spent delivering the result.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Die meiste Zeit wurde für die Ergebnisübergabe benötigt." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "La remise du résultat a pris le plus de temps." } },
+        "es": { "stringUnit": { "state": "translated", "value": "La mayor parte del tiempo se dedicó a entregar el resultado." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "結果を渡す処理に最も時間がかかりました。" } }
+      }
+    },
+    "Last dictation": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Letztes Diktat" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Dernière dictée" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Último dictado" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "直近の音声入力" } }
+      }
+    },
+    "Cancelled": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Abgebrochen" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Annulé" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Cancelado" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "キャンセル済み" } }
+      }
+    },
+    "Failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Fehlgeschlagen" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Échec" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Error" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "失敗" } }
+      }
+    },
+    "Loads requested: %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Angeforderte Ladevorgänge: %lld" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Chargements demandés : %lld" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Cargas solicitadas: %lld" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "要求した読み込み回数：%lld" } }
+      }
+    },
+    "Model calls: %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Modellaufrufe: %lld" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Appels au modèle : %lld" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Llamadas al modelo: %lld" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "モデル呼び出し回数：%lld" } }
+      }
+    },
+    "Contains timings and outcomes, never your dictated words.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Enthält Zeitmessungen und Abschlussstatus, niemals deine diktierten Worte." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Contient les durées et les statuts, jamais les mots dictés." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Contiene tiempos y estados, nunca las palabras que dictas." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "処理時間と結果の状態のみを含み、話した内容は含みません。" } }
+      }
+    },
+    "Model loading was needed": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Das Modell musste geladen werden" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Le modèle devait être chargé" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Fue necesario cargar el modelo" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "モデルの読み込みが必要でした" } }
+      }
+    },
+    "Model was already prepared": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Das Modell war bereits vorbereitet" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Le modèle était déjà prêt" } },
+        "es": { "stringUnit": { "state": "translated", "value": "El modelo ya estaba preparado" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "モデルは準備済みでした" } }
+      }
+    },
+    "Recent Dictations": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Letzte Diktate" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Dictées récentes" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Dictados recientes" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "最近の音声入力" } }
+      }
+    },
+    "Kept only in memory until you quit Syllivra.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Nur im Arbeitsspeicher gespeichert, bis du Syllivra beendest." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Conservées uniquement en mémoire jusqu’à la fermeture de Syllivra." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Se guardan solo en memoria hasta que sales de Syllivra." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "Syllivraを終了するまで、メモリ内にのみ保持されます。" } }
+      }
+    },
+    "No Recent Dictations": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Keine Diktate vorhanden" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Aucune dictée récente" } },
+        "es": { "stringUnit": { "state": "translated", "value": "No hay dictados recientes" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "最近の音声入力はありません" } }
+      }
+    },
+    "Enable recent dictations in More options to keep your next results until quitting.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Aktiviere unter „Weitere Optionen“ die Aufbewahrung letzter Diktate. Dann bleiben die nächsten Ergebnisse bis zum Beenden erhalten." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Activez la conservation des dictées récentes dans « Plus d’options » pour garder vos prochains résultats jusqu’à la fermeture." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Activa los dictados recientes en «Más opciones» para conservar los próximos resultados hasta salir." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "「その他のオプション」で最近の音声入力の保持を有効にすると、次の結果を終了するまで保持できます。" } }
+      }
+    },
+    "Copy failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Kopieren fehlgeschlagen" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Échec de la copie" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Error al copiar" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "コピーに失敗しました" } }
+      }
+    },
+    "Copy Result": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Ergebnis kopieren" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Copier le résultat" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Copiar resultado" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "結果をコピー" } }
+      }
+    },
+    "Clear Recent Dictations": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Letzte Diktate löschen" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Effacer les dictées récentes" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Borrar dictados recientes" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "最近の音声入力を消去" } }
+      }
+    },
+    "Copy failed — try again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Kopieren fehlgeschlagen – versuche es erneut." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Échec de la copie — réessayez." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Error al copiar — inténtalo de nuevo." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "コピーに失敗しました。もう一度お試しください。" } }
+      }
+    },
+    "Add Application": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "App hinzufügen" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Ajouter une application" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Añadir aplicación" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "アプリを追加" } }
+      }
+    },
+    "Keep the last 5 dictations until quitting": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Die letzten 5 Diktate bis zum Beenden behalten" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Conserver les 5 dernières dictées jusqu’à la fermeture" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Conservar los últimos 5 dictados hasta salir" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "終了するまで直近5件の音声入力を保持" } }
+      }
+    },
+    "Off by default. Results stay in memory only; turning this off clears the recent list.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Standardmäßig aus. Ergebnisse bleiben nur im Arbeitsspeicher; beim Ausschalten wird die Liste der letzten Diktate geleert." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Désactivé par défaut. Les résultats restent uniquement en mémoire ; désactiver cette option efface la liste des dictées récentes." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Desactivado por defecto. Los resultados permanecen solo en memoria; al desactivar esta opción se borra la lista de dictados recientes." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "初期設定ではオフです。結果はメモリ内にのみ保持され、オフにすると最近の音声入力一覧が消去されます。" } }
+      }
+    },
+    "Recent Dictations…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Letzte Diktate…" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Dictées récentes…" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Dictados recientes…" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "最近の音声入力…" } }
+      }
+    },
+    "Application Exceptions": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Ausnahmen für Apps" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Exceptions par application" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Excepciones por aplicación" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "アプリごとの例外" } }
+      }
+    },
+    "Use original recognition text in these apps. Cleanup, corrections and translation are off for each recording started there.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "In diesen Apps wird der ursprüngliche Erkennungstext verwendet. Bereinigung, Korrekturen und Übersetzung sind für jede dort gestartete Aufnahme aus." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Utilisez le texte reconnu d’origine dans ces applications. Le nettoyage, les corrections et la traduction sont désactivés pour chaque enregistrement démarré dans ces applications." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Usa el texto original del reconocimiento en estas aplicaciones. La limpieza, las correcciones y la traducción se desactivan en cada grabación iniciada en ellas." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "これらのアプリでは認識された原文を使用します。そこで開始した録音では、クリーンアップ、修正、翻訳が無効になります。" } }
+      }
+    },
+    "Add Application…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "App hinzufügen…" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Ajouter une application…" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Añadir aplicación…" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "アプリを追加…" } }
+      }
+    },
+    "Original text for this app · cleanup and translation off": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Originaltext für diese App · Bereinigung und Übersetzung aus" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Texte d’origine pour cette application · nettoyage et traduction désactivés" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Texto original para esta aplicación · limpieza y traducción desactivadas" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "このアプリでは原文を使用 · クリーンアップと翻訳はオフ" } }
+      }
+    },
+    "Rename Transcript": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Transkript umbenennen" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Renommer la transcription" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Renombrar transcripción" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "文字起こしの名前を変更" } }
+      }
+    },
+    "Only the session name changes. Spoken lines stay unchanged.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Nur der Sitzungsname wird geändert. Die gesprochenen Zeilen bleiben unverändert." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Seul le nom de la session change. Les lignes prononcées restent inchangées." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Solo cambia el nombre de la sesión. Las líneas habladas no se modifican." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "セッション名のみ変更されます。話した内容の行は変更されません。" } }
+      }
+    },
+    "Session name": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Sitzungsname" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Nom de la session" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Nombre de la sesión" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "セッション名" } }
+      }
+    },
+    "Up to 80 characters. Leave blank to show the date.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Bis zu 80 Zeichen. Leer lassen, um das Datum anzuzeigen." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "80 caractères maximum. Laissez vide pour afficher la date." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Hasta 80 caracteres. Déjalo en blanco para mostrar la fecha." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "80文字以内。空欄にすると日付が表示されます。" } }
+      }
+    },
+    "Save Name": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Namen speichern" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Enregistrer le nom" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Guardar nombre" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "名前を保存" } }
+      }
+    },
+    "Rename…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Umbenennen…" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Renommer…" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Renombrar…" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "名前を変更…" } }
+      }
+    },
+    "Text size": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Textgröße" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Taille du texte" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Tamaño del texto" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "文字サイズ" } }
+      }
+    },
+    "Speak a short sentence to check this microphone.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Sprich einen kurzen Satz, um dieses Mikrofon zu prüfen." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Prononcez une courte phrase pour vérifier ce microphone." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Di una frase corta para comprobar este micrófono." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "短い文を話して、このマイクを確認してください。" } }
+      }
+    },
+    "Audio level is unavailable. The dictation result is still the useful check.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Der Audiopegel ist nicht verfügbar. Prüfe die Erkennung anhand des Diktatergebnisses." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Le niveau audio n’est pas disponible. Le résultat de la dictée reste utile pour la vérification." } },
+        "es": { "stringUnit": { "state": "translated", "value": "El nivel de audio no está disponible. El resultado del dictado sigue siendo útil para la comprobación." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "音声レベルを取得できません。音声入力の結果で引き続き確認できます。" } }
+      }
+    },
+    "Input may be clipping. Lower the microphone input level.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Das Eingangssignal könnte übersteuern. Senke den Mikrofon-Eingangspegel." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Le signal d’entrée est peut-être saturé. Réduisez le niveau d’entrée du microphone." } },
+        "es": { "stringUnit": { "state": "translated", "value": "La entrada podría estar saturada. Baja el nivel de entrada del micrófono." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "入力音声が歪んでいる可能性があります。マイクの入力レベルを下げてください。" } }
+      }
+    },
+    "Input is very quiet. Check the microphone or move closer.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Das Eingangssignal ist sehr leise. Prüfe das Mikrofon oder gehe näher heran." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Le signal d’entrée est très faible. Vérifiez le microphone ou rapprochez-vous." } },
+        "es": { "stringUnit": { "state": "translated", "value": "El volumen de entrada es muy bajo. Comprueba el micrófono o acércate." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "入力音声がとても小さいです。マイクを確認するか、近づいてください。" } }
+      }
+    },
+    "Audio input detected. Review the words below to check recognition.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Audioeingang erkannt. Prüfe die Wörter unten, um die Erkennung zu beurteilen." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Une entrée audio a été détectée. Vérifiez les mots ci-dessous pour contrôler la reconnaissance." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Se ha detectado audio de entrada. Revisa las palabras de abajo para comprobar el reconocimiento." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "音声入力を検出しました。下の言葉を確認して、認識結果をチェックしてください。" } }
+      }
+    },
+    "Open Sound Settings": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Toneinstellungen öffnen" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Ouvrir les réglages Son" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Abrir ajustes de sonido" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "サウンド設定を開く" } }
+      }
+    },
+    "Use a single-line name of at most 80 characters.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Verwende einen einzeiligen Namen mit höchstens 80 Zeichen." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Utilisez un nom sur une seule ligne de 80 caractères maximum." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Usa un nombre de una sola línea con un máximo de 80 caracteres." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "80文字以内の1行の名前を入力してください。" } }
+      }
+    },
+    "Stop recording before renaming this transcript.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Beende die Aufnahme, bevor du dieses Transkript umbenennst." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Arrêtez l’enregistrement avant de renommer cette transcription." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Detén la grabación antes de renombrar esta transcripción." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "この文字起こしの名前を変更する前に、録音を停止してください。" } }
+      }
+    },
+    "634 MB. Automatic recognition with continuous caption updates. The adapter can expose the first audio language tag; complete source-language coverage is not declared here.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "634 MB. Automatische Erkennung mit fortlaufenden Untertiteln. Der Adapter kann die erste aus dem Audio erkannte Sprache melden; die vollständige Abdeckung der Ausgangssprachen ist hier nicht angegeben." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "634 Mo. Reconnaissance automatique avec des sous-titres continus. L’adaptateur peut fournir la première langue détectée dans l’audio ; la liste complète des langues sources n’est pas déclarée ici." } },
+        "es": { "stringUnit": { "state": "translated", "value": "634 MB. Reconocimiento automático con subtítulos continuos. El adaptador puede indicar el primer idioma detectado en el audio; aquí no se declara la cobertura completa de idiomas de origen." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "634 MB。自動認識で字幕を継続的に更新します。アダプターは音声から最初に検出した言語を取得できますが、対応する入力言語の全一覧はここでは公開されていません。" } }
+      }
+    },
+    "626 MB. Re-reads a window of audio for each update and can fall behind continuous speech. Its declared caption language set is listed separately; the adapter exposes an audio language tag.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "626 MB. Liest bei jeder Aktualisierung einen Audioabschnitt erneut und kann bei fortlaufender Sprache zurückfallen. Die angegebenen Untertitelsprachen sind separat aufgeführt; der Adapter meldet eine aus dem Audio erkannte Sprache." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "626 Mo. Relit une fenêtre audio à chaque mise à jour et peut prendre du retard sur une parole continue. Les langues de sous-titrage déclarées sont listées séparément ; l’adaptateur fournit une langue détectée dans l’audio." } },
+        "es": { "stringUnit": { "state": "translated", "value": "626 MB. Relee un fragmento de audio en cada actualización y puede retrasarse durante el habla continua. Los idiomas de subtítulos declarados se enumeran por separado; el adaptador indica un idioma detectado en el audio." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "626 MB。更新のたびに音声の一部を読み直すため、連続した発話に遅れることがあります。公開されている字幕対応言語は別途一覧に記載され、アダプターは音声から検出した言語を取得できます。" } }
+      }
+    },
+    "700 MB. Automatic recognition with a line when the speaker pauses, or after 10 seconds of continuous speech. This adapter exposes no audio language tag, and its complete source-language coverage is not declared here.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "700 MB. Automatische Erkennung mit einer Zeile bei einer Sprechpause oder nach 10 Sekunden fortlaufender Sprache. Dieser Adapter meldet keine aus dem Audio erkannte Sprache; die vollständige Abdeckung der Ausgangssprachen ist hier nicht angegeben." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "700 Mo. Reconnaissance automatique avec une ligne lors d’une pause, ou après 10 secondes de parole continue. Cet adaptateur ne fournit pas la langue détectée dans l’audio ; la liste complète des langues sources n’est pas déclarée ici." } },
+        "es": { "stringUnit": { "state": "translated", "value": "700 MB. Reconocimiento automático con una línea al hacer una pausa o después de 10 segundos de habla continua. Este adaptador no indica el idioma del audio, y aquí no se declara la cobertura completa de idiomas de origen." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "700 MB。話者が間を置いたとき、または連続した発話が10秒続いた後に字幕を表示する自動認識です。このアダプターは音声の言語情報を返さず、対応する入力言語の全一覧はここでは公開されていません。" } }
+      }
+    },
+    "2.1 GB. The same pause-based automatic recognition as Qwen3-ASR 0.6B, with larger weights. This adapter exposes no audio language tag, and its complete source-language coverage is not declared here.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "2,1 GB. Dieselbe pausenbasierte automatische Erkennung wie Qwen3-ASR 0.6B mit größeren Modelldateien. Dieser Adapter meldet keine aus dem Audio erkannte Sprache; die vollständige Abdeckung der Ausgangssprachen ist hier nicht angegeben." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "2,1 Go. La même reconnaissance automatique fondée sur les pauses que Qwen3-ASR 0.6B, avec un modèle plus volumineux. Cet adaptateur ne fournit pas la langue détectée dans l’audio ; la liste complète des langues sources n’est pas déclarée ici." } },
+        "es": { "stringUnit": { "state": "translated", "value": "2,1 GB. El mismo reconocimiento automático basado en pausas que Qwen3-ASR 0.6B, con un modelo más grande. Este adaptador no indica el idioma del audio, y aquí no se declara la cobertura completa de idiomas de origen." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "2.1 GB。Qwen3-ASR 0.6Bと同じ、発話の間に基づく自動認識を、より大きいモデルで行います。このアダプターは音声の言語情報を返さず、対応する入力言語の全一覧はここでは公開されていません。" } }
+      }
+    },
+    "automatic recognition": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "automatische Erkennung" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "reconnaissance automatique" } },
+        "es": { "stringUnit": { "state": "translated", "value": "reconocimiento automático" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "自動認識" } }
+      }
+    },
+    "No recognition model chosen yet. %@ is the recommended starting point for automatic multilingual recognition. Download it under Models.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Noch kein Erkennungsmodell gewählt. %@ ist der empfohlene Einstieg für die automatische mehrsprachige Erkennung. Lade es unter Modelle herunter." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Aucun modèle de reconnaissance choisi. %@ est le point de départ recommandé pour la reconnaissance multilingue automatique. Téléchargez-le dans Modèles." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Aún no se ha elegido un modelo de reconocimiento. %@ es el punto de partida recomendado para el reconocimiento multilingüe automático. Descárgalo en Modelos." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "音声認識モデルが選択されていません。自動の多言語認識には、まず%@がおすすめです。「モデル」でダウンロードしてください。" } }
+      }
+    },
+    "Summary language": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Sprache der Zusammenfassung" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Langue du résumé" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Idioma del resumen" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "要約の言語" } }
+      }
+    },
+    "Choose a language": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Sprache wählen" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Choisir une langue" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Elegir un idioma" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "言語を選択" } }
+      }
+    },
+    "This transcript uses more than one language. Choose the language for its summary.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Dieses Transkript enthält mehrere Sprachen. Wähle eine Sprache für die Zusammenfassung." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Cette transcription contient plusieurs langues. Choisissez la langue de son résumé." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Esta transcripción contiene varios idiomas. Elige el idioma de su resumen." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "この文字起こしには複数の言語が含まれています。要約の言語を選択してください。" } }
+      }
+    },
+    "Choose a summary language for this multilingual transcript.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Wähle eine Sprache für die Zusammenfassung dieses mehrsprachigen Transkripts." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Choisissez une langue pour résumer cette transcription multilingue." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Elige un idioma para resumir esta transcripción multilingüe." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "この多言語の文字起こしを要約する言語を選択してください。" } }
+      }
+    },
+    "Choose a recognized summary language.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Wähle eine gültige Sprache für die Zusammenfassung." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Choisissez une langue de résumé reconnue." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Elige un idioma reconocido para el resumen." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "要約に使う有効な言語を選択してください。" } }
+      }
+    },
+    "Captions are running.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Die Untertitel laufen." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Les sous-titres sont actifs." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Los subtítulos están activos." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "字幕を生成しています。" } }
+      }
+    },
+    "Captions run on this Mac. Nothing is uploaded.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Untertitel werden auf diesem Mac erzeugt. Es wird nichts hochgeladen." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Les sous-titres sont générés sur ce Mac. Rien n’est envoyé." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Los subtítulos se generan en este Mac. No se sube nada." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "字幕はこのMacで生成されます。アップロードされるものはありません。" } }
+      }
+    },
+    "Streams words with faster updates and skips model cleanup.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Zeigt Wörter mit schnelleren Aktualisierungen an und verzichtet auf die Modellbereinigung." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Affiche les mots plus rapidement, sans nettoyage par modèle." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Muestra las palabras con actualizaciones más rápidas y omite la limpieza mediante modelo." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "単語をより素早く逐次表示し、モデルによる整形は行いません。" } }
+      }
+    },
+    "Streams words with more context per update, then uses available cleanup.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Zeigt Wörter mit mehr Kontext pro Aktualisierung an und nutzt anschließend die verfügbare Bereinigung." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Affiche les mots avec plus de contexte à chaque mise à jour, puis utilise le nettoyage disponible." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Muestra las palabras con más contexto en cada actualización y después usa la limpieza disponible." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "更新ごとにより多くの文脈を使って単語を逐次表示し、その後、利用可能な整形を行います。" } }
+      }
+    },
+    "Recognizes the full recording after release, then uses available cleanup.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Erkennt nach dem Loslassen die gesamte Aufnahme und nutzt anschließend die verfügbare Bereinigung." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Reconnaît l’enregistrement complet après le relâchement, puis utilise le nettoyage disponible." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Reconoce la grabación completa al soltar y después usa la limpieza disponible." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "キーを離した後に録音全体を認識し、その後、利用可能な整形を行います。" } }
+      }
+    },
+    "Uses your chosen recognition, timing and cleanup settings.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Verwendet deine gewählten Einstellungen für Erkennung, Aktualisierungsintervalle und Bereinigung." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Utilise les réglages de reconnaissance, de cadence et de nettoyage que vous avez choisis." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Usa los ajustes de reconocimiento, frecuencia de actualización y limpieza que has elegido." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "選択した認識、更新間隔、整形の設定を使用します。" } }
+      }
+    },
+    "Using Whisper Auto · %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Aktuell: Whisper Auto · %@" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Utilise Whisper Auto · %@" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Usando Whisper Auto · %@" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "Whisper Autoを使用中 · %@" } }
+      }
+    },
+    "Translator installed": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Übersetzungsmodell installiert" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Modèle de traduction installé" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Modelo de traducción instalado" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "翻訳モデルをインストール済み" } }
+      }
+    },
+    "Translator needed · %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Übersetzungsmodell benötigt · %@" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Modèle de traduction requis · %@" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Se necesita un modelo de traducción · %@" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "翻訳モデルが必要 · %@" } }
+      }
+    },
+    "No translation model chosen.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Kein Übersetzungsmodell gewählt." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Aucun modèle de traduction choisi." } },
+        "es": { "stringUnit": { "state": "translated", "value": "No se ha elegido ningún modelo de traducción." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "翻訳モデルが選択されていません。" } }
+      }
+    },
+    "See you tomorrow.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Bis morgen." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "À demain." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Hasta mañana." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "また明日。" } }
+      }
+    },
+    "Could not delete this transcript.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Dieses Transkript konnte nicht gelöscht werden." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Impossible de supprimer cette transcription." } },
+        "es": { "stringUnit": { "state": "translated", "value": "No se pudo eliminar esta transcripción." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "この文字起こしを削除できませんでした。" } }
+      }
+    },
+    "Saved to Transcripts": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Unter Transkripte gespeichert" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Enregistré dans Transcriptions" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Guardado en Transcripciones" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "文字起こしに保存しました" } }
+      }
+    },
+    "Open transcript": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Transkript öffnen" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Ouvrir la transcription" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Abrir transcripción" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "文字起こしを開く" } }
+      }
+    },
+    "Saving transcript…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Transkript wird gespeichert…" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Enregistrement de la transcription…" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Guardando transcripción…" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "文字起こしを保存中…" } }
+      }
+    },
+    "Bubble history shows the latest 50 lines. Saving includes all committed lines.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Der Verlauf in der Sprechblase zeigt die letzten 50 Zeilen. Beim Speichern werden alle abgeschlossenen Zeilen eingeschlossen." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "L’historique de la bulle affiche les 50 dernières lignes. L’enregistrement inclut toutes les lignes finalisées." } },
+        "es": { "stringUnit": { "state": "translated", "value": "El historial de la burbuja muestra las últimas 50 líneas. Al guardar se incluyen todas las líneas finalizadas." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "バブルの履歴には最新の50行が表示されます。保存時には確定済みのすべての行が含まれます。" } }
+      }
+    },
+    "Translation is too slow; some lines are untranslated. Original captions continue.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Die Übersetzung ist zu langsam; einige Zeilen bleiben unübersetzt. Die Originaluntertitel laufen weiter." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "La traduction est trop lente ; certaines lignes ne sont pas traduites. Les sous-titres originaux continuent." } },
+        "es": { "stringUnit": { "state": "translated", "value": "La traducción es demasiado lenta; algunas líneas quedan sin traducir. Los subtítulos originales continúan." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "翻訳が追いつかず、一部の行は翻訳されません。原文の字幕は続きます。" } }
+      }
+    },
+    "Translation unavailable — cleaned text copied to Clipboard": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Übersetzung nicht verfügbar — bereinigter Text in die Zwischenablage kopiert" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Traduction indisponible — texte nettoyé copié dans le presse-papiers" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Traducción no disponible — texto depurado copiado al portapapeles" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "翻訳を利用できません — 整形済みのテキストをクリップボードにコピーしました" } }
+      }
+    },
+    "Download & Use": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Laden & verwenden" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Télécharger et utiliser" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Descargar y usar" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ダウンロードして使用" } }
+      }
+    },
+    "Bubble appearance": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Darstellung der Sprechblase" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Apparence de la bulle" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Apariencia de la burbuja" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "バブルの外観" } }
+      }
+    },
+    "Deleted %lld transcripts; %lld could not be removed.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "%lld Transkripte gelöscht; %lld konnten nicht entfernt werden." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "%lld transcriptions supprimées ; %lld n’ont pas pu être supprimées." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Se eliminaron %lld transcripciones; no se pudieron eliminar %lld." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "%lld件の文字起こしを削除しました。%lld件は削除できませんでした。" } }
+      }
+    },
+    "Microphone access needed": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Mikrofonzugriff benötigt" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Accès au microphone requis" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Se necesita acceso al micrófono" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "マイクへのアクセスが必要" } }
+      }
+    },
+    "Microphone requested on first use": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Mikrofonzugriff wird bei der ersten Nutzung angefragt" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "L’accès au microphone sera demandé à la première utilisation" } },
+        "es": { "stringUnit": { "state": "translated", "value": "El acceso al micrófono se solicitará la primera vez" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "初回使用時にマイクへのアクセスを要求します" } }
+      }
+    },
+    "That transcript is no longer in the saved library.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Dieses Transkript ist nicht mehr in der gespeicherten Bibliothek." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Cette transcription ne figure plus dans la bibliothèque enregistrée." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Esa transcripción ya no está en la biblioteca guardada." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "この文字起こしは保存済みライブラリにありません。" } }
+      }
+    },
+    "The transcript changed during translation. The current transcript was kept.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Das Transkript wurde während der Übersetzung geändert. Das aktuelle Transkript wurde beibehalten." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "La transcription a changé pendant la traduction. La transcription actuelle a été conservée." } },
+        "es": { "stringUnit": { "state": "translated", "value": "La transcripción cambió durante la traducción. Se conservó la transcripción actual." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "翻訳中に文字起こしが変更されました。現在の文字起こしを保持しました。" } }
+      }
+    },
     "Session actions": {
       "extractionState": "manual",
       "localizations": {
@@ -5063,30 +5954,30 @@
         }
       }
     },
-    "About sAiity": {
+    "About Syllivra": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Über sAiity"
+            "value": "Über Syllivra"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Acerca de sAiity"
+            "value": "Acerca de Syllivra"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "À propos de sAiity"
+            "value": "À propos de Syllivra"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiityについて"
+            "value": "Syllivraについて"
           }
         }
       }
@@ -5581,31 +6472,31 @@
       "extractionState": "manual",
       "shouldTranslate": false
     },
-    "Approve sAiity in System Settings → General → Login Items.": {
+    "Approve Syllivra in System Settings → General → Login Items.": {
       "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Bestätige sAiity in den Systemeinstellungen → Allgemein → Anmeldeobjekte."
+            "value": "Bestätige Syllivra in den Systemeinstellungen → Allgemein → Anmeldeobjekte."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Aprueba sAiity en Ajustes del Sistema → General → Ítems de inicio."
+            "value": "Aprueba Syllivra en Ajustes del Sistema → General → Ítems de inicio."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Approuvez sAiity dans Réglages Système → Général → Ouverture."
+            "value": "Approuvez Syllivra dans Réglages Système → Général → Ouverture."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "「システム設定」→「一般」→「ログイン項目」でsAiityを許可してください。"
+            "value": "「システム設定」→「一般」→「ログイン項目」でSyllivraを許可してください。"
           }
         }
       }
@@ -6291,31 +7182,31 @@
         }
       }
     },
-    "Captions run without your microphone — allow sAiity under System Settings → Privacy & Security → Microphone": {
+    "Captions run without your microphone — allow Syllivra under System Settings → Privacy & Security → Microphone": {
       "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Untertitel laufen ohne dein Mikrofon – erlaube sAiity unter Systemeinstellungen → Datenschutz & Sicherheit → Mikrofon"
+            "value": "Untertitel laufen ohne dein Mikrofon – erlaube Syllivra unter Systemeinstellungen → Datenschutz & Sicherheit → Mikrofon"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Los subtítulos funcionan sin tu micrófono — permite sAiity en Ajustes del Sistema → Privacidad y seguridad → Micrófono"
+            "value": "Los subtítulos funcionan sin tu micrófono — permite Syllivra en Ajustes del Sistema → Privacidad y seguridad → Micrófono"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Les sous-titres fonctionnent sans votre microphone — autorisez sAiity dans Réglages Système → Confidentialité et sécurité → Microphone"
+            "value": "Les sous-titres fonctionnent sans votre microphone — autorisez Syllivra dans Réglages Système → Confidentialité et sécurité → Microphone"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "字幕はマイクなしで動作しています — 「システム設定」→「プライバシーとセキュリティ」→「マイク」でsAiityを許可してください"
+            "value": "字幕はマイクなしで動作しています — 「システム設定」→「プライバシーとセキュリティ」→「マイク」でSyllivraを許可してください"
           }
         }
       }
@@ -7788,31 +8679,31 @@
         }
       }
     },
-    "Could not move sAiity": {
+    "Could not move Syllivra": {
       "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiity konnte nicht bewegt werden"
+            "value": "Syllivra konnte nicht bewegt werden"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "No se pudo mover sAiity"
+            "value": "No se pudo mover Syllivra"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Impossible de déplacer sAiity"
+            "value": "Impossible de déplacer Syllivra"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiityを移動できませんでした"
+            "value": "Syllivraを移動できませんでした"
           }
         }
       }
@@ -10857,31 +11748,31 @@
         }
       }
     },
-    "Move sAiity to the Applications folder?": {
+    "Move Syllivra to the Applications folder?": {
       "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiity in den Ordner „Programme“ bewegen?"
+            "value": "Syllivra in den Ordner „Programme“ bewegen?"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "¿Mover sAiity a la carpeta Aplicaciones?"
+            "value": "¿Mover Syllivra a la carpeta Aplicaciones?"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Déplacer sAiity vers le dossier Applications ?"
+            "value": "Déplacer Syllivra vers le dossier Applications ?"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiityをアプリケーションフォルダに移動しますか？"
+            "value": "Syllivraをアプリケーションフォルダに移動しますか？"
           }
         }
       }
@@ -11295,31 +12186,31 @@
         }
       }
     },
-    "After granting access, quit and reopen sAiity.": {
+    "After granting access, quit and reopen Syllivra.": {
       "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Beende sAiity nach dem Erteilen des Zugriffs und öffne die App erneut."
+            "value": "Beende Syllivra nach dem Erteilen des Zugriffs und öffne die App erneut."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Después de conceder el acceso, cierra sAiity y vuelve a abrirlo."
+            "value": "Después de conceder el acceso, cierra Syllivra y vuelve a abrirlo."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Après avoir accordé l’accès, quittez puis rouvrez sAiity."
+            "value": "Après avoir accordé l’accès, quittez puis rouvrez Syllivra."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "アクセスを許可した後、sAiityを終了して再度開いてください。"
+            "value": "アクセスを許可した後、Syllivraを終了して再度開いてください。"
           }
         }
       }
@@ -13176,31 +14067,31 @@
         }
       }
     },
-    "Off by default. System audio on a call carries only the other participants — your own voice never enters the mix, so a saved transcript is missing your half of the conversation. On, sAiity also opens the microphone (macOS asks once) and mixes it into recognition. Audio still never leaves this Mac. Takes effect immediately, including mid-session: switching it off releases the microphone straight away.": {
+    "Off by default. System audio on a call carries only the other participants — your own voice never enters the mix, so a saved transcript is missing your half of the conversation. On, Syllivra also opens the microphone (macOS asks once) and mixes it into recognition. Audio still never leaves this Mac. Takes effect immediately, including mid-session: switching it off releases the microphone straight away.": {
       "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Standardmäßig aus. Systemaudio eines Anrufs enthält nur die anderen Teilnehmer – die eigene Stimme gelangt nie in den Mix, einem gesicherten Transkript fehlt also deine Hälfte des Gesprächs. Eingeschaltet öffnet sAiity zusätzlich das Mikrofon (macOS fragt einmal) und mischt es in die Erkennung. Audio verlässt diesen Mac weiterhin nie. Gilt sofort, auch während einer Sitzung: Ausschalten gibt das Mikrofon umgehend frei."
+            "value": "Standardmäßig aus. Systemaudio eines Anrufs enthält nur die anderen Teilnehmer – die eigene Stimme gelangt nie in den Mix, einem gesicherten Transkript fehlt also deine Hälfte des Gesprächs. Eingeschaltet öffnet Syllivra zusätzlich das Mikrofon (macOS fragt einmal) und mischt es in die Erkennung. Audio verlässt diesen Mac weiterhin nie. Gilt sofort, auch während einer Sitzung: Ausschalten gibt das Mikrofon umgehend frei."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Desactivado por omisión. El audio del sistema en una llamada solo lleva a los demás participantes: tu propia voz nunca entra en la mezcla, así que a una transcripción guardada le falta tu mitad de la conversación. Activado, sAiity también abre el micrófono (macOS lo pregunta una vez) y lo mezcla en el reconocimiento. El audio sigue sin salir nunca de este Mac. Tiene efecto de inmediato, incluso a mitad de sesión: al desactivarlo se libera el micrófono al instante."
+            "value": "Desactivado por omisión. El audio del sistema en una llamada solo lleva a los demás participantes: tu propia voz nunca entra en la mezcla, así que a una transcripción guardada le falta tu mitad de la conversación. Activado, Syllivra también abre el micrófono (macOS lo pregunta una vez) y lo mezcla en el reconocimiento. El audio sigue sin salir nunca de este Mac. Tiene efecto de inmediato, incluso a mitad de sesión: al desactivarlo se libera el micrófono al instante."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Désactivé par défaut. L’audio système d’un appel ne contient que les autres participants — ta propre voix n’entre jamais dans le mix, il manque donc ta moitié de la conversation à une transcription enregistrée. Activé, sAiity ouvre aussi le microphone (macOS demande une fois) et le mélange à la reconnaissance. L’audio ne quitte toujours jamais ce Mac. Effet immédiat, y compris en cours de session : le désactiver libère le microphone aussitôt."
+            "value": "Désactivé par défaut. L’audio système d’un appel ne contient que les autres participants — ta propre voix n’entre jamais dans le mix, il manque donc ta moitié de la conversation à une transcription enregistrée. Activé, Syllivra ouvre aussi le microphone (macOS demande une fois) et le mélange à la reconnaissance. L’audio ne quitte toujours jamais ce Mac. Effet immédiat, y compris en cours de session : le désactiver libère le microphone aussitôt."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "標準ではオフです。通話のシステムオーディオには相手の声しか含まれず、自分の声はミックスに入らないため、保存した文字起こしには自分の側が欠けています。オンにすると、sAiityはマイクも開いて（macOSが一度確認します）認識にミックスします。音声は引き続きこのMacから出ません。セッション中を含めて即座に反映され、オフにするとマイクはただちに解放されます。"
+            "value": "標準ではオフです。通話のシステムオーディオには相手の声しか含まれず、自分の声はミックスに入らないため、保存した文字起こしには自分の側が欠けています。オンにすると、Syllivraはマイクも開いて（macOSが一度確認します）認識にミックスします。音声は引き続きこのMacから出ません。セッション中を含めて即座に反映され、オフにするとマイクはただちに解放されます。"
           }
         }
       }
@@ -13491,60 +14382,60 @@
         }
       }
     },
-    "Open sAiity": {
+    "Open Syllivra": {
       "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiity öffnen"
+            "value": "Syllivra öffnen"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Abrir sAiity"
+            "value": "Abrir Syllivra"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ouvrir sAiity"
+            "value": "Ouvrir Syllivra"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiityを開く"
+            "value": "Syllivraを開く"
           }
         }
       }
     },
-    "Open sAiity settings": {
+    "Open Syllivra settings": {
       "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiity-Einstellungen öffnen"
+            "value": "Syllivra-Einstellungen öffnen"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Abrir los ajustes de sAiity"
+            "value": "Abrir los ajustes de Syllivra"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ouvrir les réglages de sAiity"
+            "value": "Ouvrir les réglages de Syllivra"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiityの設定を開く"
+            "value": "Syllivraの設定を開く"
           }
         }
       }
@@ -14251,30 +15142,30 @@
         }
       }
     },
-    "Quit sAiity": {
+    "Quit Syllivra": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiity beenden"
+            "value": "Syllivra beenden"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Salir de sAiity"
+            "value": "Salir de Syllivra"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Quitter sAiity"
+            "value": "Quitter Syllivra"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiityを終了"
+            "value": "Syllivraを終了"
           }
         }
       }
@@ -15182,31 +16073,31 @@
         }
       }
     },
-    "Screen Recording permission needed (that is how macOS gates system audio). Allow sAiity in System Settings → Privacy & Security → Screen Recording, then relaunch.": {
+    "Screen Recording permission needed (that is how macOS gates system audio). Allow Syllivra in System Settings → Privacy & Security → Screen Recording, then relaunch.": {
       "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Berechtigung für die Bildschirmaufnahme nötig (so regelt macOS den Zugriff auf den Systemton). Erlaube sAiity unter Systemeinstellungen → Datenschutz & Sicherheit → Bildschirmaufnahme und starte die App neu."
+            "value": "Berechtigung für die Bildschirmaufnahme nötig (so regelt macOS den Zugriff auf den Systemton). Erlaube Syllivra unter Systemeinstellungen → Datenschutz & Sicherheit → Bildschirmaufnahme und starte die App neu."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Se necesita el permiso de Grabación de pantalla (así es como macOS controla el audio del sistema). Permite sAiity en Ajustes del Sistema → Privacidad y seguridad → Grabación de pantalla y vuelve a abrir la app."
+            "value": "Se necesita el permiso de Grabación de pantalla (así es como macOS controla el audio del sistema). Permite Syllivra en Ajustes del Sistema → Privacidad y seguridad → Grabación de pantalla y vuelve a abrir la app."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Autorisation Enregistrement de l'écran nécessaire (c'est ainsi que macOS contrôle l'audio système). Autorisez sAiity dans Réglages Système → Confidentialité et sécurité → Enregistrement de l'écran, puis relancez l'app."
+            "value": "Autorisation Enregistrement de l'écran nécessaire (c'est ainsi que macOS contrôle l'audio système). Autorisez Syllivra dans Réglages Système → Confidentialité et sécurité → Enregistrement de l'écran, puis relancez l'app."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "画面収録の権限が必要です（macOSはシステムオーディオをこの権限で管理しています）。「システム設定」→「プライバシーとセキュリティ」→「画面収録」でsAiityを許可し、その後アプリを起動し直してください。"
+            "value": "画面収録の権限が必要です（macOSはシステムオーディオをこの権限で管理しています）。「システム設定」→「プライバシーとセキュリティ」→「画面収録」でSyllivraを許可し、その後アプリを起動し直してください。"
           }
         }
       }
@@ -15508,31 +16399,31 @@
         }
       }
     },
-    "Set up sAiity": {
+    "Set up Syllivra": {
       "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiity einrichten"
+            "value": "Syllivra einrichten"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Configurar sAiity"
+            "value": "Configurar Syllivra"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Configurer sAiity"
+            "value": "Configurer Syllivra"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiityのセットアップ"
+            "value": "Syllivraのセットアップ"
           }
         }
       }
@@ -15879,88 +16770,88 @@
         }
       }
     },
-    "Start captions from the sAiity icon in the menu bar, or press %@.": {
+    "Start captions from the Syllivra icon in the menu bar, or press %@.": {
       "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Untertitel startest du über das sAiity-Symbol in der Menüleiste oder mit %@."
+            "value": "Untertitel startest du über das Syllivra-Symbol in der Menüleiste oder mit %@."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Inicia los subtítulos desde el icono de sAiity en la barra de menús, o pulsa %@."
+            "value": "Inicia los subtítulos desde el icono de Syllivra en la barra de menús, o pulsa %@."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Démarrez les sous-titres depuis l'icône sAiity dans la barre des menus, ou appuyez sur %@."
+            "value": "Démarrez les sous-titres depuis l'icône Syllivra dans la barre des menus, ou appuyez sur %@."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "メニューバーのsAiityアイコンから字幕を開始するか、%@を押してください。"
+            "value": "メニューバーのSyllivraアイコンから字幕を開始するか、%@を押してください。"
           }
         }
       }
     },
-    "Start captions from the sAiity icon in the menu bar.": {
+    "Start captions from the Syllivra icon in the menu bar.": {
       "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Untertitel startest du über das sAiity-Symbol in der Menüleiste."
+            "value": "Untertitel startest du über das Syllivra-Symbol in der Menüleiste."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Inicia los subtítulos desde el icono de sAiity en la barra de menús."
+            "value": "Inicia los subtítulos desde el icono de Syllivra en la barra de menús."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Démarrez les sous-titres depuis l'icône sAiity dans la barre des menus."
+            "value": "Démarrez les sous-titres depuis l'icône Syllivra dans la barre des menus."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "メニューバーのsAiityアイコンから字幕を開始してください。"
+            "value": "メニューバーのSyllivraアイコンから字幕を開始してください。"
           }
         }
       }
     },
-    "Start sAiity when you log in": {
+    "Start Syllivra when you log in": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiity beim Anmelden starten"
+            "value": "Syllivra beim Anmelden starten"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Iniciar sAiity al iniciar sesión"
+            "value": "Iniciar Syllivra al iniciar sesión"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Démarrer sAiity à l'ouverture de session"
+            "value": "Démarrer Syllivra à l'ouverture de session"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "ログイン時にsAiityを開始"
+            "value": "ログイン時にSyllivraを開始"
           }
         }
       }
@@ -16946,31 +17837,31 @@
         }
       }
     },
-    "Transcribed on device by sAiity.": {
+    "Transcribed on device by Syllivra.": {
       "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Auf diesem Mac mit sAiity transkribiert."
+            "value": "Auf diesem Mac mit Syllivra transkribiert."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Transcrito en el dispositivo por sAiity."
+            "value": "Transcrito en el dispositivo por Syllivra."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Transcrit sur l'appareil par sAiity."
+            "value": "Transcrit sur l'appareil par Syllivra."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiityがオンデバイスで文字起こししました。"
+            "value": "Syllivraがオンデバイスで文字起こししました。"
           }
         }
       }
@@ -18502,31 +19393,31 @@
         }
       }
     },
-    "macOS has no separate permission for system audio — Screen Recording is the one that gates it. sAiity records no video and takes no screenshots.": {
+    "macOS has no separate permission for system audio — Screen Recording is the one that gates it. Syllivra records no video and takes no screenshots.": {
       "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "macOS hat keine eigene Berechtigung für Systemton – die Bildschirmaufnahme ist die Hürde davor. sAiity nimmt kein Video auf und macht keine Screenshots."
+            "value": "macOS hat keine eigene Berechtigung für Systemton – die Bildschirmaufnahme ist die Hürde davor. Syllivra nimmt kein Video auf und macht keine Screenshots."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "macOS no tiene un permiso aparte para el audio del sistema — Grabación de pantalla es el que lo controla. sAiity no graba vídeo ni hace capturas de pantalla."
+            "value": "macOS no tiene un permiso aparte para el audio del sistema — Grabación de pantalla es el que lo controla. Syllivra no graba vídeo ni hace capturas de pantalla."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "macOS n'a pas d'autorisation distincte pour l'audio système — Enregistrement de l'écran est celle qui le contrôle. sAiity n'enregistre aucune vidéo et ne prend aucune capture d'écran."
+            "value": "macOS n'a pas d'autorisation distincte pour l'audio système — Enregistrement de l'écran est celle qui le contrôle. Syllivra n'enregistre aucune vidéo et ne prend aucune capture d'écran."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "macOSにはシステムオーディオ専用の権限がなく、それを管理しているのが画面収録の権限です。sAiityはビデオを録画せず、スクリーンショットも撮りません。"
+            "value": "macOSにはシステムオーディオ専用の権限がなく、それを管理しているのが画面収録の権限です。Syllivraはビデオを録画せず、スクリーンショットも撮りません。"
           }
         }
       }
@@ -18617,118 +19508,118 @@
         }
       }
     },
-    "sAiity": {
+    "Syllivra": {
       "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiity"
+            "value": "Syllivra"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiity"
+            "value": "Syllivra"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiity"
+            "value": "Syllivra"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiity"
+            "value": "Syllivra"
           }
         }
       }
     },
-    "sAiity is running from %@. From Applications, the Screen Recording permission sticks across launches and updates can install themselves. This is one copy, done once.": {
+    "Syllivra is running from %@. From Applications, the Screen Recording permission sticks across launches and updates can install themselves. This is one copy, done once.": {
       "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiity läuft gerade von hier: %@. Aus dem Ordner „Programme“ bleibt die Bildschirmaufnahme-Berechtigung über Starts hinweg erhalten, und Updates können sich installieren. Eine Kopie, einmalig."
+            "value": "Syllivra läuft gerade von hier: %@. Aus dem Ordner „Programme“ bleibt die Bildschirmaufnahme-Berechtigung über Starts hinweg erhalten, und Updates können sich installieren. Eine Kopie, einmalig."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiity se está ejecutando desde %@. Desde Aplicaciones, el permiso de Grabación de pantalla se mantiene entre aperturas y las actualizaciones pueden instalarse solas. Es una sola copia, hecha una vez."
+            "value": "Syllivra se está ejecutando desde %@. Desde Aplicaciones, el permiso de Grabación de pantalla se mantiene entre aperturas y las actualizaciones pueden instalarse solas. Es una sola copia, hecha una vez."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiity s'exécute depuis %@. Depuis Applications, l'autorisation Enregistrement de l'écran persiste d'un lancement à l'autre et les mises à jour peuvent s'installer elles-mêmes. C'est une seule copie, faite une seule fois."
+            "value": "Syllivra s'exécute depuis %@. Depuis Applications, l'autorisation Enregistrement de l'écran persiste d'un lancement à l'autre et les mises à jour peuvent s'installer elles-mêmes. C'est une seule copie, faite une seule fois."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiityは%@から実行されています。アプリケーションフォルダからであれば、画面収録の権限が起動をまたいで維持され、アップデートも自動でインストールされます。コピーは1回、これきりです。"
+            "value": "Syllivraは%@から実行されています。アプリケーションフォルダからであれば、画面収録の権限が起動をまたいで維持され、アップデートも自動でインストールされます。コピーは1回、これきりです。"
           }
         }
       }
     },
-    "sAiity — on-device live subtitles": {
+    "Syllivra — on-device live subtitles": {
       "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiity – Live-Untertitel direkt auf dem Gerät"
+            "value": "Syllivra – Live-Untertitel direkt auf dem Gerät"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiity — subtítulos en vivo en el dispositivo"
+            "value": "Syllivra — subtítulos en vivo en el dispositivo"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiity — sous-titres en direct sur l'appareil"
+            "value": "Syllivra — sous-titres en direct sur l'appareil"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiity — オンデバイスのライブ字幕"
+            "value": "Syllivra — オンデバイスのライブ字幕"
           }
         }
       }
     },
-    "sAiity, recording": {
+    "Syllivra, recording": {
       "extractionState": "manual",
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiity, zeichnet auf"
+            "value": "Syllivra, zeichnet auf"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiity, grabando"
+            "value": "Syllivra, grabando"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiity, enregistrement en cours"
+            "value": "Syllivra, enregistrement en cours"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "sAiity、記録中"
+            "value": "Syllivra、記録中"
           }
         }
       }

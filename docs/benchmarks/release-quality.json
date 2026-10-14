@@ -1,11 +1,40 @@
 {
   "minimumRuns": 5,
+  "languageEvidence": {
+    "status": "unverified",
+    "requiredCohorts": ["en", "de", "ja", "zh-Hans", "zh-Hant", "fr", "es", "pt", "ar", "ru", "hi", "ko"],
+    "minimumClips": 1,
+    "minimumSpeakers": 1,
+    "corpusGoal": {"clips": 20, "speakers": 3, "conditions": {"clean": 12, "difficult": 4, "critical": 4}}
+  },
   "requiredCategories": ["german", "english", "mixed", "noise", "technical"],
   "models": {
     "warm_segmented_decode": ["nemotron-2240", "whisper-base"],
-    "warm_live_stream": ["nemotron-2240"],
-    "release_to_insertion": ["nemotron-2240"]
+    "warm_live_stream": ["nemotron-1120", "nemotron-2240"],
+    "release_to_insertion": ["nemotron-1120", "nemotron-2240"]
   },
+  "configurations": {
+    "warm_segmented_decode": [
+      {"chunkMs": 2240, "cleanup": "off", "translation": "off", "target": null}
+    ],
+    "warm_live_stream": [
+      {"chunkMs": 1120, "realtime": true, "cleanup": "off", "translation": "off", "target": null},
+      {"chunkMs": 2240, "realtime": true, "cleanup": "off", "translation": "off", "target": null},
+      {"chunkMs": 1120, "realtime": true, "cleanup": "off", "translation": "hy-mt2", "target": "de"},
+      {"chunkMs": 2240, "realtime": true, "cleanup": "off", "translation": "madlad", "target": "de"}
+    ],
+    "release_to_insertion": [
+      {"chunkMs": 1120, "cleanup": "rules", "translation": "off", "target": null},
+      {"chunkMs": 2240, "cleanup": "rules", "translation": "off", "target": null},
+      {"chunkMs": 1120, "cleanup": "model", "translation": "off", "target": null},
+      {"chunkMs": 2240, "cleanup": "model", "translation": "off", "target": null},
+      {"chunkMs": 2240, "cleanup": "rules", "translation": "hy-mt2", "target": "de"},
+      {"chunkMs": 2240, "cleanup": "model", "translation": "hy-mt2", "target": "de"},
+      {"chunkMs": 2240, "cleanup": "rules", "translation": "madlad", "target": "de"},
+      {"chunkMs": 2240, "cleanup": "model", "translation": "madlad", "target": "de"}
+    ]
+  },
+  "translationLatency": {"status": "unverified", "limits": null},
   "limits": {
     "warm_segmented_decode": {"wer": 0.25, "missingWords": 2, "realTimeFactor": 1.0},
     "warm_live_stream": {"wer": 0.25, "missingWords": 2, "firstVolatileSeconds": 5.0, "firstFinalSeconds": 8.0, "finalizationSeconds": 5.0, "droppedAudioSeconds": 0.0},

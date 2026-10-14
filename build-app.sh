@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds sAiity.app.  ./build-app.sh [--install]
+# Builds Syllivra.app.  ./build-app.sh [--install]
 #
 # A bare SwiftPM executable cannot hold Screen Recording permission: TCC keys off
 # a bundle identifier + code signature, so system-audio capture silently fails
@@ -15,7 +15,7 @@ if ! xcrun --find xcstringstool >/dev/null 2>&1; then
     exit 1
 fi
 
-NAME="sAiity"
+NAME="Syllivra"
 APP="build/$NAME.app"
 
 # Version from git, so a bug report can name the build it came from. Falls back
@@ -159,6 +159,10 @@ if [ -f Resources/Localizable.xcstrings ]; then
         --output-directory "$APP/Contents/Resources"
     echo "localized: $(ls -d "$APP/Contents/Resources/"*.lproj | wc -l | tr -d ' ') languages"
 fi
+if [ -f Resources/InfoPlist.xcstrings ]; then
+    xcrun xcstringstool compile Resources/InfoPlist.xcstrings \
+        --output-directory "$APP/Contents/Resources"
+fi
 
 # Record whether this bundle carries the test-only environment hooks.
 #
@@ -201,8 +205,8 @@ fi
 # stale the first time a dependency changed.
 CREDITS="$APP/Contents/Resources/Credits.txt"
 {
-    echo "sAiity"
-    echo "The sAiity application source is public for inspection. No license is granted to copy, modify, or redistribute it."
+    echo "Syllivra"
+    echo "The Syllivra application source is public for inspection. No license is granted to copy, modify, or redistribute it."
     echo
     echo "This application includes software from the following projects."
     echo "================================================================"
@@ -293,7 +297,7 @@ if [ -d "$APP/Contents/Frameworks" ]; then
     #    inside a bundle from step 1 is already covered by that bundle.
     #
     #    Match on the path RELATIVE to Frameworks/, not the absolute one. The
-    #    app bundle is itself called sAiity.app, so every absolute path under it
+    #    app bundle is itself called Syllivra.app, so every absolute path under it
     #    contains ".app/" — testing the full path skipped every loose executable
     #    including the one this step exists for, and Apple's second rejection was
     #    Autoupdate alone.
@@ -350,7 +354,7 @@ echo "built: $APP"
 #   # system-audio capture with no window and no consent, so a hook surviving
 #   # into a signed, stapled build is the one mistake here that is a security
 #   # problem rather than an inconvenience.
-#   if strings "$APP/Contents/MacOS/sAiity" | grep -q "SAIITY_AUTOSTART"; then
+#   if strings "$APP/Contents/MacOS/Syllivra" | grep -q "SAIITY_AUTOSTART"; then
 #       echo "FATAL: test hooks are compiled into this binary; refusing to notarise."
 #       exit 1
 #   fi

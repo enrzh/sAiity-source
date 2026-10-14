@@ -11,7 +11,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VERSION="${1:?usage: scripts/make-dmg.sh <version>}"
-NAME="sAiity"
+NAME="Syllivra"
 APP="build/$NAME.app"
 DMG="build/$NAME-$VERSION.dmg"
 STAGE="build/dmg-stage"

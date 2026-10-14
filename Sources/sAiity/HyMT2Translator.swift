@@ -92,25 +92,27 @@ final class HyMT2Translator: Translating, @unchecked Sendable {
 
         progress(String(localized: "Loading \(Self.displayName)…"))
         let url = Self.localURL
-        let loaded: LLM? = await Task.detached(priority: .userInitiated) {
-            guard let model = LLM(
-                from: url,
-                template: Self.template,
-                topK: 20,
-                topP: 0.6,
-                temp: Self.generationTemperature,
-                repeatPenalty: 1.05,
-                maxTokenCount: 2048) else {
-                return nil
+        let loaded: LLM = try await LocalGeneration.loadModel {
+            let loaded: LLM? = await Task.detached(priority: .userInitiated) {
+                guard let model = LLM(
+                    from: url,
+                    template: Self.template,
+                    topK: 20,
+                    topP: 0.6,
+                    temp: Self.generationTemperature,
+                    repeatPenalty: 1.05,
+                    maxTokenCount: 2048) else {
+                    return nil
+                }
+                model.postprocess = { _ in }
+                model.update = { _ in }
+                return model
+            }.value
+            guard let loaded else {
+                throw TranslationEngineError.notAvailable(
+                    String(localized: "Could not load \(Self.displayName)."))
             }
-            model.postprocess = { _ in }
-            model.update = { _ in }
-            return model
-        }.value
-
-        guard let loaded else {
-            throw TranslationEngineError.notAvailable(
-                String(localized: "Could not load \(Self.displayName)."))
+            return loaded
         }
         llm = loaded
         progress(String(localized: "\(Self.displayName) ready."))
@@ -126,7 +128,7 @@ final class HyMT2Translator: Translating, @unchecked Sendable {
         return try await LocalGeneration.run(llm, user: input, payload: payload)
     }
 
-    func translate(_ text: String, from _: String, to target: String) async throws -> String? {
+    func translate(_ text: String, from source: String, to target: String) async throws -> String? {
         guard llm != nil,
               let targetName = HyMT2LanguageProvider.nativeCode(for: target) else {
             return nil
@@ -142,7 +144,7 @@ final class HyMT2Translator: Translating, @unchecked Sendable {
 
         let user = Self.instruction(targetName: targetName, source: text)
         guard let raw = try await generate(user, payload: text) else { return nil }
-        switch TranslationOutputValidator.sanitize(raw, input: text, target: target) {
+        switch TranslationOutputValidator.sanitize(raw, input: text, target: target, source: source) {
         case .ok(let output):
             return output
         case .rejected(let why, let retryable):
@@ -152,7 +154,7 @@ final class HyMT2Translator: Translating, @unchecked Sendable {
             let retry = Self.retryPrompt(targetName: targetName, source: text)
             guard let rawRetry = try await generate(retry, payload: text, temperature: Self.retryTemperature),
                   case .ok(let output) = TranslationOutputValidator.sanitize(
-                    rawRetry, input: text, target: target) else {
+                    rawRetry, input: text, target: target, source: source) else {
                 return nil
             }
             return output

@@ -31,6 +31,7 @@ import NaturalLanguage
 /// So: run it over the *accumulated* transcript, never a single line, and require
 /// agreement twice before acting.
 struct LanguageDetector {
+    private static let scriptExpressions = RegexCache()
     /// Below this much accumulated text, detection is noise.
     var minCharacters = 60
     /// Dominant-language probability required to count as a reading.
@@ -101,6 +102,68 @@ struct LanguageDetector {
         guard let hypothesis = LanguageRecognizerPool.shared.classify(value),
               hypothesis.probability >= minimumProbability else { return nil }
         return hypothesis.language.rawValue
+    }
+
+    /// Resolve a coherent phrase, keeping an audio hint only when its script
+    /// is compatible. Names and short shared-script fragments stay uncertain.
+    static func sourceLanguage(in text: String, hint: String? = nil) -> String? {
+        let value = text.folding(options: .widthInsensitive, locale: nil)
+        let letters = value.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count
+        guard letters > 0 else { return nil }
+        func has(_ script: String) -> Bool {
+            Self.scriptExpressions.expression(for: "\\p{script=\(script)}")?
+                .firstMatch(in: value, range: NSRange(value.startIndex..., in: value)) != nil
+        }
+        let kana = has("Hiragana") || has("Katakana")
+        let hangul = has("Hangul")
+        let han = has("Han")
+        // A long, confidently Chinese Han run adjoining Japanese grammar is
+        // evidence against a single-language claim, not a precise word boundary.
+        if kana, han,
+           let expression = scriptExpressions.expression(for: #"\p{script=Han}{8,}"#) {
+            for match in expression.matches(in: value, range: NSRange(value.startIndex..., in: value)) {
+                guard let range = Range(match.range, in: value) else { continue }
+                let probabilities = LanguageRecognizerPool.shared.hypotheses(in: String(value[range]))
+                let chinese = probabilities.reduce(0.0) { total, entry in
+                    total + (TranslationLanguage.baseCode(entry.key.rawValue) == "zh" ? entry.value : 0)
+                }
+                if chinese >= 0.9 { return nil }
+            }
+        }
+        let baseHint = hint.map(TranslationLanguage.baseCode)
+        let compatible: Bool
+        if kana { compatible = baseHint == "ja" }
+        else if hangul { compatible = baseHint == "ko" }
+        else if han { compatible = ["zh", "ja", "ko"].contains(baseHint ?? "") }
+        else if has("Cyrillic") { compatible = ["ru", "uk", "bg", "sr", "mk", "be", "kk", "ky", "mn", "tg"].contains(baseHint ?? "") }
+        else if has("Arabic") { compatible = ["ar", "fa", "ur", "ps", "sd", "ug", "ku"].contains(baseHint ?? "") }
+        else if has("Devanagari") { compatible = ["hi", "mr", "ne", "sa"].contains(baseHint ?? "") }
+        else if has("Hebrew") { compatible = ["he", "yi"].contains(baseHint ?? "") }
+        else if has("Thai") { compatible = baseHint == "th" }
+        else if has("Tamil") { compatible = baseHint == "ta" }
+        else if has("Bengali") { compatible = ["bn", "as"].contains(baseHint ?? "") }
+        else if has("Latin") {
+            compatible = baseHint != nil && !["auto", "und", "zh", "ja", "ko", "ru", "uk", "ar", "fa", "ur", "hi", "he", "th", "ta", "bn"].contains(baseHint ?? "")
+        } else { compatible = false }
+
+        // The two Chinese writing variants are mutually exclusive hypotheses
+        // for the same language. Never combine probabilities of different bases.
+        var probabilities: [String: Double] = [:]
+        if letters >= 2 {
+            for (language, probability) in LanguageRecognizerPool.shared.hypotheses(in: value) {
+                probabilities[TranslationLanguage.baseCode(language.rawValue), default: 0] += probability
+            }
+        }
+        let minimum = letters >= 6 ? 0.85 : 0.99
+        if let best = probabilities.max(by: { $0.value < $1.value }), best.value >= minimum {
+            if compatible, best.key == baseHint { return hint }
+            return best.key
+        }
+        // Kana/Hangul are local phrase evidence, unlike shared Han. Width
+        // folding is for classification only; the returned speech stays intact.
+        if kana, !hangul, letters >= 2 { return compatible ? hint : "ja" }
+        if hangul, !kana, letters >= 2 { return compatible ? hint : "ko" }
+        return compatible ? hint : nil
     }
 
     /// The installed transcriber locale that best matches a detected language,

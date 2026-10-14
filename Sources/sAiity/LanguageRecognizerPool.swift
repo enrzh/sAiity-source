@@ -19,8 +19,27 @@ final class LanguageRecognizerPool: @unchecked Sendable {
 
     private let lock = NSLock()
     private var available: [NLLanguageRecognizer] = []
+    private var hypothesisCache = BoundedCache<String, [NLLanguage: Double]>(capacity: 256)
 
     func classify(_ text: String) -> (language: NLLanguage, probability: Double)? {
+        withRecognizer(for: text) { recognizer in
+            guard let language = recognizer.dominantLanguage else { return nil }
+            return (language, recognizer.languageHypotheses(withMaximum: 1)[language] ?? 0)
+        }
+    }
+
+    /// Script variants share a source language, but remain separate output targets.
+    func hypotheses(in text: String) -> [NLLanguage: Double] {
+        if let cached = lock.withLock({ hypothesisCache[text] }) { return cached }
+        let result = withRecognizer(for: text) { $0.languageHypotheses(withMaximum: 8) }
+        // Keep repeated phrase analysis cheap without retaining oversized transcript lines.
+        if text.utf8.count <= 16_384 {
+            lock.withLock { hypothesisCache[text] = result }
+        }
+        return result
+    }
+
+    private func withRecognizer<T>(for text: String, _ read: (NLLanguageRecognizer) -> T) -> T {
         lock.lock()
         let recognizer = available.popLast() ?? NLLanguageRecognizer()
         lock.unlock()
@@ -34,11 +53,7 @@ final class LanguageRecognizerPool: @unchecked Sendable {
         recognizer.processString(text)
         // Read every hypothesis the caller needs before the recognizer goes
         // back, since the next borrower overwrites them.
-        var result: (language: NLLanguage, probability: Double)?
-        if let language = recognizer.dominantLanguage {
-            let probability = recognizer.languageHypotheses(withMaximum: 1)[language] ?? 0
-            result = (language, probability)
-        }
+        let result = read(recognizer)
 
         lock.lock()
         // A small cap, so a burst of parallel work does not turn the pool into

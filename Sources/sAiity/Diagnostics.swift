@@ -14,6 +14,25 @@ public struct DiagnosticsRuntimeTiming: Codable, Equatable, Sendable {
     public let operation: String
     public let seconds: Double
     public let cold: Bool?
+    public let runID: String?
+    public let outcome: String?
+    public let fallbackReason: String?
+    public let modelLoadCount: Int?
+    public let modelCallCount: Int?
+
+    public init(date: Date, operation: String, seconds: Double, cold: Bool? = nil,
+                runID: String? = nil, outcome: String? = nil, fallbackReason: String? = nil,
+                modelLoadCount: Int? = nil, modelCallCount: Int? = nil) {
+        self.date = date
+        self.operation = operation
+        self.seconds = seconds
+        self.cold = cold
+        self.runID = runID
+        self.outcome = outcome
+        self.fallbackReason = fallbackReason
+        self.modelLoadCount = modelLoadCount
+        self.modelCallCount = modelCallCount
+    }
 }
 
 public struct DiagnosticsTimingSummary: Equatable, Sendable {
@@ -24,6 +43,52 @@ public struct DiagnosticsTimingSummary: Equatable, Sendable {
 }
 
 enum DiagnosticsTimingSummarizer {
+    static func slowestStage(_ timings: [DiagnosticsRuntimeTiming]) -> DiagnosticsRuntimeTiming? {
+        let stages = ["dictation.preparation", "dictation.preparation-wait", "dictation.capture-start", "dictation.transcription",
+                      "dictation.cleanup", "dictation.translation", "dictation.delivery"]
+        return timings.filter { stages.contains($0.operation) && $0.seconds.isFinite && $0.seconds >= 0 }
+            .max { $0.seconds < $1.seconds }
+    }
+
+    static func stageTitle(_ operation: String) -> String {
+        switch operation {
+        case "dictation.preparation": String(localized: "Preparing recognition")
+        case "dictation.preparation-wait": String(localized: "Waiting for recognition")
+        case "dictation.capture-start": String(localized: "Starting microphone")
+        case "dictation.transcription", "model.recognition": String(localized: "Recognizing speech")
+        case "dictation.cleanup": String(localized: "Cleaning text")
+        case "dictation.translation": String(localized: "Translating text")
+        case "dictation.delivery": String(localized: "Delivering result")
+        case "dictation.total": String(localized: "Whole dictation")
+        case "dictation.release-to-result": String(localized: "From release to result")
+        case "dictation.release-to-insert": String(localized: "From release to delivery")
+        case "dictation.cleanup.requests": String(localized: "Cleanup model requests")
+        case "model.load": String(localized: "Loading a local model")
+        case "model.generation": String(localized: "Generating text")
+        case "model.prompt": String(localized: "Reading model input")
+        case "model.decode": String(localized: "Decoding text")
+        default: operation
+        }
+    }
+
+    static func slowestExplanation(_ operation: String) -> String {
+        switch operation {
+        case "dictation.preparation", "dictation.preparation-wait": String(localized: "Most time was spent preparing speech recognition.")
+        case "dictation.capture-start": String(localized: "Most time was spent starting the microphone.")
+        case "dictation.transcription": String(localized: "Most time was spent recognizing speech.")
+        case "dictation.cleanup": String(localized: "Most time was spent cleaning text.")
+        case "dictation.translation": String(localized: "Most time was spent translating text.")
+        case "dictation.delivery": String(localized: "Most time was spent delivering the result.")
+        default: ""
+        }
+    }
+
+    static func latestRun(_ timings: [DiagnosticsRuntimeTiming]) -> [DiagnosticsRuntimeTiming] {
+        let recent = timings.prefix(20)
+        guard let runID = recent.first(where: { $0.runID != nil })?.runID else { return [] }
+        return recent.filter { $0.runID == runID }
+    }
+
     static func summarize(_ timings: [DiagnosticsRuntimeTiming]) -> [DiagnosticsTimingSummary] {
         Dictionary(grouping: timings, by: \.operation)
             .map { operation, values in
@@ -141,8 +206,15 @@ public enum Diagnostics {
     private static var flushTask: Task<Void, Never>?
     private static var notifyTask: Task<Void, Never>?
 
+    private static var runtimeDefaults: UserDefaults {
+#if SAIITY_TEST_HOOKS
+        if let runtimeDefaultsForTests { return runtimeDefaultsForTests }
+#endif
+        return .standard
+    }
+
     private static func read<T: Decodable>(_ type: T.Type, key: String) -> [T] {
-        guard let data = UserDefaults.standard.data(forKey: key),
+        guard let data = runtimeDefaults.data(forKey: key),
               let values = try? JSONDecoder().decode([T].self, from: data) else {
             return []
         }
@@ -151,7 +223,7 @@ public enum Diagnostics {
 
     private static func write<T: Encodable>(_ values: [T], key: String) {
         guard let data = try? JSONEncoder().encode(values) else { return }
-        UserDefaults.standard.set(data, forKey: key)
+        runtimeDefaults.set(data, forKey: key)
     }
 
     /// Seed the in-memory history from disk on first touch of this run, so a
@@ -245,6 +317,10 @@ public enum Diagnostics {
         DiagnosticsTimingSummarizer.summarize(recentTimings)
     }
 
+    public static var recentLatestRun: [DiagnosticsRuntimeTiming] {
+        DiagnosticsTimingSummarizer.latestRun(recentTimings)
+    }
+
     public static var latestFailure: DiagnosticsRuntimeFailure? { recentFailures.first }
 
     public static func recordFailure(operation: String, reason: String) {
@@ -262,11 +338,16 @@ public enum Diagnostics {
         scheduleFlushAndNotify()
     }
 
-    public static func recordTiming(operation: String, seconds: Double, cold: Bool? = nil) {
+    public static func recordTiming(operation: String, seconds: Double, cold: Bool? = nil,
+                                    runID: String? = nil, outcome: String? = nil,
+                                    fallbackReason: String? = nil, modelLoadCount: Int? = nil,
+                                    modelCallCount: Int? = nil) {
         let operation = operation.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !operation.isEmpty, seconds.isFinite, seconds >= 0 else { return }
         loadTimings()
-        timingStore.append(.init(date: Date(), operation: operation, seconds: seconds, cold: cold))
+        timingStore.append(.init(date: Date(), operation: operation, seconds: seconds, cold: cold,
+                                 runID: runID ?? LocalGeneration.dictationRunID, outcome: outcome, fallbackReason: fallbackReason,
+                                 modelLoadCount: modelLoadCount, modelCallCount: modelCallCount))
         if timingStore.count > historyLimit * 2 {
             timingStore.removeFirst(timingStore.count - historyLimit)
         }
@@ -283,7 +364,32 @@ public enum Diagnostics {
     }
 
 #if SAIITY_TEST_HOOKS
+    private static var runtimeDefaultsForTests: UserDefaults?
+
+    /// Synchronous scope: original tasks cannot resume while a test domain is installed.
+    public static func withRuntimeHistoryForTests(defaults: UserDefaults,
+                                                  _ body: () throws -> Void) rethrows {
+        let previous = (runtimeDefaultsForTests, failuresLoaded, timingsLoaded,
+                        failureStore, timingStore, flushTask, notifyTask)
+        runtimeDefaultsForTests = defaults
+        failuresLoaded = true
+        timingsLoaded = true
+        failureStore = []
+        timingStore = []
+        flushTask = nil
+        notifyTask = nil
+        defer {
+            flushTask?.cancel()
+            notifyTask?.cancel()
+            (runtimeDefaultsForTests, failuresLoaded, timingsLoaded,
+             failureStore, timingStore, flushTask, notifyTask) = previous
+        }
+        try body()
+    }
+
     public static func clearRuntimeHistoryForTests() {
+        // Clearing a test history must never fall through to the live defaults domain.
+        guard let defaults = runtimeDefaultsForTests else { return }
         flushTask?.cancel()
         notifyTask?.cancel()
         flushTask = nil
@@ -292,8 +398,8 @@ public enum Diagnostics {
         timingStore = []
         failuresLoaded = true
         timingsLoaded = true
-        UserDefaults.standard.removeObject(forKey: failureKey)
-        UserDefaults.standard.removeObject(forKey: timingKey)
+        defaults.removeObject(forKey: failureKey)
+        defaults.removeObject(forKey: timingKey)
         NotificationCenter.default.post(name: changed, object: nil)
     }
 
@@ -312,13 +418,63 @@ public enum Diagnostics {
     }
 #endif
 
+    /// Formats synthetic or already-captured history without reading app state.
+    static func runtimeHistoryReport(failures: [DiagnosticsRuntimeFailure],
+                                     timings: [DiagnosticsRuntimeTiming]) -> [String] {
+        let timings = Array(timings.prefix(historyLimit))
+        let date = ISO8601DateFormatter()
+        func timingLine(_ timing: DiagnosticsRuntimeTiming) -> String {
+            var line = "  \(date.string(from: timing.date)) \(timing.operation): \(String(format: "%.3f", timing.seconds))s"
+            if let cold = timing.cold { line += cold ? " · cold" : " · warm" }
+            // Persisted metadata must not become an arbitrary speech/content export channel.
+            if let rawID = timing.runID, let id = UUID(uuidString: rawID) {
+                line += " · runID=\(id.uuidString)"
+            }
+            if let outcome = timing.outcome,
+               ["inserted", "copied", "copy-failed", "cancelled", "failed"].contains(outcome) {
+                line += " · outcome=\(outcome)"
+            }
+            if let reason = timing.fallbackReason,
+               ["cleanup-unavailable", "translation-unavailable", "validation-rejected"].contains(reason) {
+                line += " · fallbackReason=\(reason)"
+            }
+            if let loads = timing.modelLoadCount, loads >= 0 { line += " · modelLoadCount=\(loads)" }
+            if let calls = timing.modelCallCount, calls >= 0 { line += " · modelCallCount=\(calls)" }
+            return line
+        }
+
+        var out = ["recent failures:"]
+        if failures.isEmpty {
+            out.append("  none")
+        } else {
+            for failure in failures.prefix(historyLimit) {
+                out.append("  \(date.string(from: failure.date)) \(failure.operation): \(DiagnosticsRedactor.redact(failure.reason))")
+            }
+        }
+        out.append("recent timings:")
+        out.append(contentsOf: timings.isEmpty ? ["  none"] : timings.map(timingLine))
+        out.append("timing percentiles (recent):")
+        let summaries = DiagnosticsTimingSummarizer.summarize(timings)
+        if summaries.isEmpty {
+            out.append("  none")
+        } else {
+            for summary in summaries {
+                out.append("  \(summary.operation): n=\(summary.count) p50=\(String(format: "%.3f", summary.p50))s p95=\(String(format: "%.3f", summary.p95))s")
+            }
+        }
+        out.append("latest dictation run:")
+        let run = DiagnosticsTimingSummarizer.latestRun(timings)
+        out.append(contentsOf: run.isEmpty ? ["  none"] : run.map(timingLine))
+        return out
+    }
+
     public static func report() -> String {
         flushNow()
         var out: [String] = []
         let info = Bundle.main
         let v = info.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
         let b = info.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
-        out.append("sAiity diagnostics — \(ISO8601DateFormatter().string(from: Date()))")
+        out.append("Syllivra diagnostics — \(ISO8601DateFormatter().string(from: Date()))")
         out.append("app: \(v) (\(b))")
         out.append("macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)")
         out.append("")
@@ -348,32 +504,7 @@ public enum Diagnostics {
             out.append(line)
         }
         out.append("")
-        out.append("recent failures:")
-        let failureDate = ISO8601DateFormatter()
-        if recentFailures.isEmpty {
-            out.append("  none")
-        } else {
-            for failure in recentFailures {
-                out.append("  \(failureDate.string(from: failure.date)) \(failure.operation): \(DiagnosticsRedactor.redact(failure.reason))")
-            }
-        }
-        out.append("recent timings:")
-        if recentTimings.isEmpty {
-            out.append("  none")
-        } else {
-            for timing in recentTimings {
-                let temperature = timing.cold == nil ? "" : (timing.cold == true ? " · cold" : " · warm")
-                out.append("  \(failureDate.string(from: timing.date)) \(timing.operation): \(String(format: "%.3f", timing.seconds))s\(temperature)")
-            }
-        }
-        out.append("timing percentiles (recent):")
-        if recentTimingSummaries.isEmpty {
-            out.append("  none")
-        } else {
-            for summary in recentTimingSummaries {
-                out.append("  \(summary.operation): n=\(summary.count) p50=\(String(format: "%.3f", summary.p50))s p95=\(String(format: "%.3f", summary.p95))s")
-            }
-        }
+        out.append(contentsOf: runtimeHistoryReport(failures: recentFailures, timings: recentTimings))
         out.append("")
         out.append("log (this run):")
         out.append(contentsOf: logSinceLaunch())
@@ -384,7 +515,7 @@ public enum Diagnostics {
         let panel = NSSavePanel()
         let df = DateFormatter()
         df.dateFormat = "yyyy-MM-dd-HHmm"
-        panel.nameFieldStringValue = "sAiity-diagnostics-\(df.string(from: Date())).txt"
+        panel.nameFieldStringValue = "Syllivra-diagnostics-\(df.string(from: Date())).txt"
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {

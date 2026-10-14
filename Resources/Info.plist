@@ -4,12 +4,12 @@
 <dict>
   <key>CFBundleDevelopmentRegion</key><string>en</string>
   <key>CFBundleLocalizations</key><array><string>en</string><string>de</string><string>fr</string><string>es</string><string>ja</string></array>
-  <key>CFBundleName</key><string>sAiity</string>
-  <key>CFBundleDisplayName</key><string>sAiity</string>
-  <!-- Lowercase: reverse-DNS ids are case-folded inconsistently by LaunchServices
-       and tooling, so the brand's capital A stays out of the identifier. -->
+  <key>CFBundleName</key><string>Syllivra</string>
+  <key>CFBundleDisplayName</key><string>Syllivra</string>
+  <!-- Keep the existing identity so preferences, stored speech, models and
+       macOS permission records remain associated with the renamed app. -->
   <key>CFBundleIdentifier</key><string>de.aiity.saiity</string>
-  <key>CFBundleExecutable</key><string>sAiity</string>
+  <key>CFBundleExecutable</key><string>Syllivra</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>
@@ -48,7 +48,7 @@
        on. There is deliberately NO camera entry — the app has no camera call
        site, and declaring intent it does not have is both untrue and an
        automatic App Store 5.1.1 rejection. -->
-  <key>NSMicrophoneUsageDescription</key><string>Only used if you turn on “Include my microphone”: your side of a call is mixed into the captions and transcript. Audio never leaves this Mac.</string>
+  <key>NSMicrophoneUsageDescription</key><string>Used while dictating, and optionally to include your voice in captions. Audio stays on this Mac.</string>
   <key>NSSpeechRecognitionUsageDescription</key><string>Speech is transcribed entirely on this Mac. Nothing is uploaded.</string>
 </dict>
 </plist>

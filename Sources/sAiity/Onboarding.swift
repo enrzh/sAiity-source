@@ -1,4 +1,24 @@
 import AppKit
+import CoreAudio
+
+extension DictationInputHealth {
+    var trialHint: String {
+        guard observedDuration >= 2 else {
+            return String(localized: "Speak a short sentence to check this microphone.")
+        }
+        guard let rmsDBFS, !rmsDBFS.isNaN else {
+            return String(localized: "Audio level is unavailable. The dictation result is still the useful check.")
+        }
+        // shortcut: observational thresholds only; calibrate on approved microphones before quality claims.
+        if clippedSampleFraction > 0.01 {
+            return String(localized: "Input may be clipping. Lower the microphone input level.")
+        }
+        if rmsDBFS < -50 {
+            return String(localized: "Input is very quiet. Check the microphone or move closer.")
+        }
+        return String(localized: "Audio input detected. Review the words below to check recognition.")
+    }
+}
 import CoreGraphics
 import ScreenCaptureKit
 
@@ -12,7 +32,7 @@ enum Onboarding {
 
     private static let completedKey = "onboardingCompletedVersion"
     private static let dismissedKey = "onboardingDismissedVersion"
-    private static let resumeKey = "onboardingResumeStep"
+    static let resumeKey = "onboardingResumeStep"
 
     static var needsRun: Bool {
         if TestHooks.forceOnboarding { return true }

@@ -38,6 +38,9 @@ enum DictationCleanupValidator {
     /// single-digit milliseconds and taking microseconds.
     private static let compiled = RegexCache()
     private static let recognizers = LanguageRecognizerPool()
+    private static let verbatimPattern =
+        #"(?<![\p{L}\p{N}])'(?:\\.|[^'\\]|'(?=\p{L}))*'(?![\p{L}\p{N}])|"(?:\\.|[^"\\])*"|"#
+        + #"“[^”]*”|‘(?:[^’]|’(?=\p{L}))*’|«[^»]*»|「[^」]*」|『[^』]*』|(`+)[\s\S]*?\1"#
 
     private static func expression(_ pattern: String) -> NSRegularExpression? {
         compiled.expression(for: pattern)
@@ -49,24 +52,28 @@ enum DictationCleanupValidator {
 
     /// The deterministic pass and whether a semantic repair still remains.
     ///
-    /// Returned together because the deterministic pass is not free — it
-    /// normalises whitespace and rewrites the spoken repairs in every script it
-    /// knows — and every caller that asks `needsModelCleanup` needs that same
-    /// baseline as its fallback. Computing it once is why this is a pair rather
-    /// than two functions.
+    /// Keep the baseline and model/validation decisions together so callers
+    /// share one deterministic pass and the same fallback.
     static func deterministicOutcome(_ value: String,
-                                      sourceLanguage: String? = nil) -> (baseline: String, needsModel: Bool) {
+                                      sourceLanguage: String? = nil) -> (baseline: String, needsModel: Bool, punctuationOnly: Bool) {
         let baseline = deterministicCleanup(value, sourceLanguage: sourceLanguage)
-        guard !baseline.isEmpty else { return (baseline, false) }
+        guard !baseline.isEmpty else { return (baseline, false, false) }
+
+        // Quoted/code ellipses are literal; spoken punctuation commands already
+        // have a deterministic result. Only raw pauses outside literals need context.
+        let unquoted = replace(value, pattern: verbatimPattern, with: " ")
+        let pause = unquoted.range(of: #"\p{L}[ \t]*(?:\.{3,}|…+)[ \t]*(?=\p{L})"#,
+                                   options: .regularExpression) != nil
 
         // The deterministic pass is language-agnostic. Only send text to the
         // model when a semantic repair remains; a language allow-list made every
         // clean French, Spanish, or long-tail-language sentence pay for LLM
         // inference even when there was nothing left to fix.
         let repairs = #"(?i)\b(i mean|no wait|je veux dire|non attends|quiero decir|no espera|no aspetta|quer dizer|não espera|ik bedoel|nee wacht|mam na myśli|nie czekaj|ich meine|besser gesagt|oder doch)\b|[,;—–]\s*(?:actually|rather|sorry|no|nein|instead|eigentlich|sondern|warte|plutôt|désolé|más bien|perdón|piuttosto|scusa|melhor|desculpa|liever|raczej|przepraszam)\b|(?:いや、?待って|不对|我的意思是|等一下|잠깐만)"#
-        guard let regex = expression(repairs) else { return (baseline, false) }
-        let range = NSRange(baseline.startIndex..<baseline.endIndex, in: baseline)
-        return (baseline, regex.firstMatch(in: baseline, range: range) != nil)
+        let prose = replace(baseline, pattern: verbatimPattern, with: " ")
+        let range = NSRange(prose.startIndex..<prose.endIndex, in: prose)
+        let repair = expression(repairs)?.firstMatch(in: prose, range: range) != nil
+        return (baseline, repair || pause, pause && !repair)
     }
 
     /// Applies the speech repairs that should never depend on a small local
@@ -74,19 +81,19 @@ enum DictationCleanupValidator {
     /// semantic rewrites still belong to the cleanup model.
     static func deterministicCleanup(_ value: String, sourceLanguage: String? = nil) -> String {
         var text = normalizeWhitespace(value)
-        let language = baseLanguage(sourceLanguage) ?? detectedLanguage(in: text).flatMap(baseLanguage)
+        let language = baseLanguage(LanguageDetector.sourceLanguage(in: text, hint: sourceLanguage))
+        guard let language, ["en", "de", "fr", "es", "it", "pt", "nl", "ru", "ja", "zh", "ko", "ar"].contains(language) else { return text }
         text = applySpokenFormatting(text, language: language)
         text = normalizeWhitespace(text)
         text = removeFillers(text, language: language)
 
-        // ASR commonly repeats a word while the speaker is deciding what to
-        // say. Repeat until stable so "please please please" is handled too.
-        while true {
-            let cleaned = replace(text,
-                                  pattern: #"(?i)\b([[:alnum:]][[:alnum:]'’-]*)\s+\1\b"#,
-                                  with: "$1")
-            guard cleaned != text else { break }
-            text = cleaned
+        if let politeness = ["en": "please", "de": "bitte"][language] {
+            // Politeness stutters are repairable; emphatic repetitions carry meaning.
+            while true {
+                let cleaned = replace(text, pattern: "(?i)\\b(" + politeness + ")\\s+\\1\\b", with: "$1")
+                guard cleaned != text else { break }
+                text = cleaned
+            }
         }
 
         // A proper-name correction is safe to resolve without a model. The
@@ -121,6 +128,7 @@ enum DictationCleanupValidator {
     /// model receives this already-formatted baseline and can improve it without
     /// having to infer every command from a single noisy pass.
     private static func applySpokenFormatting(_ value: String, language: String?) -> String {
+        guard let language, ["en", "de", "fr", "es", "it", "pt"].contains(language) else { return value }
         var text = value
         let lineBreaks: [(String, String)]
         switch language {
@@ -256,6 +264,7 @@ enum DictationCleanupValidator {
     }
 
     private static func removeFillers(_ value: String, language: String?) -> String {
+        guard let language, ["en", "de", "fr", "es", "it", "pt", "nl", "ru", "ja", "zh", "ko", "ar"].contains(language) else { return value }
         let fillers: [String]
         switch language {
         case "de": fillers = ["ähm+", "äh", "öhm+", "hm+"]
@@ -269,7 +278,7 @@ enum DictationCleanupValidator {
         case "zh": fillers = ["呃+", "嗯+"]
         case "ko": fillers = ["어+", "음+"]
         case "ar": fillers = ["اممم+"]
-        case "en", nil: fillers = ["um+", "uh+", "erm+", "er", "hmm+", "mmm+"]
+        case "en": fillers = ["um+", "uh+", "erm+", "er", "hmm+", "mmm+"]
         default: fillers = ["uh+", "erm+", "hmm+", "mmm+"]
         }
         let fillerPattern = #"(?i)(?<![\p{L}\p{N}])(?:"#
@@ -280,12 +289,14 @@ enum DictationCleanupValidator {
         // German "um" is normally meaningful ("um acht Uhr"). Remove it as
         // hesitation only at a sentence boundary with hesitation punctuation,
         // which covers "Um... Ja" without damaging real German phrasing.
-        text = replace(text,
-                       pattern: #"(?i)^\s*um+\s*(?:\.{2,}|…+|[,;:，、；：])\s*"#,
-                       with: "")
-        text = replace(text,
-                       pattern: #"(?i)(?<=[.!?。！？])\s*um+\s*(?:\.{2,}|…+|[,;:，、；：])\s*"#,
-                       with: " ")
+        if language == "de" || language == "en" {
+            text = replace(text,
+                           pattern: #"(?i)^\s*um+\s*(?:\.{2,}|…+|[,;:，、；：])\s*"#,
+                           with: "")
+            text = replace(text,
+                           pattern: #"(?i)(?<=[.!?。！？])\s*um+\s*(?:\.{2,}|…+|[,;:，、；：])\s*"#,
+                           with: " ")
+        }
 
         // These words can carry meaning, so only remove them when the speaker
         // marked them as discourse fillers with punctuation.
@@ -302,13 +313,14 @@ enum DictationCleanupValidator {
         case "zh": punctuated = ["那个", "就是说"]
         case "ko": punctuated = ["그러니까", "저기"]
         case "ar": punctuated = ["يعني", "حسنا"]
-        default: punctuated = ["like", "well", "you know"]
+        case "en": punctuated = ["like", "well", "you know"]
+        default: punctuated = []
         }
         let punctuatedPattern = #"(?i)(?<![\p{L}\p{N}])(?:"#
             + punctuated.joined(separator: "|")
             + #")(?![\p{L}\p{N}])[ \t]*(?:[,;:，、；：]|\.{2,}|…+)[ \t]*"#
-        text = replace(text, pattern: punctuatedPattern, with: "")
-        if language == "en" || language == nil {
+        if !punctuated.isEmpty { text = replace(text, pattern: punctuatedPattern, with: "") }
+        if language == "en" {
             text = replace(text,
                            pattern: #"(?i)^\s*(?:you know|basically|well)[ \t]*[,;:][ \t]*"#,
                            with: "")
@@ -370,7 +382,25 @@ enum DictationCleanupValidator {
         let paragraphs = text.components(separatedBy: "\n\n").filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         guard allowParagraphs || paragraphs.count <= 1 || isStructuredList(text) else { return nil }
         if let input {
-            guard meaningTokens(in: input).isSubset(of: meaningTokens(in: text)) else { return nil }
+            if input.contains("...") || input.contains("…") {
+                let outcome = deterministicOutcome(input, sourceLanguage: sourceLanguage)
+                if outcome.punctuationOnly {
+                    guard words(in: outcome.baseline).map({ $0.lowercased() }) == words(in: text).map({ $0.lowercased() }),
+                          let literals = expression(verbatimPattern) else { return nil }
+                    let literalBytes: (String) -> [Data] = { value in
+                        let range = NSRange(value.startIndex..<value.endIndex, in: value)
+                        return literals.matches(in: value, range: range).compactMap { match in
+                            Range(match.range, in: value).map { Data(value[$0].utf8) }
+                        }
+                    }
+                    guard literalBytes(input) == literalBytes(text) else { return nil }
+                }
+            }
+            let language = LanguageDetector.sourceLanguage(in: input, hint: sourceLanguage)
+            guard TranslationOutputValidator.preservesNumericFacts(input, in: text,
+                sourceLanguage: language, outputLanguage: language) else { return nil }
+            let outputMeaning = meaningTokens(in: text)
+            guard meaningTokens(in: input).allSatisfy({ outputMeaning[$0.key, default: 0] >= $0.value }) else { return nil }
             let inputWords = words(in: input)
             let outputWords = words(in: text)
             if inputWords.count >= 8, outputWords.count < max(3, inputWords.count / 4) { return nil }
@@ -436,18 +466,24 @@ enum DictationCleanupValidator {
     private static func mixedLanguageWasPreserved(input: String,
                                                   output: String,
                                                   metadata: DictationLanguageMetadata) -> Bool {
-        // A cleanup may remove a filler, but it must not erase every useful
-        // token from one of the intentionally spoken spans. This catches a
-        // translated German-English result even when both languages share the
-        // Latin script and NaturalLanguage reports only one dominant language.
+        let outputTokens = words(in: output).reduce(into: [String: Int]()) {
+            $0[String($1).folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil), default: 0] += 1
+        }
+        // One surviving word cannot account for a whole spoken span. This is
+        // a conservative omission guard; it does not certify a paraphrase's meaning.
         for region in metadata.regionTexts {
             let tokens = words(in: region).filter { $0.count >= 2 }
             guard !tokens.isEmpty else { continue }
-            let retained = tokens.contains { token in
-                output.range(of: token,
-                             options: [.caseInsensitive, .diacriticInsensitive]) != nil
+            var available = outputTokens
+            var retained = 0
+            for token in tokens {
+                let key = String(token).folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+                if available[key, default: 0] > 0 {
+                    available[key, default: 0] -= 1
+                    retained += 1
+                }
             }
-            guard retained else { return false }
+            guard retained >= (tokens.count * 3 + 4) / 5 else { return false }
         }
 
         // Script changes are stronger evidence than a text classifier. Require
@@ -582,7 +618,7 @@ enum DictationCleanupValidator {
     /// ordinary capitalisation are intentionally not protected because sentence
     /// starts would make those rules reject normal punctuation cleanup.
     private static func protectedTokens(in input: String) -> [String] {
-        let pattern = #"(?i)(?:https?://[^\s]+|www\.[^\s]+|[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}|\d+)"#
+        let pattern = #"(?i)(?:https?://[^\s]+|www\.[^\s]+|[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,})"#
         guard let regex = expression(pattern) else { return [] }
         let range = NSRange(input.startIndex..<input.endIndex, in: input)
         var tokens: [String] = regex.matches(in: input, range: range).compactMap { match -> String? in
@@ -594,19 +630,21 @@ enum DictationCleanupValidator {
         return tokens.filter { seen.insert($0.lowercased()).inserted }
     }
 
-    private static func meaningTokens(in text: String) -> Set<String> {
+    private static func meaningTokens(in text: String) -> [String: Int] {
         let pattern = #"(?i)\b(?:not|never|no|nein|nicht|kein(?:e|en|em|er|es)?|don't|can't|won't|isn't|wasn't|shouldn't|couldn't|maybe|perhaps|possibly|might|vielleicht|eventuell|wahrscheinlich|nunca|jamais|pas|quizá|forse)\b|(?:不|没|ない|않|못)"#
-        guard let regex = expression(pattern) else { return [] }
+        guard let regex = expression(pattern) else { return [:] }
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
-        return Set(regex.matches(in: text, range: range).compactMap { match in
+        let tokens: [String] = regex.matches(in: text, range: range).compactMap { match in
             guard let span = Range(match.range, in: text) else { return nil }
             let token = text[span].lowercased()
             // An isolated correction marker can disappear; an assertion cannot.
             if ["no", "nein"].contains(token),
-               text[..<span.lowerBound].trimmingCharacters(in: .whitespaces).last == "," {
+               text[..<span.lowerBound].trimmingCharacters(in: .whitespaces).last == ",",
+               text[span.upperBound...].trimmingCharacters(in: .whitespaces).first == "," {
                 return nil
             }
             return token
-        })
+        }
+        return tokens.reduce(into: [:]) { $0[$1, default: 0] += 1 }
     }
 }
