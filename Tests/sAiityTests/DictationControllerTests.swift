@@ -6,6 +6,108 @@ import Testing
 
 @MainActor
 @Suite struct DictationControllerTests {
+    @Test("A cold prepare returning after release deadline never starts preview inference or inserts output")
+    func lateColdPreparationDoesNotStartRecognition() async throws {
+        let backend = FakeBackend(log: EventLog())
+        backend.blockPreparation = true
+        let capture = FakeCapture(log: EventLog()), inserter = FakeInserter()
+        let controller = DictationController(makeBackend: { backend }, capture: capture, inserter: inserter,
+            captionsActive: { false }, cleanupConfiguration: { .disabled }, dictationStreamingDraftEnabled: { true })
+        controller.press()
+        let waitingUntil = ContinuousClock.now + .seconds(2)
+        while backend.preparationContinuation == nil, ContinuousClock.now < waitingUntil { await Task.yield() }
+        try #require(backend.preparationContinuation != nil)
+        capture.samples = [0.2, 0.3]
+        LocalGeneration.$deadline.withValue(.now + .milliseconds(5)) { controller.release() }
+        try await Task.sleep(for: .milliseconds(15))
+        backend.finishPreparation()
+        await controller.waitForWorkForTests()
+        #expect(capture.startCalls == 1 && capture.stopCalls == 1)
+        #expect(backend.starts == 0 && backend.finishDictationCalls == 0)
+        #expect(inserter.inserted.isEmpty && !controller.isBusy)
+        if case .failure = controller.phase {} else { Issue.record("Late preparation needs an explicit retryable failure") }
+    }
+    @Test("Native Paste dispatch uses truthful delivery wording without claiming visible insertion")
+    func deliveryCopyDescribesPasteDispatch() async {
+        let backend = FakeBackend(log: EventLog()), inserter = FakeInserter()
+        inserter.outcome = .insertedAndCopied
+        let controller = DictationController(makeBackend: { backend }, capture: FakeCapture(log: EventLog()),
+            inserter: inserter, captionsActive: { false }, cleanupConfiguration: { .disabled })
+        controller.press()
+        await controller.waitForWorkForTests()
+        controller.release()
+        await controller.waitForWorkForTests()
+        #expect(controller.phase == .result(String(localized: "Copied — paste requested")))
+    }
+    @Test("Delayed native preview and forced-cut decoding preserve new tail PCM through release", arguments: [false, true])
+    func delayedForcedCutPreservesCompleteAudio(preview: Bool) async throws {
+        let engine = StreamingASRBackendTests.GatedEngine(finalText: { pcm in
+            pcm.contains(0.4) ? "shared ending" : "source begins shared"
+        })
+        defer { engine.releaseProcess() }
+        let backend = StreamingASRBackend(name: "Synthetic delayed recognizer", engine: engine)
+        let capture = FakeCapture(log: EventLog()), inserter = FakeInserter()
+        let controller = DictationController(makeBackend: { backend }, capture: capture, inserter: inserter,
+            captionsActive: { false }, cleanupConfiguration: { .disabled }, dictationStreamingDraftEnabled: { preview })
+        controller.press()
+        await controller.waitForWorkForTests()
+        let initial = Array(repeating: Float(0.1), count: 3_200)
+        let prefix = initial + Array(repeating: Float(0.2), count: 174_400)
+        if preview {
+            capture.samples = initial
+            capture.onBuffer?(CaptionASRPerformanceTests.audioBufferForDictation(initial[...]))
+            let deadline = ContinuousClock.now + .seconds(2)
+            while !engine.processStarted, ContinuousClock.now < deadline { await Task.yield() }
+            try #require(engine.processStarted)
+        }
+        capture.samples = prefix
+        capture.onBuffer?(CaptionASRPerformanceTests.audioBufferForDictation(prefix[initial.count...]))
+        let deadline = ContinuousClock.now + .seconds(2)
+        while (preview ? backend.acceptingAudioForTests : !engine.processStarted), ContinuousClock.now < deadline {
+            await Task.yield()
+        }
+        #expect(!preview || !backend.acceptingAudioForTests)
+        let full = prefix + Array(repeating: Float(0.4), count: 16_000)
+        capture.samples = full
+        controller.release()
+        #expect(capture.stopped && inserter.inserted.isEmpty)
+        #expect(engine.maximumInFlight == 1)
+        engine.releaseProcess()
+        await controller.waitForWorkForTests()
+        let regions = SpeechRegionSegmenter.default.segment(full, sampleRate: 16_000)
+        #expect(regions.first?.isForced == true)
+        #expect(Array(engine.inputs.suffix(regions.count)) == regions.map { Array(full[$0.audioRange]) })
+        #expect(controller.completedSampleRangesForTests == regions.map(\.coveredRange))
+        #expect(inserter.inserted == ["source begins shared ending"])
+        #expect(engine.maximumInFlight == 1 && capture.takeCalls == 1)
+        await controller.invalidatePreparedBackend()
+    }
+
+    @Test("An incremental decode that outlives release deadline cannot start later regions or leave the run busy")
+    func releaseDeadlineReachesExistingIncrementalTask() async throws {
+        let gate = ContinuationGate(), backend = FakeSegmentedBackend(log: EventLog())
+        backend.transcriptionGate = gate
+        backend.result = .init(text: "synthetic prefix", language: "en")
+        let capture = FakeCapture(log: EventLog()), inserter = FakeInserter()
+        let controller = DictationController(makeBackend: { backend }, capture: capture, inserter: inserter,
+            captionsActive: { false }, cleanupConfiguration: { .disabled })
+        controller.press()
+        await controller.waitForWorkForTests()
+        capture.samples = Array(repeating: 0.2, count: 16_000 * 31)
+        capture.onBuffer?(CaptionASRPerformanceTests.audioBufferForDictation(capture.samples.prefix(1)))
+        let waitingUntil = ContinuousClock.now + .seconds(2)
+        while !gate.entered, ContinuousClock.now < waitingUntil { await Task.yield() }
+        try #require(gate.entered)
+        LocalGeneration.$deadline.withValue(.now + .milliseconds(5)) { controller.release() }
+        try await Task.sleep(for: .milliseconds(15))
+        backend.transcriptionGate = nil
+        gate.open()
+        await controller.waitForWorkForTests()
+        #expect(backend.regionCalls.count == 1)
+        #expect(inserter.inserted.isEmpty)
+        #expect(!controller.isBusy && !controller.isActive)
+        if case .failure = controller.phase {} else { Issue.record("Deadline exhaustion needs an explicit retryable failure") }
+    }
     @Test("dictation corrects a stale Chinese tag before translating coherent Japanese")
     func pql3JapaneseDelivery() async throws {
         let original = "日本語の字幕を確認してください。"
@@ -43,6 +145,8 @@ import Testing
         var stopped = false
         var stopCalls = 0
         var takeCalls = 0
+        var startCalls = 0
+        var onBuffer: (@Sendable (AVAudioPCMBuffer) -> Void)?
         var limitHandler: (@Sendable () -> Void)?
         var waveformHandler: (@Sendable ([Float]) -> Void)?
 
@@ -51,6 +155,8 @@ import Testing
         func start(targetFormat: AVAudioFormat,
                    onBuffer: @escaping @Sendable (AVAudioPCMBuffer) -> Void) throws {
             started = true
+            startCalls += 1
+            self.onBuffer = onBuffer
         }
 
         func stop() {
@@ -60,6 +166,7 @@ import Testing
         }
 
         var samples: [Float] = []
+        var collectedSamples: [[Float]] { samples.isEmpty ? [] : [samples] }
         func takeCollectedSamples() -> [Float] {
             takeCalls += 1
             defer { samples.removeAll() }
@@ -85,6 +192,7 @@ import Testing
         var detectedLanguageResult: String? = "en"
         var authoritativeResult: String? = "hello from dictation"
         var finishDictationCalls = 0
+        var fedSamples: [Float] = []
         var failureHandler: (@Sendable (String) -> Void)?
 
         init(log: EventLog) { self.log = log }
@@ -108,7 +216,11 @@ import Testing
             starts += 1
             self.onChunk = onChunk
         }
-        func feed(_ buffer: AVAudioPCMBuffer) {}
+        func feed(_ buffer: AVAudioPCMBuffer) {
+            if let channel = buffer.floatChannelData?[0] {
+                fedSamples += Array(UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength)))
+            }
+        }
         func setFailureHandler(_ handler: (@Sendable (String) -> Void)?) { failureHandler = handler }
         func flushPending() async {
             log.values.append("backend.flushPending")
@@ -149,6 +261,7 @@ import Testing
         var prepares = 0
         var receivedSamples: [Float] = []
         var receivedRegions: [DictationSpeechRegion] = []
+        var regionCalls: [[DictationSpeechRegion]] = []
         var result = DictationTranscriptionResult(regions: [])
         var transcriptionStarted = false
         var blockTranscription = false
@@ -182,13 +295,15 @@ import Testing
                                  regions: [DictationSpeechRegion]) async throws -> DictationTranscriptionResult {
             receivedSamples = samples
             receivedRegions = regions
+            regionCalls.append(regions)
             transcriptionStarted = true
+            let response = result
             if let transcriptionGate { await transcriptionGate.wait() }
             if let transcriptionError { throw transcriptionError }
             if blockTranscription {
                 try await Task.sleep(nanoseconds: 60_000_000_000)
             }
-            return result
+            return response
         }
         func detectedLanguage() async -> String? { nil }
     }
@@ -989,10 +1104,12 @@ import Testing
     func transcriptionFailureReportsIssue() async {
         let backend = FakeSegmentedBackend(log: EventLog())
         backend.transcriptionError = BackendError.notPrepared
+        let capture = FakeCapture(log: EventLog())
+        capture.samples = [0.2]
         var issues: [String] = []
         let controller = DictationController(
             makeBackend: { backend },
-            capture: FakeCapture(log: EventLog()),
+            capture: capture,
             inserter: FakeInserter(),
             captionsActive: { false },
             onIssue: { operation, reason in issues.append("\(operation):\(reason)") })
@@ -1003,7 +1120,7 @@ import Testing
         await controller.waitForWorkForTests()
 
         #expect(issues.count == 1)
-        #expect(issues[0].hasPrefix("dictation.transcription:"))
+        #expect(issues.first?.hasPrefix("dictation.transcription:") == true)
         #expect(controller.phase == .failure(BackendError.notPrepared.localizedDescription))
     }
 
@@ -1193,7 +1310,7 @@ import Testing
         #expect(backends[1].prepares == 1)
     }
 
-    @Test("a press before readiness waits and starts only after preparation")
+    @Test("a press before recognition readiness immediately records while preparation continues")
     func earlyPressWaitsForPreparation() async {
         let backend = FakeBackend(log: EventLog())
         backend.blockPreparation = true
@@ -1209,8 +1326,9 @@ import Testing
             await Task.yield()
         }
         controller.press()
-        #expect(controller.phase == .starting)
-        #expect(!capture.started)
+        #expect(controller.phase == .dictating)
+        #expect(capture.started)
+        #expect(!capture.stopped)
 
         backend.finishPreparation()
         await controller.waitForWorkForTests()
@@ -1219,7 +1337,91 @@ import Testing
         #expect(controller.phase == .dictating)
     }
 
-    @Test("release before readiness never opens the microphone")
+    @Test("a stable authoritative region is decoded during recording and is not decoded again at release", arguments: [false, true])
+    func completedRecognitionRunsBeforeRelease(preview: Bool) async throws {
+        let capture = FakeCapture(log: EventLog())
+        let backend = FakeSegmentedBackend(log: EventLog())
+        backend.result = .init(text: "Hello world.", language: "en")
+        let inserter = FakeInserter()
+        let controller = DictationController(makeBackend: { backend }, capture: capture,
+            inserter: inserter, captionsActive: { false }, dictationStreamingDraftEnabled: { preview })
+        controller.press()
+        await controller.waitForWorkForTests()
+        capture.samples = Array(repeating: 0.2, count: 16_000) + Array(repeating: 0, count: 6_400)
+            + Array(repeating: 0.2, count: 16_000)
+        let buffer = AVAudioPCMBuffer(pcmFormat: backend.format, frameCapacity: 1)!
+        buffer.frameLength = 1
+        buffer.floatChannelData![0][0] = 0.2
+        capture.onBuffer?(buffer)
+        let waitUntil = ContinuousClock.now + .seconds(2)
+        while backend.regionCalls.isEmpty, ContinuousClock.now < waitUntil {
+            await Task.yield()
+        }
+        #expect(backend.regionCalls.count == 1)
+        #expect(inserter.inserted.isEmpty)
+        let expected = SpeechRegionSegmenter.default.segment(capture.samples, sampleRate: 16_000)
+        #expect(backend.regionCalls.first == Array(expected.prefix(1)))
+        controller.release()
+        await controller.waitForWorkForTests()
+        #expect(backend.regionCalls.flatMap { $0 } == expected)
+        #expect(inserter.inserted == ["Hello world. Hello world."])
+    }
+
+    @Test("a cancelled release cannot commit old authoritative regions into an immediate new recording")
+    func cancelledRegionCannotEnterNextRecording() async throws {
+        let gate = ContinuationGate()
+        let backend = FakeSegmentedBackend(log: EventLog())
+        backend.transcriptionGate = gate
+        backend.result = .init(text: "old recording", language: "en")
+        let capture = FakeCapture(log: EventLog())
+        let inserter = FakeInserter()
+        let controller = DictationController(makeBackend: { backend }, capture: capture,
+            inserter: inserter, captionsActive: { false })
+        controller.press()
+        await controller.waitForWorkForTests()
+        capture.samples = [0.2]
+        controller.release()
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !gate.entered, ContinuousClock.now < deadline { await Task.yield() }
+        #expect(gate.entered)
+        controller.cancel()
+        controller.press()
+        capture.samples = [0.3]
+        backend.result = .init(text: "new recording", language: "en")
+        backend.transcriptionGate = nil
+        gate.open()
+        await controller.waitForWorkForTests()
+        controller.release()
+        await controller.waitForWorkForTests()
+        #expect(inserter.inserted == ["new recording"])
+        #expect(backend.regionCalls.count == 2)
+    }
+
+    @Test("a capped recording waiting for preparation refuses another press and preserves its phrase")
+    func limitWaitRefusesNewPress() async {
+        let backend = FakeBackend(log: EventLog())
+        backend.blockPreparation = true
+        let capture = FakeCapture(log: EventLog())
+        let inserter = FakeInserter()
+        let controller = DictationController(makeBackend: { backend }, capture: capture,
+            inserter: inserter, captionsActive: { false })
+        controller.press()
+        let deadline = ContinuousClock.now + .seconds(2)
+        while backend.preparationContinuation == nil, ContinuousClock.now < deadline { await Task.yield() }
+        capture.samples = [0.2]
+        capture.limitHandler?()
+        while controller.phase != .limit, ContinuousClock.now < deadline { await Task.yield() }
+        #expect(controller.phase == .limit)
+        #expect(controller.isFinishing && controller.isBusy)
+        controller.press()
+        #expect(capture.startCalls == 1)
+        backend.finishPreparation()
+        await controller.waitForWorkForTests()
+        #expect(capture.takeCalls == 1)
+        #expect(inserter.inserted == ["hello from dictation"])
+    }
+
+    @Test("release before readiness stops capture immediately and preserves the recorded phrase")
     func releaseBeforeReadinessDoesNotStartCapture() async {
         let backend = FakeBackend(log: EventLog())
         backend.blockPreparation = true
@@ -1232,15 +1434,27 @@ import Testing
             captionsActive: { false })
 
         controller.press()
+        #expect(capture.started)
+        capture.samples = Array(repeating: 0.2, count: 1600)
+        let earlyBuffer = AVAudioPCMBuffer(pcmFormat: AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1)!,
+                                          frameCapacity: 1600)!
+        earlyBuffer.frameLength = 1600
+        earlyBuffer.floatChannelData![0].update(from: capture.samples, count: 1600)
+        capture.onBuffer?(earlyBuffer)
         for _ in 0..<100 where backend.prepares == 0 {
             await Task.yield()
         }
         controller.release()
+        #expect(capture.stopped)
+        #expect(capture.takeCalls == 1)
         backend.finishPreparation()
         await controller.waitForWorkForTests()
 
-        #expect(!capture.started)
-        #expect(inserter.inserted.isEmpty)
+        #expect(capture.started)
+        #expect(capture.startCalls == 1)
+        #expect(capture.stopCalls == 1)
+        #expect(backend.fedSamples == Array(repeating: 0.2, count: 1600))
+        #expect(inserter.inserted == ["hello from dictation"])
         #expect(!controller.isActive)
     }
 

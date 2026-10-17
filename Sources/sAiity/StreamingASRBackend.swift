@@ -183,6 +183,7 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
     /// out of memory — which is exactly how it was found.
     var pendingSampleCountForTests: Int { pendingLock.withLock { pending.count } }
     var audioClockEndForTests: Int { pendingLock.withLock { audioClockEndSamples } }
+    var acceptingAudioForTests: Bool { pendingLock.withLock { acceptingAudio } }
     #endif
 
     /// Cancel the running pump and wait for it to actually leave the engine.
@@ -192,6 +193,7 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
     /// second pump, or a `finish()`, re-enter the actor and corrupt its buffer
     /// offset.
     private func stopPump(drainPending: Bool = false) async {
+        let waiting = ContinuousClock.now
         let (p, wake) = pumpLock.withLock { () -> (Task<Void, Never>?, AsyncStream<Void>.Continuation?) in
             let p = pump
             pump = nil
@@ -212,6 +214,11 @@ final class StreamingASRBackend: TranscriptionBackend, DictationSegmentTranscrib
             wake?.finish()
             p?.cancel()
             await p?.value
+        }
+        let waited = waiting.duration(to: .now).components
+        await MainActor.run {
+            Diagnostics.recordTiming(operation: "asr.queue-wait",
+                seconds: Double(waited.seconds) + Double(waited.attoseconds) / 1e18)
         }
     }
 

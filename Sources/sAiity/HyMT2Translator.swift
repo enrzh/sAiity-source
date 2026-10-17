@@ -76,6 +76,7 @@ final class HyMT2Translator: Translating, @unchecked Sendable {
             throw TranslationEngineError.notAvailable(
                 String(localized: "\(Self.displayName) cannot translate into \(AppLanguage(code: target).displayName)."))
         }
+        if llm != nil { return }
 
         if !Self.isDownloaded {
             progress(String(localized: "Downloading \(Self.displayName)…"))

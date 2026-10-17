@@ -84,15 +84,29 @@ import Testing
         private var started = false
         private var released = false
         private var continuation: CheckedContinuation<Void, Never>?
+        private var batches: [[Float]] = []
+        private var inFlight = 0
+        private var peak = 0
+        private let finalText: (@Sendable ([Float]) -> String?)?
+
+        init(finalText: (@Sendable ([Float]) -> String?)? = nil) { self.finalText = finalText }
+        var inputs: [[Float]] { lock.withLock { batches } }
+        var maximumInFlight: Int { lock.withLock { peak } }
 
         var processStarted: Bool { lock.withLock { started } }
 
         func load(progress: @escaping @Sendable (String) -> Void) async throws {}
-        func reset() async {}
+        func reset() async { #expect(lock.withLock { inFlight == 0 }) }
         func setPartial(_ callback: @escaping @Sendable (String) -> Void) async {}
 
         func process(_ samples: [Float]) async throws {
-            lock.withLock { started = true }
+            lock.withLock {
+                started = true
+                batches.append(samples)
+                inFlight += 1
+                peak = max(peak, inFlight)
+            }
+            defer { lock.withLock { inFlight -= 1 } }
             await withCheckedContinuation { continuation in
                 let resumeImmediately = lock.withLock { () -> Bool in
                     if released { return true }
@@ -113,8 +127,11 @@ import Testing
             pending?.resume()
         }
 
-        func finishSession() async -> String? { nil }
-        func teardown() async {}
+        func finishSession() async -> String? {
+            #expect(lock.withLock { inFlight == 0 })
+            return lock.withLock { finalText?(batches.last ?? []) }
+        }
+        func teardown() async { #expect(lock.withLock { inFlight == 0 }) }
     }
 
     final class SegmentedEngine: FluidStreamingEngine, @unchecked Sendable {
@@ -124,7 +141,9 @@ import Testing
         var languages: [String?] = []
         var finishIndex = 0
         var waitsForCancellation = false
-        var processStarted = false
+        private let startLock = NSLock()
+        private var didStart = false
+        var processStarted: Bool { startLock.withLock { didStart } }
 
         func load(progress: @escaping @Sendable (String) -> Void) async throws {
             events.append("load")
@@ -139,7 +158,7 @@ import Testing
         }
 
         func process(_ samples: [Float]) async throws {
-            processStarted = true
+            startLock.withLock { didStart = true }
             events.append("process-\(samples.first ?? -1)")
             if waitsForCancellation {
                 try await Task.sleep(nanoseconds: 60_000_000_000)
@@ -435,7 +454,9 @@ import Testing
         let task = Task {
             try await backend.transcribeDictation(samples: [1, 2], regions: [region])
         }
-        for _ in 0..<100 where !engine.processStarted { await Task.yield() }
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !engine.processStarted, ContinuousClock.now < deadline { await Task.yield() }
+        try #require(engine.processStarted, "Cancellation regression must enter native processing first")
         task.cancel()
 
         do {

@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import Carbon.HIToolbox
 import CoreGraphics
+import CryptoKit
 import Foundation
 
 protocol DictationPasteboard: AnyObject {
@@ -30,6 +31,16 @@ struct TextInsertionResult: Equatable {
 
     let outcome: Outcome
     var secureTargetObserved = false
+    /// SHA-256 of the exact UTF-8 payload successfully written to the clipboard.
+    var payloadSHA256: String? = nil
+
+    var deliveryEndpoint: String? {
+        switch outcome {
+        case .copied: "copied"
+        case .insertedAndCopied: "paste-dispatched"
+        case .copyFailed: nil
+        }
+    }
 }
 
 /// The accessibility snapshot used for one dictation insertion. Keeping role,
@@ -38,6 +49,8 @@ struct TextInsertionResult: Equatable {
 /// keyboard events.
 struct TextInsertionTarget: Equatable {
     let role: String?
+    /// Bounded text immediately before the selection start. Legacy injected
+    /// snapshots may still supply an end-of-field prefix here.
     let value: String?
     let isEditable: Bool
     /// `AXSecureTextField` is a *subrole* of `AXTextField`, so the role alone
@@ -104,7 +117,9 @@ final class TextInserter {
     /// `AXSecureTextField` as its subrole. Neither may ever receive dictated
     /// text: the secret would land in the target document *and* stay on the
     /// general pasteboard in cleartext.
-    static let secureRole = "AXSecureTextField"
+    nonisolated static let secureRole = "AXSecureTextField"
+
+    private static let accessibilityTimeout: Float = 0.2
 
     private let pasteboard: any DictationPasteboard
     private let accessibilityTrusted: @MainActor () -> Bool
@@ -171,7 +186,8 @@ final class TextInserter {
     /// Retry copies only; it must never paste into a newly focused destination.
     func copy(_ text: String) -> TextInsertionResult {
         let copied = pasteboard.setString(text)
-        return TextInsertionResult(outcome: copied ? .copied : .copyFailed)
+        return TextInsertionResult(outcome: copied ? .copied : .copyFailed,
+                                   payloadSHA256: copied ? Self.payloadSHA256(text) : nil)
     }
 
     private func insert(_ text: String, shouldPaste: () -> Bool) -> TextInsertionResult {
@@ -187,17 +203,23 @@ final class TextInserter {
         // whatever happens to be focused when the event lands — it can become
         // part of a Terminal command, advance a slide deck, and it stays in the
         // document even when the paste that follows it fails.
-        let payload = Self.needsSeparator(before: target?.value) ? " " + cleaned : cleaned
+        let payload = canPaste && Self.needsSeparator(before: target?.value) ? " " + cleaned : cleaned
         guard pasteboard.setString(payload) else {
             return TextInsertionResult(outcome: .copyFailed, secureTargetObserved: target?.isSecure == true)
         }
+        let payloadSHA256 = Self.payloadSHA256(payload)
 
         guard canPaste, shouldPaste() else {
-            return TextInsertionResult(outcome: .copied, secureTargetObserved: target?.isSecure == true)
+            return TextInsertionResult(outcome: .copied, secureTargetObserved: target?.isSecure == true,
+                                       payloadSHA256: payloadSHA256)
         }
 
-        guard sendPaste() else { return TextInsertionResult(outcome: .copied) }
-        return TextInsertionResult(outcome: .insertedAndCopied)
+        guard sendPaste() else { return TextInsertionResult(outcome: .copied, payloadSHA256: payloadSHA256) }
+        return TextInsertionResult(outcome: .insertedAndCopied, payloadSHA256: payloadSHA256)
+    }
+
+    private static func payloadSHA256(_ payload: String) -> String {
+        SHA256.hash(data: Data(payload.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     private static func canPasteInto(_ target: TextInsertionTarget) -> Bool {
@@ -205,19 +227,14 @@ final class TextInserter {
         return target.isEditable || target.role.map(editableRoles.contains) == true
     }
 
-    /// Separates a new dictated phrase from text already in the target while
-    /// avoiding a duplicate when the target already ends in whitespace.
-    private static func needsSeparator(before existingValue: String?) -> Bool {
-        guard let existingValue,
-              !existingValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              existingValue.last?.isWhitespace != true else {
-            return false
-        }
-        return true
+    /// Separates a phrase at the selection start without duplicating whitespace.
+    private static func needsSeparator(before precedingContext: String?) -> Bool {
+        precedingContext?.last?.isWhitespace == false
     }
 
     private static func currentFocusedUIElement() -> AXUIElement? {
         let system = AXUIElementCreateSystemWide()
+        guard AXUIElementSetMessagingTimeout(system, accessibilityTimeout) == .success else { return nil }
         var focusedValue: CFTypeRef?
         guard AXUIElementCopyAttributeValue(system,
                                             kAXFocusedUIElementAttribute as CFString,
@@ -230,23 +247,59 @@ final class TextInserter {
 
     private static func currentFocusedElement() -> TextInsertionTarget? {
         guard let focused = currentFocusedUIElement() else { return nil }
-        let role = stringAttribute(kAXRoleAttribute, from: focused)
-        let subrole = stringAttribute(kAXSubroleAttribute, from: focused)
-        let value = stringAttribute(kAXValueAttribute, from: focused)
-        let hasSelectedTextRange = attributeIsAvailable(kAXSelectedTextRangeAttribute, on: focused)
-        let valueIsSettable = attributeIsSettable(kAXValueAttribute, on: focused)
-        let isEditable = editableRoles.contains(role ?? "")
-            || hasSelectedTextRange
-            || (value != nil && valueIsSettable)
-        return TextInsertionTarget(role: role, value: value, isEditable: isEditable, subrole: subrole)
+        return currentFocusedElement(from: focused)
     }
 
-    private static func stringAttribute(_ attribute: String, from element: AXUIElement) -> String? {
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element,
-                                            attribute as CFString,
-                                            &value) == .success else { return nil }
-        return value as? String
+    static func currentFocusedElement(
+        from focused: AXUIElement,
+        copyAttributeValue: (AXUIElement, CFString, UnsafeMutablePointer<CFTypeRef?>) -> AXError = AXUIElementCopyAttributeValue,
+        copyParameterizedAttributeValue: (AXUIElement, CFString, CFTypeRef, UnsafeMutablePointer<CFTypeRef?>) -> AXError = AXUIElementCopyParameterizedAttributeValue,
+        setMessagingTimeout: (AXUIElement, Float) -> AXError = AXUIElementSetMessagingTimeout
+    ) -> TextInsertionTarget? {
+        guard setMessagingTimeout(focused, accessibilityTimeout) == .success else { return nil }
+        var roleValue: CFTypeRef?
+        guard copyAttributeValue(focused, kAXRoleAttribute as CFString, &roleValue) == .success,
+              let role = roleValue as? String else { return nil }
+        if role == secureRole {
+            return TextInsertionTarget(role: role, value: nil, isEditable: false)
+        }
+
+        var subroleValue: CFTypeRef?
+        let subroleError = copyAttributeValue(focused, kAXSubroleAttribute as CFString, &subroleValue)
+        // A failed security classification must not turn a password field into
+        // an ordinary editable target. Missing subroles are normal for editors.
+        guard subroleError == .success || subroleError == .attributeUnsupported || subroleError == .noValue else { return nil }
+        let subrole = subroleValue as? String
+        guard subroleError != .success || subrole != nil else { return nil }
+        if subrole == secureRole {
+            return TextInsertionTarget(role: role, value: nil, isEditable: false, subrole: subrole)
+        }
+
+        var selectionValue: CFTypeRef?
+        let hasSelectedTextRange = copyAttributeValue(focused, kAXSelectedTextRangeAttribute as CFString,
+                                                      &selectionValue) == .success
+        let isEditable = editableRoles.contains(role) || hasSelectedTextRange
+            || attributeIsSettable(kAXValueAttribute, on: focused)
+        let target = TextInsertionTarget(role: role, value: nil, isEditable: isEditable, subrole: subrole)
+        guard isEditable, hasSelectedTextRange, let selectionValue,
+              CFGetTypeID(selectionValue) == AXValueGetTypeID() else { return target }
+        var selection = CFRange()
+        guard AXValueGetValue(selectionValue as! AXValue, .cfRange, &selection),
+              selection.location >= 0, selection.length >= 0,
+              selection.location <= Int.max - selection.length,
+              selection.location > 0 else { return target }
+
+        // AX offsets are UTF-16. Query only before the selection start, so
+        // replacement text and an unrelated document suffix cannot affect it.
+        let length = min(selection.location, 32)
+        var precedingRange = CFRange(location: selection.location - length, length: length)
+        guard let rangeValue = AXValueCreate(.cfRange, &precedingRange) else { return target }
+        var contextValue: CFTypeRef?
+        guard copyParameterizedAttributeValue(focused, kAXStringForRangeParameterizedAttribute as CFString,
+                                               rangeValue, &contextValue) == .success,
+              let context = contextValue as? String,
+              context.utf16.count <= length else { return target }
+        return TextInsertionTarget(role: role, value: context, isEditable: isEditable, subrole: subrole)
     }
 
     private static func attributeIsSettable(_ attribute: String, on element: AXUIElement) -> Bool {
@@ -255,13 +308,6 @@ final class TextInserter {
                                              attribute as CFString,
                                              &settable) == .success else { return false }
         return settable.boolValue
-    }
-
-    private static func attributeIsAvailable(_ attribute: String, on element: AXUIElement) -> Bool {
-        var value: CFTypeRef?
-        return AXUIElementCopyAttributeValue(element,
-                                             attribute as CFString,
-                                             &value) == .success
     }
 
     private static func postPaste() -> Bool {

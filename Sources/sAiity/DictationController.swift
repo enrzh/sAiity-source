@@ -3,6 +3,7 @@ import Foundation
 
 protocol DictationAudioCapture: AnyObject {
     var inputHealth: DictationInputHealth? { get }
+    var collectedSamples: [[Float]] { get }
     func start(targetFormat: AVAudioFormat,
                onBuffer: @escaping @Sendable (AVAudioPCMBuffer) -> Void) throws
     func stop()
@@ -13,6 +14,7 @@ protocol DictationAudioCapture: AnyObject {
 
 extension DictationAudioCapture {
     var inputHealth: DictationInputHealth? { nil }
+    var collectedSamples: [[Float]] { [] }
     func takeCollectedSamples() -> [Float] { [] }
     func setLimitHandler(_ handler: (@Sendable () -> Void)?) {}
     func setWaveformHandler(_ handler: (@Sendable ([Float]) -> Void)?) {}
@@ -53,6 +55,7 @@ final class DictationController {
     private let capture: any DictationAudioCapture
     private let inserter: any DictationTextInsertion
     private let captionsActive: () -> Bool
+    private let modelRemovalActive: () -> Bool
     private let translationConfiguration: TranslationConfigurationProvider
     private let translate: TranslationHandler
     private let detailedTranslate: DetailedTranslationHandler?
@@ -100,6 +103,16 @@ final class DictationController {
     private var sessionLocale = Locale.current
     private var sessionSampleRate = 16_000.0
     private var captureDrained = true
+    private let captureSink = BackendSink()
+    private var releasedSamples: [Float]?
+    private var authoritativeTask: Task<Void, Never>?
+    private var completedSpeechRegions: [DictationSpeechRegion] = []
+    #if SAIITY_TEST_HOOKS
+    var completedSampleRangesForTests: [Range<Int>] { completedSpeechRegions.map(\.coveredRange) }
+    #endif
+    private var completedTranscripts: [DictationRegionTranscript] = []
+    private var lastRecognizedAudioEnd = 0
+    private var nextRegionCheck = 0
     private var draftFinalText = ""
     private var draftVolatileText = ""
     private var latestDraftText = ""
@@ -127,9 +140,9 @@ final class DictationController {
     /// was in the middle of saying.
     var isFinishing: Bool {
         switch phase {
-        case .transcribing, .cleaning, .translating, .inserting: return true
+        case .limit, .transcribing, .cleaning, .translating, .inserting: return true
         case .idle, .waitingForInputMonitoring, .preparing, .ready, .starting,
-             .dictating, .limit, .recovery, .result, .failure:
+             .dictating, .recovery, .result, .failure:
             return false
         }
     }
@@ -139,9 +152,9 @@ final class DictationController {
     /// `isActive` alone is not enough for model-lifecycle decisions.
     var isBusy: Bool {
         switch phase {
-        case .preparing, .starting, .dictating, .transcribing, .cleaning, .translating, .inserting:
+        case .preparing, .starting, .dictating, .limit, .transcribing, .cleaning, .translating, .inserting:
             return true
-        case .idle, .waitingForInputMonitoring, .ready, .limit, .recovery, .result, .failure:
+        case .idle, .waitingForInputMonitoring, .ready, .recovery, .result, .failure:
             return false
         }
     }
@@ -150,6 +163,7 @@ final class DictationController {
          capture: any DictationAudioCapture,
          inserter: any DictationTextInsertion,
          captionsActive: @escaping () -> Bool,
+         modelRemovalActive: @escaping () -> Bool = { false },
          translationConfiguration: @escaping TranslationConfigurationProvider = { .disabled },
          translate: @escaping TranslationHandler = { _, _, _ in nil },
          detailedTranslate: DetailedTranslationHandler? = nil,
@@ -176,6 +190,7 @@ final class DictationController {
         self.capture = capture
         self.inserter = inserter
         self.captionsActive = captionsActive
+        self.modelRemovalActive = modelRemovalActive
         self.translationConfiguration = translationConfiguration
         self.translate = translate
         self.detailedTranslate = detailedTranslate
@@ -204,6 +219,7 @@ final class DictationController {
          capture: any DictationAudioCapture,
          inserter: any DictationTextInsertion,
          captionsActive: @escaping () -> Bool,
+         modelRemovalActive: @escaping () -> Bool = { false },
          translationConfiguration: @escaping TranslationConfigurationProvider = { .disabled },
          translate: @escaping TranslationHandler = { _, _, _ in nil },
          detailedTranslate: DetailedTranslationHandler? = nil,
@@ -230,6 +246,7 @@ final class DictationController {
         self.capture = capture
         self.inserter = inserter
         self.captionsActive = captionsActive
+        self.modelRemovalActive = modelRemovalActive
         self.translationConfiguration = translationConfiguration
         self.translate = translate
         self.detailedTranslate = detailedTranslate
@@ -258,7 +275,7 @@ final class DictationController {
     /// than once joins the same single-flight task and never creates a second
     /// backend.
     func prepare() {
-        guard !dictationUsesWhisper(),
+        guard !modelRemovalActive(), !dictationUsesWhisper(),
               !state.isActive,
               preparationTask == nil,
               phase != .ready else { return }
@@ -300,6 +317,10 @@ final class DictationController {
         // inserting is not a second recording — it is two sessions contending
         // for one shared, exclusively-leased backend.
         guard !isFinishing else { return }
+        guard !modelRemovalActive() else {
+            phase = .failure(String(localized: "Model files are being removed. Wait for that to finish."))
+            return
+        }
         guard !captionsActive() else {
             phase = .failure(String(localized: "Captions are already running."))
             return
@@ -314,6 +335,7 @@ final class DictationController {
         currentRunID = runID
         runStarted = previewOnly ? nil : .now
         runFallbackReason = nil
+        processingDeadline = nil
         generation += 1
         let session = generation
         sessionUsesWhisper = dictationUsesWhisper()
@@ -321,6 +343,11 @@ final class DictationController {
         resetDraft()
         sessionLocale = sessionUsesWhisper ? Locale(identifier: WhisperDictationBackend.locale) : Locale.current
         captureDrained = false
+        releasedSamples = nil
+        completedSpeechRegions = []
+        completedTranscripts = []
+        lastRecognizedAudioEnd = 0
+        nextRegionCheck = 0
         if sessionUsesWhisper && !whisperIsReady() {
             state.cancel()
             phase = .failure(String(localized: "Not ready"))
@@ -329,6 +356,33 @@ final class DictationController {
         terminal = .open
         let wasReady = phase == .ready
         phase = .starting
+        do {
+            guard let format = audioFormatFactory(), format.sampleRate == 16_000,
+                  format.channelCount == 1, format.commonFormat == .pcmFormatFloat32 else {
+                throw BackendError.notPrepared
+            }
+            sessionSampleRate = format.sampleRate
+            captureSink.point(at: nil, buffering: !sessionUsesWhisper)
+            capture.setLimitHandler { [weak self] in
+                Task { @MainActor in self?.limit(session: session) }
+            }
+            capture.setWaveformHandler(onWaveform)
+            let sink = captureSink
+            let captureStarted = ContinuousClock.now
+            try capture.start(targetFormat: format) { [weak self] buffer in
+                sink.feed(buffer)
+                Task { @MainActor [weak self] in self?.scheduleAuthoritativeRegions(session: session) }
+            }
+            logDuration("capture-start", since: captureStarted, runID: runID)
+            phase = .dictating
+        } catch {
+            _ = drainCapture()
+            captureSink.point(at: nil)
+            state.cancel()
+            reportIssue("dictation.start", error.localizedDescription)
+            phase = .failure(error.localizedDescription)
+            return
+        }
         if !sessionUsesWhisper, !wasReady, preparationTask == nil {
             beginPreparation()
         }
@@ -342,14 +396,20 @@ final class DictationController {
     func release() {
         guard state.release(), terminal.accept(.released) else { return }
         releaseStarted = .now
+        releasedSamples = drainCapture()
         let session = generation
         let runID = currentRunID
+        let deadline = LocalGeneration.deadline ?? .now.advanced(by: .seconds(15))
+        processingDeadline = deadline
         phase = .transcribing
         releaseTask = Task { @MainActor [weak self] in
             guard let self else { return }
             await LocalGeneration.$dictationRunID.withValue(runID?.uuidString) {
-                await self.startupTask?.value
-                await self.finish(session: session)
+                await LocalGeneration.$deadline.withValue(deadline) {
+                    await self.startupTask?.value
+                    await self.authoritativeTask?.value
+                    await self.finish(session: session)
+                }
             }
         }
     }
@@ -371,11 +431,15 @@ final class DictationController {
         startupTask?.cancel()
         releaseTask?.cancel()
         preparationTask?.cancel()
+        authoritativeTask?.cancel()
         _ = drainCapture()
+        releasedSamples = nil
+        captureSink.point(at: nil)
 
         let preparation = preparationTask
         let startup = startupTask
         let release = releaseTask
+        let authoritative = authoritativeTask
         let active = backend
         preparationTask = nil
         backend = nil
@@ -390,6 +454,7 @@ final class DictationController {
             await previousCleanup?.value
             await preparation?.value
             await startup?.value
+            await authoritative?.value
             await release?.value
             if let active {
                 await backendProvider.release(active, discard: true)
@@ -402,6 +467,7 @@ final class DictationController {
     private func limit(session: Int) {
         guard session == generation, terminal.accept(.limited) else { return }
         releaseStarted = .now
+        releasedSamples = drainCapture()
         state.cancel()
         // Say the recording was cut. This used to go straight to `.transcribing`,
         // which left `DictationPhase.limit` — and its "Limit reached" wording —
@@ -410,9 +476,15 @@ final class DictationController {
         // `finish` moves on to `.transcribing` as soon as it starts working.
         phase = .limit
         let runID = currentRunID
+        let deadline = LocalGeneration.deadline ?? .now.advanced(by: .seconds(15))
+        processingDeadline = deadline
         releaseTask = Task { @MainActor [weak self] in
             await LocalGeneration.$dictationRunID.withValue(runID?.uuidString) {
-                await self?.finish(session: session)
+                await LocalGeneration.$deadline.withValue(deadline) {
+                    await self?.startupTask?.value
+                    await self?.authoritativeTask?.value
+                    await self?.finish(session: session)
+                }
             }
         }
     }
@@ -465,6 +537,8 @@ final class DictationController {
             guard token == preparationGeneration else { return }
             preparationTask = nil
             state.cancel()
+            _ = drainCapture()
+            captureSink.point(at: nil)
             reportIssue("dictation.prepare", error.localizedDescription)
             phase = .failure(error.localizedDescription)
         }
@@ -479,36 +553,18 @@ final class DictationController {
             logDuration("preparation-wait", since: waiting, runID: runID)
         }
         guard session == generation else { return }
-        guard state.isActive else {
-            if phase == .starting || phase == .transcribing {
-                phase = .idle
-            }
-            return
-        }
+        guard state.isActive || phase == .transcribing || phase == .limit else { return }
         let progress: @Sendable (String) -> Void = { _ in }
         do {
+            if processingDeadlineExpired { throw CancellationError() }
+            try LocalGeneration.checkDeadline()
             if sessionUsesWhisper {
-                guard let format = audioFormatFactory() else {
-                    throw BackendError.notPrepared
-                }
-                sessionSampleRate = format.sampleRate
-                capture.setLimitHandler { [weak self] in
-                    Task { @MainActor in self?.limit(session: session) }
-                }
-                capture.setWaveformHandler(onWaveform)
-                let captureStarted = ContinuousClock.now
-                try capture.start(targetFormat: format) { _ in }
-                logDuration("capture-start", since: captureStarted, runID: runID)
-                guard session == generation else {
-                    capture.stop()
-                    return
-                }
-                phase = state.isActive ? .dictating : .transcribing
+                scheduleAuthoritativeRegions(session: session)
                 return
             }
             let acquired = try await backendProvider.acquire(locale: Locale.current,
                                                               progress: progress)
-            guard session == generation else {
+            guard session == generation, !processingDeadlineExpired else {
                 // This lease is unambiguously ours — nothing else can hold the
                 // pool's single active slot — so it can be discarded even
                 // though a newer session exists.
@@ -526,7 +582,9 @@ final class DictationController {
                     self.phase = .failure(reason)
                 }
             }
-            guard let format = await acquired.inputFormat else {
+            guard let format = await acquired.inputFormat,
+                  format.sampleRate == sessionSampleRate,
+                  format.channelCount == 1, format.commonFormat == .pcmFormatFloat32 else {
                 throw BackendError.notPrepared
             }
             sessionSampleRate = format.sampleRate
@@ -542,21 +600,10 @@ final class DictationController {
                 try Task.checkCancellation()
             }
             guard session == generation else { return }
-            capture.setLimitHandler { [weak self] in
-                Task { @MainActor in self?.limit(session: session) }
-            }
-            capture.setWaveformHandler(onWaveform)
-            let captureStarted = ContinuousClock.now
-            try capture.start(targetFormat: format) { [weak acquired] buffer in
-                guard !deferred else { return }
-                acquired?.feed(buffer)
-            }
-            logDuration("capture-start", since: captureStarted, runID: runID)
-            guard session == generation else {
-                capture.stop()
-                return
-            }
+            if processingDeadlineExpired { throw CancellationError() }
+            captureSink.point(at: deferred ? nil : acquired)
             phase = state.isActive ? .dictating : .transcribing
+            scheduleAuthoritativeRegions(session: session)
         } catch is CancellationError {
             if backendSession == session {
                 await failStart(session: session, message: nil)
@@ -574,6 +621,112 @@ final class DictationController {
     }
 
     private var releaseStarted: ContinuousClock.Instant?
+    private var processingDeadline: ContinuousClock.Instant?
+
+    private var processingDeadlineExpired: Bool {
+        processingDeadline.map { ContinuousClock.now >= $0 } ?? false
+    }
+
+    private func reportProcessingTimeout(session: Int) {
+        guard session == generation, processingDeadlineExpired else { return }
+        runFallbackReason = "deadline-exhausted"
+        phase = .failure(String(localized: "Recognition took too long. Please try again."))
+    }
+
+    private func scheduleAuthoritativeRegions(session: Int) {
+        guard session == generation, state.isActive, authoritativeTask == nil,
+              (backend is any DictationSegmentTranscriber
+               || (sessionUsesWhisper && sessionLocale.identifier == "auto" && transcribeWhisperSegments != nil)),
+              (capture.inputHealth?.sampleCount ?? capture.collectedSamples.first?.count ?? 0) >= nextRegionCheck,
+              let samples = capture.collectedSamples.first,
+              samples.count >= nextRegionCheck else { return }
+        nextRegionCheck = samples.count + Int(sessionSampleRate / 2)
+        let regions = segmenter.completedRegions(samples, sampleRate: sessionSampleRate)
+        guard regions.count > completedSpeechRegions.count,
+              Array(regions.prefix(completedSpeechRegions.count)) == completedSpeechRegions else { return }
+        let pending = Array(regions.dropFirst(completedSpeechRegions.count))
+        let runID = currentRunID
+        // Preview work remains provisional; its pump drains before authoritative decoding.
+        if sessionUsesStreamingDraft { captureSink.point(at: nil) }
+        authoritativeTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.authoritativeTask = nil }
+            do {
+                for region in pending {
+                    try Task.checkCancellation()
+                    let started = ContinuousClock.now
+                    let result = try await LocalGeneration.$dictationRunID.withValue(runID?.uuidString) {
+                        try await self.decodeRegion(samples: samples, region: region)
+                    }
+                    self.logDuration("recognition-region", since: started, runID: runID)
+                    guard session == self.generation, !Task.isCancelled else { return }
+                    self.acceptRegion(result, region: region)
+                }
+                if self.state.isActive, self.sessionUsesStreamingDraft, let backend = self.backend {
+                    self.draftFinalText = DictationTranscriptionResult(regions: self.completedTranscripts).text
+                    self.draftVolatileText = ""
+                    try await backend.start { [weak self] chunk in
+                        Task { @MainActor in self?.receiveDraft(chunk, session: session) }
+                    }
+                    guard session == self.generation, self.state.isActive, !Task.isCancelled else { return }
+                    self.captureSink.point(at: backend)
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                guard session == self.generation else { return }
+                // An incomplete prefix is never used as final output; finish retries the full source.
+                self.completedSpeechRegions = []
+                self.completedTranscripts = []
+                self.lastRecognizedAudioEnd = 0
+                self.reportIssue("dictation.recognition-region", error.localizedDescription)
+            }
+        }
+    }
+
+    private func decodeRegion(samples: [Float], region: DictationSpeechRegion) async throws -> DictationTranscriptionResult {
+        let deadline = [processingDeadline, LocalGeneration.deadline].compactMap { $0 }.min()
+        return try await LocalGeneration.$deadline.withValue(deadline) {
+            try LocalGeneration.checkDeadline()
+            let result: DictationTranscriptionResult
+            if sessionUsesWhisper, let transcribeWhisperSegments {
+                result = try await transcribeWhisperSegments(samples, [region], sessionLocale)
+            } else {
+                guard let segmented = backend as? any DictationSegmentTranscriber else { throw BackendError.notPrepared }
+                result = try await segmented.transcribeDictation(samples: samples, regions: [region])
+            }
+            try LocalGeneration.checkDeadline()
+            // A recording-time call can outlive the later release deadline.
+            if processingDeadlineExpired { throw CancellationError() }
+            return result
+        }
+    }
+
+    private func acceptRegion(_ result: DictationTranscriptionResult, region: DictationSpeechRegion) {
+        var transcripts = result.regions
+        if let first = transcripts.first, lastRecognizedAudioEnd > region.audioRange.lowerBound {
+            transcripts[0] = .init(text: first.text, language: first.language, overlapsPreviousAudio: true)
+        }
+        if !transcripts.isEmpty { lastRecognizedAudioEnd = region.audioRange.upperBound }
+        completedTranscripts += transcripts
+        completedSpeechRegions.append(region)
+    }
+
+    private func finishRegions(samples: [Float], regions: [DictationSpeechRegion], session: Int) async throws -> DictationTranscriptionResult {
+        guard session == generation else { throw CancellationError() }
+        if Array(regions.prefix(completedSpeechRegions.count)) != completedSpeechRegions {
+            completedSpeechRegions = []
+            completedTranscripts = []
+            lastRecognizedAudioEnd = 0
+        }
+        for region in regions.dropFirst(completedSpeechRegions.count) {
+            try Task.checkCancellation()
+            let result = try await decodeRegion(samples: samples, region: region)
+            guard session == generation, !Task.isCancelled else { throw CancellationError() }
+            acceptRegion(result, region: region)
+        }
+        return DictationTranscriptionResult(regions: completedTranscripts)
+    }
 
     private func finish(session: Int) async {
         guard session == generation else { return }
@@ -582,19 +735,24 @@ final class DictationController {
         // path needs this — a normal release already said `.transcribing` when
         // the key came up.
         if phase == .limit { phase = .transcribing }
-        let samples = drainCapture()
+        let samples = releasedSamples ?? drainCapture()
+        releasedSamples = nil
+        captureSink.point(at: nil)
+        if processingDeadlineExpired {
+            await releaseOwnedBackend(session: session, discard: true)
+            reportProcessingTimeout(session: session)
+            return
+        }
         NSLog("sAiity dictation capture: \(samples.count) samples at \(Int(sessionSampleRate)) Hz (\(String(format: "%.2f", Double(samples.count) / sessionSampleRate))s)")
         if sessionUsesWhisper {
             do {
-                if let transcribeWhisperSegments,
+                if transcribeWhisperSegments != nil,
                    sessionLocale.identifier == "auto" {
                     let regions = segmenter.segment(samples, sampleRate: sessionSampleRate)
                     NSLog("sAiity dictation transcription: Whisper Auto, \(regions.count) region(s)")
                     guard session == generation, !Task.isCancelled else { return }
                     let transcriptionStarted = ContinuousClock.now
-                    let transcription = try await transcribeWhisperSegments(samples,
-                                                                              regions,
-                                                                              sessionLocale)
+                    let transcription = try await finishRegions(samples: samples, regions: regions, session: session)
                     logDuration("transcription", since: transcriptionStarted, runID: runID)
                     guard session == generation else { return }
                     await finish(transcription: transcription,
@@ -610,6 +768,7 @@ final class DictationController {
                 guard session == generation else { return }
                 await finish(authoritative: authoritative, session: session, sourceLanguage: sessionLocale.identifier(.bcp47))
             } catch is CancellationError {
+                reportProcessingTimeout(session: session)
                 return
             } catch {
                 guard session == generation else { return }
@@ -626,7 +785,7 @@ final class DictationController {
             }
             return
         }
-        if let segmented = backend as? any DictationSegmentTranscriber {
+        if backend is any DictationSegmentTranscriber {
             if sessionUsesStreamingDraft {
                 if !latestDraftText.isEmpty {
                     onDraft(latestDraftText)
@@ -637,8 +796,7 @@ final class DictationController {
                 NSLog("sAiity dictation transcription: segmented \(regions.count) region(s) with \(backend.name)")
                 guard session == generation, !Task.isCancelled else { return }
                 let transcriptionStarted = ContinuousClock.now
-                let transcription = try await segmented.transcribeDictation(samples: samples,
-                                                                              regions: regions)
+                let transcription = try await finishRegions(samples: samples, regions: regions, session: session)
                 logDuration("transcription", since: transcriptionStarted, runID: runID)
                 await releaseOwnedBackend(session: session, discard: false)
                 guard session == generation else { return }
@@ -647,6 +805,7 @@ final class DictationController {
                              fallbackSourceLanguage: Locale.current.identifier(.bcp47))
             } catch is CancellationError {
                 await releaseOwnedBackend(session: session, discard: true)
+                reportProcessingTimeout(session: session)
             } catch {
                 await releaseOwnedBackend(session: session, discard: true)
                 guard session == generation else { return }
@@ -678,6 +837,10 @@ final class DictationController {
                         session: Int,
                         fallbackSourceLanguage: String) async {
         guard session == generation else { return }
+        if processingDeadlineExpired {
+            reportProcessingTimeout(session: session)
+            return
+        }
         let runID = currentRunID
         let authoritativeText = transcription.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !authoritativeText.isEmpty else {
@@ -696,7 +859,8 @@ final class DictationController {
         var cleanupUnavailable = false
         var translated = false
         var translationFailed = false
-        if !sessionUsesOriginalText, cleanupConfiguration().enabled {
+        if !sessionUsesOriginalText, cleanupConfiguration().enabled,
+           LocalGeneration.deadline.map({ ContinuousClock.now < $0 }) ?? true {
             let cleanupStarted = ContinuousClock.now
             defer { logDuration("cleanup", since: cleanupStarted, runID: runID) }
             phase = .cleaning
@@ -741,6 +905,7 @@ final class DictationController {
         }
         guard session == generation, !Task.isCancelled else { return }
         if configuration.enabled,
+           LocalGeneration.deadline.map({ ContinuousClock.now < $0 }) ?? true,
            let target = configuration.target?.trimmingCharacters(in: .whitespacesAndNewlines),
            !target.isEmpty {
             phase = .translating
@@ -802,11 +967,11 @@ final class DictationController {
             phase = .recovery(String(localized: "Copy failed — use Retry Copy in the bubble."))
         case .insertedAndCopied:
             if translated {
-                phase = .result(String(localized: "Translated and inserted"))
+                phase = .result(String(localized: "Translated and copied — paste requested"))
             } else if translationFailed {
-                phase = .result(String(localized: cleaned ? "Translation unavailable — cleaned text inserted and copied" : "Translation unavailable — original inserted and copied"))
+                phase = .result(String(localized: cleaned ? "Translation unavailable — cleaned text copied; paste requested" : "Translation unavailable — original copied; paste requested"))
             } else {
-                phase = .result(String(localized: "Inserted and copied"))
+                phase = .result(String(localized: "Copied — paste requested"))
             }
         case .copied:
             if translated {
@@ -819,7 +984,7 @@ final class DictationController {
         }
         let outcome: String
         switch result.outcome {
-        case .insertedAndCopied: outcome = "inserted"
+        case .insertedAndCopied: outcome = "paste-dispatched"
         case .copied: outcome = "copied"
         case .copyFailed: outcome = "copy-failed"
         }
@@ -877,10 +1042,13 @@ final class DictationController {
     /// did not know was a second session.
     private func releaseOwnedBackend(session: Int, discard: Bool) async {
         guard let active = backend, backendSession == session else { return }
+        let drained = ContinuousClock.now
+        let runID = currentRunID
         active.setFailureHandler(nil)
         backend = nil
         backendSession = nil
         await backendProvider.release(active, discard: discard)
+        logDuration("drain", since: drained, runID: runID)
     }
 
     private func drainCapture() -> [Float] {
@@ -920,6 +1088,7 @@ final class DictationController {
     func waitForWorkForTests() async {
         await preparationTask?.value
         await startupTask?.value
+        await authoritativeTask?.value
         await releaseTask?.value
         await cleanupTask?.value
     }

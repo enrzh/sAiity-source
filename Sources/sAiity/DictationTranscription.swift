@@ -40,6 +40,15 @@ struct SpeechRegionSegmenter: Sendable {
         self.configuration = configuration
     }
 
+    func completedRegions(_ samples: [Float], sampleRate: Double) -> [DictationSpeechRegion] {
+        guard sampleRate > 0 else { return [] }
+        let retainedTail = max(1, durationSamples(configuration.minimumSpeechDuration, sampleRate: sampleRate))
+        // A later short tail may merge backward; forced cuts also need their lookahead.
+        return segment(samples, sampleRate: sampleRate).filter {
+            $0.coveredRange.upperBound <= samples.count - retainedTail
+        }
+    }
+
     func segment(_ samples: [Float], sampleRate: Double) -> [DictationSpeechRegion] {
         guard !samples.isEmpty, sampleRate > 0 else { return [] }
 

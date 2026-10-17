@@ -5,6 +5,29 @@ import WhisperKit
 @testable import sAiity
 
 @Suite struct DictationTranscriptionTests {
+    @Test("only immutable speech regions leave a live recording")
+    func completedRegionsKeepMergeableTail() {
+        let segmenter = SpeechRegionSegmenter.default
+        let first = Array(repeating: Float(0.2), count: 16_000)
+        let silence = Array(repeating: Float.zero, count: 6_400)
+        let shortTail = Array(repeating: Float(0.2), count: 4_000)
+        #expect(segmenter.completedRegions(first + silence + shortTail, sampleRate: 16_000).isEmpty)
+        let samples = first + silence + Array(repeating: Float(0.2), count: 16_000)
+        let complete = segmenter.completedRegions(samples, sampleRate: 16_000)
+        #expect(complete.count == 1)
+        #expect(complete == Array(segmenter.segment(samples + shortTail, sampleRate: 16_000).prefix(1)))
+    }
+
+    @Test("live hard cuts retain all lookahead and a nonmergeable tail")
+    func completedHardCutRetainsContext() {
+        let segmenter = SpeechRegionSegmenter.default
+        let samples = Array(repeating: Float(0.2), count: 160_000 + 11_200)
+        #expect(segmenter.completedRegions(Array(samples.prefix(160_001)), sampleRate: 16_000).isEmpty)
+        let complete = segmenter.completedRegions(samples, sampleRate: 16_000)
+        #expect(complete == [.init(audioRange: 0..<162_560, coveredRange: 0..<160_000, isForced: true)])
+        #expect(complete == Array(segmenter.segment(samples + Array(repeating: 0.2, count: 8_000),
+                                                   sampleRate: 16_000).prefix(1)))
+    }
     @Test("language refinement cannot remove original code-switch paragraph boundaries")
     func pql4RawParagraphs() {
         for text in ["Please check the invoice.\n\n日本語の字幕を確認してください。",
