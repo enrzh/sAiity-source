@@ -1,5 +1,5 @@
 {
-  "originHash" : "284826d1c2e45421b384dc6b68986a49bb79b085f56cf513e4d06ec3072481e6",
+  "originHash" : "4eac0fa549521a7ecb3ddba80606adad4e6bf03e835ae86d722a527364ac322b",
   "pins" : [
     {
       "identity" : "async-http-client",
@@ -53,14 +53,6 @@
       "state" : {
         "revision" : "716c54294152c6d3301a6239a1d74db57cbcd6dc",
         "version" : "2.6.0"
-      }
-    },
-    {
-      "identity" : "llm.swift",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/obra/LLM.swift",
-      "state" : {
-        "revision" : "c2144e1a0e29c280ec6080b7da85e876d51f8509"
       }
     },
     {
@@ -317,10 +309,10 @@
     {
       "identity" : "swift-syntax",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/apple/swift-syntax.git",
+      "location" : "https://github.com/swiftlang/swift-syntax.git",
       "state" : {
-        "revision" : "4799286537280063c85a32f09884cfbca301b1a1",
-        "version" : "602.0.0"
+        "revision" : "79e4b74a295b6eb74a8b585e3a39d29e70c1dbd1",
+        "version" : "603.0.2"
       }
     },
     {

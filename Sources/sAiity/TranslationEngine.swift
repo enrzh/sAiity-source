@@ -206,17 +206,20 @@ actor TranslationInferenceGate {
     private var tail: Task<Void, Never>?
 
     func run<T: Sendable>(_ operation: @escaping @Sendable () async throws -> T) async throws -> T {
+        try LocalGeneration.checkDeadline()
         let previous = tail
         let queuedAt = ContinuousClock.now
         let current = Task { () throws -> T in
             await previous?.value
-            try Task.checkCancellation()
+            try LocalGeneration.checkDeadline()
             let waited = queuedAt.duration(to: .now).components
-            Task { @MainActor in
+            await MainActor.run {
                 Diagnostics.recordTiming(operation: "translator.gate-wait",
                     seconds: Double(waited.seconds) + Double(waited.attoseconds) / 1e18, cold: false)
             }
-            return try await operation()
+            let result = try await operation()
+            try LocalGeneration.checkDeadline()
+            return result
         }
         tail = Task {
             _ = try? await current.value
@@ -259,12 +262,13 @@ enum TranslationTiming: String, CaseIterable, Sendable {
 enum TranslationEngine: String, CaseIterable, Sendable, Codable {
     case madlad
     case hyMT2
+    case translateGemma
     case qwen
 
     /// MADLAD and Hy-MT2 are the user-facing translation catalogue. The local
     /// LLM case below remains representable only for old raw preferences and
     /// cleanup compatibility; it is intentionally absent from `allCases`.
-    static var allCases: [TranslationEngine] { [.madlad, .hyMT2] }
+    static var allCases: [TranslationEngine] { [.madlad, .hyMT2, .translateGemma] }
 
     /// Keep the normal path deliberately small. The other engines remain
     /// available internally for old preferences and cleanup compatibility, but
@@ -274,12 +278,12 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
     /// Hy-MT2 was trained on, at 40% less disk than MADLAD. It covers far fewer
     /// languages, so it belongs behind the advanced disclosure rather than
     /// beside the recommended engine.
-    static let advancedCases: [TranslationEngine] = [.hyMT2]
+    static let advancedCases: [TranslationEngine] = [.hyMT2, .translateGemma]
     /// The engines a user may pick. MADLAD for coverage, Hy-MT2 for the
     /// languages it specialises in. The legacy LLM case remains available
     /// internally for old preferences and cleanup compatibility, but never
     /// appears in a picker.
-    static let userSelectableCases: [TranslationEngine] = [.madlad, .hyMT2]
+    static let userSelectableCases: [TranslationEngine] = [.madlad, .hyMT2, .translateGemma]
 
     static func visibleSelection(_ engine: TranslationEngine?) -> TranslationEngine? {
         guard let engine, userSelectableCases.contains(engine) else { return nil }
@@ -342,6 +346,7 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
         switch self {
         case .madlad: return String(localized: "MADLAD")
         case .hyMT2: return HyMT2Translator.displayName
+        case .translateGemma: return "TranslateGemma 4B"
         case .qwen: return String(localized: "Local LLM")
         }
     }
@@ -354,6 +359,8 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
             return String(localized: "Hy-MT2-1.8B, a translation specialist that runs on CPU. A second opinion for the 37 languages it was trained on, at 1.1 GB instead of 1.9 GB. Fewer languages than MADLAD, so reach for it when you want the smaller download or prefer its phrasing.")
         case .qwen:
             return String(localized: "Experimental local LLM translation. Useful for cleanup and language experiments, but less predictable than a dedicated translation model. Choose a Qwen, Gemma, or custom GGUF in Models.")
+        case .translateGemma:
+            return String(localized: "Optional Gemma 3-based translation specialist. 2.49 GB, with declared language variants and a dedicated translation prompt. Local quality and speed qualification is pending.")
         }
     }
 
@@ -366,6 +373,7 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
         switch self {
         case .madlad: return String(localized: "Apache-2.0 (Google MADLAD-400)")
         case .hyMT2: return String(localized: "Apache-2.0 (Tencent Hy-MT2)")
+        case .translateGemma: return "Gemma Terms of Use (Google) · GGUF: mradermacher"
         case .qwen: return String(localized: "Per model — shown on each row under Models")
         }
     }
@@ -374,6 +382,7 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
         switch self {
         case .madlad: return MADLADTranslator()
         case .hyMT2: return HyMT2Translator()
+        case .translateGemma: return TranslateGemmaTranslator()
         case .qwen: return LocalLLMTranslator()
         }
     }
@@ -385,6 +394,7 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
         switch self {
         case .madlad: return AssetID.madlad
         case .hyMT2: return AssetID.hyMT2
+        case .translateGemma: return AssetID.translateGemma
         case .qwen: return LocalModel.cleanupSelected.map { AssetID.llm(file: $0.file) }
         }
     }
@@ -426,6 +436,13 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
                 use: .whenTranslator(.hyMT2),
                 install: { sink in try await HyMT2Translator.download(progress: sink) })]
 
+        case .translateGemma:
+            return [ModelAsset(id: AssetID.translateGemma, family: .translation,
+                title: "TranslateGemma 4B Q4_K_M", detail: summary, recommended: false,
+                licence: licence, advertisedBytes: TranslateGemmaTranslator.modelBytes,
+                storage: .file(TranslateGemmaTranslator.localURL, expectedBytes: TranslateGemmaTranslator.modelBytes),
+                removal: .remove(TranslateGemmaTranslator.localURL), use: .whenTranslator(.translateGemma),
+                install: { sink in try await TranslateGemmaTranslator.download(progress: sink) })]
         case .qwen:
             return LocalModel.all.map { m in
                 ModelAsset(
@@ -446,11 +463,13 @@ enum TranslationEngine: String, CaseIterable, Sendable, Codable {
                     install: m.downloadURL.map { url in
                         let destination = m.localURL
                         let expectedBytes = m.bytes
+                        let checksum = m.sha256
                         return { @Sendable sink in
                             try await FileDownloader.download(from: url,
                                                               to: destination,
                                                               expectedBytes: expectedBytes,
                                                               requireMagic: FileDownloader.ggufMagic,
+                                                              expectedSHA256: checksum,
                                                               progress: sink)
                         }
                     })

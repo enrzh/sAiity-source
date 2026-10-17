@@ -56,7 +56,7 @@ struct TranslationRuntimeFallback: Sendable {
         guard quarantined.contains(preferred) else { return preferred }
         let fallback: TranslationEngine?
         switch preferred {
-        case .hyMT2, .qwen:
+        case .hyMT2, .qwen, .translateGemma:
             fallback = .madlad
         case .madlad:
             fallback = nil

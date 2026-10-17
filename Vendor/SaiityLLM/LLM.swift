@@ -1,6 +1,8 @@
 import Foundation
 import llama
-@_exported import LLMMacros
+public protocol Generatable: Codable {
+    static var jsonSchema: String { get }
+}
 
 public enum ThinkingMode: Sendable {
     case none
@@ -122,7 +124,7 @@ public actor LLMCore {
         let samplerParams = llama_sampler_chain_default_params()
         sampler = llama_sampler_chain_init(samplerParams)
         
-        llama_sampler_chain_add(sampler!, llama_sampler_init_penalties(repetitionLookback, repeatPenalty, 0, 0))
+        llama_sampler_chain_add(sampler!, llama_sampler_init_penalties(Int32(totalTokenCount), repetitionLookback, repeatPenalty, 0, 0))
         llama_sampler_chain_add(sampler!, llama_sampler_init_top_k(topK))
         llama_sampler_chain_add(sampler!, llama_sampler_init_top_p(topP, 1))
         llama_sampler_chain_add(sampler!, llama_sampler_init_temp(temp))
@@ -188,32 +190,70 @@ public actor LLMCore {
             return cached as String
         }
         
+        guard let bytes = tokenPieceBytes(token, special: special),
+              var decoded = String(bytes: bytes, encoding: .utf8) else { return "" }
+        if decoded.contains("\0") {
+            decoded = decoded.filter { $0 != "\0" }
+        }
+        tokenDecodeCache.setObject(decoded as NSString, forKey: NSNumber(value: cacheKey))
+        return decoded
+    }
+
+    private func tokenPieceBytes(_ token: Token, special: Bool) -> [UInt8]? {
         var bufferLength = 16
         var buffer: [CChar] = .init(repeating: 0, count: bufferLength)
         var actualLength = Int(llama_token_to_piece(vocab, token, &buffer, Int32(bufferLength), 0, special))
         
-        guard actualLength != 0 else { return "" }
+        guard actualLength != 0 else { return [] }
         
         if actualLength < 0 {
             bufferLength = -actualLength
             buffer = .init(repeating: 0, count: bufferLength)
             actualLength = Int(llama_token_to_piece(vocab, token, &buffer, Int32(bufferLength), 0, special))
-            guard actualLength > 0 else { return "" }
+            guard actualLength > 0 else { return nil }
         }
-        
-        let validBuffer = Array(buffer.prefix(actualLength))
-        let bytes = validBuffer.map { UInt8(bitPattern: $0) }
-        guard var decoded = String(bytes: bytes, encoding: .utf8) else { return "" }
-        
-        if decoded.contains("\0") {
-            decoded = decoded.filter { $0 != "\0" }
-        }
-        
-        tokenDecodeCache.setObject(decoded as NSString, forKey: NSNumber(value: cacheKey))
-        
-        return decoded
+        guard actualLength <= buffer.count else { return nil }
+        return buffer.prefix(actualLength).map { UInt8(bitPattern: $0) }
     }
-    
+
+    nonisolated static func filteredGemma4Answer(from tokenPieces: [[UInt8]]) -> String? {
+        let bytes = tokenPieces.flatMap { $0 }
+        guard String(bytes: bytes, encoding: .utf8) != nil else { return nil }
+        let open = Array("<|channel>thought\n".utf8)
+        let close = Array("<channel|>".utf8)
+        let openPrefix = Array("<|".utf8)
+        let closePrefix = Array("<channel".utf8)
+        var answer: [UInt8] = []
+        var offset = 0
+        var inThought = false
+        while offset < bytes.count {
+            guard bytes[offset] == 0x3C else {
+                if !inThought { answer.append(bytes[offset]) }
+                offset += 1
+                continue
+            }
+            let tail = bytes[offset...]
+            if tail.starts(with: open) {
+                guard !inThought else { return nil }
+                inThought = true
+                offset += open.count
+            } else if tail.starts(with: close) {
+                guard inThought else { return nil }
+                inThought = false
+                offset += close.count
+            } else if tail.starts(with: openPrefix) || tail.starts(with: closePrefix)
+                || open.starts(with: tail) || close.starts(with: tail) {
+                return nil
+            } else {
+                if !inThought { answer.append(bytes[offset]) }
+                offset += 1
+            }
+        }
+        guard !inThought, let result = String(bytes: answer, encoding: .utf8),
+              !result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return result
+    }
+
     public func getChatTemplateHint() -> String? {
         guard let template = llama_model_chat_template(model, nil) else { return nil }
         return String(cString: template)
@@ -275,7 +315,7 @@ public actor LLMCore {
         
         let token = llama_sampler_sample(sampler, context, batchIndex)
         
-        if token == endToken {
+        if llama_vocab_is_eog(vocab, token) {
             return endToken
         }
         
@@ -357,6 +397,8 @@ public actor LLMCore {
             defer { generationTask = nil }
             let started = ContinuousClock.now
             let budget = generationBudget
+            let filterGemma4Channels = input.hasPrefix("<|turn>")
+            var gemma4Pieces: [[UInt8]] = []
             generatedTokenCount = 0
             generationWasLimited = false
             generationFailed = false
@@ -397,6 +439,16 @@ public actor LLMCore {
             func finishAllStreams() {
                 thinkingContinuation.finish()
                 responseContinuation.finish()
+            }
+
+            func finishGemma4Answer() {
+                guard !Task.isCancelled, !generationWasLimited, !generationFailed else { return }
+                guard let answer = Self.filteredGemma4Answer(from: gemma4Pieces) else {
+                    generationFailed = true
+                    shouldContinuePredicting = false
+                    return
+                }
+                responseContinuation.yield(answer)
             }
             
             func transitionToResponsePhase() {
@@ -447,6 +499,11 @@ public actor LLMCore {
                 let reachedEndOfGeneration = token == endToken
                 
                 if reachedEndOfGeneration {
+                    if filterGemma4Channels {
+                        finishGemma4Answer()
+                        finishAllStreams()
+                        return
+                    }
                     let stuckInThinkingPhase = currentlyInThinkingPhase && thinkingEndTokens != nil
                     
                     if stuckInThinkingPhase {
@@ -464,6 +521,16 @@ public actor LLMCore {
                     return
                 }
                 
+                if filterGemma4Channels {
+                    guard let bytes = tokenPieceBytes(token, special: true) else {
+                        generationFailed = true
+                        shouldContinuePredicting = false
+                        finishAllStreams()
+                        return
+                    }
+                    gemma4Pieces.append(bytes)
+                    continue
+                }
                 pendingText += decode(token)
                 
                 let detectingThinkingMarkers = thinkingMode != .none
@@ -1122,7 +1189,7 @@ public actor LLMCore {
             }
         }
         let token = llama_sampler_sample(sampler, context, i)
-        return token
+        return llama_vocab_is_eog(vocab, token) ? endToken : token
     }
     
     private func isValidJSON(_ text: String) -> Bool {
@@ -1802,6 +1869,7 @@ enum TemplateFamily: Sendable, Equatable {
     case llama
     case mistral
     case gemma
+    case gemma4
 
     func makeTemplate(systemPrompt: String?) -> Template {
         switch self {
@@ -1817,6 +1885,8 @@ enum TemplateFamily: Sendable, Equatable {
             return .mistral
         case .gemma:
             return .gemma
+        case .gemma4:
+            return .gemma4(systemPrompt)
         }
     }
 }
@@ -1847,6 +1917,12 @@ enum TemplateResolver {
             return family
         }
 
+        if context.metadata["general.architecture"]?.lowercased() == "gemma",
+           let name = context.metadata["general.name"],
+           inferFamily(fromIdentifier: name) == .gemma4 {
+            return .gemma4
+        }
+
         for key in ["general.architecture", "general.name"] {
             if let value = context.metadata[key], let family = inferFamily(fromIdentifier: value) {
                 return family
@@ -1871,6 +1947,9 @@ enum TemplateResolver {
     private static func inferFamily(fromChatTemplateHint hint: String?) -> TemplateFamily? {
         guard let loweredHint = hint?.lowercased(), !loweredHint.isEmpty else { return nil }
 
+        if loweredHint.contains("<|turn>") {
+            return .gemma4
+        }
         if loweredHint.contains("enable_thinking") || loweredHint.contains("<think>\n") || loweredHint.contains("qwen") {
             return .qwen
         }
@@ -1896,6 +1975,9 @@ enum TemplateResolver {
     private static func inferFamily(fromIdentifier identifier: String) -> TemplateFamily? {
         let loweredIdentifier = identifier.lowercased()
 
+        if loweredIdentifier.range(of: #"\bgemma[-_ ]?4(?:\b|_)"#, options: .regularExpression) != nil {
+            return .gemma4
+        }
         if loweredIdentifier.contains("qwen") {
             return .qwen
         }
@@ -2045,6 +2127,16 @@ public struct Template: Sendable {
         systemPrompt: nil
     )
     
+    public static func gemma4(_ systemPrompt: String? = nil) -> Template {
+        Template(
+            system: ("<|turn>system\n", "<turn|>\n"),
+            user: ("<|turn>user\n", "<turn|>\n"),
+            bot: ("<|turn>model\n", "<turn|>\n"),
+            stopSequence: "<turn|>",
+            systemPrompt: systemPrompt
+        )
+    }
+
     public static let gemma = Template(
         user: ("<start_of_turn>user\n", "<end_of_turn>\n"),
         bot: ("<start_of_turn>model\n", "<end_of_turn>\n"),

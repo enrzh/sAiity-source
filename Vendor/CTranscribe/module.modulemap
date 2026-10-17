@@ -1,0 +1,5 @@
+module CTranscribe [system] {
+    header "include/transcribe.h"
+    link "transcribe"
+    export *
+}

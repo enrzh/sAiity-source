@@ -3,6 +3,26 @@ import Testing
 
 @testable import sAiity
 
+extension LanguageTests {
+    @Test("TranslateGemma target UI retains declared regional variants")
+    func translateGemmaUIUsesDeclaredVariants() async {
+        let supported = LanguageCatalog.supportedCodes(for: .translateGemma)
+        #expect(supported == TranslateGemmaTranslator.canonicalCodes)
+        for code in ["de-DE", "fr-CA", "pt-BR", "zh-Hant"] {
+            #expect(supported.contains(code))
+            #expect(LanguageCatalog.all.contains { $0.code == code })
+        }
+        for code in ["fr-BE", "de-Latn-US", "auto", "und"] {
+            #expect(!supported.contains(code))
+        }
+        #expect(await LanguageCatalog.engines(supporting: "fr-CA").contains(.translateGemma))
+    }
+}
+// Existing dictationCatalogMatchesMADLAD asserts the OLD exact union of MADLAD
+// codes and popular codes. If MAIN admits TranslateGemma's declared region rows
+// into the common picker, update that existing expectation to the new intended
+// union; do not weaken this new test or keep contradictory catalog contracts.
+
 /// Language codes fail silently. A code an engine does not recognise produces no
 /// translation and no error message — the caption simply stays untranslated —
 /// so these are the assertions that would have caught it.
@@ -116,7 +136,8 @@ struct LanguageTests {
     @Test("The dictation catalog matches the translation catalog")
     func dictationCatalogMatchesMADLAD() {
         #expect(Set(LanguageCatalog.all.map(\.code)) ==
-                Set(MADLADLanguages.canonicalCodes).union(LanguageCatalog.popular))
+                Set(MADLADLanguages.canonicalCodes).union(LanguageCatalog.popular)
+                    .union(TranslateGemmaTranslator.canonicalCodes))
     }
 
     @Test("Persisted dictation locales are canonical BCP-47 or auto")

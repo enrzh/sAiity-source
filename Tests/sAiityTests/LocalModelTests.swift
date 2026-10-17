@@ -3,6 +3,40 @@ import Testing
 
 @testable import sAiity
 
+@Suite struct NewModelCatalogueTests {
+    @Test("Gemma 4 choices have official pinned files, exact sizes and integrity without replacing Gemma 3")
+    func verifiedCleanupChoices() throws {
+        for (file, bytes, checksum) in [
+            ("gemma-4-E2B_q4_0-it.gguf", Int64(3_349_516_256), "fa401b55b07ee70a54c6dae3903c783a6e65064312529ea57175cb5f8dec6634"),
+            ("gemma-4-E4B_q4_0-it.gguf", Int64(5_154_941_280), "676c35070db6dbe52f93e9c864ee0fba4eddea94b9c875d9cb10daff453fbaee")
+        ] {
+            let model = try #require(LocalModel.builtIn.first { $0.file == file })
+            #expect(model.bytes == bytes)
+            #expect(model.sha256 == checksum)
+            #expect(model.revision?.count == 40)
+            #expect(model.downloadURL?.absoluteString.contains("/resolve/main/") == false)
+            #expect(model.licence.contains("Apache-2.0"))
+            #expect(model.isCleanupCandidate())
+            #expect(!model.recommended)
+        }
+        #expect(LocalModel.builtIn.filter { $0.file.hasPrefix("gemma-3-") }.count == 2)
+    }
+
+    @Test("new translation and English recognition choices remain explicit selectable options")
+    func explicitNewChoices() throws {
+        let translation = try #require(TranslationEngine(rawValue: "translateGemma"))
+        #expect(TranslationEngine.userSelectableCases.contains(translation))
+        #expect(TranslationEngine.recommended == .madlad)
+        let recognition = try #require(ASREngine(rawValue: "granite"))
+        #expect(ASREngine.userSelectableCases.contains(recognition))
+        #expect(recognition.canHear("en-US"))
+        #expect(!recognition.canHear("de"))
+        #expect(!recognition.identifiesLanguageFromAudio)
+        #expect(!recognition.automaticallyRecognizesLanguage)
+        #expect(ASREngine.recommended == .nemotron)
+    }
+}
+
 /// Custom models are user data: a wrong completeness answer either re-downloads
 /// gigabytes or loads a truncated file, and a broken import silently loses the
 /// model the user just added.
@@ -86,7 +120,7 @@ struct LocalModelTests {
 
     @Test("Built-ins are never removable from the catalogue and all have sources")
     func builtInsAreStable() {
-        #expect(LocalModel.builtIn.count == 2)
+        #expect(LocalModel.builtIn.count == 4)
         for m in LocalModel.builtIn {
             #expect(m.downloadURL != nil, "\(m.file) has no download URL")
             #expect(m.bytes != nil && m.bytes! > 100 * 1_048_576,
@@ -162,8 +196,8 @@ struct LocalModelTests {
         #expect(ASREngine.effective == ASREngine.recommended)
         #expect(TranslationEngine.effective == TranslationEngine.recommended)
 
-        #expect(ASREngine.allCases == [.nemotron, .qwen06, .qwen17, .whisperTurbo])
-        #expect(ASREngine.userSelectableCases == [.nemotron, .qwen06, .qwen17])
+        #expect(ASREngine.allCases == [.nemotron, .qwen06, .qwen17, .granite, .whisperTurbo])
+        #expect(ASREngine.userSelectableCases == [.nemotron, .qwen06, .qwen17, .granite])
         // The Whisper turbo case survives so its 626 MB keeps a registry row and
         // a Delete button, but it is not offered, and a stored preference for it
         // must normalize away rather than silently select a model the user can

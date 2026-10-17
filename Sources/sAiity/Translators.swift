@@ -1,6 +1,6 @@
 import AudioCommon
 import Foundation
-import MADLADTranslation
+import SaiityMADLAD
 import SaiityLLM
 
 /// MADLAD-400-3B-MT — a T5 encoder-decoder run on MLX via
@@ -14,7 +14,7 @@ import SaiityLLM
 final class MADLADTranslator: Translating, @unchecked Sendable {
     let name = "MADLAD-400-3B (MLX)"
 
-    private var translator: MADLADTranslation.MADLADTranslator?
+    private var translator: SaiityMADLAD.MADLADTranslator?
 
     static var modelsDirectory: URL {
         ModelRegistry.root.appendingPathComponent("madlad", isDirectory: true)
@@ -35,7 +35,7 @@ final class MADLADTranslator: Translating, @unchecked Sendable {
     /// Fetch without loading, for the Models page.
     static func downloadWeights(progress: @escaping ProgressSink) async throws {
         try await HuggingFaceDownloader.downloadWeights(
-            modelId: MADLADTranslation.MADLADTranslator.defaultModelId,
+            modelId: SaiityMADLAD.MADLADTranslator.defaultModelId,
             to: modelsDirectory,
             additionalFiles: weightFiles,
             progressHandler: { f in
@@ -93,6 +93,7 @@ final class MADLADTranslator: Translating, @unchecked Sendable {
             throw TranslationEngineError.runtimeUnavailable(
                 String(localized: "Translation is unavailable because the MLX Metal library is missing from this app build."))
         }
+        if translator != nil { return }
 
         // Two defects in speech-swift's loader shape this, both verified against
         // the library in isolation:
@@ -115,7 +116,7 @@ final class MADLADTranslator: Translating, @unchecked Sendable {
         // runs an MLX model never initialises Metal at all.
         MemoryPolicy.prepareForMLX()
 
-        let madlad = MADLADTranslation.MADLADTranslator.self
+        let madlad = SaiityMADLAD.MADLADTranslator.self
         if Self.isDownloaded() {
             progress(String(localized: "Loading MADLAD…"))
             translator = try await LocalGeneration.loadModel {
@@ -156,7 +157,7 @@ final class MADLADTranslator: Translating, @unchecked Sendable {
         if let translator {
             let warming = ContinuousClock.now
             do {
-                _ = try translator.translate("Guten Morgen.", to: native)
+                _ = try translator.translate("Guten Morgen.", to: native, deadline: LocalGeneration.deadline)
                 await LocalGeneration.recordModelTiming("model.generation", since: warming, cold: false, calls: 1)
             } catch {
                 await LocalGeneration.recordModelTiming("model.generation", since: warming, cold: false, calls: 1)
@@ -174,9 +175,9 @@ final class MADLADTranslator: Translating, @unchecked Sendable {
     static func validatedTranslation(_ text: String, target: String, source: String? = nil,
                                      decode: (Float) throws -> String) throws -> String? {
         for temperature in [Float(0), Float(0.15)] {
-            try Task.checkCancellation()
+            try LocalGeneration.checkDeadline()
             let raw = try decode(temperature)
-            try Task.checkCancellation()
+            try LocalGeneration.checkDeadline()
             switch TranslationOutputValidator.sanitize(raw, input: text, target: target, source: source) {
             case .ok(let valid): return valid
             case .rejected(let why, let retryable):
@@ -205,7 +206,7 @@ final class MADLADTranslator: Translating, @unchecked Sendable {
             let result = try lock.withLock {
                 try Self.validatedTranslation(text, target: target, source: source) { temperature in
                     calls += 1
-                    return try t.translate(text, to: native, sampling: .init(temperature: temperature))
+                    return try t.translate(text, to: native, sampling: .init(temperature: temperature), deadline: LocalGeneration.deadline)
                 }
             }
             await LocalGeneration.recordModelTiming("model.generation", since: decoding, cold: false, calls: calls)
@@ -521,6 +522,9 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
                 String(localized: "No translation model chosen. Pick one under Settings → Models."))
         }
         if !m.isDownloaded {
+            guard m.revision == nil else {
+                throw TranslationEngineError.notAvailable(String(localized: "Download this model in Models before using it."))
+            }
             let label = m.label
             progress(String(localized: "Downloading \(label) (\(m.sizeText))…"))
             // The GGUF path is the one that physically corrupts: FileDownloader
@@ -552,7 +556,7 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
         // lower would start truncating it, which is the failure this number
         // guards against.
         let url = m.localURL
-        let l: LLM = try await LocalGeneration.loadModel {
+        let l: LLM = try await LocalGeneration.loadModel(assetID: AssetID.llm(file: m.file)) {
             let loaded: LLM? = await Task.detached(priority: .userInitiated) {
                 guard let l = LLM(from: url, maxTokenCount: 2048) else { return nil }
                 l.temp = 0.1
@@ -693,6 +697,7 @@ final class LocalLLMTranslator: Translating, @unchecked Sendable {
         try await FileDownloader.download(from: url, to: m.localURL,
                                           expectedBytes: m.bytes,
                                           requireMagic: FileDownloader.ggufMagic,
+                                          expectedSHA256: m.sha256,
                                           progress: progress)
     }
 }

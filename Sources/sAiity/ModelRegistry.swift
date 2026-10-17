@@ -116,6 +116,7 @@ enum AssetUse: Sendable {
             return false
         case .whenRecognitionEngine(let e):
             return ASREngine.selected == e
+                || (DictationRecognizer.selected == .streaming && ASREngine.dictationSelected == e)
         case .whenNemotronTier(let ms):
             // Either surface's choice counts. Two independent preferences now
             // name a tier, and "in use" has to mean both of them: advertising
@@ -132,7 +133,7 @@ enum AssetUse: Sendable {
             return DictationRecognizer.selected == .whisper
                 && WhisperDictationBackend.model == choice
         case .whenTranslator(let t):
-            return TranslationEngine.selected == t
+            return TranslationEngine.selected == t || TranslationEngine.dictationSelected == t
         case .whenQwenVariant(let f):
             // `selected?.file == f`, never `selected!` and never `?? ""` — with
             // nothing chosen this has to be false, not "matches the empty name".
@@ -329,7 +330,7 @@ enum ModelRegistry {
                 atPath: url.path)[.size] as? Int) ?? 0)
             guard bytes > 0 else { return false }
             guard let expected else { return true }
-            return Double(bytes) >= Double(expected) * 0.98
+            return bytes == expected
         }
     }
 

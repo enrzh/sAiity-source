@@ -11,13 +11,13 @@ struct HyMT2TranslationTests {
     /// catalogue and behind the advanced disclosure, never as the default.
     @Test("MADLAD stays the recommended engine, with Hy-MT2 beside it")
     func engineRecommendationIsUnchanged() {
-        #expect(TranslationEngine.allCases == [.madlad, .hyMT2])
+        #expect(TranslationEngine.allCases == [.madlad, .hyMT2, .translateGemma])
         #expect(TranslationEngine.recommended.rawValue == "madlad")
         #expect(TranslationEngine.hyMT2.displayName == "Hy-MT2")
         #expect(TranslationEngine.hyMT2 != TranslationEngine.recommended)
         #expect(TranslationEngine.primaryCases == [.madlad])
-        #expect(TranslationEngine.advancedCases == [.hyMT2])
-        #expect(TranslationEngine.userSelectableCases == [.madlad, .hyMT2])
+        #expect(TranslationEngine.advancedCases == [.hyMT2, .translateGemma])
+        #expect(TranslationEngine.userSelectableCases == [.madlad, .hyMT2, .translateGemma])
         #expect(!TranslationEngine.madlad.isAdvanced)
         #expect(TranslationEngine.hyMT2.isAdvanced)
         #expect(TranslationEngine.qwen.isAdvanced)

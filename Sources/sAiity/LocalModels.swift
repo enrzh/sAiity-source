@@ -33,6 +33,8 @@ struct LocalModel: Identifiable, Sendable, Equatable, Codable {
     let note: String
     /// The weights' terms. Custom models get "your own model" — we cannot know.
     let licence: String
+    var revision: String? = nil
+    var sha256: String? = nil
 
     var sizeText: String {
         bytes.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? String(localized: "size unknown")
@@ -57,6 +59,22 @@ struct LocalModel: Identifiable, Sendable, Equatable, Codable {
                    label: String(localized: "Gemma 3 4B"), bytes: 2_489_894_016, recommended: false,
                    note: String(localized: "Higher-quality cleanup, with more memory use and slower processing."),
                    licence: "Gemma Terms of Use (Google) · huggingface.co/unsloth"),
+        LocalModel(source: .huggingFace(repo: "google/gemma-4-E2B-it-qat-q4_0-gguf",
+                                        file: "gemma-4-E2B_q4_0-it.gguf"),
+                   file: "gemma-4-E2B_q4_0-it.gguf", label: "Gemma 4 E2B",
+                   bytes: 3_349_516_256, recommended: false,
+                   note: String(localized: "Optional Gemma 4 cleanup. Local quality and speed qualification is pending."),
+                   licence: "Apache-2.0 (Google Gemma 4)",
+                   revision: "347eef722ec7f151f37d1ef0b5c7c77d8de4efcb",
+                   sha256: "fa401b55b07ee70a54c6dae3903c783a6e65064312529ea57175cb5f8dec6634"),
+        LocalModel(source: .huggingFace(repo: "google/gemma-4-E4B-it-qat-q4_0-gguf",
+                                        file: "gemma-4-E4B_q4_0-it.gguf"),
+                   file: "gemma-4-E4B_q4_0-it.gguf", label: "Gemma 4 E4B",
+                   bytes: 5_154_941_280, recommended: false,
+                   note: String(localized: "Optional larger Gemma 4 cleanup. Uses more memory; local quality and speed qualification is pending."),
+                   licence: "Apache-2.0 (Google Gemma 4)",
+                   revision: "e998672c8018dd704e347d3b6843c112547244d1",
+                   sha256: "676c35070db6dbe52f93e9c864ee0fba4eddea94b9c875d9cb10daff453fbaee"),
     ]
 
     // MARK: - Custom models
@@ -312,14 +330,14 @@ struct LocalModel: Identifiable, Sendable, Equatable, Codable {
 
     var localURL: URL { Self.directory.appendingPathComponent(file) }
 
-    /// Present and, when the expected size is known, close to it. Unknown-size
+    /// Present and, when the expected size is known, exactly that size. Unknown-size
     /// models rely on the downloader's staging: the destination file only ever
     /// exists once a transfer completed, so presence alone is meaningful.
     var isDownloaded: Bool {
         guard let n = try? FileManager.default.attributesOfItem(atPath: localURL.path)[.size] as? Int
         else { return false }
         guard let expected = bytes else { return n > 0 }
-        return Double(n) >= Double(expected) * 0.98
+        return Int64(n) == expected
     }
 
     static func isCleanupCandidate(_ model: LocalModel?) -> Bool {
@@ -347,7 +365,7 @@ struct LocalModel: Identifiable, Sendable, Equatable, Codable {
     var downloadURL: URL? {
         switch source {
         case .huggingFace(let repo, let file):
-            return URL(string: "https://huggingface.co/\(repo)/resolve/main/\(file)?download=true")
+            return URL(string: "https://huggingface.co/\(repo)/resolve/\(revision ?? "main")/\(file)?download=true")
         case .url(let s):
             return URL(string: s)
         case .importedFile:

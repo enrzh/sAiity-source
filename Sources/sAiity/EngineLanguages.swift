@@ -24,6 +24,7 @@ extension TranslationEngine {
         switch self {
         case .madlad: return MADLADLanguageProvider.self
         case .hyMT2: return HyMT2LanguageProvider.self
+        case .translateGemma: return TranslateGemmaTranslator.self
         case .qwen: return LLMLanguageProvider.self
         }
     }

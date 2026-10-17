@@ -50,6 +50,7 @@ import Foundation
 /// somebody else is still waiting for, and the last one going away should not
 /// leave bytes being paid for that nobody wants.
 actor DownloadCoordinator {
+    @TaskLocal static var downloadsAllowed = true
     static let shared = DownloadCoordinator()
 
     private final class Transfer {
@@ -58,6 +59,14 @@ actor DownloadCoordinator {
     }
 
     private var transfers: [String: Transfer] = [:]
+
+    private var removingModels = false
+    func beginModelRemoval() -> Bool {
+        guard !removingModels, transfers.isEmpty else { return false }
+        removingModels = true
+        return true
+    }
+    func endModelRemoval() { removingModels = false }
 
     /// Run `work` for `id`, or join the run already in progress.
     ///
@@ -69,6 +78,12 @@ actor DownloadCoordinator {
         // run `leave` before the continuation exists — and then the continuation
         // registers with nobody left to resume it, which is a permanent hang.
         try Task.checkCancellation()
+        guard !removingModels else {
+            throw TranslationEngineError.notAvailable(String(localized: "Model files are being removed. Wait for that to finish."))
+        }
+        guard Self.downloadsAllowed else {
+            throw TranslationEngineError.notAvailable("Model downloads are disabled for this operation.")
+        }
 
         let transfer: Transfer
         if let existing = transfers[id] {
@@ -158,5 +173,7 @@ enum AssetID {
     }
     static let madlad = "mt.madlad"
     static let hyMT2 = "mt.hymt2.1.8b.q4"
+    static let translateGemma = "mt.translategemma.4b.q4"
+    static let granite = "asr.granite.5.0.470m.q8"
     static func llm(file: String) -> String { "mt.llm.\(file)" }
 }

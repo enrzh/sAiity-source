@@ -7,9 +7,16 @@ import SaiityLLM
 enum LocalGeneration {
     @TaskLocal static var deadline: ContinuousClock.Instant?
     @TaskLocal static var dictationRunID: String?
+    @TaskLocal static var timingObserver: (@MainActor @Sendable (DiagnosticsRuntimeTiming) -> Void)?
 
-    static func loadModel<T>(_ load: () async throws -> T,
-                             onTiming: (@MainActor (DiagnosticsRuntimeTiming) -> Void)? = nil) async rethrows -> T {
+    static func checkDeadline() throws {
+        try Task.checkCancellation()
+        if let deadline, ContinuousClock.now >= deadline { throw CancellationError() }
+    }
+
+    static func loadModel<T>(assetID: String? = nil, _ load: () async throws -> T,
+                             onTiming: (@MainActor (DiagnosticsRuntimeTiming) -> Void)? = nil) async throws -> T {
+        try checkDeadline()
         let started = ContinuousClock.now
         let runID = dictationRunID
         let record: @MainActor () -> Void = {
@@ -21,14 +28,21 @@ enum LocalGeneration {
                                          runID: timing.runID, modelLoadCount: timing.modelLoadCount)
             }
         }
-        do {
-            let model = try await load()
+        let model: T
+        do { model = try await load() }
+        catch {
             await record()
-            return model
-        } catch {
-            await record()
+            if let assetID, LoadHealth.shouldRecordLoadFailure(error) {
+                await MainActor.run {
+                    LoadHealth.recordFailureIfInstalled(assetID, reason: DiagnosticsRedactor.redact(error.localizedDescription))
+                }
+            }
             throw error
         }
+        await record()
+        if let assetID { await MainActor.run { LoadHealth.clear(assetID) } }
+        try checkDeadline()
+        return model
     }
 
     @MainActor
@@ -54,7 +68,7 @@ enum LocalGeneration {
                     thinking: ThinkingMode = .none,
                     outputTokens: Int? = nil,
                     maximumDuration: Double = 15) async throws -> String? {
-        guard !Task.isCancelled else { return nil }
+        try checkDeadline()
         let started = ContinuousClock.now
         let framed = model.template?.preprocess(user, [], thinking) ?? user
         let promptTokens = await model.encode(framed).count

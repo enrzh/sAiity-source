@@ -1,4 +1,5 @@
 import Foundation
+import CTranscribe
 
 /// Records "the bytes are on disk, but they did not load" per asset.
 ///
@@ -23,6 +24,21 @@ enum LoadHealth {
     }
 
     static func reason(for assetID: String) -> String? { all[assetID] }
+    static func shouldRecordLoadFailure(_ error: Error) -> Bool {
+        if error is CancellationError { return false }
+        if let error = error as? URLError, error.code == .cancelled { return false }
+        if let error = error as? TranslationEngineError, case .runtimeUnavailable = error { return false }
+        if let error = error as? GraniteASRBackend.Failure {
+            switch error {
+            case .invalidModelIdentity: return true
+            case .native(let status, _, _):
+                return [TRANSCRIBE_ERR_GGUF, TRANSCRIBE_ERR_UNSUPPORTED_ARCH, TRANSCRIBE_ERR_UNSUPPORTED_VARIANT]
+                    .contains { Int32(bitPattern: $0.rawValue) == status }
+            default: return false
+            }
+        }
+        return true
+    }
 
     /// Record only when the asset's files are actually present — a failure to
     /// load what was never downloaded is not damage, it is the normal

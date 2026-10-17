@@ -1,6 +1,749 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Model files are being removed. Wait for that to finish.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Modelldateien werden entfernt. Warte, bis das abgeschlossen ist." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Les fichiers du modèle sont en cours de suppression. Attendez la fin de cette opération." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Se están eliminando los archivos del modelo. Espera a que termine." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "モデルファイルを削除しています。完了するまでお待ちください。" } }
+      }
+    },
+    "Gemma or your own GGUF · one is used at a time": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Gemma oder dein eigenes GGUF · jeweils ein Modell" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Gemma ou votre propre GGUF · un seul modèle à la fois" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Gemma o tu propio GGUF · se usa uno a la vez" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "Gemma または独自の GGUF · 一度に使うモデルは1つ" } }
+      }
+    },
+    "Copied — paste requested": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kopiert — Einfügen angefordert"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copié — collage demandé"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copiado — pegado solicitado"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "コピー済み — 貼り付けを要求しました"
+          }
+        }
+      }
+    },
+    "Translated and copied — paste requested": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Übersetzt und kopiert — Einfügen angefordert"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Traduit et copié — collage demandé"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Traducido y copiado — pegado solicitado"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "翻訳・コピー済み — 貼り付けを要求しました"
+          }
+        }
+      }
+    },
+    "Translation unavailable — cleaned text copied; paste requested": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Übersetzung nicht verfügbar — bereinigten Text kopiert; Einfügen angefordert"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Traduction indisponible — texte corrigé copié ; collage demandé"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Traducción no disponible — texto corregido copiado; pegado solicitado"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "翻訳できません — 整形したテキストをコピーし、貼り付けを要求しました"
+          }
+        }
+      }
+    },
+    "Translation unavailable — original copied; paste requested": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Übersetzung nicht verfügbar — Original kopiert; Einfügen angefordert"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Traduction indisponible — original copié ; collage demandé"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Traducción no disponible — original copiado; pegado solicitado"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "翻訳できません — 原文をコピーし、貼り付けを要求しました"
+          }
+        }
+      }
+    },
+    "Recognition took too long. Please try again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Spracherkennung hat zu lange gedauert. Bitte erneut versuchen."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La reconnaissance a pris trop de temps. Veuillez réessayer."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "El reconocimiento tardó demasiado. Inténtalo de nuevo."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "音声認識に時間がかかりすぎました。もう一度お試しください。"
+          }
+        }
+      }
+    },
+    "English-only offline recognition on Apple Silicon, 506 MB. Decodes completed audio regions; no live partials or audio language detection. Local quality and speed qualification is pending.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Offline-Spracherkennung nur für Englisch auf Apple Silicon, 506 MB. Verarbeitet abgeschlossene Audioabschnitte; keine laufenden Teilergebnisse und keine Erkennung der Audiosprache. Qualität und Geschwindigkeit in dieser App sind noch nicht geprüft."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reconnaissance hors ligne en anglais uniquement sur Apple Silicon, 506 Mo. Décode les segments audio terminés ; aucun résultat partiel en direct ni détection de langue audio. Qualité et vitesse dans l’app restent à vérifier."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reconocimiento sin conexión solo en inglés en Apple Silicon, 506 MB. Decodifica segmentos de audio completos; sin resultados parciales en directo ni detección de idioma del audio. La calidad y la velocidad en la app están pendientes de validación."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple Silicon向けの英語専用オフライン音声認識。506 MB。完了した音声区間を認識します。リアルタイムの途中結果や音声からの言語検出には対応していません。このアプリでの品質と速度は未検証です。"
+          }
+        }
+      }
+    },
+    "English only · 506 MB · completed audio regions": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nur Englisch · 506 MB · abgeschlossene Audioabschnitte"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anglais uniquement · 506 Mo · segments audio terminés"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Solo inglés · 506 MB · segmentos de audio completos"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "英語専用 · 506 MB · 完了した音声区間を認識"
+          }
+        }
+      }
+    },
+    "Optional Gemma 4 cleanup. Local quality and speed qualification is pending.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Optionale Textbereinigung mit Gemma 4. Qualität und Geschwindigkeit in dieser App sind noch nicht geprüft."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Correction facultative avec Gemma 4. Qualité et vitesse dans l’app restent à vérifier."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Corrección opcional con Gemma 4. La calidad y la velocidad en la app están pendientes de validación."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gemma 4による任意のテキスト整形。このアプリでの品質と速度は未検証です。"
+          }
+        }
+      }
+    },
+    "Optional larger Gemma 4 cleanup. Uses more memory; local quality and speed qualification is pending.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Optionale Textbereinigung mit dem größeren Gemma 4. Benötigt mehr Arbeitsspeicher; Qualität und Geschwindigkeit in dieser App sind noch nicht geprüft."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Correction facultative avec le modèle Gemma 4 plus grand. Utilise plus de mémoire ; qualité et vitesse dans l’app restent à vérifier."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Corrección opcional con el modelo Gemma 4 más grande. Usa más memoria; la calidad y la velocidad en la app están pendientes de validación."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "大きいGemma 4モデルによる任意のテキスト整形。より多くのメモリを使用します。このアプリでの品質と速度は未検証です。"
+          }
+        }
+      }
+    },
+    "Optional Gemma 3-based translation specialist. 2.49 GB, with declared language variants and a dedicated translation prompt. Local quality and speed qualification is pending.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Optionales, auf Gemma 3 basierendes Übersetzungsmodell. 2,49 GB, mit angegebenen Sprachvarianten und einer speziellen Übersetzungsanweisung. Qualität und Geschwindigkeit in dieser App sind noch nicht geprüft."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modèle de traduction facultatif basé sur Gemma 3. 2,49 Go, avec des variantes linguistiques déclarées et une consigne dédiée à la traduction. Qualité et vitesse dans l’app restent à vérifier."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modelo de traducción opcional basado en Gemma 3. 2,49 GB, con variantes de idioma declaradas y una instrucción específica para traducir. La calidad y la velocidad en la app están pendientes de validación."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gemma 3ベースの任意の翻訳専用モデル。2.49 GB。対応する言語バリエーションと翻訳専用の指示を使用します。このアプリでの品質と速度は未検証です。"
+          }
+        }
+      }
+    },
+    "Download this model in Models before using it.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dieses Modell vor der Verwendung unter „Modelle“ herunterladen."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Téléchargez ce modèle dans Modèles avant de l’utiliser."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Descarga este modelo en Modelos antes de usarlo."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用する前に「モデル」でこのモデルをダウンロードしてください。"
+          }
+        }
+      }
+    },
+    "Download TranslateGemma in Models before using it.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TranslateGemma vor der Verwendung unter „Modelle“ herunterladen."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Téléchargez TranslateGemma dans Modèles avant de l’utiliser."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Descarga TranslateGemma en Modelos antes de usarlo."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用する前に「モデル」でTranslateGemmaをダウンロードしてください。"
+          }
+        }
+      }
+    },
+    "TranslateGemma does not support that language variant.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TranslateGemma unterstützt diese Sprachvariante nicht."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TranslateGemma ne prend pas en charge cette variante linguistique."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TranslateGemma no admite esa variante de idioma."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TranslateGemmaはこの言語バリエーションに対応していません。"
+          }
+        }
+      }
+    },
+    "TranslateGemma ready.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TranslateGemma ist bereit."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TranslateGemma est prêt."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TranslateGemma está listo."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TranslateGemmaの準備ができました。"
+          }
+        }
+      }
+    },
+    "Loading Granite Speech…": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Granite Speech wird geladen…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chargement de Granite Speech…"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cargando Granite Speech…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Granite Speechを読み込み中…"
+          }
+        }
+      }
+    },
+    "Granite Speech ready.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Granite Speech ist bereit."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Granite Speech est prêt."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Granite Speech está listo."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Granite Speechの準備ができました。"
+          }
+        }
+      }
+    },
+    "Granite implementation is unavailable.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Granite-Implementierung ist nicht verfügbar."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’implémentation Granite est indisponible."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La implementación de Granite no está disponible."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Graniteの実装を利用できません。"
+          }
+        }
+      }
+    },
+    "Granite recognizes English only.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Granite erkennt nur Englisch."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Granite reconnaît uniquement l’anglais."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Granite solo reconoce inglés."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Graniteは英語のみに対応しています。"
+          }
+        }
+      }
+    },
+    "Granite native runtime is incompatible with the bundled header.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die native Granite-Laufzeit ist nicht mit dem enthaltenen Header kompatibel."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le moteur natif Granite est incompatible avec l’en-tête fourni."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "El motor nativo de Granite no es compatible con la cabecera incluida."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Graniteのネイティブランタイムが同梱のヘッダーと互換性がありません。"
+          }
+        }
+      }
+    },
+    "The selected Granite model file is missing or empty.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die ausgewählte Granite-Modelldatei fehlt oder ist leer."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le fichier du modèle Granite sélectionné est absent ou vide."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "El archivo del modelo Granite seleccionado falta o está vacío."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選択したGraniteモデルのファイルが存在しないか、空です。"
+          }
+        }
+      }
+    },
+    "Granite requires the commercial Apache-2.0 English TurboCTC model.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Granite benötigt das kommerziell nutzbare englische TurboCTC-Modell unter Apache-2.0."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Granite nécessite le modèle TurboCTC anglais utilisable commercialement sous Apache-2.0."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Granite requiere el modelo TurboCTC en inglés con uso comercial permitido bajo Apache-2.0."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Graniteには商用利用可能なApache-2.0ライセンスの英語TurboCTCモデルが必要です。"
+          }
+        }
+      }
+    },
+    "Granite requires bounded 16 kHz mono Float32 audio with finite samples.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Granite benötigt begrenztes 16-kHz-Mono-Audio im Float32-Format mit endlichen Samplewerten."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Granite nécessite un audio mono Float32 à 16 kHz de taille bornée, avec des échantillons finis."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Granite requiere audio mono Float32 de 16 kHz de tamaño limitado y muestras finitas."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Graniteには、有限のサンプル値を持つ、サイズが制限された16 kHz・モノラル・Float32の音声が必要です。"
+          }
+        }
+      }
+    },
+    "Granite speech regions have invalid bounds, order or coverage.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Granite-Sprachabschnitte haben ungültige Grenzen, eine ungültige Reihenfolge oder Abdeckung."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les segments audio Granite ont des limites, un ordre ou une couverture invalides."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Los segmentos de voz de Granite tienen límites, orden o cobertura no válidos."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Graniteの音声区間の範囲、順序、またはカバレッジが不正です。"
+          }
+        }
+      }
+    },
+    "Granite returned an invalid or incomplete native result.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Granite hat ein ungültiges oder unvollständiges natives Ergebnis zurückgegeben."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Granite a renvoyé un résultat natif invalide ou incomplet."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Granite devolvió un resultado nativo no válido o incompleto."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Graniteが不正または不完全なネイティブ結果を返しました。"
+          }
+        }
+      }
+    },
+    "Granite native operation failed (status %d).": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die native Granite-Verarbeitung ist fehlgeschlagen (Status %d)."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’opération native Granite a échoué (état %d)."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La operación nativa de Granite falló (estado %d)."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Graniteのネイティブ処理に失敗しました（状態 %d）。"
+          }
+        }
+      }
+    },
     "Transparent background": {
       "extractionState": "manual",
       "localizations": {

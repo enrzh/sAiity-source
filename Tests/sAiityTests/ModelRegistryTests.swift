@@ -3,11 +3,59 @@ import Testing
 
 @testable import sAiity
 
+extension ModelRegistryTests {
+    @Test("a dictation-only TranslateGemma choice participates in asset selection")
+    func dictationOnlyTranslatorSelection() {
+        let defaults = UserDefaults.standard
+        let keys = ["translationEngine", "dictationTranslationEngine"]
+        let previous = keys.map { ($0, defaults.object(forKey: $0)) }
+        defer { for (key, value) in previous { defaults.set(value, forKey: key) } }
+        TranslationEngine.selected = .madlad
+        TranslationEngine.dictationSelected = .translateGemma
+        #expect(AssetUse.whenTranslator(.translateGemma).isSelected)
+        TranslationEngine.dictationSelected = nil
+        #expect(!AssetUse.whenTranslator(.translateGemma).isSelected)
+        #expect(AssetUse.whenTranslator(.madlad).isSelected)
+    }
+}
+
 /// The registry's job is to be right about paths and install state. Both fail
 /// silently: a wrong removal path deletes someone else's model, and a wrong
 /// install check either re-downloads gigabytes or loads a model that isn't there.
 @MainActor
 struct ModelRegistryTests {
+    @Test("A known-size file missing its final byte remains a partial download")
+    func exactKnownFileSizeIsRequired() throws {
+        let owned = try #require(ProcessInfo.processInfo.environment["CODEX_TASK_TMP"])
+        let file = URL(fileURLWithPath: owned).appendingPathComponent("known-size-\(UUID().uuidString).gguf")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let asset = ModelAsset(id: "synthetic.known-size", family: .recognition, title: "Synthetic", detail: "",
+            recommended: false, licence: nil, advertisedBytes: 100,
+            storage: .file(file, expectedBytes: 100), removal: .remove(file), use: .never, install: nil)
+        try Data(repeating: 0, count: 99).write(to: file)
+        #expect(!ModelRegistry.status(of: asset).isInstalled)
+        #expect(ModelRegistry.status(of: asset).isPartial)
+        try Data(repeating: 0, count: 100).write(to: file)
+        #expect(ModelRegistry.status(of: asset).isInstalled)
+    }
+
+    @Test("Granite selected for streaming dictation is represented as selected on its Models row")
+    func dictationRecognitionSelectionIsRepresented() {
+        let defaults = UserDefaults.standard
+        let keys = ["asrEngine", "dictationStreamingEngine", "dictationRecognizer", "whisperDictationSelected"]
+        let previous = keys.map { ($0, defaults.object(forKey: $0)) }
+        defer {
+            for (key, value) in previous {
+                if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+            }
+        }
+        ASREngine.selected = .nemotron
+        ASREngine.dictationSelected = .granite
+        DictationRecognizer.selected = .streaming
+        #expect(AssetUse.whenRecognitionEngine(.granite).isSelected)
+        DictationRecognizer.selected = .whisper
+        #expect(!AssetUse.whenRecognitionEngine(.granite).isSelected)
+    }
 
     @Test("No asset can delete the models root")
     func removalNeverTargetsTheRoot() {
@@ -258,6 +306,21 @@ struct ModelRegistryTests {
 
 @Suite("Download coordination")
 struct DownloadCoordinatorTests {
+
+    @Test("Offline benchmark policy refuses a transfer at the shared download boundary")
+    func offlinePolicyNeverStartsTransfer() async {
+        let counter = Counter()
+        let coordinator = DownloadCoordinator()
+        var refused = false
+        do {
+            try await DownloadCoordinator.$downloadsAllowed.withValue(false) {
+                try await coordinator.run("synthetic.offline") { await counter.bumpAndWait() }
+            }
+        } catch { refused = true }
+        #expect(refused)
+        #expect(await counter.value == 0)
+        #expect(await coordinator.activeIDs.isEmpty)
+    }
 
     /// The defect: two callers wanting the same model each ran their own
     /// transfer, and for a GGUF that means each deleting the other's staging

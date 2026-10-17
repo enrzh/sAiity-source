@@ -16,7 +16,8 @@ if ! xcrun --find xcstringstool >/dev/null 2>&1; then
 fi
 
 NAME="Syllivra"
-APP="build/$NAME.app"
+APP="${SAIITY_APP_PATH:-build/$NAME.app}"
+SWIFT_SCRATCH="${SAIITY_SWIFT_SCRATCH:-.build}"
 
 # Version from git, so a bug report can name the build it came from. Falls back
 # to the Info.plist value outside a git checkout.
@@ -80,7 +81,7 @@ if [ "$NOTARIZE" = 1 ]; then
 fi
 
 MLX_PROJECT=".build/checkouts/mlx-swift/xcode/MLX.xcodeproj"
-MLX_DERIVED_DATA="build/MLXDerivedData"
+MLX_DERIVED_DATA="${SAIITY_MLX_DERIVED_DATA:-build/MLXDerivedData}"
 if [ ! -d "$MLX_PROJECT" ]; then
     echo "FATAL: MLX Xcode project is missing at $MLX_PROJECT" >&2
     exit 1
@@ -92,9 +93,9 @@ if ! xcrun metal --version >/dev/null 2>&1; then
 fi
 
 if [ "$CLEAN_BUILD" = 1 ]; then
-    swift build -c release
+    swift build --scratch-path "$SWIFT_SCRATCH" --cache-path "$PWD/.build" --disable-automatic-resolution -c release
 else
-    swift build -c release -Xswiftc -DSAIITY_TEST_HOOKS
+    swift build --scratch-path "$SWIFT_SCRATCH" --cache-path "$PWD/.build" --disable-automatic-resolution -c release -Xswiftc -DSAIITY_TEST_HOOKS
 fi
 
 # SwiftPM builds the MLX C++ library but deliberately cannot compile its Metal
@@ -108,13 +109,13 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # The filename here MUST match CFBundleExecutable exactly, capital A included.
 # If it does not, codesign still succeeds and the app just silently fails to
 # launch from Finder with no diagnostic.
-cp ".build/release/$NAME" "$APP/Contents/MacOS/$NAME"
+cp "$SWIFT_SCRATCH/release/$NAME" "$APP/Contents/MacOS/$NAME"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 
 # SwiftPM's product directory is architecture-specific (for example,
 # .build/arm64-apple-macosx/release). Do not guess a legacy path: a guessed
 # path leaves dynamic frameworks out of the bundle while codesign still passes.
-FW_SRC=$(swift build -c release --show-bin-path)
+FW_SRC=$(swift build --scratch-path "$SWIFT_SCRATCH" --cache-path "$PWD/.build" --disable-automatic-resolution -c release --show-bin-path)
 
 
 
@@ -135,6 +136,10 @@ fi
 mkdir -p "$APP/Contents/Frameworks"
 for fw in "${frameworks[@]}"; do
     ditto "$fw" "$APP/Contents/Frameworks/$(basename "$fw")"
+done
+for library in Vendor/CTranscribe/lib/*.dylib; do
+    [ -f "$library" ] || { echo "FATAL: Granite runtime is missing." >&2; exit 1; }
+    cp "$library" "$APP/Contents/Frameworks/"
 done
 install_name_tool -add_rpath "@executable_path/../Frameworks" \
     "$APP/Contents/MacOS/$NAME" 2>/dev/null || true
@@ -216,6 +221,14 @@ CREDITS="$APP/Contents/Resources/Credits.txt"
         proj=$(basename "$(dirname "$lic")")
         echo
         echo "--- $proj ---"
+        cat "$lic"
+    done
+    echo
+    for lic in Vendor/SaiityLLM/LICENSE Vendor/SaiityMADLAD/LICENSE Vendor/CTranscribe/licenses/LICENSE \
+               Vendor/CTranscribe/licenses/ggml/LICENSE Vendor/CTranscribe/licenses/src/third_party/miniz/LICENSE \
+               Vendor/CTranscribe/licenses/src/third_party/silero_vad/LICENSE; do
+        [ -f "$lic" ] || { echo "FATAL: missing native runtime license $lic" >&2; exit 1; }
+        printf '\n--- %s ---\n' "$lic"
         cat "$lic"
     done
     echo

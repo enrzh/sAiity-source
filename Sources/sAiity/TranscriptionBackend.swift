@@ -53,16 +53,32 @@ struct TimedWord: Sendable, Codable {
 final class BackendSink: @unchecked Sendable {
     private let lock = NSLock()
     private var backend: TranscriptionBackend?
+    private var buffering = false
+    private var buffered: [AVAudioPCMBuffer] = []
+    private var bufferedSamples = 0
 
-    func point(at backend: TranscriptionBackend?) {
-        lock.withLock { self.backend = backend }
+    func point(at backend: TranscriptionBackend?, buffering: Bool = false) {
+        lock.withLock {
+            self.backend = backend
+            self.buffering = buffering
+            // Serialize replay with new callbacks so early speech stays first.
+            if let backend { for buffer in buffered { backend.feed(buffer) } }
+            buffered.removeAll(keepingCapacity: false)
+            bufferedSamples = 0
+        }
     }
 
     /// Called ~50×/s from the capture queue. Reads the current backend under the
     /// lock and hands off; `feed` itself only copies samples and returns.
     func feed(_ buffer: AVAudioPCMBuffer) {
-        let current = lock.withLock { backend }
-        current?.feed(buffer)
+        lock.withLock {
+            if let backend { backend.feed(buffer) }
+            else if buffering,
+                    Int(buffer.frameLength) <= DictationAudioSampleLimit.maximumSamples - bufferedSamples {
+                buffered.append(buffer)
+                bufferedSamples += Int(buffer.frameLength)
+            }
+        }
     }
 }
 

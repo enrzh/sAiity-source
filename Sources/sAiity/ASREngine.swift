@@ -37,14 +37,15 @@ enum ASREngine: String, CaseIterable, Sendable {
     case qwen06
     /// Qwen3-ASR 1.7B, 4-bit. Same caption behaviour, larger weights.
     case qwen17
+    case granite
     /// Legacy on-disk value. Keep the raw case so old preferences can be read
     /// and normalized without making it selectable again.
     case parakeetEou
 
-    static var allCases: [ASREngine] { [.nemotron, .qwen06, .qwen17, .whisperTurbo] }
+    static var allCases: [ASREngine] { [.nemotron, .qwen06, .qwen17, .granite, .whisperTurbo] }
 
     /// The engines a user may pick. Whisper stays out: see `whisperTurbo`.
-    static let userSelectableCases: [ASREngine] = [.nemotron, .qwen06, .qwen17]
+    static let userSelectableCases: [ASREngine] = [.nemotron, .qwen06, .qwen17, .granite]
 
     static let primaryCases: [ASREngine] = [.nemotron]
     /// Empty. Kept as a named list so the shape survives the measurement that
@@ -81,6 +82,15 @@ enum ASREngine: String, CaseIterable, Sendable {
     /// filled radio.
     static let recommended: ASREngine = .nemotron
 
+    static let graniteFile = "granite-speech-5.0-470m-turboctc-Q8_0.gguf"
+    static let graniteBytes: Int64 = 505_606_496
+    static let graniteSHA256 = "0408fe0b33be19af5be423d8ba6b43768608b6f065e1ac97b78c84b55c140738"
+    static let graniteDownloadURL = URL(string: "https://huggingface.co/handy-computer/granite-speech-5.0-470m-turboctc-gguf/resolve/a144022e0444835b15bc52287537644157d5c50c/\(graniteFile)?download=true")!
+    static var graniteURL: URL { ModelRegistry.root.appendingPathComponent("granite").appendingPathComponent(graniteFile) }
+    static var graniteDownloaded: Bool {
+        (try? graniteURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) == Int(graniteBytes)
+    }
+
     /// The engine the pipeline runs. Only reached once `selected` is non-nil —
     /// `AppDelegate.start()` refuses to begin otherwise — so the fallback here
     /// keeps the backend types non-optional without ever deciding anything.
@@ -114,6 +124,7 @@ enum ASREngine: String, CaseIterable, Sendable {
         case .whisperTurbo: return String(localized: "Whisper turbo")
         case .qwen06: return String(localized: "Qwen3-ASR 0.6B")
         case .qwen17: return String(localized: "Qwen3-ASR 1.7B")
+        case .granite: return "Granite Speech 5.0"
         case .parakeetEou: return String(localized: "Parakeet")
         }
     }
@@ -128,6 +139,8 @@ enum ASREngine: String, CaseIterable, Sendable {
             return String(localized: "700 MB. Automatic recognition with a line when the speaker pauses, or after 10 seconds of continuous speech. This adapter exposes no audio language tag, and its complete source-language coverage is not declared here.")
         case .qwen17:
             return String(localized: "2.1 GB. The same pause-based automatic recognition as Qwen3-ASR 0.6B, with larger weights. This adapter exposes no audio language tag, and its complete source-language coverage is not declared here.")
+        case .granite:
+            return String(localized: "English-only offline recognition on Apple Silicon, 506 MB. Decodes completed audio regions; no live partials or audio language detection. Local quality and speed qualification is pending.")
         case .parakeetEou:
             return String(localized: "English only, 437 MB. A fifth of Nemotron's parameters, so it reaches the first word sooner, and it detects the end of an utterance itself, so sentences break where the speaker actually stopped. Pick this if you only caption English; it will produce confident nonsense on anything else.")
         }
@@ -145,6 +158,8 @@ enum ASREngine: String, CaseIterable, Sendable {
             return String(localized: "Multilingual · 700 MB · a line when the speaker pauses")
         case .qwen17:
             return String(localized: "Multilingual · 2.1 GB · same pause captions, heavier")
+        case .granite:
+            return String(localized: "English only · 506 MB · completed audio regions")
         case .parakeetEou:
             return String(localized: "English only · 437 MB · fastest")
         }
@@ -161,6 +176,8 @@ enum ASREngine: String, CaseIterable, Sendable {
             return !QwenASREngine.isDownloaded(.small)
         case .qwen17:
             return !QwenASREngine.isDownloaded(.large)
+        case .granite:
+            return !Self.graniteDownloaded
         case .parakeetEou: return !ParakeetEouEngine.isDownloaded()
         }
     }
@@ -172,13 +189,13 @@ enum ASREngine: String, CaseIterable, Sendable {
         switch self {
         case .nemotron, .qwen06, .qwen17: return .unknown
         case .whisperTurbo: return .only(WhisperTurboEngine.reliableLanguages)
-        case .parakeetEou: return .only(["en"])
+        case .parakeetEou, .granite: return .only(["en"])
         }
     }
 
     /// Auto recognition does not require a source-language selection, even when
     /// complete coverage or an audio language tag is unavailable to the app.
-    var automaticallyRecognizesLanguage: Bool { self != .parakeetEou }
+    var automaticallyRecognizesLanguage: Bool { self != .parakeetEou && self != .granite }
 
     /// Whether this adapter can expose an audio language tag. Nemotron returns
     /// its first tag; Whisper's per-window tag can change. Neither promises a
@@ -186,7 +203,7 @@ enum ASREngine: String, CaseIterable, Sendable {
     var identifiesLanguageFromAudio: Bool {
         switch self {
         case .nemotron, .whisperTurbo: return true
-        case .qwen06, .qwen17, .parakeetEou: return false
+        case .qwen06, .qwen17, .parakeetEou, .granite: return false
         }
     }
 
@@ -214,6 +231,8 @@ enum ASREngine: String, CaseIterable, Sendable {
             return AssetID.qwen06
         case .qwen17:
             return AssetID.qwen17
+        case .granite:
+            return AssetID.granite
         case .parakeetEou:
             return AssetID.parakeetEou
         }
@@ -247,6 +266,9 @@ enum ASREngine: String, CaseIterable, Sendable {
                                        engine: QwenASREngine(size: .large),
                                        onPerformance: onPerformance,
                                        onMetrics: onMetrics)
+        case .granite:
+            return GraniteASRBackend(modelURL: Self.graniteURL,
+                artifactDirectory: Bundle.main.privateFrameworksURL ?? Self.graniteURL.deletingLastPathComponent())
         }
     }
 
@@ -316,6 +338,18 @@ enum ASREngine: String, CaseIterable, Sendable {
             return [Self.qwenAsset(size: .small, engine: .qwen06)]
         case .qwen17:
             return [Self.qwenAsset(size: .large, engine: .qwen17)]
+        case .granite:
+            return [ModelAsset(id: AssetID.granite, family: .recognition,
+                title: "Granite Speech 5.0 470M TurboCTC Q8_0", detail: summary, recommended: false,
+                licence: "Apache-2.0 (IBM Granite) · GGUF: handy-computer",
+                advertisedBytes: Self.graniteBytes,
+                storage: .file(Self.graniteURL, expectedBytes: Self.graniteBytes),
+                removal: .remove(Self.graniteURL), use: .whenRecognitionEngine(.granite),
+                install: { sink in
+                    try await FileDownloader.download(from: Self.graniteDownloadURL, to: Self.graniteURL,
+                        expectedBytes: Self.graniteBytes, requireMagic: FileDownloader.ggufMagic,
+                        expectedSHA256: Self.graniteSHA256, progress: sink)
+                })]
         case .parakeetEou:
             return [ModelAsset(
                 id: AssetID.parakeetEou,

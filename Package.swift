@@ -1,5 +1,9 @@
 // swift-tools-version: 6.0
 import PackageDescription
+import Foundation
+
+let transcribeLibraries = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+    .appendingPathComponent("Vendor/CTranscribe/lib").path
 
 let package = Package(
     name: "Syllivra",
@@ -18,9 +22,8 @@ let package = Package(
         // that drift visible until the upstream package publishes a release.
         .package(url: "https://github.com/soniqo/speech-swift",
                  revision: "37c99dd856cfacfe952b2e48ecdb3c9dedc77625"),
-        // Qwen via llama.cpp/GGUF. Ships a binaryTarget, so no cmake.
-        .package(url: "https://github.com/obra/LLM.swift",
-                 revision: "c2144e1a0e29c280ec6080b7da85e876d51f8509"),
+        // The repository-owned MADLAD tokenizer uses this existing transitive pin.
+        .package(url: "https://github.com/huggingface/swift-transformers", exact: "1.3.3"),
         // Already here transitively, under speech-swift. Declared explicitly so
         // the app can import MLX and bound its buffer pool: MLX caches freed GPU
         // buffers and its default ceiling is a fraction of physical RAM, which on
@@ -39,7 +42,8 @@ let package = Package(
             name: "sAiity",
             dependencies: [
                 .product(name: "FluidAudio", package: "FluidAudio"),
-                .product(name: "MADLADTranslation", package: "speech-swift"),
+                "SaiityMADLAD",
+                "CTranscribe",
                 // For HuggingFaceDownloader: fetching MADLAD's weights without
                 // also loading 1.86 GB into memory, which fromPretrained does.
                 .product(name: "AudioCommon", package: "speech-swift"),
@@ -59,12 +63,26 @@ let package = Package(
                 // Keep test-only hooks available to local debug builds; release
                 // builds pass no test-hook flags.
                 .define("SAIITY_TEST_HOOKS", .when(configuration: .debug)),
-            ]
+            ],
+            linkerSettings: [.unsafeFlags(["-L", transcribeLibraries,
+                                           "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]
         ),
         .target(name: "SaiityLLM",
-                dependencies: [.product(name: "LLM", package: "LLM.swift")],
+                dependencies: ["llama"],
                 path: "Vendor/SaiityLLM",
                 exclude: ["README.md", "LICENSE"],
+                swiftSettings: [.swiftLanguageMode(.v5)]),
+        .binaryTarget(name: "llama",
+                      url: "https://github.com/ggml-org/llama.cpp/releases/download/b11619/llama-b11619-xcframework.zip",
+                      checksum: "8137660a3ad30a8115057e9eb8880cabb0f61e0ec37521b9738ddbb632ba7caf"),
+        .systemLibrary(name: "CTranscribe", path: "Vendor/CTranscribe"),
+        .target(name: "SaiityMADLAD",
+                dependencies: [.product(name: "MLX", package: "mlx-swift"),
+                               .product(name: "MLXNN", package: "mlx-swift"),
+                               .product(name: "MLXFast", package: "mlx-swift"),
+                               .product(name: "AudioCommon", package: "speech-swift"),
+                               .product(name: "Tokenizers", package: "swift-transformers")],
+                path: "Vendor/SaiityMADLAD", exclude: ["README.md", "LICENSE"],
                 swiftSettings: [.swiftLanguageMode(.v5)]),
         // Covers the pure logic only — the model registry and the per-engine
         // language mapping. Both are places where a wrong answer is silent:
@@ -72,7 +90,7 @@ let package = Package(
         // code produces no translation and no error.
         .testTarget(
             name: "sAiityTests",
-            dependencies: ["sAiity"],
+            dependencies: ["sAiity", "SaiityLLM", "SaiityMADLAD", "CTranscribe"],
             path: "Tests/sAiityTests",
             swiftSettings: [.swiftLanguageMode(.v5), .define("SAIITY_TEST_HOOKS")],
             // Sparkle is a dynamic framework living in the build products
@@ -80,8 +98,9 @@ let package = Package(
             // rpath the whole test bundle fails to dlopen — and SIP strips
             // DYLD_FRAMEWORK_PATH from the test runner, so an env var cannot
             // stand in for it.
-            linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath",
-                                           "-Xlinker", "@loader_path/../../.."])]
+            linkerSettings: [.unsafeFlags(["-L", transcribeLibraries,
+                                           "-Xlinker", "-rpath", "-Xlinker", transcribeLibraries,
+                                           "-Xlinker", "-rpath", "-Xlinker", "@loader_path/../../.."])]
         ),
     ]
 )

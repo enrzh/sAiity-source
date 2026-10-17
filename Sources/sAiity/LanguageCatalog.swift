@@ -71,6 +71,7 @@ enum LanguageCatalog {
     static let all: [AppLanguage] = {
         var codes = MADLADLanguages.canonicalCodes
         codes.formUnion(popular)
+        codes.formUnion(TranslateGemmaTranslator.canonicalCodes)
         return codes.map(AppLanguage.init(code:))
             .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
     }()
@@ -83,6 +84,7 @@ enum LanguageCatalog {
     private static let supportedCodesByEngine: [TranslationEngine: Set<String>] = [
         .madlad: MADLADLanguageProvider.canonicalCodes,
         .hyMT2: HyMT2LanguageProvider.canonicalCodes,
+        .translateGemma: TranslateGemmaTranslator.canonicalCodes,
         .qwen: LLMLanguageProvider.canonicalCodes,
     ]
 
