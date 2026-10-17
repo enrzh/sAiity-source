@@ -3,8 +3,154 @@ import Testing
 
 @testable import sAiity
 
+// AppDelegate preparation observes the process-wide CaptionSession admission.
+// Keep its tests in the same serial namespace as model-removal operations.
+extension SavedTranscriptOperationTests {
 @MainActor
 @Suite struct ModelLifecycleTests {
+    @Test("Post-eviction evidence and reacquisition wait for actual native release acknowledgement")
+    func evictionEvidenceWaitsForNativeRelease() async throws {
+        final class ReleaseGate: @unchecked Sendable {
+            private let lock = NSLock()
+            private var continuation: CheckedContinuation<Void, Never>?
+            var entered: Bool { lock.withLock { continuation != nil } }
+            func wait() async {
+                await withCheckedContinuation { value in lock.withLock { continuation = value } }
+            }
+            func open() {
+                let value = lock.withLock { let value = continuation; continuation = nil; return value }
+                value?.resume()
+            }
+        }
+        let gate = ReleaseGate(), backend = FakeLifecycleBackend()
+        backend.onRelease = { await gate.wait() }
+        let pool = ASRBackendPool(makeBackend: { backend }, idleEvictionDelay: .milliseconds(5))
+        try await pool.prepare(locale: Locale(identifier: "en")) { _ in }
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !gate.entered, ContinuousClock.now < deadline { await Task.yield() }
+        try #require(gate.entered)
+        #expect(pool.warmState == nil)
+        var acquired = false
+        let next = Task {
+            let lease = try await pool.acquire(locale: Locale(identifier: "en")) { _ in }
+            acquired = true
+            return lease
+        }
+        try await Task.sleep(for: .milliseconds(15))
+        #expect(!acquired && backend.prepares == 1)
+        gate.open()
+        let lease = try await next.value
+        #expect(acquired && backend.prepares == 2 && pool.warmState == "warm")
+        backend.onRelease = nil
+        await pool.release(lease, discard: true)
+    }
+    @Test("warm-state evidence follows preparation and confirmed idle eviction, not loop index")
+    func actualWarmState() async throws {
+        let backend = FakeLifecycleBackend()
+        let pool = ASRBackendPool(makeBackend: { backend }, idleEvictionDelay: .milliseconds(20))
+        #expect(pool.warmState == "cold-start")
+        let lease = try await pool.acquire(locale: Locale(identifier: "en")) { _ in }
+        #expect(pool.warmState == "warm")
+        await pool.release(lease, discard: false)
+        let deadline = ContinuousClock.now + .seconds(2)
+        while pool.warmState != "post-eviction", ContinuousClock.now < deadline { await Task.yield() }
+        #expect(backend.releases == 1)
+        #expect(pool.warmState == "post-eviction")
+        let second = try await pool.acquire(locale: Locale(identifier: "en")) { _ in }
+        #expect(pool.warmState == "warm")
+        await pool.release(second, discard: true)
+        #expect(pool.warmState == nil, "manual invalidation is not an idle eviction or a fresh process")
+    }
+    @Test("changing a supported target keeps the same resident translation model and native leases")
+    func targetChangeKeepsResidentTranslator() {
+        let runtime = TranslationRuntime()
+        let translator = TranslationProcedureTests.Engine()
+        runtime.active = translator
+        runtime.engine = .hyMT2
+        runtime.ready = true
+        runtime.preparedTarget = "de"
+        runtime.beginUse()
+        #expect(runtime.retargetPreparedModel(to: "en"))
+        #expect(runtime.preparedTarget == "en")
+        #expect(runtime.active === translator)
+        #expect(runtime.users == 1)
+        #expect(!runtime.retargetPreparedModel(to: "unsupported-language"))
+        #expect(runtime.preparedTarget == "en")
+        runtime.endUse()
+        runtime.ready = false
+        #expect(!runtime.retargetPreparedModel(to: "de"))
+    }
+
+    @Test("An expired waiter cannot acquire a model whose earlier shared load finishes later")
+    func existingLoadStillHonorsWaiterDeadline() async throws {
+        let gate = DictationControllerTests.ContinuationGate(), backend = FakeLifecycleBackend()
+        backend.preparationGate = gate
+        let pool = ASRBackendPool(makeBackend: { backend })
+        let loading = Task { try await pool.prepare(locale: Locale(identifier: "en")) { _ in } }
+        let waitingUntil = ContinuousClock.now + .seconds(2)
+        while !gate.entered, ContinuousClock.now < waitingUntil { await Task.yield() }
+        try #require(gate.entered)
+        let expired = Task {
+            try await LocalGeneration.$deadline.withValue(.now + .milliseconds(5)) {
+                try await pool.acquire(locale: Locale(identifier: "en")) { _ in }
+            }
+        }
+        try await Task.sleep(for: .milliseconds(15))
+        gate.open()
+        try await loading.value
+        do {
+            let unexpected = try await expired.value
+            Issue.record("Expired waiter acquired the native model")
+            await pool.release(unexpected, discard: false)
+        } catch { #expect(error is CancellationError) }
+        #expect(backend.prepares == 1 && backend.releases == 0 && !pool.hasActiveLeaseForTests)
+        let lease = try await pool.acquire(locale: Locale(identifier: "en")) { _ in }
+        await pool.release(lease, discard: true)
+    }
+    @Test("separate consumers reuse one preparation only for matching recognition configurations")
+    func scopedPoolsShareIdenticalModel() async throws {
+        let captionBackend = FakeLifecycleBackend()
+        let dictationBackend = FakeLifecycleBackend()
+        let captions = ASRBackendPool(makeBackend: { captionBackend })
+        var matching = true
+        let dictation = ASRBackendPool(makeBackend: { dictationBackend }, sharingWith: captions,
+                                       matchesSharedConfiguration: { matching })
+        try await dictation.prepare(locale: Locale(identifier: "en")) { _ in }
+        let captionLease = try await captions.acquire(locale: Locale(identifier: "en")) { _ in }
+        await captions.release(captionLease, discard: false)
+        let dictationLease = try await dictation.acquire(locale: Locale(identifier: "en")) { _ in }
+        #expect(captionLease === dictationLease)
+        #expect(captionBackend.prepares == 1)
+        #expect(dictationBackend.prepares == 0)
+        // A changed selection cannot reroute the lease that already owns native state.
+        matching = false
+        await dictation.release(dictationLease, discard: false)
+        #expect(!captions.hasActiveLeaseForTests)
+        let different = try await dictation.acquire(locale: Locale(identifier: "en")) { _ in }
+        #expect(different === dictationBackend)
+        #expect(dictationBackend.prepares == 1)
+        await dictation.release(different, discard: false)
+        await dictation.invalidate()
+        await captions.invalidate()
+        #expect(captionBackend.releases == 1 && dictationBackend.releases == 1)
+    }
+
+    @Test("matching child consumers cannot steal or invalidate another consumer's native lease")
+    func matchingConsumerCannotStealLease() async throws {
+        let backend = FakeLifecycleBackend()
+        let captions = ASRBackendPool(makeBackend: { backend })
+        let dictation = ASRBackendPool(makeBackend: { FakeLifecycleBackend() }, sharingWith: captions,
+                                       matchesSharedConfiguration: { true })
+        let lease = try await captions.acquire(locale: Locale(identifier: "en")) { _ in }
+        await #expect(throws: ASRBackendPool.Error.busy) {
+            _ = try await dictation.acquire(locale: Locale(identifier: "en")) { _ in }
+        }
+        await dictation.invalidate()
+        #expect(backend.releases == 0)
+        #expect(captions.hasActiveLeaseForTests)
+        await captions.release(lease, discard: true)
+        #expect(backend.releases == 1)
+    }
     @Test("translator lifetime waits for every native user before allowing teardown")
     func translatorWaitsForAllUsers() async {
         let runtime = TranslationRuntime()
@@ -71,12 +217,15 @@ import Testing
         var starts = 0
         var stops = 0
         var releases = 0
+        var preparationGate: DictationControllerTests.ContinuationGate?
+        var onRelease: (@Sendable () async -> Void)?
 
         var inputFormat: AVAudioFormat? { get async { format } }
 
         func prepare(locale: Locale,
                      progress: @escaping @Sendable (String) -> Void) async throws {
             prepares += 1
+            if let preparationGate { await preparationGate.wait() }
         }
 
         func start(onChunk: @escaping @Sendable (TranscriptChunk) -> Void) async throws {
@@ -91,6 +240,7 @@ import Testing
 
         func release() async {
             releases += 1
+            await onRelease?()
         }
 
         func finishDictation() async -> String? { nil }
@@ -131,6 +281,54 @@ import Testing
         #expect(created == 1)
         #expect(backend.prepares == 1)
         #expect(backend.releases == 0)
+    }
+
+    @Test("concurrent cold root and child acquisition preserves exactly one native owner")
+    func concurrentColdConsumersAreExclusive() async throws {
+        let backend = FakeLifecycleBackend()
+        let gate = DictationControllerTests.ContinuationGate()
+        backend.preparationGate = gate
+        let captions = ASRBackendPool(makeBackend: { backend })
+        let dictation = ASRBackendPool(makeBackend: { FakeLifecycleBackend() }, sharingWith: captions,
+                                       matchesSharedConfiguration: { true })
+        let first = Task { try await captions.acquire(locale: Locale(identifier: "en")) { _ in } }
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !gate.entered, ContinuousClock.now < deadline { await Task.yield() }
+        let second = Task { try await dictation.acquire(locale: Locale(identifier: "en")) { _ in } }
+        await Task.yield()
+        gate.open()
+        var winners: [TranscriptionBackend] = []
+        var busy = 0
+        for task in [first, second] {
+            do { winners.append(try await task.value) }
+            catch ASRBackendPool.Error.busy { busy += 1 }
+        }
+        #expect(winners.count == 1)
+        #expect(busy == 1)
+        #expect(backend.prepares == 1)
+        #expect(backend.releases == 0)
+        if let winner = winners.first { await dictation.release(winner, discard: false); await captions.release(winner, discard: true) }
+    }
+
+    @Test("refreshing an unused matching child preserves captions' in-progress cold load")
+    func childRefreshPreservesCaptionPreparation() async throws {
+        let backend = FakeLifecycleBackend()
+        let gate = DictationControllerTests.ContinuationGate()
+        backend.preparationGate = gate
+        let captions = ASRBackendPool(makeBackend: { backend })
+        let dictation = ASRBackendPool(makeBackend: { FakeLifecycleBackend() }, sharingWith: captions,
+                                       matchesSharedConfiguration: { true })
+        let first = Task { try await captions.acquire(locale: Locale(identifier: "en")) { _ in } }
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !gate.entered, ContinuousClock.now < deadline { await Task.yield() }
+        let invalidated = Task { await dictation.invalidate() }
+        await Task.yield()
+        gate.open()
+        await invalidated.value
+        let winner = try? await first.value
+        #expect(winner != nil)
+        #expect(backend.prepares == 1 && backend.releases == 0)
+        if let winner { await captions.release(winner, discard: true) }
     }
 
     @Test("a second ASR consumer cannot acquire while the first is active")
@@ -404,4 +602,5 @@ import Testing
             self.value = value
         }
     }
+}
 }

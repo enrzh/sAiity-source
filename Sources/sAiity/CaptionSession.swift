@@ -16,6 +16,8 @@ final class CaptionSession {
 
     private(set) var isRunning = false
     private(set) var isStopping = false
+    private(set) var isRemovingModels = false
+    func setRemovingModels(_ on: Bool) { isRemovingModels = on }
     private(set) var translationBacklogged = false
     func setTranslationBacklogged(_ on: Bool) { translationBacklogged = on }
 

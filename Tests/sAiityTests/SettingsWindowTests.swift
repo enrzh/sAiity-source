@@ -6,6 +6,307 @@ import WhisperKit
 
 @testable import sAiity
 
+extension SavedTranscriptOperationTests.SettingsWindowTests {
+    @Test("Explicit Whisper Settings and prewarm entry reject model removal before preparation")
+    func explicitWhisperRespectsRemoval() async throws {
+        let session = CaptionSession.shared
+        let previous = session.isRemovingModels
+        defer { session.setRemovingModels(previous) }
+        let app = AppDelegate(), calls = DictationControllerTests.EventLog()
+        app.whisperPreparationForTests = { _, _ in await MainActor.run { calls.values.append("prepare") } }
+        session.setRemovingModels(true)
+        do {
+            try await app.prepareSelectedWhisperModelForUse(.base)
+            Issue.record("Whisper Settings preparation entered during removal")
+        } catch { #expect(error is TranslationEngineError) }
+        do {
+            try await app.prepareSelectedWhisperModelForUse()
+            Issue.record("Whisper prewarm entered during removal")
+        } catch { #expect(error is TranslationEngineError) }
+        #expect(calls.values.isEmpty)
+        session.setRemovingModels(false)
+        try await app.prepareSelectedWhisperModelForUse(.base)
+        #expect(calls.values == ["prepare"])
+    }
+
+    @Test("An admitted Whisper preparation prevents unlink until its actual return")
+    func admittedWhisperPreventsUnlink() async throws {
+        let scratch = try #require(ProcessInfo.processInfo.environment["CODEX_TASK_TMP"])
+        let file = URL(fileURLWithPath: scratch).appendingPathComponent("held-whisper-\(UUID().uuidString)")
+        try Data("fake".utf8).write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let app = AppDelegate(), gate = DictationControllerTests.ContinuationGate()
+        app.whisperPreparationForTests = { _, _ in await gate.wait() }
+        let preparing = Task { try await app.prepareSelectedWhisperModelForUse(.base) }
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !gate.entered, ContinuousClock.now < deadline { await Task.yield() }
+        try #require(gate.entered)
+        let state = AppState()
+        let asset = ModelAsset(id: "test.held-whisper", family: .recognition, title: "Synthetic", detail: "",
+            recommended: false, licence: nil, advertisedBytes: 4, storage: .file(file, expectedBytes: 4),
+            removal: .remove(file), use: .never, install: nil)
+        await state.delete(asset, prepareForCleanup: { await app.prepareForModelCleanup() })
+        #expect(FileManager.default.fileExists(atPath: file.path) && state.modelError != nil)
+        #expect(!CaptionSession.shared.isRemovingModels)
+        gate.open()
+        try await preparing.value
+        await state.delete(asset, prepareForCleanup: { await app.prepareForModelCleanup() })
+        #expect(!FileManager.default.fileExists(atPath: file.path) && state.modelError == nil)
+    }
+
+    @Test("Downloads and model removal have exclusive actor admission")
+    func downloadAdmissionHonorsModelRemoval() async throws {
+        let coordinator = DownloadCoordinator()
+        let gate = AsyncStream<Void>.makeStream()
+        var entered = false
+        let download = Task {
+            try await coordinator.run("synthetic") {
+                await MainActor.run { entered = true }
+                for await _ in gate.stream { break }
+            }
+        }
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !entered, ContinuousClock.now < deadline { await Task.yield() }
+        #expect(entered)
+        #expect(await !coordinator.beginModelRemoval())
+        gate.continuation.yield(())
+        gate.continuation.finish()
+        try await download.value
+        #expect(await coordinator.beginModelRemoval())
+        #expect(await !coordinator.beginModelRemoval())
+        var calls = 0
+        do {
+            try await coordinator.run("blocked") { await MainActor.run { calls += 1 } }
+            Issue.record("Download was admitted during model removal")
+        } catch { #expect(error is TranslationEngineError) }
+        #expect(calls == 0)
+        await coordinator.endModelRemoval()
+        try await coordinator.run("after") { await MainActor.run { calls += 1 } }
+        #expect(calls == 1)
+    }
+
+    @Test("load health uses the frozen asset, clears only on a real load, and ignores absent files")
+    func loadHealthBindsFrozenSyntheticAsset() async throws {
+        let defaults = UserDefaults.standard
+        let keys = ["customLLMModels", "cleanupModelFile", "qwenModelFile", "assetLoadFailures"]
+        let previous = keys.map { ($0, defaults.object(forKey: $0)) }
+        defer { for (key, value) in previous { defaults.set(value, forKey: key) } }
+        let model = LocalModel(source: .importedFile, file: "gemma-health-\(UUID().uuidString).gguf",
+            label: "Synthetic cleanup fixture", bytes: 4, recommended: false, note: "", licence: "test")
+        let id = AssetID.llm(file: model.file) // Frozen before any loader await/selection change.
+        try FileManager.default.createDirectory(at: LocalModel.directory, withIntermediateDirectories: true)
+        try Data("fake".utf8).write(to: model.localURL)
+        defer { try? FileManager.default.removeItem(at: model.localURL) }
+        LocalModel.custom = LocalModel.custom + [model]
+        LocalModel.cleanupSelected = model
+        let otherHealth = LoadHealth.all
+        var calls = 0
+        do {
+            let _: Int = try await LocalGeneration.loadModel(assetID: id, {
+                calls += 1
+                await Task.yield()
+                LocalModel.cleanupSelected = nil // An asset selected later must not inherit this failure.
+                throw CocoaError(.fileReadCorruptFile)
+            }, onTiming: { _ in })
+            Issue.record("synthetic loader failure became success")
+        } catch { #expect(error is CocoaError) }
+        #expect(calls == 1 && LoadHealth.reason(for: id) != nil)
+        #expect(LoadHealth.all.filter { $0.key != id } == otherHealth.filter { $0.key != id })
+
+        LoadHealth.recordFailureIfInstalled(id, reason: "synthetic prior fault")
+        for error in [CancellationError() as any Error, URLError(.cancelled),
+                      TranslationEngineError.runtimeUnavailable("synthetic resource shortage")] {
+            let before = LoadHealth.all
+            do {
+                let _: Int = try await LocalGeneration.loadModel(assetID: id, { throw error }, onTiming: { _ in })
+                Issue.record("throwing loader became success")
+            } catch {}
+            #expect(LoadHealth.all == before) // No new damage and no clearing of an earlier fault.
+        }
+        let value = try await LocalGeneration.loadModel(assetID: id, { calls += 1; return 42 }, onTiming: { _ in })
+        #expect(value == 42 && calls == 2 && LoadHealth.reason(for: id) == nil)
+
+        try FileManager.default.removeItem(at: model.localURL)
+        let beforeMissing = LoadHealth.all
+        do {
+            let _: Int = try await LocalGeneration.loadModel(assetID: id, { calls += 1; throw CocoaError(.fileReadCorruptFile) },
+                onTiming: { _ in })
+        } catch {}
+        #expect(calls == 3 && LoadHealth.all == beforeMissing) // Not installed, even though loader threw.
+    }
+}
+
+extension SavedTranscriptOperationTests.SettingsWindowTests {
+    @Test("model removal rejects dictation prepare and press, then permits a later press",
+          arguments: [false, true])
+    func removalAdmissionBlocksDictation(prewarm: Bool) async {
+        let previous = CaptionSession.shared.isRemovingModels
+        defer { CaptionSession.shared.setRemovingModels(previous) }
+        let log = DictationControllerTests.EventLog(), backend = DictationControllerTests.FakeBackend(log: DictationControllerTests.EventLog())
+        let capture = DictationControllerTests.FakeCapture(log: log), inserter = DictationControllerTests.FakeInserter()
+        let controller = DictationController(makeBackend: { backend }, capture: capture,
+            inserter: inserter, captionsActive: { false }, modelRemovalActive: { CaptionSession.shared.isRemovingModels }, cleanupConfiguration: { .disabled })
+        CaptionSession.shared.setRemovingModels(true)
+        if prewarm { controller.prepare() } else { controller.press() }
+        await controller.waitForWorkForTests()
+        #expect(backend.prepares == 0 && backend.starts == 0)
+        #expect(capture.startCalls == 0 && inserter.inserted.isEmpty)
+        #expect(!controller.isBusy)
+        CaptionSession.shared.setRemovingModels(false)
+        controller.press()
+        await controller.waitForWorkForTests()
+        #expect(capture.startCalls == 1 && backend.prepares == 1)
+        controller.cancel()
+        await controller.waitForWorkForTests()
+    }
+}
+
+extension SavedTranscriptOperationTests.SettingsWindowTests {
+    @Test("Delete refuses a busy runtime before cancellation, release or unlink")
+    func deletionRefusesBusyRuntime() async throws {
+        let scratch = try #require(ProcessInfo.processInfo.environment["CODEX_TASK_TMP"])
+        let file = URL(fileURLWithPath: scratch).appendingPathComponent("busy-model-\(UUID().uuidString).gguf")
+        try Data("fake".utf8).write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let session = CaptionSession.shared
+        let saved = session.releaseModels
+        let removing = session.isRemovingModels
+        defer { session.releaseModels = saved; session.setRemovingModels(removing) }
+        var releases = 0
+        session.releaseModels = { releases += 1 }
+        let asset = ModelAsset(id: "test.busy", family: .cleanup, title: "Synthetic", detail: "",
+            recommended: false, licence: nil, advertisedBytes: 4, storage: .file(file, expectedBytes: 4),
+            removal: .remove(file), use: .never, install: nil)
+        let state = AppState()
+        await state.delete(asset, prepareForCleanup: { false })
+        #expect(FileManager.default.fileExists(atPath: file.path))
+        #expect(state.modelError != nil && releases == 0 && !session.isRemovingModels)
+    }
+
+    @Test("Forget keeps custom metadata until native release and uses the guarded removal path")
+    func forgetWaitsForNativeBeforeMetadata() async throws {
+        let defaults = UserDefaults.standard
+        let keys = ["customLLMModels", "cleanupModelFile", "qwenModelFile", "assetLoadFailures", "translationEngine", "dictationTranslationEngine"]
+        let previous = keys.map { ($0, defaults.object(forKey: $0)) }
+        defer { for (key, value) in previous { defaults.set(value, forKey: key) } }
+        let model = LocalModel(source: .importedFile, file: "gemma-forget-\(UUID().uuidString).gguf",
+            label: "Synthetic", bytes: 4, recommended: false, note: "", licence: "test")
+        try FileManager.default.createDirectory(at: LocalModel.directory, withIntermediateDirectories: true)
+        try Data("fake".utf8).write(to: model.localURL)
+        defer { try? FileManager.default.removeItem(at: model.localURL) }
+        LocalModel.custom += [model]
+        let state = AppState()
+        state.llmModel = model
+        let session = CaptionSession.shared
+        let saved = session.releaseModels, removing = session.isRemovingModels
+        defer { session.releaseModels = saved; session.setRemovingModels(removing) }
+        let gate = AsyncStream<Void>.makeStream()
+        defer { gate.continuation.yield(()); gate.continuation.finish() }
+        var releaseEntered = false, finished = false
+        session.releaseModels = {
+            releaseEntered = true
+            #expect(session.isRemovingModels)
+            #expect(LocalModel.custom.contains { $0.file == model.file })
+            #expect(state.llmModel?.file == model.file)
+            for await _ in gate.stream { break }
+        }
+        let forget = Task { await state.forgetCustomModel(model); finished = true }
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !releaseEntered, !finished, ContinuousClock.now < deadline { await Task.yield() }
+        #expect(releaseEntered && !finished)
+        if releaseEntered { #expect(FileManager.default.fileExists(atPath: model.localURL.path)) }
+        gate.continuation.yield(())
+        gate.continuation.finish()
+        await forget.value
+        #expect(state.modelError == nil && !session.isRemovingModels)
+        #expect(!LocalModel.custom.contains { $0.file == model.file })
+        #expect(state.llmModel == nil && LocalModel.cleanupSelected == nil)
+        #expect(!FileManager.default.fileExists(atPath: model.localURL.path))
+    }
+
+    @Test("Model cleanup also unloads a retained unselected cleanup model")
+    func cleanupQuiescenceReleasesWarmModel() async {
+        let app = AppDelegate()
+        var stops = 0
+        _ = await app.cleanupSessionForTests.cleanup(.init(text: "Send the report, I mean the revised report.", language: "en"), modelKey: "synthetic-old") {
+            .init(cleanup: { _, _, _ in "Send the revised report." }, stop: { stops += 1 })
+        }
+        #expect(stops == 0)
+        #expect(await app.prepareForModelCleanup())
+        #expect(stops == 1)
+        await app.cleanupSessionForTests.invalidate()
+    }
+
+    @Test("unselected old warm owner drains before unlink and keeps removal admission closed")
+    func oldWarmOwnerDrainsBeforeUnlink() async throws {
+        let scratch = try #require(ProcessInfo.processInfo.environment["CODEX_TASK_TMP"])
+        let file = URL(fileURLWithPath: scratch)
+            .appendingPathComponent("old-warm-\(UUID().uuidString).gguf")
+        try Data("fake".utf8).write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+
+        let defaults = UserDefaults.standard
+        let keys = ["asrEngine", "translationEngine", "dictationTranslationEngine",
+                    "dictationCleanupEnabled", "translateDictation", "translateTo",
+                    "dictationTranslateTo", "dictationTranslateToMigrated", CaptionStyle.key,
+                    "cleanupModelFile", "qwenModelFile", "assetLoadFailures"]
+        let previous = keys.map { ($0, defaults.object(forKey: $0)) }
+        let session = CaptionSession.shared
+        let previousRelease = session.releaseModels
+        let wasRunning = session.isRunning, wasStopping = session.isStopping
+        let wasRemoving = session.isRemovingModels
+        try #require(!wasRemoving && !session.isProcessingTranscript)
+        defer {
+            session.releaseModels = previousRelease
+            session.setRunning(wasRunning, stopping: wasStopping)
+            session.setRemovingModels(wasRemoving)
+            for (key, value) in previous { defaults.set(value, forKey: key) }
+        }
+        session.setRunning(false)
+        let state = AppState()
+        let gate = AsyncStream<Void>.makeStream()
+        defer { gate.continuation.yield(()); gate.continuation.finish() }
+        var releaseEntered = false, releaseFinished = false, deleteFinished = false
+        var events: [String] = []
+        session.releaseModels = {
+            #expect(session.isRemovingModels)
+            #expect(FileManager.default.fileExists(atPath: file.path))
+            releaseEntered = true
+            events.append("release-enter")
+            for await _ in gate.stream { break }
+            releaseFinished = true
+            events.append("release-exit")
+        }
+        let asset = ModelAsset(id: "test.old-warm.\(UUID().uuidString)", family: .cleanup,
+            title: "Synthetic old warm owner", detail: "", recommended: false, licence: nil,
+            advertisedBytes: 4, storage: .file(file, expectedBytes: 4),
+            removal: .remove(file), use: .never, install: nil,
+            unload: {
+                MainActor.assumeIsolated {
+                    #expect(releaseFinished && session.isRemovingModels)
+                    #expect(FileManager.default.fileExists(atPath: file.path))
+                    events.append("unlink-boundary")
+                }
+            })
+        let deletion = Task { @MainActor in await state.delete(asset); deleteFinished = true }
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !releaseEntered, !deleteFinished, ContinuousClock.now < deadline { await Task.yield() }
+        #expect(releaseEntered && !deleteFinished)
+        if releaseEntered {
+            #expect(session.isRemovingModels)
+            #expect(FileManager.default.fileExists(atPath: file.path))
+        }
+        // Always unblock and await the task, including the expected RED path.
+        gate.continuation.yield(())
+        gate.continuation.finish()
+        await deletion.value
+        #expect(events == ["release-enter", "release-exit", "unlink-boundary"])
+        #expect(state.modelError == nil)
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+        #expect(!session.isRemovingModels)
+    }
+}
+
 extension SavedTranscriptOperationTests {
 
 @MainActor

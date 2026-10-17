@@ -69,13 +69,16 @@ final class SegmentCache: @unchecked Sendable {
         }
     }
 
-    func store(_ segments: [Segment], for path: String, stamp: Stamp) {
+    func store(_ segments: [Segment], for path: String, stamp: Stamp, evictExisting: Bool = true) {
         let c = Self.cost(segments)
         lock.withLock {
-            if let old = entries[path] {
+            guard !Task.isCancelled else { return }
+            if let old = entries.removeValue(forKey: path) {
                 bytes -= old.cost
                 order.removeAll { $0 == path }
             }
+            // Whole-library scans must not evict the hits they are about to visit.
+            guard evictExisting || c <= maxBytes - bytes else { return }
             entries[path] = Entry(stamp: stamp, segments: segments, cost: c)
             order.append(path)
             bytes += c

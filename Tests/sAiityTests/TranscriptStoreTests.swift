@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Testing
 
 @testable import sAiity
@@ -13,6 +14,150 @@ import Testing
 /// transcripts in parallel must not be able to see — or delete — this one's.
 @MainActor
 struct TranscriptStoreTests {
+    @Test("whole-library search preserves cache hits beyond its byte budget", arguments: [4, 100, 500])
+    func sequentialSearchPreservesCachedSessions(sessionCount: Int) async throws {
+        try await withTemporaryLibrary { root in
+            let text = "needle " + String(repeating: "a", count: 153)
+            let segment = Segment(i: 0, t0: 0, t1: 1, text: text, loc: "en",
+                                  tr: nil, trLoc: nil, words: nil)
+            let capacity = sessionCount * 3 / 4
+            let cache = SegmentCache(maxBytes: capacity * (text.utf8.count + 64))
+            let sessions = try (0..<sessionCount).map { _ in
+                try TranscriptStore.saveSession([segment], locale: "en", translateTo: nil, in: root)
+            }
+            let stamps = try sessions.map { try segmentStamp($0) }
+            let first = TranscriptStore.search(sessions: sessions, query: "NEEDLE", cache: cache)
+            #expect(first.map(\.session.id) == sessions.map(\.id))
+            let retained = sessions.indices.filter {
+                cache.value(for: sessions[$0].url.appendingPathComponent("segments.jsonl").path,
+                            stamp: stamps[$0]) != nil
+            }
+            #expect(retained.count == capacity)
+
+            for _ in 0..<2 {
+                let decodes = OSAllocatedUnfairLock(initialState: 0)
+                let next = TranscriptTestLibrary.$afterSegmentLineForTests.withValue({ _ in
+                    decodes.withLock { $0 += 1 }
+                }) {
+                    TranscriptStore.search(sessions: sessions, query: "needle", cache: cache)
+                }
+                #expect(next.map(\.session.id) == sessions.map(\.id))
+                #expect(next.allSatisfy { $0.segment.text == text })
+                #expect(decodes.withLock { $0 } == sessionCount - capacity,
+                        "only uncached sessions should be decoded on the next sequential pass")
+                for index in retained {
+                    #expect(cache.value(for: sessions[index].url.appendingPathComponent("segments.jsonl").path,
+                                        stamp: stamps[index])?.first?.text == text,
+                            "a sequential miss evicted a session needed later in the same scan")
+                }
+            }
+        }
+    }
+
+    @Test("search invalidates edited and externally removed cached files")
+    func searchCacheFollowsEditsAndRemovals() async throws {
+        try await withTemporaryLibrary { root in
+            let original = Segment(i: 0, t0: 0, t1: 1, text: "needle old", loc: "en",
+                                   tr: nil, trLoc: nil, words: nil)
+            let sessions = try (0..<2).map { _ in
+                try TranscriptStore.saveSession([original], locale: "en", translateTo: nil, in: root)
+            }
+            let cache = SegmentCache(maxBytes: 512)
+            let oldStamps = try sessions.map { try segmentStamp($0) }
+            #expect(TranscriptStore.search(sessions: sessions, query: "needle", cache: cache).count == 2)
+            let edited = sessions[0].url.appendingPathComponent("segments.jsonl")
+            var replacement = original
+            replacement.text = "new source with a different size"
+            replacement.tr = "translated NEEDLE"
+            replacement.trLoc = "en"
+            var data = try JSONEncoder().encode(replacement)
+            data.append(0x0A)
+            try data.write(to: edited, options: .atomic)
+            let removed = sessions[1].url.appendingPathComponent("segments.jsonl")
+            try FileManager.default.removeItem(at: removed)
+
+            let hits = TranscriptStore.search(sessions: sessions, query: "needle", cache: cache)
+            #expect(hits.map(\.session.id) == [sessions[0].id])
+            #expect(hits.first?.segment.text == replacement.text)
+            #expect(hits.first?.segment.tr == replacement.tr)
+            #expect(cache.value(for: edited.path, stamp: oldStamps[0]) == nil)
+            #expect(cache.value(for: removed.path, stamp: oldStamps[1]) == nil,
+                    "an externally removed file must release its old cache entry")
+            #expect(cache.value(for: edited.path, stamp: try segmentStamp(sessions[0]))?.first?.tr == replacement.tr)
+        }
+    }
+
+    @Test("an oversized search miss keeps existing cached sessions")
+    func oversizedSearchMissPreservesCache() async throws {
+        try await withTemporaryLibrary { root in
+            let small = Segment(i: 0, t0: 0, t1: 1, text: "needle", loc: "en",
+                                tr: nil, trLoc: nil, words: nil)
+            var large = small
+            large.text += String(repeating: "a", count: 4096)
+            let cached = try TranscriptStore.saveSession([small], locale: "en", translateTo: nil, in: root)
+            let oversized = try TranscriptStore.saveSession([large], locale: "en", translateTo: nil, in: root)
+            let cache = SegmentCache(maxBytes: 256)
+            let stamp = try segmentStamp(cached)
+            #expect(TranscriptStore.search(sessions: [cached], query: "needle", cache: cache).count == 1)
+            #expect(TranscriptStore.search(sessions: [oversized, cached], query: "needle", cache: cache).count == 2)
+            #expect(cache.value(for: cached.url.appendingPathComponent("segments.jsonl").path,
+                                stamp: stamp)?.first?.text == small.text)
+            #expect(cache.value(for: oversized.url.appendingPathComponent("segments.jsonl").path,
+                                stamp: try segmentStamp(oversized)) == nil)
+        }
+    }
+
+    @Test("a cancelled search returns no hits and admits no sessions")
+    func cancelledSearchDoesNotPopulateCache() async throws {
+        try await withTemporaryLibrary { root in
+            let segment = Segment(i: 0, t0: 0, t1: 1, text: "needle", loc: "en",
+                                  tr: nil, trLoc: nil, words: nil)
+            let session = try TranscriptStore.saveSession([segment], locale: "en", translateTo: nil, in: root)
+            let cache = SegmentCache(maxBytes: 4096)
+            let hits = await Task.detached {
+                withUnsafeCurrentTask { $0?.cancel() }
+                return TranscriptStore.search(sessions: [session], query: "needle", cache: cache)
+            }.value
+            #expect(hits.isEmpty)
+            #expect(cache.value(for: session.url.appendingPathComponent("segments.jsonl").path,
+                                stamp: try segmentStamp(session)) == nil)
+            #expect(TranscriptStore.search(sessions: [session], query: "needle", cache: cache).count == 1)
+        }
+    }
+
+    @Test("cancellation during decoding never caches a partial transcript")
+    func cancelledDecodeDoesNotCachePartialTranscript() async throws {
+        try await withTemporaryLibrary { root in
+            let segments = (0..<1000).map {
+                Segment(i: $0, t0: Double($0), t1: Double($0 + 1), text: "needle \($0)", loc: "en",
+                        tr: nil, trLoc: nil, words: nil)
+            }
+            let session = try TranscriptStore.saveSession(segments, locale: "en", translateTo: nil, in: root)
+            let cache = SegmentCache(maxBytes: 1 << 20)
+            let hits = await Task.detached {
+                TranscriptTestLibrary.$afterSegmentLineForTests.withValue({ line in
+                    if line == 16 { withUnsafeCurrentTask { $0?.cancel() } }
+                }) {
+                    TranscriptStore.search(sessions: [session], query: "needle", cache: cache)
+                }
+            }.value
+            #expect(hits.isEmpty)
+            #expect(cache.value(for: session.url.appendingPathComponent("segments.jsonl").path,
+                                stamp: try segmentStamp(session)) == nil)
+            let complete = TranscriptStore.search(sessions: [session], query: "needle", cache: cache)
+            #expect(complete.map(\.segment.i) == Array(0..<1000))
+            #expect(cache.value(for: session.url.appendingPathComponent("segments.jsonl").path,
+                                stamp: try segmentStamp(session))?.count == 1000)
+        }
+    }
+
+    private func segmentStamp(_ session: SessionRef) throws -> SegmentCache.Stamp {
+        let attributes = try FileManager.default.attributesOfItem(
+            atPath: session.url.appendingPathComponent("segments.jsonl").path)
+        return SegmentCache.Stamp(modified: try #require(attributes[.modificationDate] as? Date),
+                                  size: try #require((attributes[.size] as? NSNumber)?.intValue))
+    }
+
     @Test("DUP7 legacy metadata decodes an absent optional title without changing its fields")
     func dup7LegacyMetadataHasOptionalTitle() async throws {
         try await TranscriptTestLibrary.withTemporaryDirectory { _ in

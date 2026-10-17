@@ -18,6 +18,12 @@ final class TranslationRuntime {
 
     func beginUse() { users += 1 }
 
+    func retargetPreparedModel(to target: String) -> Bool {
+        guard ready, active != nil, let engine, engine.languages.nativeCode(for: target) != nil else { return false }
+        preparedTarget = target
+        return true
+    }
+
     func endUse() {
         precondition(users > 0, "Unbalanced translator use lease")
         users -= 1
@@ -44,6 +50,8 @@ final class TranslationRuntime {
 
     func stop(_ translator: (any Translating)?) async {
         guard let translator else { return }
-        _ = try? await gate.run { await translator.stop() }
+        _ = try? await LocalGeneration.$deadline.withValue(nil) {
+            try await gate.run { await translator.stop() }
+        }
     }
 }

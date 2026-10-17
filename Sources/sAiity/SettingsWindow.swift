@@ -687,6 +687,10 @@ final class AppState {
     /// report — some give bytes, some a fraction, some nothing at all.
     @discardableResult
     func download(_ asset: ModelAsset) async -> Bool {
+        guard !CaptionSession.shared.isRemovingModels else {
+            modelError = String(localized: "Model files are being removed. Wait for that to finish.")
+            return false
+        }
         guard activeDownload == nil, let install = asset.install else { return false }
         if let required = asset.advertisedBytes,
            let available = ModelRegistry.availableDiskBytes(),
@@ -753,56 +757,83 @@ final class AppState {
         downloadTask?.cancel()
     }
 
-    /// Delete one asset's files.
-    ///
-    /// Two rules, both load-bearing. Refuse while captions are running, because
-    /// silently killing a live session from another window is worse than saying
-    /// no. And when idle, unload first: deleting a file the engine still has
-    /// mmap'd succeeds without freeing a single block, so the app would report
-    /// space reclaimed that was not.
-    func delete(_ asset: ModelAsset) async {
-        guard case .remove = asset.removal else { return }
+    /// Close admission through native drain, unlink and metadata updates. Selection
+    /// is not ownership: an unselected cleanup model can still be warm and mapped.
+    @discardableResult
+    private func withModelRemoval(prepareForCleanup: (@MainActor () async -> Bool)? = nil,
+                                  _ remove: () async -> Void) async -> Bool {
         modelError = nil
-        if await DownloadCoordinator.shared.activeIDs.contains(asset.id) {
+        let session = CaptionSession.shared
+        guard !session.isRemovingModels else {
+            modelError = String(localized: "Model files are being removed. Wait for that to finish.")
+            return false
+        }
+        guard !session.isRunning else {
+            modelError = String(localized: "Captions are running. Stop them first.")
+            return false
+        }
+        guard !session.isProcessingTranscript else {
+            modelError = String(localized: session.transcriptWorkMessage)
+            return false
+        }
+        guard activeDownload == nil else {
             modelError = String(localized: "A download is still in progress.")
-            return
+            return false
         }
-        // A re-translation is a live session with a multi-gigabyte translator
-        // open. It is the mirror of the rule below — that one stops a session
-        // from starting during a re-translation — and it was missing: the
-        // Models page could unlink the weights a running re-translation was
-        // decoding from, which frees nothing and then fails at the next line.
-        if CaptionSession.shared.isProcessingTranscript {
-            modelError = String(localized: CaptionSession.shared.transcriptWorkMessage)
-            return
+        session.setRemovingModels(true)
+        defer { session.setRemovingModels(false) }
+        // Reserve removal in the same actor turn that checks transfers. A
+        // separate activeIDs check would race a new download registration.
+        guard await DownloadCoordinator.shared.beginModelRemoval() else {
+            modelError = String(localized: "A download is still in progress.")
+            return false
         }
-        if CaptionSession.shared.isRunning, asset.use.isSelected {
-            modelError = String(localized: "\(asset.title) is running the live captions. Stop captions first.")
-            return
+        let ready: Bool
+        if let prepareForCleanup {
+            ready = await prepareForCleanup()
+        } else if let delegate = NSApp.delegate as? AppDelegate {
+            ready = await Task { @MainActor in await delegate.prepareForModelCleanup() }.value
+        } else {
+            ready = true
         }
-        // Recognition can be prewarmed for dictation even when no captions
-        // engine has been selected: ASREngine.effective uses the recommended
-        // fallback in that state. Release all loaded recognition resources
-        // before deletion so the fallback cannot keep the file mapped.
-        //
-        // The parentheses are load-bearing and the line is deliberately not
-        // written as a bare `,`-separated list. Swift would parse the list form
-        // as intended, but a reader — or a port to a language where the list
-        // separator does not exist — reasonably reads it as
-        // `(!running && recognition) || isSelected`, which would release a live
-        // session's caption model out from under it.
-        if !CaptionSession.shared.isRunning,
-           (asset.family == .recognition || asset.use.isSelected) {
-            await CaptionSession.shared.releaseEverything()
-            // Dictation keeps its own prepared backend, which the caption pool
-            // release does not own. Drop it too, or the next dictation press
-            // loads a model whose files are seconds from being unlinked.
-            await (NSApp.delegate as? AppDelegate)?.invalidateDictationBackend()
+        if !ready {
+            modelError = String(localized: "Stop captions or dictation before clearing this model's files.")
+        } else {
+            // Parent cancellation must not skip a gate and leave a live native
+            // owner. This task is always awaited before touching the files.
+            await Task { @MainActor in await session.releaseEverything() }.value
+            if !Task.isCancelled { await remove() }
         }
-        if !ModelRegistry.remove(asset) {
-            modelError = String(localized: "Could not delete \(asset.title).")
+        await DownloadCoordinator.shared.endModelRemoval()
+        return ready && !Task.isCancelled
+    }
+
+    /// Delete after actual runtime owners drain. A busy session is refused;
+    /// Delete never cancels the user's recording to reclaim a file.
+    func delete(_ asset: ModelAsset, prepareForCleanup: (@MainActor () async -> Bool)? = nil) async {
+        guard case .remove = asset.removal else { return }
+        await withModelRemoval(prepareForCleanup: prepareForCleanup) {
+            if !ModelRegistry.remove(asset) {
+                modelError = String(localized: "Could not delete \(asset.title).")
+            }
+            await refreshModelsAsync(force: true)
         }
-        await refreshModelsAsync(force: true)
+    }
+
+    func forgetCustomModel(_ model: LocalModel) async {
+        guard LocalModel.custom.contains(where: { $0.file == model.file }),
+              let asset = ModelRegistry.assets().first(where: { $0.id == AssetID.llm(file: model.file) }) else { return }
+        await withModelRemoval {
+            guard ModelRegistry.remove(asset) else {
+                modelError = String(localized: "Could not delete \(asset.title).")
+                return
+            }
+            LocalModel.custom.removeAll { $0.file == model.file }
+            if llmModel?.file == model.file || LocalModel.cleanupSelected?.file == model.file {
+                llmModel = nil
+            }
+            await refreshModelsAsync(force: true)
+        }
     }
 
     /// Remove only interrupted download state, leaving completed models alone.
@@ -812,52 +843,21 @@ final class AppState {
     /// refused or any partial could not be removed.
     @discardableResult
     func clearInterruptedDownloads(includeRetired: Bool = true) async -> Int64? {
-        modelError = nil
-        let coordinatorIDs = await DownloadCoordinator.shared.activeIDs
-        guard activeDownload == nil, coordinatorIDs.isEmpty else {
-            modelError = String(localized: "A download is still in progress.")
-            return nil
-        }
-        guard !CaptionSession.shared.isRunning else {
-            modelError = String(localized: "Captions are running. Stop them first.")
-            return nil
-        }
-        // Same reasoning as `delete`: a re-translation holds the translator
-        // open, and the partial files it needs to fetch again are not ours to
-        // clear underneath it.
-        guard !CaptionSession.shared.isProcessingTranscript else {
-            modelError = String(localized: CaptionSession.shared.transcriptWorkMessage)
-            return nil
-        }
-
         let partials: [AssetStatus] = assets.filter(\.isPartial)
             + (includeRetired
                 ? ModelRegistry.retiredPartialAssets().map { ModelRegistry.status(of: $0) }
                 : [])
-        guard !partials.isEmpty else { return 0 }
-
-        if partials.contains(where: { $0.asset.use.isSelected }) {
-            guard let delegate = NSApp.delegate as? AppDelegate,
-                  await delegate.prepareForModelCleanup() else {
-                modelError = String(localized: "Stop captions or dictation before clearing this model's files.")
-                return nil
+        var freed: Int64?
+        await withModelRemoval {
+            var removed: Int64 = 0
+            var failed = false
+            for status in partials {
+                if ModelRegistry.remove(status.asset) { removed += status.bytesOnDisk }
+                else { failed = true }
             }
-            await CaptionSession.shared.releaseEverything()
-        }
-
-        var freed: Int64 = 0
-        var failed = false
-        for status in partials {
-            if ModelRegistry.remove(status.asset) {
-                freed += status.bytesOnDisk
-            } else {
-                failed = true
-            }
-        }
-        await refreshModelsAsync(force: true)
-        guard !failed else {
-            modelError = String(localized: "Some interrupted downloads could not be cleared.")
-            return nil
+            await refreshModelsAsync(force: true)
+            if failed { modelError = String(localized: "Some interrupted downloads could not be cleared.") }
+            else { freed = removed }
         }
         return freed
     }
@@ -866,29 +866,13 @@ final class AppState {
     /// it refused or failed.
     @discardableResult
     func removeAllDownloads() async -> Int64? {
-        modelError = nil
-        guard await DownloadCoordinator.shared.activeIDs.isEmpty else {
-            modelError = String(localized: "A download is still in progress.")
-            return nil
-        }
-        guard !CaptionSession.shared.isRunning else {
-            modelError = String(localized: "Captions are running. Stop them first.")
-            return nil
-        }
-        guard !CaptionSession.shared.isProcessingTranscript else {
-            modelError = String(localized: CaptionSession.shared.transcriptWorkMessage)
-            return nil
-        }
-        await CaptionSession.shared.releaseEverything()
-        do {
-            let freed = try ModelRegistry.removeAllOwned()
+        var freed: Int64?
+        await withModelRemoval {
+            do { freed = try ModelRegistry.removeAllOwned() }
+            catch { modelError = error.localizedDescription }
             await refreshModelsAsync(force: true)
-            return freed
-        } catch {
-            modelError = error.localizedDescription
-            await refreshModelsAsync(force: true)
-            return nil
         }
+        return freed
     }
 
 

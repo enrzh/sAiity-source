@@ -449,7 +449,7 @@ struct DictationView: View {
                                 Text(entry.completedAt.formatted(date: .omitted, time: .shortened))
                                     .foregroundStyle(.secondary)
                                 Spacer()
-                                Text(entry.delivery.outcome == .insertedAndCopied ? String(localized: "Inserted and copied") :
+                                Text(entry.delivery.outcome == .insertedAndCopied ? String(localized: "Copied — paste requested") :
                                      entry.delivery.outcome == .copyFailed ? String(localized: "Copy failed") : String(localized: "Copied to Clipboard"))
                                     .font(.callout)
                             }
@@ -536,9 +536,9 @@ struct DictationView: View {
                 }
                 if state.dictationRecognizer == .streaming {
                     HStack {
-                        Label("Streaming model", systemImage: "cpu")
+                        Label("Recognition model", systemImage: "cpu")
                         Spacer()
-                        Picker("Streaming model", selection: $state.dictationEngine) {
+                        Picker("Recognition model", selection: $state.dictationEngine) {
                             Text("Not set").tag(Optional<ASREngine>.none)
                             ForEach(ASREngine.userSelectableCases, id: \.self) { engine in
                                 Text(verbatim: engine.displayName).tag(Optional(engine))
@@ -804,14 +804,14 @@ struct DictationView: View {
                     Task { try? await removeWhisper(choice) }
                 }
                 .controlSize(.small)
-                .disabled(whisperBusy)
+                .disabled(whisperBusy || CaptionSession.shared.isRemovingModels)
             } else if ready == false {
                 Button("Download") { prepareWhisper(choice) }
                     .controlSize(.small)
-                    .disabled(whisperBusy)
+                    .disabled(whisperBusy || CaptionSession.shared.isRemovingModels)
                 Button("Retry") { retryWhisper(choice) }
                     .controlSize(.small)
-                    .disabled(whisperBusy)
+                    .disabled(whisperBusy || CaptionSession.shared.isRemovingModels)
             }
             Button("Models") { openModels() }
                 .buttonStyle(.bordered)
@@ -897,10 +897,13 @@ struct DictationView: View {
             whisperBusy = false
             Task { await refreshWhisperStatus() }
         }
-        try await Self.removeAction(choice, invalidate: {
-            await (NSApp.delegate as? AppDelegate)?.invalidateDictationBackend()
-        }, remove: { choice in
-            try await WhisperDictationBackend().removeModel(choice)
+        // The shared transaction refuses a busy recording before invalidation.
+        try await Self.removeAction(choice, invalidate: {}, remove: { choice in
+            guard let asset = ModelRegistry.assets().first(where: { $0.id == AssetID.whisper(choice) }) else {
+                throw BackendError.notPrepared
+            }
+            await state.delete(asset)
+            if let error = state.modelError { throw TranslationEngineError.notAvailable(error) }
         }, refresh: { Task { await state.refreshModelsAsync(force: true) } }, setError: { state.modelError = $0.localizedDescription })
     }
 
@@ -2322,27 +2325,23 @@ struct TranscriptsView: View {
 
         isSearching = true
         let sessions = state.sessions
-        let result = await Task.detached(priority: .userInitiated) {
+        let worker = Task.detached(priority: .userInitiated) {
             Self.search(sessions: sessions, query: q)
-        }.value
+        }
+        let result = await withTaskCancellationHandler {
+            await worker.value
+        } onCancel: {
+            worker.cancel()
+        }
         guard !Task.isCancelled else { return }
         searchHits = result
         isSearching = false
     }
 
     nonisolated private static func search(sessions: [SessionRef], query: String) -> [SearchHit] {
-        var out: [SearchHit] = []
-        for session in sessions {
-            for segment in TranscriptStore.segments(of: session) {
-                if segment.text.localizedCaseInsensitiveContains(query)
-                    || (segment.tr?.localizedCaseInsensitiveContains(query) ?? false) {
-                    out.append(SearchHit(id: "\(session.id)#\(segment.i)",
-                                          session: session,
-                                          seg: segment))
-                }
-            }
+        TranscriptStore.search(sessions: sessions, query: query).map { hit in
+            SearchHit(id: "\(hit.session.id)#\(hit.segment.i)", session: hit.session, seg: hit.segment)
         }
-        return out
     }
 
     private func startRetranslate(_ s: SessionRef, to code: String) {
@@ -2651,7 +2650,7 @@ struct GeneralView: View {
                 Text("Last dictation").font(.headline)
                 if let terminal = lastRun.first(where: { $0.outcome != nil }) {
                     switch terminal.outcome {
-                    case "inserted": Label("Inserted and copied", systemImage: "checkmark.circle")
+                    case "inserted", "paste-dispatched": Label("Copied — paste requested", systemImage: "checkmark.circle")
                     case "copied": Label("Copied to Clipboard", systemImage: "doc.on.clipboard")
                     case "copy-failed": Label("Copy failed", systemImage: "exclamationmark.triangle")
                     case "cancelled": Label("Cancelled", systemImage: "xmark.circle")
@@ -3055,8 +3054,7 @@ struct LocalModelsView: View {
                         }
                         if case .huggingFace = m.source {} else {
                             Button {
-                                LocalModel.removeCustom(m)
-                                Task { await state.refreshModelsAsync(force: true) }
+                                Task { await state.forgetCustomModel(m) }
                             } label: {
                                 Image(systemName: "minus.circle")
                             }

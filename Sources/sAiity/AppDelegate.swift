@@ -42,8 +42,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     private var dictationHotkeyRetryTask: Task<Void, Never>?
     /// Each recognition path owns a warm model and leases it while feeding audio.
-    private lazy var captionResources = CaptionSessionResources(makeBackend: AppDelegate.makeActiveBackend)
-    private lazy var dictationBackendPool = ASRBackendPool(makeBackend: AppDelegate.makeDictationStreamingBackend)
+    private lazy var captionResources: CaptionSessionResources = CaptionSessionResources(makeBackend: { [weak self] in
+        let pool = self?.captionResources.pool
+        return AppDelegate.makeActiveBackend(metricScope: { [weak pool] in pool?.metricScope ?? .captions })
+    })
+    private lazy var dictationBackendPool: ASRBackendPool = ASRBackendPool(makeBackend: AppDelegate.makeDictationStreamingBackend,
+        sharingWith: captionResources.pool,
+        matchesSharedConfiguration: {
+            guard ASREngine.effective == ASREngine.dictationEffective else { return false }
+            // Adaptive tiers can differ despite equal preferences; share only pinned equal tiers.
+            return ASREngine.effective != .nemotron
+                || (NemotronEngine.hasExplicitChunkSelection && NemotronEngine.hasExplicitDictationChunkSelection
+                    && NemotronEngine.selectedChunkMs == NemotronEngine.dictationSelectedChunkMs)
+        })
     private lazy var dictationController: DictationController = {
         let waveformDelivery = self.waveformDelivery
         return DictationController(
@@ -51,6 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         capture: dictationCapture,
         inserter: TextInserter(),
         captionsActive: { [weak self] in self?.state.isActive ?? false },
+        modelRemovalActive: { CaptionSession.shared.isRemovingModels },
         translationConfiguration: { [weak self] in
             self?.dictationTranslationConfiguration() ?? .disabled
         },
@@ -132,6 +144,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }()
     private let dictationHotkeyMonitor = DictationHotkeyMonitor()
     private var dictationPrewarmTask: Task<Void, Never>?
+    private var whisperPreparationUsers = 0
     private var lastDictationResult: DictationResultSnapshot?
     private weak var onboardingTrialModel: OnboardingModel?
     private var onboardingTrialPreparation: Task<Void, Never>?
@@ -355,6 +368,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Production action for the deferred Task6 settings control.
     func prepareSelectedWhisperModelForUse(_ choice: WhisperDictationBackend.ModelChoice,
                                            progress: @escaping @Sendable (Progress) -> Void = { _ in }) async throws {
+        guard !CaptionSession.shared.isRemovingModels else {
+            throw TranslationEngineError.notAvailable(String(localized: "Model files are being removed. Wait for that to finish."))
+        }
+        // Settings and launch prewarming own native preparation independently
+        // of the dictation controller. Keep removal out until the real return.
+        whisperPreparationUsers += 1
+        defer { whisperPreparationUsers -= 1 }
         #if SAIITY_TEST_HOOKS
         if let hook = whisperPreparationForTests {
             try await hook(choice, progress)
@@ -370,8 +390,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func removeSelectedWhisperModel() async throws {
-        await invalidateDictationBackend()
-        try await WhisperDictationBackend().removeModel(WhisperDictationBackend.model)
+        let state = SettingsWindowController.state
+        guard let asset = ModelRegistry.assets().first(where: { $0.id == AssetID.whisper(WhisperDictationBackend.model) }) else {
+            throw BackendError.notPrepared
+        }
+        await state.delete(asset, prepareForCleanup: { await self.prepareForModelCleanup() })
+        if let error = state.modelError { throw TranslationEngineError.notAvailable(error) }
     }
 
     func invalidateDictationBackend() async {
@@ -380,6 +404,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     #if SAIITY_TEST_HOOKS
     var captionEngineForTests: ASREngine { engine }
+    var cleanupSessionForTests: DictationCleanupSession { dictationCleanupSession }
     func startCaptionsForTests() { start() }
     var captionsActiveForTests: Bool { state.isActive }
     func setCaptionStateForTests(_ value: SessionState) { state = value }
@@ -509,23 +534,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// That engine was cut: it stopped emitting finals about 25 seconds into
     /// every session (its sliding window slid but its commit index never
     /// rebased), and it was slower than Nemotron plus a real translator anyway.
-    static func makeActiveBackend() -> TranscriptionBackend {
+    static func makeActiveBackend(metricScope: @escaping @Sendable () -> ASRAdaptivePolicy.Scope = { .captions }) -> TranscriptionBackend {
         let selected = ASREngine.effective
         let metrics: @Sendable (StreamingASRMetrics) -> Void = { metrics in
+            let scope = metricScope()
             Task { @MainActor in
-                Diagnostics.recordTiming(operation: "captions.asr.rtf",
+                Diagnostics.recordTiming(operation: "\(scope.rawValue).asr.rtf",
                                          seconds: metrics.realTimeFactor,
                                          cold: false)
-                Diagnostics.recordTiming(operation: "captions.asr.backlog",
+                Diagnostics.recordTiming(operation: "\(scope.rawValue).asr.backlog",
                                          seconds: metrics.peakBacklogSeconds,
                                          cold: false)
                 if metrics.droppedAudioSeconds > 0 {
-                    ASRAdaptivePolicy.markOverloaded(scope: .captions)
-                    Diagnostics.recordTiming(operation: "captions.asr.dropped",
+                    ASRAdaptivePolicy.markOverloaded(scope: scope)
+                    Diagnostics.recordTiming(operation: "\(scope.rawValue).asr.dropped",
                                              seconds: metrics.droppedAudioSeconds,
                                              cold: false)
                     Diagnostics.recordFailure(
-                        operation: "captions.audio",
+                        operation: "\(scope.rawValue).audio",
                         reason: String(format: "dropped %.3fs of backlog audio",
                                        metrics.droppedAudioSeconds))
                 }
@@ -550,15 +576,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             name: name,
             engine: NemotronEngine(chunkMs: tier),
             onPerformance: { rtf, _ in
-                ASRAdaptivePolicy.record(realTimeFactor: rtf,
-                                         tier: tier,
-                                         scope: .captions)
+                let scope = metricScope()
+                Task { @MainActor in
+                    ASRAdaptivePolicy.record(realTimeFactor: rtf, tier: tier, scope: scope)
+                }
             },
             onMetrics: metrics,
             onBackpressure: { backlogSeconds in
+                let scope = metricScope()
                 Task { @MainActor in
-                    ASRAdaptivePolicy.markOverloaded(scope: .captions)
-                    Diagnostics.recordTiming(operation: "captions.asr.backpressure",
+                    ASRAdaptivePolicy.markOverloaded(scope: scope)
+                    Diagnostics.recordTiming(operation: "\(scope.rawValue).asr.backpressure",
                                              seconds: backlogSeconds,
                                              cold: false)
                 }
@@ -607,6 +635,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func prepareForModelCleanup() async -> Bool {
         guard state == .idle,
               !dictationController.isBusy,
+              whisperPreparationUsers == 0,
               // A re-translation is a live session of its own, holding a
               // translator this is about to stop and files it is about to
               // unlink. It reports through the same global flag captions do, so
@@ -614,9 +643,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
               !CaptionSession.shared.isProcessingTranscript,
               translationRuntime.swap == nil,
               translationRuntime.users == 0 else { return false }
-        await dictationController.invalidatePreparedBackend()
-        let outgoing = translationRuntime.take()
-        await translationRuntime.stop(outgoing)
+        await releaseModels()
         return true
     }
 
@@ -652,6 +679,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// is constructed, so the peak is one model rather than two.
     @MainActor
     private func swapTranslator(for scope: TranslationEngineScope = .captions) {
+        guard !CaptionSession.shared.isRemovingModels else { return }
         liveTranslation.invalidate()
         captionTranslationTasks.values.forEach { $0.cancel() }
         captionTranslationTasks.removeAll()
@@ -815,6 +843,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                            sourceLanguage: String? = nil,
                                            scope: TranslationEngineScope = .captions,
                                            allowRuntimeFallback: Bool = true) async -> Bool {
+        guard !CaptionSession.shared.isRemovingModels else { return false }
         translationRuntime.idleEviction.cancel()
         guard let target = translationTarget(for: scope, requestedTarget: requestedTarget) else {
             return false
@@ -841,7 +870,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             translationRuntime.engine = selectedEngine
         }
         guard let engine = translationRuntime.active else { return false }
-        if translationRuntime.ready && translationRuntime.preparedTarget == target {
+        if translationRuntime.retargetPreparedModel(to: target) {
             return true
         }
         // Loading is deferred until a session is actually running, deliberately.
@@ -903,7 +932,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case is CancellationError: break
             case let e as URLError where e.code == .cancelled: break
             default:
-                if let assetID, !Self.isRuntimeResourceFailure(error) {
+                if let assetID, LoadHealth.shouldRecordLoadFailure(error) {
                     LoadHealth.recordFailureIfInstalled(assetID,
                                                         reason: DiagnosticsRedactor.redact(error.localizedDescription))
                 }
@@ -2419,7 +2448,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Task { @MainActor in
             if state.isActive { await stopAsync() }
             await dictationController.invalidatePreparedBackend()
-            await captionResources.pool.replace(with: Self.makeActiveBackend())
+            let pool = captionResources.pool
+            await pool.replace(with: Self.makeActiveBackend(metricScope: { [weak pool] in pool?.metricScope ?? .captions }))
             setStatus("Engine: \(new.displayName)")
             if wasRunning, state == .idle { start() }
             rebuildMenu()
@@ -2583,6 +2613,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func start() {
+        guard !CaptionSession.shared.isRemovingModels else {
+            setStatus("Model files are being removed. Wait for that to finish.")
+            return
+        }
         // Ignore a second Start while one is already in flight. Without this,
         // two starts each brought up their own SCStream and their own ASR pump,
         // and two pumps calling process() concurrently is the exact overlap
@@ -2720,12 +2754,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     // The inner catch exists to scope damage-recording to the
                     // MODEL failing: everything after this point (capture,
                     // permissions) fails for reasons no re-download fixes.
-                    switch error {
-                    case is CancellationError: break
-                    case let e as URLError where e.code == .cancelled: break
-                    default:
+                    if LoadHealth.shouldRecordLoadFailure(error) {
                         LoadHealth.recordFailureIfInstalled(
-                            asrAssetID, reason: error.localizedDescription)
+                            asrAssetID, reason: DiagnosticsRedactor.redact(error.localizedDescription))
                     }
                     throw error
                 }
@@ -3038,9 +3069,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         await captionResources.speakerPreparation?.value
         await captionResources.speakerTracker?.stop()
         await dictationController.invalidatePreparedBackend()
-        await captionResources.pool.replace(with: AppDelegate.makeActiveBackend())
+        let pool = captionResources.pool
+        await pool.replace(with: AppDelegate.makeActiveBackend(metricScope: { [weak pool] in pool?.metricScope ?? .captions }))
         await unloadTranslator(reason: "model deletion")
         await dictationCleanupSession.invalidate()
+        await WhisperDictationBackend.releaseLoadedModels()
     }
 
     /// Silence is not the same as a broken pipeline, and the UI must not let the

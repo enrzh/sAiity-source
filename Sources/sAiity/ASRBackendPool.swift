@@ -33,10 +33,22 @@ final class ASRBackendPool: ASRBackendProvider {
     private let makeBackend: () -> TranscriptionBackend
     private let idleEvictionDelay: Duration
     private let idleEviction = IdleEviction()
+    private let sharedPool: ASRBackendPool?
+    private let matchesSharedConfiguration: () -> Bool
+    private var sharedLease: TranscriptionBackend?
+    private let scopeLock = NSLock()
+    nonisolated(unsafe) private var currentMetricScope = ASRAdaptivePolicy.Scope.captions
+
+    nonisolated var metricScope: ASRAdaptivePolicy.Scope { scopeLock.withLock { currentMetricScope } }
+
+    private func setMetricScope(_ scope: ASRAdaptivePolicy.Scope) {
+        scopeLock.withLock { currentMetricScope = scope }
+    }
 
     private var cachedBackend: TranscriptionBackend?
     private var unpreparedBackend: TranscriptionBackend?
     private var preparationTask: Task<Void, any Swift.Error>?
+    private var evictionTask: Task<Void, Never>?
     private var preparationGeneration = 0
     private var prepared = false
     private var activeBackend: TranscriptionBackend?
@@ -46,11 +58,25 @@ final class ASRBackendPool: ASRBackendProvider {
     var hasActiveLeaseForTests: Bool { activeBackend != nil }
     #endif
 
-    var isPrepared: Bool { prepared }
+    var isPrepared: Bool { matchesSharedConfiguration() ? sharedPool?.isPrepared ?? prepared : prepared }
+    var hasSharedLease: Bool { sharedLease != nil }
+    private var hasPrepared = false
+    private var wasIdleEvicted = false
+    var warmState: String? {
+        if matchesSharedConfiguration(), let sharedPool { return sharedPool.warmState }
+        if evictionTask != nil { return nil }
+        if prepared { return "warm" }
+        if wasIdleEvicted { return "post-eviction" }
+        return hasPrepared ? nil : "cold-start"
+    }
 
     init(makeBackend: @escaping () -> TranscriptionBackend,
+         sharingWith: ASRBackendPool? = nil,
+         matchesSharedConfiguration: @escaping () -> Bool = { false },
          idleEvictionDelay: Duration = .seconds(300)) {
         self.makeBackend = makeBackend
+        self.sharedPool = sharingWith
+        self.matchesSharedConfiguration = matchesSharedConfiguration
         self.idleEvictionDelay = idleEvictionDelay
     }
 
@@ -58,6 +84,8 @@ final class ASRBackendPool: ASRBackendProvider {
     /// name. This can create an unprepared, model-free backend; loaded weights
     /// remain owned only by `cachedBackend` and are therefore evictable.
     var currentBackend: TranscriptionBackend {
+        if let sharedLease { return sharedLease }
+        if matchesSharedConfiguration(), let sharedPool { return sharedPool.currentBackend }
         if let activeBackend { return activeBackend }
         if let cachedBackend { return cachedBackend }
         if let unpreparedBackend { return unpreparedBackend }
@@ -68,6 +96,18 @@ final class ASRBackendPool: ASRBackendProvider {
 
     func prepare(locale: Locale,
                  progress: @escaping @Sendable (String) -> Void) async throws {
+        if let evictionTask {
+            await evictionTask.value
+            try Task.checkCancellation()
+        }
+        if matchesSharedConfiguration(), let sharedPool {
+            // Settings changes can invalidate this consumer while the shared load drains.
+            let generation = preparationGeneration
+            await invalidateOwnBackend()
+            try await sharedPool.prepare(locale: locale, progress: progress)
+            guard generation == preparationGeneration else { throw CancellationError() }
+            return
+        }
         idleEviction.cancel()
         if prepared {
             if let cachedBackend, activeBackend == nil {
@@ -89,7 +129,10 @@ final class ASRBackendPool: ASRBackendProvider {
         unpreparedBackend = nil
         let task = Task { @MainActor [weak self] in
             do {
-                try await candidate.prepare(locale: locale, progress: progress)
+                try await LocalGeneration.loadModel(assetID: (candidate as? GraniteASRBackend)?.modelAssetID) {
+                    try await candidate.prepare(locale: candidate is GraniteASRBackend ? Locale(identifier: "en") : locale,
+                                                progress: progress)
+                }
             } catch {
                 await candidate.release()
                 throw error
@@ -103,6 +146,8 @@ final class ASRBackendPool: ASRBackendProvider {
             }
             self.cachedBackend = candidate
             self.prepared = true
+            self.hasPrepared = true
+            self.wasIdleEvicted = false
             self.preparationTask = nil
         }
         preparationTask = task
@@ -121,43 +166,70 @@ final class ASRBackendPool: ASRBackendProvider {
 
     func acquire(locale: Locale,
                  progress: @escaping @Sendable (String) -> Void) async throws -> TranscriptionBackend {
+        if matchesSharedConfiguration(), let sharedPool {
+            guard sharedLease == nil, activeBackend == nil else { throw Error.busy }
+            let generation = preparationGeneration
+            await invalidateOwnBackend()
+            let acquired = try await sharedPool.acquire(locale: locale, progress: progress)
+            guard generation == preparationGeneration, !Task.isCancelled else {
+                await sharedPool.release(acquired, discard: false)
+                throw CancellationError()
+            }
+            sharedLease = acquired
+            sharedPool.setMetricScope(.dictation)
+            return acquired
+        }
         guard activeBackend == nil else { throw Error.busy }
         try await prepare(locale: locale, progress: progress)
+        guard activeBackend == nil else { throw Error.busy }
+        try LocalGeneration.checkDeadline()
         guard let cachedBackend, prepared else {
             throw BackendError.notPrepared
         }
         idleEviction.cancel()
         activeBackend = cachedBackend
+        setMetricScope(.captions)
         return cachedBackend
     }
 
     func release(_ backend: TranscriptionBackend, discard: Bool) async {
-        guard activeBackend === backend || cachedBackend === backend else { return }
-        if activeBackend === backend {
-            activeBackend = nil
+        if sharedLease === backend, let sharedPool {
+            await sharedPool.release(backend, discard: discard)
+            if sharedLease === backend { sharedLease = nil }
+            return
         }
-
+        guard activeBackend === backend || cachedBackend === backend else { return }
         guard discard else {
+            if activeBackend === backend { activeBackend = nil }
             scheduleIdleEviction(for: backend)
             return
         }
 
         idleEviction.cancel()
+        wasIdleEvicted = false
         if cachedBackend === backend {
             cachedBackend = nil
             prepared = false
             await backend.release()
         }
+        if activeBackend === backend { activeBackend = nil }
     }
 
     func invalidate() async {
+        guard sharedLease == nil else { return }
+        preparationGeneration += 1
+        await invalidateOwnBackend()
+    }
+
+    private func invalidateOwnBackend() async {
         // This provider is shared by captions and dictation. An invalidation
         // requested by one consumer must not tear the backend out from under
         // the other consumer's active lease. The active owner will return it;
         // callers that need a full unload stop all consumers before retrying.
         guard activeBackend == nil else { return }
         idleEviction.cancel()
-        preparationGeneration += 1
+        await evictionTask?.value
+        guard activeBackend == nil else { return }
         let task = preparationTask
         preparationTask = nil
         task?.cancel()
@@ -194,7 +266,16 @@ final class ASRBackendPool: ASRBackendProvider {
         guard activeBackend == nil, cachedBackend === backend else { return }
         cachedBackend = nil
         prepared = false
-        await backend.release()
+        wasIdleEvicted = false
+        let generation = preparationGeneration
+        let task = Task { @MainActor [weak self] in
+            await backend.release()
+            guard let self else { return }
+            self.evictionTask = nil
+            if self.preparationGeneration == generation { self.wasIdleEvicted = true }
+        }
+        evictionTask = task
+        await task.value
     }
 }
 

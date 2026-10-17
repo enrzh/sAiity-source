@@ -7,6 +7,43 @@ import Testing
 struct DictationCleanupSessionTests {
     private let repair = "Send the report, I mean the revised report."
 
+    @Test("cleanup keeps the caller's one absolute deadline across model loads and calls")
+    func cleanupKeepsSharedDeadline() async throws {
+        let session = DictationCleanupSession(gate: TranslationInferenceGate())
+        let deadline = ContinuousClock.now + .seconds(2)
+        var loadDeadline: ContinuousClock.Instant?
+        var callDeadline: ContinuousClock.Instant?
+        _ = await LocalGeneration.$deadline.withValue(deadline) {
+            await session.cleanup(.init(text: repair, language: "en"), modelKey: "one") {
+                loadDeadline = LocalGeneration.deadline
+                return .init(cleanup: { _, _, _ in
+                    callDeadline = LocalGeneration.deadline
+                    return "Send the revised report."
+                }, stop: {})
+            }
+        }
+        #expect(loadDeadline == deadline)
+        #expect(callDeadline == deadline)
+        await session.invalidate()
+    }
+
+    @Test("rules-only cleanup does not unload a resident model that the next phrase can reuse")
+    func rulesOnlyDoesNotEvictResidentModel() async throws {
+        let session = DictationCleanupSession(gate: TranslationInferenceGate())
+        var loads = 0
+        var stops = 0
+        for (text, key) in [(repair, "same" as String?), ("Please send the report today.", nil), (repair, "same")] {
+            _ = await session.cleanup(.init(text: text, language: "en"), modelKey: key) {
+                loads += 1
+                return .init(cleanup: { _, _, _ in "Send the revised report." }, stop: { stops += 1 })
+            }
+        }
+        #expect(loads == 1)
+        #expect(stops == 0)
+        await session.invalidate()
+        #expect(stops == 1)
+    }
+
     @Test("pause dots reach the existing contextual editor and preserve words")
     func pauseDotsReachModel() async throws {
         let original = "It's weird because that shouldn't happen when you... are currently adding items to the card."

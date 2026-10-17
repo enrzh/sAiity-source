@@ -43,9 +43,10 @@ final class DictationCleanupSession {
                 self?.model != nil
             }, evict: { [weak self] in await self?.invalidate() })
         }
+        let deadline = LocalGeneration.deadline ?? .now.advanced(by: .seconds(15))
         do {
-            return try await gate.run { [self] in
-                try await LocalGeneration.$deadline.withValue(.now.advanced(by: .seconds(15))) {
+            return try await LocalGeneration.$deadline.withValue(deadline) {
+                try await gate.run { [self] in
                     try await process(input, key: key, load: load)
                 }
             }
@@ -58,7 +59,9 @@ final class DictationCleanupSession {
 
     func invalidate() async {
         idle.cancel()
-        _ = try? await gate.run { [self] in await releaseModel() }
+        _ = try? await LocalGeneration.$deadline.withValue(nil) {
+            try await gate.run { [self] in await releaseModel() }
+        }
     }
 
     /// Caller must already own the shared gate. Used during translator loading
@@ -92,7 +95,6 @@ final class DictationCleanupSession {
                            runID: LocalGeneration.dictationRunID,
                            modelLoadCount: modelLoads, modelCallCount: modelCalls))
         }
-        if modelKey != key { await releaseModel() }
 
         // A single-language recording may still be split into several audio
         // regions for recognition. Cleaning the joined transcript once is both
@@ -113,6 +115,8 @@ final class DictationCleanupSession {
             var modelReturnedOutput = false
             if outcome.needsModel, key == nil { modelUnavailable = true }
             if key != nil, outcome.needsModel {
+                try LocalGeneration.checkDeadline()
+                if modelKey != key { await releaseModel() }
                 if model == nil {
                     let loading = ContinuousClock.now
                     modelLoads += 1
@@ -121,14 +125,14 @@ final class DictationCleanupSession {
                     let elapsed = loading.duration(to: .now).components
                     loadSeconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
                 }
-                try Task.checkCancellation()
+                try LocalGeneration.checkDeadline()
                 modelCalls = 1
                 if let value = await model?.cleanup(input.text, source, metadata) {
                     candidate = value
                     modelReturnedOutput = true
                 }
                 else { modelUnavailable = true }
-                try Task.checkCancellation()
+                try LocalGeneration.checkDeadline()
             }
             let cleaned = DictationCleanupValidator.validate(candidate,
                 preserving: input.text, sourceLanguage: source, languageMetadata: metadata)
@@ -163,6 +167,10 @@ final class DictationCleanupSession {
             if outcome.needsModel, key == nil { modelUnavailable = true }
             return key != nil && outcome.needsModel
         }
+        if !modelIndexes.isEmpty {
+            try LocalGeneration.checkDeadline()
+            if modelKey != key { await releaseModel() }
+        }
         if !modelIndexes.isEmpty, model == nil {
             let loading = ContinuousClock.now
             modelLoads += 1
@@ -174,7 +182,7 @@ final class DictationCleanupSession {
 
         var batched: [Int: String] = [:]
         if modelIndexes.count > 1, let cleanupRegions = model?.cleanupRegions {
-            try Task.checkCancellation()
+            try LocalGeneration.checkDeadline()
             modelCalls = 1
             let requested = modelIndexes.map { input.regions[$0] }
             if let values = await cleanupRegions(requested), values.count == requested.count {
@@ -197,14 +205,14 @@ final class DictationCleanupSession {
                     batched[modelIndexes[offset]] = cleaned
                 }
             }
-            try Task.checkCancellation()
+            try LocalGeneration.checkDeadline()
         }
 
         let modelIndexSet = Set(modelIndexes)
         var regions: [DictationRegionTranscript] = []
         regions.reserveCapacity(input.regions.count)
         for (index, region) in input.regions.enumerated() {
-            try Task.checkCancellation()
+            try LocalGeneration.checkDeadline()
             let source = region.language == "auto" ? nil : region.language
             let metadata = DictationLanguageMetadata(regions: [region])
             let baseline = baselines[index]
@@ -222,7 +230,7 @@ final class DictationCleanupSession {
                     modelReturnedOutput = true
                 }
                 else { modelUnavailable = true }
-                try Task.checkCancellation()
+                try LocalGeneration.checkDeadline()
             }
             let cleaned = DictationCleanupValidator.validate(candidate,
                 preserving: region.text, sourceLanguage: source, languageMetadata: metadata)

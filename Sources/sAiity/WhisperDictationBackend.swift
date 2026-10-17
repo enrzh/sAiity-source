@@ -59,6 +59,7 @@ actor WhisperModelCache<Key: Hashable & Sendable, Resource: WhisperModelResource
     private let loader: Loader
     private var entries: [Key: Entry] = [:]
     private var evictionTasks: [Key: Task<Void, Never>] = [:]
+    private var unloadTasks: [UUID: Task<Void, Never>] = [:]
     private var orphans: [Int: Orphan] = [:]
     private var leaseHome: [Int: LeaseHome] = [:]
     private var nextLeaseID = 0
@@ -84,14 +85,18 @@ actor WhisperModelCache<Key: Hashable & Sendable, Resource: WhisperModelResource
 
     func invalidate(_ key: Key) async {
         evictionTasks.removeValue(forKey: key)?.cancel()
-        guard var entry = entries[key] else { return }
-        if !entry.leases.isEmpty {
-            entry.invalidated = true
-            entries[key] = entry
-            return
+        if var entry = entries[key] {
+            if !entry.leases.isEmpty {
+                entry.invalidated = true
+                entries[key] = entry
+            } else {
+                entries.removeValue(forKey: key)
+                await beginUnload(entry.resource).value
+            }
         }
-        entries.removeValue(forKey: key)
-        await entry.resource.unload()
+        // ponytail: this small cache drains all pending unloads. Use per-key
+        // fences only if independent model teardown needs to overlap.
+        for task in Array(unloadTasks.values) { await task.value }
     }
 
     /// `invalidate` without the await, for callers that cannot suspend — a
@@ -111,7 +116,7 @@ actor WhisperModelCache<Key: Hashable & Sendable, Resource: WhisperModelResource
         }
         entries.removeValue(forKey: key)
         let resource = entry.resource
-        Task { await resource.unload() }
+        _ = beginUnload(resource)
     }
 
 #if SAIITY_TEST_HOOKS
@@ -136,14 +141,14 @@ actor WhisperModelCache<Key: Hashable & Sendable, Resource: WhisperModelResource
         do {
             try Task.checkCancellation()
         } catch {
-            await resource.unload()
+            await beginUnload(resource).value
             throw error
         }
 
         // A caller can invalidate while the loader is suspended. Reuse the
         // existing resident resource and release the duplicate immediately.
         if var existing = entries[key], !existing.invalidated {
-            await resource.unload()
+            await beginUnload(resource).value
             let lease = Lease(id: nextLeaseID, resource: existing.resource)
             nextLeaseID += 1
             leaseHome[lease.id] = .entry(key)
@@ -158,7 +163,7 @@ actor WhisperModelCache<Key: Hashable & Sendable, Resource: WhisperModelResource
         // them is never unloaded.
         if let displaced = entries[key] {
             if displaced.leases.isEmpty {
-                if displaced.invalidated { await displaced.resource.unload() }
+                if displaced.invalidated { await beginUnload(displaced.resource).value }
             } else {
                 nextOrphanID += 1
                 orphans[nextOrphanID] = Orphan(resource: displaced.resource,
@@ -188,7 +193,7 @@ actor WhisperModelCache<Key: Hashable & Sendable, Resource: WhisperModelResource
                 return
             }
             orphans.removeValue(forKey: id)
-            if orphan.invalidated { await orphan.resource.unload() }
+            if orphan.invalidated { await beginUnload(orphan.resource).value }
         case .entry(let key):
             guard var entry = entries[key] else { return }
             entry.leases.remove(lease.id)
@@ -199,7 +204,7 @@ actor WhisperModelCache<Key: Hashable & Sendable, Resource: WhisperModelResource
             if entry.invalidated {
                 entries.removeValue(forKey: key)
                 evictionTasks.removeValue(forKey: key)?.cancel()
-                await entry.resource.unload()
+                await beginUnload(entry.resource).value
                 return
             }
             entry.evictionToken = UUID()
@@ -208,6 +213,18 @@ actor WhisperModelCache<Key: Hashable & Sendable, Resource: WhisperModelResource
         case nil:
             return
         }
+    }
+
+    /// Register before the first suspension: a removed entry can still own
+    /// native pages until unload returns, and invalidation must see that work.
+    private func beginUnload(_ resource: Resource) -> Task<Void, Never> {
+        let id = UUID()
+        let task: Task<Void, Never> = Task {
+            await resource.unload()
+            _ = unloadTasks.removeValue(forKey: id)
+        }
+        unloadTasks[id] = task
+        return task
     }
 
     private func scheduleEviction(for key: Key, token: UUID) {
@@ -227,7 +244,7 @@ actor WhisperModelCache<Key: Hashable & Sendable, Resource: WhisperModelResource
               !entry.invalidated else { return }
         entries.removeValue(forKey: key)
         evictionTasks.removeValue(forKey: key)
-        await entry.resource.unload()
+        await beginUnload(entry.resource).value
     }
 }
 
@@ -521,6 +538,14 @@ struct WhisperDictationBackend {
                     continue
                 }
             }
+        }
+    }
+
+    /// Called after production admission is closed and all preparation and
+    /// dictation owners have returned, before any model file is unlinked.
+    static func releaseLoadedModels(under root: URL = ModelRegistry.root) async {
+        for choice in ModelChoice.allCases {
+            await modelCache.invalidate(cacheKey(choice, root))
         }
     }
 

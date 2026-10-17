@@ -291,6 +291,10 @@ final class TranscriptSummarizer {
              onProgress: @escaping @MainActor (Progress) -> Void,
              onFinish: @escaping @MainActor (String?) -> Void) async {
         guard !running else { return }
+        guard !CaptionSession.shared.isRemovingModels else {
+            onFinish(String(localized: "Model files are being removed. Wait for that to finish."))
+            return
+        }
         guard !CaptionSession.shared.isProcessingTranscript else {
             onFinish(String(localized: CaptionSession.shared.transcriptWorkMessage))
             return

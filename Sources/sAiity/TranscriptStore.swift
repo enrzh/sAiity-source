@@ -29,6 +29,7 @@ private struct TranscriptFileStamp: Equatable {
 /// produces look like transcript corruption.
 enum TranscriptTestLibrary {
     private static let scopedDirectory = TaskLocal<URL?>(wrappedValue: nil)
+    @TaskLocal static var afterSegmentLineForTests: (@Sendable (Int) -> Void)? = nil
 
     /// The library this task is using, or nil for the real one.
     static var sessionsDir: URL? { scopedDirectory.wrappedValue }
@@ -437,32 +438,66 @@ actor TranscriptStore {
 
 
 
-    nonisolated static func segments(of session: SessionRef) -> [Segment] {
+    nonisolated static func search(sessions: [SessionRef], query: String,
+                                  cache: SegmentCache = .shared) -> [(session: SessionRef, segment: Segment)] {
+        guard !query.isEmpty, !Task.isCancelled else { return [] }
+        var hits: [(session: SessionRef, segment: Segment)] = []
+        for session in sessions {
+            guard !Task.isCancelled else { return [] }
+            for segment in segments(of: session, cache: cache, evictExisting: false) {
+                guard !Task.isCancelled else { return [] }
+                if segment.text.localizedCaseInsensitiveContains(query)
+                    || (segment.tr?.localizedCaseInsensitiveContains(query) ?? false) {
+                    hits.append((session: session, segment: segment))
+                }
+            }
+        }
+        return Task.isCancelled ? [] : hits
+    }
+
+    nonisolated static func segments(of session: SessionRef, cache: SegmentCache = .shared,
+                                    evictExisting: Bool = true) -> [Segment] {
+        guard !Task.isCancelled else { return [] }
         let url = session.url.appendingPathComponent("segments.jsonl")
         // Cached on (path, mtime, size). Searching across sessions calls this
         // for every session on every keystroke, and each call was a full file
         // read plus a JSON decode per line — fine for a handful of sessions,
         // quadratic-feeling by a few hundred. The stamp means an edited or
         // still-recording file is re-read rather than served stale.
-        let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path) else {
+            cache.invalidate(path: url.path)
+            return []
+        }
         let stamp = SegmentCache.Stamp(
-            modified: (attrs?[.modificationDate] as? Date) ?? .distantPast,
-            size: (attrs?[.size] as? Int) ?? 0)
-        if let hit = SegmentCache.shared.value(for: url.path, stamp: stamp) { return hit }
+            modified: (attrs[.modificationDate] as? Date) ?? .distantPast,
+            size: (attrs[.size] as? Int) ?? 0)
+        if let hit = cache.value(for: url.path, stamp: stamp) { return hit }
+        cache.invalidate(path: url.path)
 
-        guard let data = try? Data(contentsOf: url) else { return [] }
-        let segs = segments(from: data)
-        SegmentCache.shared.store(segs, for: url.path, stamp: stamp)
+        guard !Task.isCancelled else { return [] }
+        guard let data = try? Data(contentsOf: url) else {
+            cache.invalidate(path: url.path)
+            return []
+        }
+        let segs = segments(from: data, checkingCancellation: true)
+        guard !Task.isCancelled else { return [] }
+        cache.store(segs, for: url.path, stamp: stamp, evictExisting: evictExisting)
         return segs
     }
 
     /// Decode a captured file without a second disk read or a cached generation.
-    nonisolated static func segments(from data: Data) -> [Segment] {
+    nonisolated static func segments(from data: Data, checkingCancellation: Bool = false) -> [Segment] {
+        // Snapshot consumers must retain complete data for their write-back validation.
+        if checkingCancellation, Task.isCancelled { return [] }
         guard let text = String(data: data, encoding: .utf8) else { return [] }
         let dec = JSONDecoder()
         var segs: [Segment] = []
         var positions: [Int: Int] = [:]
+        #if SAIITY_TEST_HOOKS
+        var lineCount = 0
+        #endif
         for line in text.split(separator: "\n") {
+            if checkingCancellation, Task.isCancelled { return [] }
             guard let data = line.data(using: .utf8) else { continue }
             if let segment = try? dec.decode(Segment.self, from: data) {
                 positions[segment.i] = segs.count
@@ -476,7 +511,12 @@ actor TranscriptStore {
                 segs[position].speaker = update.speaker
                 segs[position].overlappingSpeech = update.overlappingSpeech ? true : nil
             }
+            #if SAIITY_TEST_HOOKS
+            lineCount += 1
+            if checkingCancellation { TranscriptTestLibrary.afterSegmentLineForTests?(lineCount) }
+            #endif
         }
+        if checkingCancellation, Task.isCancelled { return [] }
         return segs
     }
 

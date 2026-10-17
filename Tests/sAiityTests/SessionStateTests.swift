@@ -157,10 +157,11 @@ extension DictationControllerTests {
         await controller.waitForWorkForTests()
     }
 
-    @Test("release before capture ends its diagnostics run exactly once")
+    @Test("release during preparation ends an empty recording's diagnostics run exactly once")
     func dupEarlyReleaseEndsRun() async throws {
         let backend = FakeBackend(log: EventLog())
         backend.blockPreparation = true
+        backend.authoritativeResult = nil
         let capture = FakeCapture(log: EventLog())
         var events: [DiagnosticsRuntimeTiming] = []
         let controller = DictationController(makeBackend: { backend }, capture: capture,
@@ -175,7 +176,9 @@ extension DictationControllerTests {
         controller.release()
         backend.finishPreparation()
         await controller.waitForWorkForTests()
-        #expect(!capture.started)
+        #expect(capture.started)
+        #expect(capture.stopped)
+        #expect(capture.takeCalls == 1)
         #expect(controller.currentRunID == nil)
         #expect(events.filter { $0.outcome != nil }.map(\.outcome) == ["failed"])
         controller.cancel()

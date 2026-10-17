@@ -5,6 +5,33 @@ import Testing
 
 @Suite(.serialized)
 struct WhisperModelCacheTests {
+    @Test("Invalidation awaits an unload already started by eviction or Forget", arguments: [false, true])
+    func invalidationAwaitsPendingUnload(forgotten: Bool) async throws {
+        let gate = Gate(), unloads = Counter(), completed = Counter()
+        let cache = WhisperModelCache<String, FakeResource>(idleDuration: forgotten ? .seconds(60) : .milliseconds(5)) { key in
+            FakeResource(id: key, unloads: unloads, unloadGate: gate)
+        }
+        _ = try await cache.withModel(for: "base") { $0.id }
+        if forgotten { await cache.forget("base") }
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !(await gate.entered), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        try #require(await gate.entered)
+        let invalidating = Task { await cache.invalidate("base"); await completed.increment() }
+        try await Task.sleep(for: .milliseconds(10))
+        #expect(await completed.value == 0)
+        #expect(await unloads.value == 0)
+        await gate.release()
+        await invalidating.value
+        // Unwind the fake unload even on the expected early-return RED path.
+        while await unloads.value == 0, ContinuousClock.now < deadline { await Task.yield() }
+        await cache.invalidate("base")
+        #expect(await completed.value == 1)
+        #expect(await unloads.value == 1)
+        #expect(await cache.residentCountForTests == 0)
+    }
+
     @Test("resident models are reused and evicted after the idle window")
     func reuseAndIdleEviction() async throws {
         let loads = Counter()
@@ -159,13 +186,16 @@ struct WhisperModelCacheTests {
     private final class FakeResource: WhisperModelResource, @unchecked Sendable {
         let id: String
         let unloads: Counter
+        let unloadGate: Gate?
 
-        init(id: String, unloads: Counter) {
+        init(id: String, unloads: Counter, unloadGate: Gate? = nil) {
             self.id = id
             self.unloads = unloads
+            self.unloadGate = unloadGate
         }
 
         func unload() async {
+            await unloadGate?.hold()
             await unloads.increment()
         }
     }
