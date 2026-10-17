@@ -898,3 +898,48 @@ captions and dictation captures were inspected at
 `/tmp/saiity-speakers-ui.kGZ4PN/`. Interactive and real speaker-acoustic QA remain
 distinct from these checks. No weights were downloaded and no release or DMG
 was created.
+
+## Preliminary product collection (14 October 2026)
+
+`scripts/quality-matrix.sh --product --help` describes the separate pipeline
+collector. The original invocation retains the twelve-cohort release matrix.
+Product collection requires an actually clean matching revision, an explicitly
+approved natural-speech corpus, independent reference reviews and already
+installed weights. It never downloads models. Run disposable work through
+`/Users/enrico/.codex/bin/codex-task`; the script does so automatically when
+called outside that wrapper.
+
+Supply `SAIITY_RELEASE_FIXTURES`, `SAIITY_PRODUCT_VERSION`,
+`SAIITY_PRODUCT_BUILD`, `SAIITY_PRODUCT_MACHINE_ID`, `SAIITY_PRODUCT_POWER_MODE`,
+`SAIITY_PRODUCT_THERMAL_STATE` and `SAIITY_PRODUCT_MEMORY_PRESSURE` explicitly.
+The script resolves the actual compiled test code image, fingerprints it and
+the corpus/models before and after measurement, and binds the existing
+SOURCE/EVIDENCE/COMPLETE markers. Version/build label this test image; its hash
+does not certify a separately packaged or installed app. Conditions are operator
+observations, not inferred hardware claims.
+
+`SAIITY_DICTATION_BENCHMARK_RUNS` accepts 1–50 in explicit product mode; legacy
+pipeline defaults remain five. Cleanup/translation/tier use the existing
+benchmark variables. Both product preview states receive paced, growing PCM;
+scoring runs after an immutable actual delivery completion time. Native rows
+bind the UUID and exact successfully copied payload hash, including separators,
+plus accumulated measured capture/load/queue/recognition/cleanup/translation/
+delivery/drain durations. Recognized ranges are checked against accepted input.
+Native completion is distinct from physical input cessation and compositor
+disappearance.
+
+`SAIITY_PRODUCT_LIFECYCLE=warm` is the default. `post-eviction` waits for the
+pool's actual native release acknowledgement before each run. `cold-start`
+requires a fresh process, `SAIITY_DICTATION_BENCHMARK_RUNS=1`, one explicit
+`SAIITY_PRODUCT_FIXTURE` and `SAIITY_PRODUCT_PREVIEW=0` or `1`. Repeating a loop
+or manually invalidating a warm pool never establishes a cold start.
+
+The memory pasteboard keeps this harness **copied only**. It does not touch
+another app's focused field and cannot qualify visible insertion. Missing
+`SAIITY_PRODUCT_OBSERVATIONS` returns nonzero with UNVERIFIED after retaining
+the completed batch. When supplied, that file goes to the existing product
+verifier; it must contain genuine independent observations and output/header-
+bound semantic reviews. See `product-qualification.md` for the frozen contract.
+No approved recordings, new model weights or production observations were
+collected during implementation. Natural-speech quality, competitive latency,
+physical shortcuts, device capture and visible insertion remain unqualified.

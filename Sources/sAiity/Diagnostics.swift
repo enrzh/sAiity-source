@@ -40,6 +40,8 @@ public struct DiagnosticsTimingSummary: Equatable, Sendable {
     public let count: Int
     public let p50: Double
     public let p95: Double
+    public var cold: Bool? = nil
+    public var outcome: String? = nil
 }
 
 enum DiagnosticsTimingSummarizer {
@@ -90,18 +92,22 @@ enum DiagnosticsTimingSummarizer {
     }
 
     static func summarize(_ timings: [DiagnosticsRuntimeTiming]) -> [DiagnosticsTimingSummary] {
-        Dictionary(grouping: timings, by: \.operation)
-            .map { operation, values in
+        let allowed = ["inserted", "paste-dispatched", "copied", "copy-failed", "cancelled", "failed"]
+        func outcome(_ value: String?) -> String? { value.flatMap { allowed.contains($0) ? $0 : nil } }
+        return Dictionary(grouping: timings.filter { $0.seconds.isFinite && $0.seconds >= 0 }, by: {
+            "\($0.operation)|\($0.cold.map { $0 ? "cold" : "warm" } ?? "unspecified")|\(outcome($0.outcome) ?? "unspecified")"
+        })
+            .map { _, values in
                 let sorted = values.map(\.seconds).sorted()
                 let percentile: (Double) -> Double = { rank in
                     let index = min(sorted.count - 1,
                                     max(0, Int(ceil(rank * Double(sorted.count))) - 1))
                     return sorted[index]
                 }
-                return DiagnosticsTimingSummary(operation: operation,
+                return DiagnosticsTimingSummary(operation: values[0].operation,
                                                 count: sorted.count,
                                                 p50: percentile(0.50),
-                                                p95: percentile(0.95))
+                                                p95: percentile(0.95), cold: values[0].cold, outcome: outcome(values[0].outcome))
             }
             .sorted { $0.operation < $1.operation }
     }
@@ -344,10 +350,15 @@ public enum Diagnostics {
                                     modelCallCount: Int? = nil) {
         let operation = operation.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !operation.isEmpty, seconds.isFinite, seconds >= 0 else { return }
-        loadTimings()
-        timingStore.append(.init(date: Date(), operation: operation, seconds: seconds, cold: cold,
+        let timing = DiagnosticsRuntimeTiming(date: Date(), operation: operation, seconds: seconds, cold: cold,
                                  runID: runID ?? LocalGeneration.dictationRunID, outcome: outcome, fallbackReason: fallbackReason,
-                                 modelLoadCount: modelLoadCount, modelCallCount: modelCallCount))
+                                 modelLoadCount: modelLoadCount, modelCallCount: modelCallCount)
+        if let observer = LocalGeneration.timingObserver {
+            observer(timing)
+            return
+        }
+        loadTimings()
+        timingStore.append(timing)
         if timingStore.count > historyLimit * 2 {
             timingStore.removeFirst(timingStore.count - historyLimit)
         }
@@ -431,11 +442,11 @@ public enum Diagnostics {
                 line += " · runID=\(id.uuidString)"
             }
             if let outcome = timing.outcome,
-               ["inserted", "copied", "copy-failed", "cancelled", "failed"].contains(outcome) {
+               ["inserted", "paste-dispatched", "copied", "copy-failed", "cancelled", "failed"].contains(outcome) {
                 line += " · outcome=\(outcome)"
             }
             if let reason = timing.fallbackReason,
-               ["cleanup-unavailable", "translation-unavailable", "validation-rejected"].contains(reason) {
+               ["cleanup-unavailable", "translation-unavailable", "validation-rejected", "deadline-exhausted"].contains(reason) {
                 line += " · fallbackReason=\(reason)"
             }
             if let loads = timing.modelLoadCount, loads >= 0 { line += " · modelLoadCount=\(loads)" }
@@ -459,7 +470,8 @@ public enum Diagnostics {
             out.append("  none")
         } else {
             for summary in summaries {
-                out.append("  \(summary.operation): n=\(summary.count) p50=\(String(format: "%.3f", summary.p50))s p95=\(String(format: "%.3f", summary.p95))s")
+                let condition = summary.cold.map { $0 ? "cold" : "warm" } ?? "unspecified"
+                out.append("  \(summary.operation): n=\(summary.count) p50=\(String(format: "%.3f", summary.p50))s p95=\(String(format: "%.3f", summary.p95))s [\(condition), \(summary.outcome ?? "unspecified")]")
             }
         }
         out.append("latest dictation run:")

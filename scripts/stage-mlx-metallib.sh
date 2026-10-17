@@ -32,7 +32,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 APP_BUNDLE="build/Syllivra.app/Contents/Resources/mlx-swift_Cmlx.bundle"
-TESTS=".build/out/Products/Release/sAiityTests.xctest"
+TESTS="${SAIITY_TEST_BUNDLE:-.build/out/Products/Release/sAiityTests.xctest}"
 MACOS_DIR="$TESTS/Contents/MacOS"
 
 if [ ! -f "$APP_BUNDLE/default.metallib" ]; then
@@ -47,11 +47,9 @@ if [ "${1:-}" = "--check" ]; then
     exit 0
 fi
 
-# SwiftPM leaves an empty mlx-swift_Cmlx.bundle behind. Copying into it nests a
-# second copy one level down, which MLX does not find — so replace it outright.
-rm -rf "$TESTS/Contents/Resources/mlx-swift_Cmlx.bundle"
-mkdir -p "$TESTS/Contents/Resources"
-cp -R "$APP_BUNDLE" "$TESTS/Contents/Resources/"
+# Copy the contents into the exact resource bundle, without nesting a second bundle.
+mkdir -p "$TESTS/Contents/Resources/mlx-swift_Cmlx.bundle"
+cp -R "$APP_BUNDLE/." "$TESTS/Contents/Resources/mlx-swift_Cmlx.bundle/"
 
 # The colocated fallback: relative to the running binary.
 mkdir -p "$MACOS_DIR/Resources"

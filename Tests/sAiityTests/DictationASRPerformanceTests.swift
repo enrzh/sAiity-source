@@ -6,6 +6,162 @@ import Testing
 
 @testable import sAiity
 
+// MAIN appends this extension to DictationASRPerformanceTests.swift after the
+// current compiler freeze. All inputs are synthetic; no model/audio IO.
+extension DictationASRPerformanceTests {
+    @MainActor static func tearDownPipeline(controller: DictationController?, pool: ASRBackendPool,
+                                           cleanup: DictationCleanupSession, translator: (any Translating)?) async {
+        // Cleanup must retain native ownership even when its caller is cancelled
+        // or inherits an exhausted processing deadline. This task is always awaited.
+        await Task { @MainActor in
+            await LocalGeneration.$deadline.withValue(nil) {
+                await controller?.invalidatePreparedBackend()
+                await pool.invalidate()
+                await cleanup.invalidate()
+                await translator?.stop()
+            }
+        }.value
+    }
+
+    @MainActor @Test("Pipeline teardown drains native work even when its caller is cancelled", arguments: [false, true])
+    func cancellationDrainsActiveBenchmarkController(cancelled: Bool) async throws {
+        let backend = DictationControllerTests.FakeSegmentedBackend(log: DictationControllerTests.EventLog())
+        let gate = DictationControllerTests.ContinuationGate()
+        backend.transcriptionGate = gate
+        backend.result = .init(text: "synthetic completed phrase", language: "en")
+        let pool = ASRBackendPool(makeBackend: { backend })
+        let capture = FixtureCapture(), board = MemoryPasteboard()
+        let controller = DictationController(backendProvider: pool, capture: capture,
+            inserter: TextInserter(pasteboard: board, accessibilityTrusted: { false }, currentFocus: { nil }),
+            captionsActive: { false }, cleanupConfiguration: { .disabled })
+        let cleanup = DictationCleanupSession(gate: TranslationInferenceGate())
+        var cleanupStops = 0
+        _ = await cleanup.cleanup(.init(text: "Send the report, I mean the revised report.", language: "en"), modelKey: "synthetic") {
+            .init(cleanup: { _, _, _ in "Send the revised report." }, stop: { cleanupStops += 1 })
+        }
+        controller.press()
+        await controller.waitForWorkForTests()
+        capture.feed([0.2, 0.3])
+        controller.release()
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !gate.entered, ContinuousClock.now < deadline { await Task.yield() }
+        try #require(gate.entered)
+        var tornDown = false
+        let teardown = Task {
+            await Self.tearDownPipeline(controller: controller, pool: pool, cleanup: cleanup, translator: nil)
+            tornDown = true
+        }
+        if cancelled { teardown.cancel() }
+        try await Task.sleep(for: .milliseconds(10))
+        #expect(!tornDown && pool.hasActiveLeaseForTests && cleanupStops == 0)
+        gate.open()
+        await teardown.value
+        #expect(tornDown && !pool.hasActiveLeaseForTests && !pool.isPrepared && cleanupStops == 1)
+        #expect(!controller.isBusy && !controller.isActive && capture.sink == nil)
+        #expect(board.text.isEmpty)
+        // Also unwind on the expected RED path, which deliberately returns early.
+        await Task { @MainActor in
+            await controller.invalidatePreparedBackend()
+            await pool.invalidate()
+            await cleanup.invalidate()
+        }.value
+    }
+
+    private static var syntheticProductEnvironment: [String: String] {
+        ["SAIITY_PRODUCT_BENCHMARK": "1", "SAIITY_PRODUCT_BINARY": "/synthetic/test-host",
+         "SAIITY_PRODUCT_VERSION": "2.7.0", "SAIITY_PRODUCT_BUILD": "226",
+         "SAIITY_PRODUCT_REVISION": String(repeating: "a", count: 40),
+         "SAIITY_PRODUCT_MACHINE_ID": "test-mac", "SAIITY_PRODUCT_POWER_MODE": "normal",
+         "SAIITY_PRODUCT_THERMAL_STATE": "nominal", "SAIITY_PRODUCT_MEMORY_PRESSURE": "normal"]
+    }
+
+    @Test("Product configuration matches collector conditions and allows fifty runs only in explicit product mode")
+    func productConfigurationMatchesCollector() throws {
+        var environment = Self.syntheticProductEnvironment
+        environment["SAIITY_DICTATION_BENCHMARK_RUNS"] = "50"
+        let configuration = try Self.benchmarkConfiguration(profile: "pipeline", environment: environment)
+        #expect(configuration["runs"] as? Int == 50)
+        #expect(configuration["powerMode"] as? String == "normal")
+        #expect(configuration["thermalState"] as? String == "nominal")
+        #expect(configuration["memoryPressure"] as? String == "normal")
+        #expect(configuration["preview"] as? [Bool] == [false, true])
+        #expect(configuration["realtime"] is NSNull)
+        #expect(configuration["cleanupModel"] is NSNull)
+        #expect(configuration["target"] is NSNull)
+        let legacy = try Self.benchmarkConfiguration(profile: "pipeline", environment: ["SAIITY_DICTATION_BENCHMARK_RUNS": "50"])
+        #expect(legacy["runs"] as? Int == 5)
+        #expect(legacy["powerMode"] == nil && legacy["thermalState"] == nil && legacy["memoryPressure"] == nil)
+        for runs in ["0", "51", "nan"] {
+            var invalid = environment
+            invalid["SAIITY_DICTATION_BENCHMARK_RUNS"] = runs
+            #expect(throws: (any Error).self) { try Self.benchmarkConfiguration(profile: "pipeline", environment: invalid) }
+        }
+        for key in ["SAIITY_PRODUCT_BINARY", "SAIITY_PRODUCT_VERSION", "SAIITY_PRODUCT_BUILD",
+                    "SAIITY_PRODUCT_REVISION", "SAIITY_PRODUCT_MACHINE_ID", "SAIITY_PRODUCT_POWER_MODE",
+                    "SAIITY_PRODUCT_THERMAL_STATE", "SAIITY_PRODUCT_MEMORY_PRESSURE"] {
+            var missing = environment
+            missing.removeValue(forKey: key)
+            #expect(throws: (any Error).self) { try Self.benchmarkConfiguration(profile: "pipeline", environment: missing) }
+        }
+        var malformed = environment
+        malformed["SAIITY_PRODUCT_POWER_MODE"] = "personal condition text"
+        #expect(throws: (any Error).self) { try Self.benchmarkConfiguration(profile: "pipeline", environment: malformed) }
+        #expect(throws: (any Error).self) { try Self.benchmarkConfiguration(profile: "captions", environment: environment) }
+    }
+
+    @Test("Fixture capture exposes only accepted PCM before each callback and drains once")
+    func fixtureCaptureGrowsWithoutFutureAudio() throws {
+        let capture = FixtureCapture()
+        let format = try #require(AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false))
+        let prefix: [Float] = [0.1, 0.2], tail: [Float] = [0.3]
+        try capture.start(targetFormat: format) { _ in }
+        #expect(capture.collectedSamples.isEmpty || capture.collectedSamples == [[]])
+        capture.feed(prefix)
+        #expect(capture.collectedSamples == [prefix])
+        #expect(capture.inputHealth?.sampleCount == prefix.count)
+        capture.feed(tail)
+        #expect(capture.collectedSamples == [prefix + tail])
+        capture.stop()
+        capture.feed([0.9])
+        #expect(capture.takeCollectedSamples() == prefix + tail)
+        #expect(capture.takeCollectedSamples().isEmpty)
+    }
+
+    @Test("Optional product duration and condition survive manifest decoding without changing legacy fixture shape")
+    func productFixtureMetadataRoundTrips() throws {
+        let fixture = try JSONDecoder().decode(DictationBenchmarkFixture.self,
+            from: Data(#"{"audio":"synthetic.wav","condition":"clean","durationSeconds":5.25}"#.utf8))
+        let fields = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(fixture)) as? [String: Any])
+        #expect(fields["condition"] as? String == "clean")
+        #expect(fields["durationSeconds"] as? Double == 5.25)
+        let legacy = try JSONDecoder().decode(DictationBenchmarkFixture.self, from: Data(#"{"audio":"legacy.wav"}"#.utf8))
+        let old = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(legacy)) as? [String: Any])
+        #expect(old["condition"] == nil && old["durationSeconds"] == nil)
+    }
+
+    @Test("Product phase accounting sums repeated regions and rejects unobserved boundaries")
+    func productPhasesRequireActualMeasurements() throws {
+        let measured = ["capture-start": 0.01, "model.load": 0.2, "translator.gate-wait": 0.3,
+                        "asr.queue-wait": 0.04, "recognition-region": 0.5, "transcription": 0.1,
+                        "cleanup": 0.6, "translation": 0.7, "delivery": 0.02, "drain": 0.03]
+        let phases = try Self.productPhaseSeconds(timings: measured, cleanupEnabled: true, translationEnabled: true)
+        #expect(phases["capture"] == 0.01 && phases["modelLoad"] == 0.2)
+        #expect(abs((phases["nativeQueue"] ?? -1) - 0.34) < 1e-9)
+        #expect(phases["recognition"] == 0.6 && phases["cleanup"] == 0.6 && phases["translation"] == 0.7)
+        #expect(phases["delivery"] == 0.02 && phases["drain"] == 0.03)
+        for key in ["capture-start", "model.load", "translator.gate-wait", "asr.queue-wait", "transcription", "cleanup", "translation", "delivery", "drain"] {
+            var missing = measured
+            missing.removeValue(forKey: key)
+            #expect(throws: (any Error).self) { try Self.productPhaseSeconds(timings: missing, cleanupEnabled: true, translationEnabled: true) }
+        }
+        var disabled = measured
+        disabled.removeValue(forKey: "cleanup")
+        disabled.removeValue(forKey: "translation")
+        let bypassed = try Self.productPhaseSeconds(timings: disabled, cleanupEnabled: false, translationEnabled: false)
+        #expect(bypassed["cleanup"] == 0 && bypassed["translation"] == 0)
+    }
+}
+
 /// Opt in with SAIITY_ASR_BENCHMARK_DIR=/absolute/fixtures and filter this suite.
 /// Run in a fresh test process for cold model preparation (OS caches may be warm).
 /// Reads at most 12 mono Float32 16 kHz WAVs, each at most 60 seconds. No downloads.
@@ -14,9 +170,25 @@ struct DictationASRPerformanceTests {
     private final class FixtureCapture: DictationAudioCapture {
         var samples: [Float] = []
         var sink: (@Sendable (AVAudioPCMBuffer) -> Void)?
-        func start(targetFormat: AVAudioFormat, onBuffer: @escaping @Sendable (AVAudioPCMBuffer) -> Void) throws { sink = onBuffer }
+        var collectedSamples: [[Float]] { samples.isEmpty ? [] : [samples] }
+        var inputHealth: DictationInputHealth? {
+            .init(sampleCount: samples.count, rmsDBFS: nil, clippedSampleFraction: 0,
+                  observedDuration: Double(samples.count) / 16_000)
+        }
+        func start(targetFormat: AVAudioFormat, onBuffer: @escaping @Sendable (AVAudioPCMBuffer) -> Void) throws {
+            samples = []
+            sink = onBuffer
+        }
         func stop() { sink = nil }
-        func takeCollectedSamples() -> [Float] { samples }
+        func takeCollectedSamples() -> [Float] {
+            defer { samples = [] }
+            return samples
+        }
+        func feed(_ values: [Float]) {
+            guard let sink else { return }
+            samples += values
+            sink(CaptionASRPerformanceTests.audioBufferForDictation(values[...]))
+        }
     }
 
     private final class MemoryPasteboard: DictationPasteboard {
@@ -38,6 +210,8 @@ struct DictationASRPerformanceTests {
         let maxWER: Double?
         let expectedTranslations: [String: DictationBenchmarkFixture.TranslationReference]?
         let scoring: [String: String]?
+        let durationSeconds: Double?
+        let condition: String?
     }
 
     /// The app's Nemotron loader also offers downloads. This adapter uses only
@@ -91,17 +265,25 @@ struct DictationASRPerformanceTests {
                 throw BenchmarkError("Non-finite samples in \(url.lastPathComponent)")
             }
             let metadata = manifest[url.lastPathComponent]
+            if ProcessInfo.processInfo.environment["SAIITY_PRODUCT_BENCHMARK"] == "1" {
+                guard let duration = metadata?.durationSeconds, duration.isFinite, duration > 0,
+                      abs(duration - Double(samples.count) / 16_000) <= 1.0 / 16_000,
+                      ["clean", "difficult", "noisy"].contains(metadata?.condition ?? "") else {
+                    throw BenchmarkError("Product fixture requires matching approved duration and condition")
+                }
+            }
             return Fixture(name: url.lastPathComponent, samples: samples,
                            regions: SpeechRegionSegmenter.default.segment(samples, sampleRate: 16_000),
                            expectedText: metadata?.expectedText,
                            expectedLanguages: metadata?.expectedLanguages,
                            maxWER: metadata?.maxWER, expectedTranslations: metadata?.expectedTranslations,
-                           scoring: metadata?.scoring)
+                           scoring: metadata?.scoring, durationSeconds: metadata?.durationSeconds, condition: metadata?.condition)
         }
     }
 
-    private func record(_ fields: [String: Any], since start: ContinuousClock.Instant) throws {
-        let duration = start.duration(to: .now).components
+    private func record(_ fields: [String: Any], since start: ContinuousClock.Instant,
+                        completedAt: ContinuousClock.Instant? = nil) throws {
+        let duration = start.duration(to: completedAt ?? .now).components
         var fields = fields
         let phase = fields["phase"] as? String
         fields["configuration"] = try Self.benchmarkConfiguration(profile:
@@ -113,15 +295,18 @@ struct DictationASRPerformanceTests {
             fields["realTimeFactor"] = seconds / audioSeconds
         }
         let data = try JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys])
-        print("SAIITY_ASR_BENCHMARK " + String(decoding: data, as: UTF8.self))
+        let product = ProcessInfo.processInfo.environment["SAIITY_PRODUCT_BENCHMARK"] == "1"
+        print((product ? "SAIITY_PRODUCT_BENCHMARK " : "SAIITY_ASR_BENCHMARK ") + String(decoding: data, as: UTF8.self))
     }
 
     static func benchmarkConfiguration(profile: String, environment env: [String: String] = ProcessInfo.processInfo.environment) throws -> [String: Any] {
+        let product = try productMetadata(environment: env)
+        guard product == nil || profile == "pipeline" else { throw BenchmarkError("Product collection requires the pipeline profile") }
         let prefix = profile == "captions" ? "SAIITY_CAPTION_BENCHMARK_" : "SAIITY_DICTATION_BENCHMARK_"
         guard let chunk = Int(profile == "asr" ? "2240" : env[prefix + "CHUNK_MS"] ?? "2240"),
               [1120, 2240].contains(chunk),
-              let runs = Int(profile == "captions" ? env[prefix + "RUNS"] ?? "3" : "5"),
-              (1...10).contains(runs), ["0", "1"].contains(env[prefix + "REALTIME"] ?? "1") else {
+              let runs = Int(profile == "captions" ? env[prefix + "RUNS"] ?? "3" : product != nil ? env[prefix + "RUNS"] ?? "5" : "5"),
+              (1...(product == nil ? 10 : 50)).contains(runs), ["0", "1"].contains(env[prefix + "REALTIME"] ?? "1") else {
             throw BenchmarkError("Unsupported benchmark tier, runs or realtime setting")
         }
         let cleanup = profile == "pipeline" ? env[prefix + "CLEANUP"] ?? "rules" : "off"
@@ -134,15 +319,53 @@ struct DictationASRPerformanceTests {
               target == nil || (!target!.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !["auto", "und", "unknown"].contains(target!)) else {
             throw BenchmarkError("Explicit cleanup model and translation target are required")
         }
-        return ["profile": profile, "language": "auto", "chunkMs": chunk, "runs": runs,
+        var configuration: [String: Any] = ["profile": profile, "language": "auto", "chunkMs": chunk, "runs": runs,
                 "realtime": profile == "captions" ? (env[prefix + "REALTIME"] != "0") as Any : NSNull(),
                 "preview": profile == "pipeline" ? [false, true] as Any : NSNull(),
                 "cleanup": cleanup, "cleanupModel": model as Any? ?? NSNull(),
                 "translation": translation, "target": target as Any? ?? NSNull()]
+        if let product {
+            for key in ["powerMode", "thermalState", "memoryPressure"] { configuration[key] = product[key]! }
+        }
+        return configuration
+    }
+
+    static func productMetadata(environment env: [String: String] = ProcessInfo.processInfo.environment) throws -> [String: String]? {
+        guard env["SAIITY_PRODUCT_BENCHMARK"] == "1" else { return nil }
+        let fields = ["binary": "BINARY", "version": "VERSION", "build": "BUILD", "revision": "REVISION",
+                      "machineID": "MACHINE_ID", "powerMode": "POWER_MODE", "thermalState": "THERMAL_STATE", "memoryPressure": "MEMORY_PRESSURE"]
+        var result: [String: String] = [:]
+        for (key, suffix) in fields {
+            guard let value = env["SAIITY_PRODUCT_" + suffix], !value.isEmpty else { throw BenchmarkError("Missing explicit product metadata") }
+            let valid: Bool
+            switch key {
+            case "binary": valid = value.hasPrefix("/") && !value.unicodeScalars.contains(where: { $0.value < 32 })
+            case "revision": valid = value.count == 40 && value.allSatisfy { "0123456789abcdef".contains($0) }
+            default: valid = value.range(of: #"^[A-Za-z0-9][A-Za-z0-9._-]*$"#, options: .regularExpression) != nil
+            }
+            guard valid else { throw BenchmarkError("Malformed product metadata") }
+            result[key] = value
+        }
+        return result
     }
 
     static func outputHash(_ text: String) -> String {
         SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    static func productPhaseSeconds(timings: [String: Double], cleanupEnabled: Bool, translationEnabled: Bool) throws -> [String: Double] {
+        func measured(_ operation: String) throws -> Double {
+            guard let seconds = timings[operation], seconds.isFinite, seconds >= 0 else {
+                throw BenchmarkError("Product phase measurement is missing or invalid")
+            }
+            return seconds
+        }
+        return ["capture": try measured("capture-start"), "modelLoad": try measured("model.load"),
+                "nativeQueue": try measured("translator.gate-wait") + measured("asr.queue-wait"),
+                "recognition": try measured("transcription") + (timings["recognition-region"] ?? 0),
+                "cleanup": cleanupEnabled ? try measured("cleanup") : 0,
+                "translation": translationEnabled ? try measured("translation") : 0,
+                "delivery": try measured("delivery"), "drain": try measured("drain")]
     }
 
     static func scoreFields(reference: String, hypothesis: String, scoring: [String: String]?) throws -> [String: Any] {
@@ -365,9 +588,33 @@ struct DictationASRPerformanceTests {
     @Test("complete installed dictation pipeline with both preview states",
           .enabled(if: ProcessInfo.processInfo.environment["SAIITY_DICTATION_PIPELINE_BENCHMARK"] == "1"))
     @MainActor func completePipeline() async throws {
+        try await DownloadCoordinator.$downloadsAllowed.withValue(false) {
+            try await completePipelineBody()
+        }
+    }
+
+    @MainActor private func completePipelineBody() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        let product = try Self.productMetadata() != nil
         let path = try #require(ProcessInfo.processInfo.environment["SAIITY_ASR_BENCHMARK_DIR"])
-        let inputs = try fixtures(in: URL(fileURLWithPath: path, isDirectory: true))
+        var inputs = try fixtures(in: URL(fileURLWithPath: path, isDirectory: true))
+        if product, let selected = environment["SAIITY_PRODUCT_FIXTURE"] {
+            inputs = inputs.filter { $0.name == selected }
+            try #require(inputs.count == 1, "Explicit product fixture is missing")
+        }
         let configuration = try Self.benchmarkConfiguration(profile: "pipeline")
+        let runs = try #require(configuration["runs"] as? Int)
+        let lifecycle = product ? environment["SAIITY_PRODUCT_LIFECYCLE"] ?? "warm" : "warm"
+        try #require(["warm", "cold-start", "post-eviction"].contains(lifecycle), "Unsupported product lifecycle")
+        var previews = [false, true]
+        if product, let selected = environment["SAIITY_PRODUCT_PREVIEW"] {
+            try #require(["0", "1"].contains(selected), "Product preview must be 0 or 1")
+            previews = [selected == "1"]
+        }
+        if lifecycle == "cold-start" {
+            try #require(runs == 1 && inputs.count == 1 && previews.count == 1,
+                         "Cold-start requires one fixture, run and preview in a fresh process")
+        }
         let chunkMs = try #require(configuration["chunkMs"] as? Int)
         let asrModel = "nemotron-\(chunkMs)"
         try #require(NemotronEngine.isDownloaded(chunkMs: chunkMs), "Installed Nemotron required; downloads disabled")
@@ -379,8 +626,8 @@ struct DictationASRPerformanceTests {
         if cleanupMode == "model" { try #require(model?.isCleanupCompatible() == true, "Installed compatible cleanup model required; downloads disabled") }
         let translationMode = ProcessInfo.processInfo.environment["SAIITY_DICTATION_BENCHMARK_TRANSLATION"] ?? "off"
         if translationMode == "madlad" {
-            MADLADTranslator.metalLibraryRootOverride = URL(fileURLWithPath:
-                "\(FileManager.default.currentDirectoryPath)/.build/release/sAiityTests.xctest/Contents/MacOS")
+            let bundle = try #require(environment["SAIITY_TEST_BUNDLE"], "Explicit native test bundle is required")
+            MADLADTranslator.metalLibraryRootOverride = URL(fileURLWithPath: bundle).appendingPathComponent("Contents/MacOS")
         }
         defer { MADLADTranslator.metalLibraryRootOverride = nil }
         let translator: (any Translating)?
@@ -406,17 +653,22 @@ struct DictationASRPerformanceTests {
         var translatorPrepared = false
         let pool = ASRBackendPool(makeBackend: {
             StreamingASRBackend(name: "Pipeline Nemotron", engine: InstalledNemotron(directory: NemotronEngine.variantDirectory(chunkMs: chunkMs)))
-        }, idleEvictionDelay: .seconds(3_600))
-        let cold = ContinuousClock.now
-        try await pool.prepare(locale: Locale(identifier: "auto")) { _ in }
-        try record(["model": asrModel, "phase": "pipeline_cold_prepare"], since: cold)
-        for preview in [false, true] {
+        }, idleEvictionDelay: lifecycle == "post-eviction" ? .milliseconds(25) : .seconds(3_600))
+        var activeController: DictationController?
+        do {
+        if lifecycle != "cold-start" {
+            let cold = ContinuousClock.now
+            try await pool.prepare(locale: Locale(identifier: "auto")) { _ in }
+            if !product { try record(["model": asrModel, "phase": "pipeline_cold_prepare"], since: cold) }
+        }
+        for preview in previews {
             let capture = FixtureCapture()
             let pasteboard = MemoryPasteboard()
-            let inserter = TextInserter(pasteboard: pasteboard, accessibilityTrusted: { false })
+            let inserter = TextInserter(pasteboard: pasteboard, accessibilityTrusted: { false }, currentFocus: { nil })
             var timings: [String: Double] = [:]
             var snapshot: DictationResultSnapshot?
             var cleanupResult: DictationTranscriptionResult?
+            var delivered: (result: TextInsertionResult, id: UUID, completed: ContinuousClock.Instant)?
             let controller = DictationController(backendProvider: pool, capture: capture, inserter: inserter,
                 captionsActive: { false },
                 translationConfiguration: { .init(enabled: translator != nil, target: target) },
@@ -454,34 +706,70 @@ struct DictationASRPerformanceTests {
                     cleanupResult = result
                     return result
                 }, onResult: { snapshot = $0 }, dictationStreamingDraftEnabled: { preview },
-                onTiming: { operation, seconds, _ in timings[operation] = seconds })
+                onTiming: { operation, seconds, _ in timings[operation, default: 0] += seconds },
+                onDelivered: { _, result, id in delivered = (result, id, .now) })
+            activeController = controller
             for fixture in inputs {
-                for run in 1...5 {
-                    capture.samples = fixture.samples
+                for run in 1...runs {
+                    if lifecycle == "post-eviction" {
+                        let deadline = ContinuousClock.now + .seconds(30)
+                        while pool.warmState != "post-eviction", ContinuousClock.now < deadline {
+                            try await Task.sleep(for: .milliseconds(5))
+                        }
+                    }
+                    let warmState = product ? try #require(pool.warmState, "ASR lifecycle has not completed") : "warm"
+                    if product { try #require(warmState == lifecycle, "ASR lifecycle differs from requested trial") }
                     pasteboard.text = ""
                     snapshot = nil
                     cleanupResult = nil
-                    timings.removeAll()
+                    delivered = nil
+                    // All relevant loaders and gates report through the scoped
+                    // observer. Zero here means no event occurred in this run.
+                    timings = ["model.load": 0, "translator.gate-wait": 0, "asr.queue-wait": 0]
+                    var acceptedSamples = 0
+                    var released = ContinuousClock.now
+                    try await LocalGeneration.$timingObserver.withValue({ event in
+                        if event.runID == controller.currentRunID?.uuidString {
+                            timings[event.operation, default: 0] += event.seconds
+                        }
+                    }) {
                     controller.press()
                     await controller.waitForWorkForTests()
-                    // Pace capture for the preview path, matching microphone callbacks.
+                    // Product comparisons pace both preview states identically.
                     for offset in stride(from: 0, to: fixture.samples.count, by: 3_200) {
                         let end = min(offset + 3_200, fixture.samples.count)
-                        capture.sink?(CaptionASRPerformanceTests.audioBufferForDictation(fixture.samples[offset..<end]))
-                        if preview { try await Task.sleep(for: .milliseconds(200)) }
+                        capture.feed(Array(fixture.samples[offset..<end]))
+                        if product || preview { try await Task.sleep(for: .seconds(Double(end - offset) / 16_000)) }
                     }
-                    let released = ContinuousClock.now
+                    acceptedSamples = capture.inputHealth?.sampleCount ?? 0
+                    released = .now
                     controller.release()
                     await controller.waitForWorkForTests()
+                    }
                     try #require(!pasteboard.text.isEmpty, "No inserted dictation result")
                     if translator != nil { #expect(snapshot?.wasTranslated == true, "Translation silently fell back") }
                     if cleanupMode != "off" { #expect(snapshot?.cleanupUnavailable == false, "Cleanup was unavailable") }
                     let result = try #require(snapshot)
+                    let delivery = try #require(delivered, "Actual delivery completion was not measured")
                     var fields: [String: Any] = ["model": asrModel, "phase": "release_to_insertion",
                         "fixture": fixture.name, "preview": preview, "run": run,
                         "cleanup": cleanupMode, "translation": translationMode, "timings": timings,
                         "outputChars": pasteboard.text.count, "outputSHA256": Self.outputHash(pasteboard.text), "wasTranslated": result.wasTranslated,
                         "cleanupUnavailable": result.cleanupUnavailable]
+                    if product {
+                        var covered = 0
+                        for range in controller.completedSampleRangesForTests {
+                            try #require(range.lowerBound == covered, "Recognition coverage has a gap or duplicate")
+                            covered = range.upperBound
+                        }
+                        try #require(covered <= acceptedSamples, "Recognition used unaccepted future samples")
+                        fields["droppedAudioSeconds"] = Double(fixture.samples.count - covered) / 16_000
+                        fields.merge(try DictationBenchmarkScorer.productFields(runID: delivery.id.uuidString,
+                            warmState: warmState, phraseSeconds: Double(acceptedSamples) / 16_000,
+                            delivery: delivery.result, phaseSeconds: Self.productPhaseSeconds(timings: timings,
+                                cleanupEnabled: cleanupMode != "off", translationEnabled: translator != nil)),
+                            uniquingKeysWith: { _, new in new })
+                    }
                     if cleanupMode != "off" {
                         let outcome = try #require(cleanupResult, "Cleanup outcome was not measured")
                         fields["modelCalls"] = outcome.modelCalls
@@ -530,13 +818,15 @@ struct DictationASRPerformanceTests {
                         fields["translationFailures"] = result.wasTranslated ? 0 : 1
                         fields["translationSkipped"] = result.wasTranslated ? 0 : 1
                     }
-                    try record(fields, since: released)
+                    try record(fields, since: released, completedAt: product ? delivery.completed : nil)
                 }
             }
         }
-        await pool.invalidate()
-        await cleanup.invalidate()
-        await translator?.stop()
+        } catch {
+            await Self.tearDownPipeline(controller: activeController, pool: pool, cleanup: cleanup, translator: translator)
+            throw error
+        }
+        await Self.tearDownPipeline(controller: activeController, pool: pool, cleanup: cleanup, translator: translator)
     }
 
     @Test("Installed Nemotron 2240 versus Whisper base, three sequential decodes per fixture",

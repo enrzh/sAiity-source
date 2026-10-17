@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "status": "unverified",
+  "minimumWarmRuns": 50,
+  "coldObservations": {"cold-start": 5, "post-eviction": 5},
+  "maxShortSeconds": 10,
+  "longSeconds": 30,
+  "cleanWER": 0.05,
+  "translatedWER": 0.25,
+  "languageEvidence": {
+    "requiredCohorts": ["en", "de"],
+    "minimumClips": 2,
+    "minimumSpeakers": 2
+  },
+  "limits": {
+    "captureStart": 0.150,
+    "rules": 0.700,
+    "model": 1.2,
+    "translated": 2.5,
+    "stopToCompositorHidden": 0.100,
+    "stopToInputStopped": 0.250
+  },
+  "requiredCases": [
+    {"cohort": "en", "model": "nemotron-2240", "configuration": {"cleanup": "rules", "translation": "off", "target": null}},
+    {"cohort": "de", "model": "nemotron-2240", "configuration": {"cleanup": "rules", "translation": "off", "target": null}},
+    {"cohort": "en", "model": "nemotron-2240", "configuration": {"cleanup": "model", "translation": "off", "target": null}},
+    {"cohort": "de", "model": "nemotron-2240", "configuration": {"cleanup": "model", "translation": "off", "target": null}},
+    {"cohort": "en", "model": "nemotron-2240", "configuration": {"cleanup": "rules", "translation": "hy-mt2", "target": "de"}},
+    {"cohort": "de", "model": "nemotron-2240", "configuration": {"cleanup": "rules", "translation": "hy-mt2", "target": "en"}},
+    {"cohort": "en", "model": "nemotron-2240", "configuration": {"cleanup": "rules", "translation": "madlad", "target": "de"}},
+    {"cohort": "de", "model": "nemotron-2240", "configuration": {"cleanup": "rules", "translation": "madlad", "target": "en"}}
+  ]
+}

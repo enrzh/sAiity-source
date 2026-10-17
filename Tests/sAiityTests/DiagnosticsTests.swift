@@ -5,6 +5,22 @@ import Testing
 
 @MainActor
 @Suite struct DiagnosticsTests {
+    @Test("Scoped benchmark timing collection preserves run correlation without writing production history")
+    func benchmarkTimingObserver() throws {
+        try withIsolatedHistory { _ in
+            var observed: [DiagnosticsRuntimeTiming] = []
+            LocalGeneration.$dictationRunID.withValue("benchmark-run") {
+                LocalGeneration.$timingObserver.withValue({ observed.append($0) }) {
+                    Diagnostics.recordTiming(operation: "model.load", seconds: 0.2, modelLoadCount: 1)
+                    Diagnostics.recordTiming(operation: "translator.gate-wait", seconds: 0.3)
+                }
+            }
+            #expect(observed.count == 2)
+            #expect(observed.allSatisfy { $0.runID == "benchmark-run" })
+            #expect(observed.first?.modelLoadCount == 1)
+            #expect(Diagnostics.recentTimings.isEmpty)
+        }
+    }
     @Test("model observations inherit only their async dictation context")
     func dupModelTimingUsesRunContext() throws {
         try withIsolatedHistory { _ in
@@ -102,6 +118,23 @@ import Testing
         #expect(encoded["fallbackReason"] == nil)
         #expect(encoded["modelLoadCount"] == nil)
         #expect(encoded["modelCallCount"] == nil)
+    }
+
+    @Test("timing summaries keep cold, warm and delivery endpoints in separate cohorts")
+    func summariesSeparateLifecycleAndDelivery() {
+        let date = Date(timeIntervalSinceReferenceDate: 0)
+        let timings = [
+            DiagnosticsRuntimeTiming(date: date, operation: "dictation.total", seconds: 20, cold: true, outcome: "copied"),
+            .init(date: date, operation: "dictation.total", seconds: 1, cold: false, outcome: "copied"),
+            .init(date: date, operation: "dictation.total", seconds: 2, cold: false, outcome: "paste-dispatched"),
+            .init(date: date, operation: "dictation.total", seconds: 3, cold: false, outcome: "paste-dispatched")
+        ]
+        let summaries = DiagnosticsTimingSummarizer.summarize(timings)
+        #expect(summaries.count == 3)
+        #expect(summaries.first { $0.cold == true }?.p95 == 20)
+        #expect(summaries.first { $0.cold == false && $0.outcome == "copied" }?.p95 == 1)
+        #expect(summaries.first { $0.outcome == "paste-dispatched" }?.count == 2)
+        #expect(summaries.first { $0.outcome == "paste-dispatched" }?.p95 == 3)
     }
 
     @Test("correlated timing summaries preserve percentiles without mixing interleaved runs")
@@ -298,7 +331,8 @@ import Testing
         #expect(grouped.contains("modelCallCount=0"))
         #expect(!grouped.contains("99.000s"))
         #expect(!grouped.contains("outcome=cancelled"))
-        #expect(report.contains("dictation.cleanup: n=2 p50=1.250s p95=99.000s"))
+        #expect(report.contains("dictation.cleanup: n=1 p50=1.250s p95=1.250s [cold, unspecified]"))
+        #expect(report.contains("dictation.cleanup: n=1 p50=99.000s p95=99.000s [unspecified, cancelled]"))
     }
 
     @Test("diagnostics export accepts only content-free run IDs and controlled metadata codes")

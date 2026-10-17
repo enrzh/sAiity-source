@@ -12,7 +12,8 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import benchmark_evidence
 
-verify = runpy.run_path(str(Path(__file__).resolve().parents[1] / "scripts/verify-quality.py"))["verify"]
+gate = runpy.run_path(str(Path(__file__).resolve().parents[1] / "scripts/verify-quality.py"))
+verify = gate["verify"]
 
 
 class ReleaseQualityTests(unittest.TestCase):
@@ -528,6 +529,329 @@ probe() {
         self.assertEqual(policy["limits"]["release_to_insertion"]["seconds"], 8)
         self.assertEqual(policy["limits"]["warm_live_stream"]["firstVolatileSeconds"], 5)
         self.assertEqual(policy["translationLatency"], {"status": "unverified", "limits": None})
+
+
+class ProductQualificationTests(unittest.TestCase):
+    def product_data(self, processing="rules", translation="off"):
+        # Entirely synthetic gate fixtures. They do not certify real audio/UI.
+        policy = {"schema": 1, "status": "unverified", "minimumWarmRuns": 50,
+            "coldObservations": {"cold-start": 5, "post-eviction": 5},
+            "maxShortSeconds": 10, "longSeconds": 30, "cleanWER": 0.05,
+            "translatedWER": 0.25, "languageEvidence": {"requiredCohorts": ["en", "de"],
+                "minimumClips": 2, "minimumSpeakers": 2},
+            "limits": {"captureStart": 0.150, "rules": 0.700, "model": 1.2,
+                "translated": 2.5, "stopToCompositorHidden": 0.100, "stopToInputStopped": 0.250},
+            "requiredCases": []}
+        manifest = {"fixtures": []}
+        for cohort in ("en", "de"):
+            for clip in (1, 2):
+                scoring = {"language": cohort, "wordUnit": "natural-language", "normalization": "nfc-grapheme-v1"}
+                review = {"reviewed": True, "independent": True, "reviewer": "synthetic-listener"}
+                manifest["fixtures"].append({"audio": f"{cohort}-{clip}.wav", "expectedText": "synthetic reference",
+                    "expectedLanguages": [cohort], "cohort": cohort, "condition": "clean", "durationSeconds": 5,
+                    "categories": ["clean"], "scoring": scoring, "referenceReview": review,
+                    "provenance": {"reviewed": True, "source": "synthetic test", "license": "test-only",
+                        "consent": "test-only", "speechType": "natural", "speaker": f"speaker-{clip}", "reviewer": "curator"},
+                    "expectedTranslations": {target: {"text": "synthetic target", "reviewed": True,
+                        "referenceReview": review, "scoring": dict(scoring, language=target)} for target in ("en", "de")}})
+        records, observations = [], []
+        revision = "c" * 40
+        for cohort in ("en", "de"):
+            config = {"profile": "pipeline", "language": "auto", "chunkMs": 2240, "runs": 5,
+                "preview": [False, True], "cleanup": processing, "cleanupModel": "synthetic.gguf" if processing == "model" else None,
+                "translation": translation, "target": ("de" if cohort == "en" else "en") if translation != "off" else None,
+                "powerMode": "normal", "thermalState": "nominal", "memoryPressure": "normal"}
+            policy["requiredCases"].append({"cohort": cohort, "model": "nemotron-2240",
+                "configuration": {key: config[key] for key in ("cleanup", "translation", "target")}})
+            recordings = {f["audio"]: "d" * 64 for f in manifest["fixtures"]}
+            evidence = {"schema": 1, "revision": revision, "sourceState": "clean",
+                "appBuild": {"version": "synthetic", "build": "1", "binarySHA256": "e" * 64},
+                "corpus": {"manifestSHA256": hashlib.sha256(json.dumps(manifest).encode()).hexdigest(),
+                    "recordings": recordings, "corpusSHA256": benchmark_evidence.digest(recordings)},
+                "hardware": {key: "synthetic" for key in ("model", "arch", "macOS", "osBuild", "toolchain", "swift", "sdk", "machineID")},
+                "models": {"nemotron-2240": "a" * 64}, "configuration": config}
+            evidence["hardware"]["memoryBytes"] = 16
+            if processing == "model": evidence["models"]["cleanup:synthetic.gguf"] = "b" * 64
+            if translation != "off": evidence["models"][translation] = "f" * 64
+            for state, count in (("warm", 50), ("cold-start", 5), ("post-eviction", 5)):
+                for preview in (False, True):
+                    for run in range(1, count + 1):
+                        fixture = manifest["fixtures"][(0 if cohort == "en" else 2) + run % 2]
+                        run_id = f"{cohort}-{state}-{preview}-{run}"
+                        row = {"phase": "release_to_insertion", "runID": run_id, "run": run,
+                            "fixture": fixture["audio"], "model": "nemotron-2240", "configuration": config,
+                            "evidence": evidence, "warmState": state, "phraseSeconds": 5, "preview": preview,
+                            "deliveryEndpoint": "paste-dispatched", "outputSHA256": "a" * 64,
+                            "phaseSeconds": {key: 0.01 for key in ("capture", "modelLoad", "nativeQueue", "recognition", "cleanup", "translation", "delivery", "drain")},
+                            "wer": 0, "cer": 0, "missingWords": 0, "droppedAudioSeconds": 0, "languagePreserved": True,
+                            "scoring": fixture["scoring"], "scoredLanguages": [cohort], "cleanup": processing,
+                            "translation": translation, "target": config["target"], "outputWER": 0, "outputCER": 0,
+                            "outputMissingWords": 0, "outputLanguagePreserved": True, "scoredOutputLanguages": [cohort]}
+                        if processing == "model":
+                            row.update(cleanupUnavailable=False, modelCalls=1, modelAccepted=1, modelFallbacks=0, rulesSkipped=0)
+                        if translation != "off":
+                            reference = fixture["expectedTranslations"][config["target"]]
+                            row.update(wasTranslated=True, translationWER=0, translationCER=0, translationMissingWords=0,
+                                translationScoring=reference["scoring"], translationReferenceSHA256=hashlib.sha256(reference["text"].encode()).hexdigest(),
+                                targetLanguagePreserved=True, translationFailures=0, translationSkipped=0)
+                        binding = benchmark_evidence.digest(evidence)
+                        observation = {"runID": run_id, "outputSHA256": row["outputSHA256"], "evidenceSHA256": binding,
+                            "endpoint": "visible-insertion", "observer": {"identity": "synthetic-observer", "independent": True,
+                                "method": "external-accessibility"}, "targetApp": "synthetic.destination",
+                            "physicalInputObserved": True, "compositorHiddenObserved": True, "inputStoppedObserved": True,
+                            "durationsSeconds": {"captureStart": 0.1, "releaseToEndpoint": 0.6 if state == "warm" else 9,
+                                "stopToCompositorHidden": 0.08, "stopToInputStopped": 0.2},
+                            "qualityReview": {"reviewed": True, "independent": True, "reviewer": "synthetic-listener",
+                                "outputSHA256": row["outputSHA256"], "evidenceSHA256": binding,
+                                **{key: True for key in ("meaning", "names", "numbers", "negation", "omissions", "naturalness")}}}
+                        records.append(row)
+                        observations.append(observation)
+        return policy, manifest, records, observations, revision
+
+    def check(self, data):
+        self.assertTrue(callable(gate.get("verify_product")), "explicit product qualification path is missing")
+        return gate["verify_product"](*data)
+
+    @staticmethod
+    def rebind(data):
+        for row, observation in zip(data[2], data[3]):
+            binding = benchmark_evidence.digest(row["evidence"])
+            observation["evidenceSHA256"] = binding
+            observation["qualityReview"]["evidenceSHA256"] = binding
+
+    def test_product_mixed_actual_build_hardware_models_fail_even_with_rebound_observer(self):
+        for part, field, value in (("appBuild", "binarySHA256", "b" * 64), ("hardware", "machineID", "different-Mac"),
+                                  ("models", "nemotron-2240", "b" * 64)):
+            data = self.product_data()
+            # Only the DE batch changes. Every observation is consistently rebound.
+            data[2][120]["evidence"][part][field] = value
+            self.rebind(data)
+            with self.subTest(part=part), self.assertRaisesRegex(ValueError, "different"):
+                self.check(data)
+
+    def test_product_malformed_nested_evidence_and_content_are_rejected(self):
+        for part, field, invalid in (("manifest", "fixtures", None), ("policy", "languageEvidence", None),
+                ("row", "model", []), ("row", "fixture", []), ("row", "configuration", None),
+                ("observation", "transcript", "content must not be accepted"),
+                ("observer", "text", "content must not be accepted"),
+                ("review", "text", "content must not be accepted")):
+            data = self.product_data()
+            target = {"manifest": data[1], "policy": data[0], "row": data[2][0],
+                      "observation": data[3][0], "observer": data[3][0]["observer"], "review": data[3][0]["qualityReview"]}[part]
+            target[field] = invalid
+            with self.subTest(part=part, field=field), self.assertRaises(ValueError): self.check(data)
+
+    def test_product_extra_outcomes_and_durations_are_reported_without_pooling(self):
+        data = self.product_data()
+        # Additional reviewed observations do not dilute the required clean short groups.
+        extras = [(10, "clean", "copied", 0), (10, "clean", "paste-dispatched", 0),
+                  (10.01, "clean", "visible-insertion", 0), (30, "clean", "visible-insertion", 0),
+                  (5, "difficult", "visible-insertion", 0.2), (5, "noisy", "visible-insertion", 0.2)]
+        for index, (duration, condition, endpoint, wer) in enumerate(extras):
+            fixture = copy.deepcopy(data[1]["fixtures"][0])
+            fixture.update(audio=f"extra-{index}.wav", durationSeconds=duration, condition=condition)
+            data[1]["fixtures"].append(fixture)
+            row, observation = copy.deepcopy(data[2][0]), copy.deepcopy(data[3][0])
+            row.update(runID=f"extra-{index}", fixture=fixture["audio"], phraseSeconds=duration, wer=wer, outputWER=wer,
+                       deliveryEndpoint="copied" if endpoint == "copied" else "paste-dispatched")
+            observation.update(runID=row["runID"], endpoint=endpoint)
+            observation["durationsSeconds"]["releaseToEndpoint"] = 20
+            data[2].append(row)
+            data[3].append(observation)
+        recordings = {fixture["audio"]: "d" * 64 for fixture in data[1]["fixtures"]}
+        for row in data[2]:
+            row["evidence"]["corpus"] = {"recordings": recordings,
+                "corpusSHA256": benchmark_evidence.digest(recordings),
+                "manifestSHA256": hashlib.sha256(json.dumps(data[1]).encode()).hexdigest()}
+        self.rebind(data)
+        summaries = self.check(data)
+        self.assertEqual(len(summaries), 18)
+        self.assertEqual({s["duration"] for s in summaries}, {"short", "medium", "long"})
+        self.assertEqual({s["condition"] for s in summaries}, {"clean", "difficult", "noisy"})
+        self.assertEqual({s["endpoint"] for s in summaries}, {"copied", "paste-dispatched", "visible-insertion"})
+        warm_visible = [s for s in summaries if s["warmState"] == "warm" and s["condition"] == "clean"
+                        and s["duration"] == "short" and s["endpoint"] == "visible-insertion"]
+        self.assertTrue(all(s["runs"] == 50 and s["metrics"]["releaseToEndpoint"]["p95"] == 0.6 for s in warm_visible))
+
+    def test_product_fifty_repetitions_cannot_replace_reviewed_clips_or_speakers(self):
+        for change in ("clip", "speaker", "model-skips"):
+            data = self.product_data("model" if change == "model-skips" else "rules")
+            if change == "clip":
+                for row in data[2][:50]: row["fixture"] = "en-1.wav"
+            elif change == "speaker":
+                data[1]["fixtures"][1]["provenance"]["speaker"] = "speaker-1"
+            else:
+                for row in data[2][:50]: row.update(modelCalls=0, modelAccepted=0, rulesSkipped=1)
+            with self.subTest(change=change), self.assertRaisesRegex(ValueError, "coverage"):
+                self.check(data)
+
+    def test_product_splits_cold_preview_and_exact_endpoint(self):
+        data = self.product_data()
+        summaries = self.check(data)
+        self.assertEqual(len(summaries), 12)
+        warm = [s for s in summaries if s["warmState"] == "warm"]
+        self.assertEqual({s["cohort"] for s in warm}, {"en", "de"})
+        self.assertTrue(all(s["runs"] == 50 and s["endpoint"] == "visible-insertion" for s in warm))
+        self.assertTrue(all(s["metrics"]["releaseToEndpoint"]["p95"] == 9 for s in summaries if s["warmState"] != "warm"))
+
+    def test_product_copy_and_dispatch_never_satisfy_visible_insertion(self):
+        for endpoint in ("copied", "paste-dispatched"):
+            data = self.product_data()
+            for row, observation in zip(data[2], data[3]):
+                row["deliveryEndpoint"] = endpoint
+                observation["endpoint"] = endpoint
+            with self.subTest(endpoint=endpoint), self.assertRaisesRegex(ValueError, "visible|coverage"):
+                self.check(data)
+        data = self.product_data()
+        data[2][0]["deliveryEndpoint"] = "copied"
+        with self.assertRaisesRegex(ValueError, "endpoint"):
+            self.check(data)
+        data[2][0]["deliveryEndpoint"] = "visible-insertion"
+        with self.assertRaisesRegex(ValueError, "endpoint"):
+            self.check(data)
+
+    def test_product_observations_bind_every_output_and_environment(self):
+        for part, field, invalid in [("observation", "outputSHA256", "b" * 64),
+                ("observation", "evidenceSHA256", "b" * 64), ("observation", "targetApp", ""),
+                ("observer", "identity", ""), ("observer", "independent", False), ("observer", "method", "in-memory"),
+                ("observation", "physicalInputObserved", False), ("observation", "compositorHiddenObserved", False),
+                ("observation", "inputStoppedObserved", False), ("review", "evidenceSHA256", "b" * 64)]:
+            data = self.product_data()
+            observation = data[3][0]
+            target = observation if part == "observation" else observation["observer" if part == "observer" else "qualityReview"]
+            target[field] = invalid
+            with self.subTest(part=part, field=field), self.assertRaises(ValueError): self.check(data)
+        for field in ("revision", "sourceState", "appBuild", "hardware", "models", "configuration", "corpus"):
+            data = self.product_data()
+            del data[2][0]["evidence"][field]
+            with self.subTest(header=field), self.assertRaises(ValueError): self.check(data)
+
+    def test_product_all_semantic_checks_require_independent_review(self):
+        for field in ("reviewed", "independent", "meaning", "names", "numbers", "negation", "omissions", "naturalness"):
+            data = self.product_data()
+            data[3][0]["qualityReview"][field] = False
+            with self.subTest(field=field), self.assertRaises(ValueError): self.check(data)
+        for field in ("qualityReview", "observer", "durationsSeconds"):
+            data = self.product_data()
+            del data[3][0][field]
+            with self.subTest(missing=field), self.assertRaises(ValueError): self.check(data)
+
+    def test_product_missing_duplicate_short_warm_and_cold_fail(self):
+        for change in (lambda d: d[3].clear(), lambda d: d[3].pop(), lambda d: d[3].append(d[3][0]),
+                lambda d: d[2].append(d[2][0]), lambda d: d[2].pop(0), lambda d: d[2].pop(50),
+                lambda d: d[0].update(minimumWarmRuns=49)):
+            data = self.product_data()
+            change(data)
+            with self.subTest(change=change), self.assertRaises(ValueError): self.check(data)
+
+    def test_product_thresholds_cannot_hide_lost_audio_or_critical_errors(self):
+        for field, invalid in [("captureStart", 0.151), ("releaseToEndpoint", 0.701),
+                ("stopToCompositorHidden", 0.101), ("stopToInputStopped", 0.251),
+                ("captureStart", True), ("releaseToEndpoint", float("nan")), ("stopToInputStopped", -1)]:
+            data = self.product_data()
+            # More than 5% fail: nearest-rank p95 must exceed the target.
+            for observation in data[3][:3]: observation["durationsSeconds"][field] = invalid
+            with self.subTest(metric=field), self.assertRaises(ValueError): self.check(data)
+        for metric, invalid in [("wer", 0.051), ("outputWER", 0.051), ("missingWords", 1),
+                ("outputMissingWords", 1), ("droppedAudioSeconds", 0.001), ("languagePreserved", False)]:
+            data = self.product_data()
+            data[2][0][metric] = invalid
+            with self.subTest(metric=metric), self.assertRaises(ValueError): self.check(data)
+        for metric in ("capture", "modelLoad", "nativeQueue", "recognition", "cleanup", "translation", "delivery", "drain"):
+            data = self.product_data()
+            del data[2][0]["phaseSeconds"][metric]
+            with self.subTest(phase=metric), self.assertRaises(ValueError): self.check(data)
+
+    def test_product_duration_noise_and_configuration_cannot_fill_clean_short_coverage(self):
+        for field, value in (("durationSeconds", 10.01), ("condition", "difficult"), ("condition", "noisy")):
+            data = self.product_data()
+            for fixture in data[1]["fixtures"]: fixture[field] = value
+            for row in data[2]:
+                row["phraseSeconds"] = data[1]["fixtures"][0]["durationSeconds"]
+            with self.subTest(field=field, value=value), self.assertRaises(ValueError): self.check(data)
+        data = self.product_data()
+        data[2][0]["configuration"] = dict(data[2][0]["configuration"], powerMode="low-power")
+        with self.assertRaises(ValueError): self.check(data)
+
+    def test_product_model_and_translation_require_success_and_pair_review(self):
+        for processing, translation, budget in (("model", "off", 1.2), ("rules", "hy-mt2", 2.5), ("model", "madlad", 2.5)):
+            data = self.product_data(processing, translation)
+            for observation in data[3][:50]: observation["durationsSeconds"]["releaseToEndpoint"] = budget
+            self.assertEqual(len(self.check(data)), 12)
+            for observation in data[3][:3]: observation["durationsSeconds"]["releaseToEndpoint"] = budget + 0.001
+            with self.subTest(processing=processing, translation=translation), self.assertRaises(ValueError): self.check(data)
+        for processing, translation, field, value in (("model", "off", "modelFallbacks", 1),
+                ("model", "off", "cleanupUnavailable", True), ("model", "off", "modelAccepted", 2),
+                ("rules", "hy-mt2", "wasTranslated", False), ("rules", "hy-mt2", "translationSkipped", 1),
+                ("rules", "hy-mt2", "translationReferenceSHA256", "b" * 64)):
+            data = self.product_data(processing, translation)
+            data[2][0][field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError): self.check(data)
+
+    def test_product_cli_content_free_logs_and_no_audio_access(self):
+        data = self.product_data()
+        script = Path(__file__).resolve().parents[1] / "scripts/verify-quality.py"
+        with tempfile.TemporaryDirectory(dir=os.environ["CODEX_TASK_TMP"], prefix="product-") as directory:
+            root = Path(directory)
+            for name, value in (("policy.json", data[0]), ("manifest.json", data[1]), ("observations.json", data[3])):
+                (root / name).write_text(json.dumps(value))
+            logs = []
+            for cohort in ("en", "de"):
+                rows = [r for r in data[2] if r["runID"].startswith(cohort)]
+                header = rows[0]["evidence"]
+                path = root / (cohort + ".log")
+                path.write_text(f"SAIITY_QUALITY_SOURCE {data[4]} clean\nSAIITY_BENCHMARK_EVIDENCE " + json.dumps(header) + "\n"
+                    + "\n".join("SAIITY_PRODUCT_BENCHMARK " + json.dumps({k: v for k, v in r.items() if k != "evidence"}) for r in rows)
+                    + ReleaseQualityTests.completion(header, data[4]))
+                logs.append(str(path))
+            command = [sys.executable, str(script), "--product", "--revision", data[4], "--policy", str(root / "policy.json"),
+                "--manifest", str(root / "manifest.json"), "--observations", str(root / "observations.json"), *logs]
+            result = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("product qualification passed", result.stdout)
+            self.assertNotIn("synthetic reference", result.stdout)
+            # Product parsing accepts legacy ASR records with the explicit additions.
+            first_log = Path(logs[0])
+            valid_log = first_log.read_text()
+            first_log.write_text(valid_log.replace("SAIITY_PRODUCT_BENCHMARK ", "SAIITY_ASR_BENCHMARK "))
+            result = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for invalid_log in (valid_log.replace(f"{data[4]} clean", f"{data[4]} dirty"),
+                    valid_log.replace(f"SAIITY_QUALITY_SOURCE {data[4]}", "SAIITY_QUALITY_SOURCE " + "b" * 40),
+                    valid_log[:valid_log.index("\nSAIITY_QUALITY_COMPLETE ")],
+                    valid_log + ReleaseQualityTests.completion(data[2][0]["evidence"], data[4])):
+                first_log.write_text(invalid_log)
+                result = subprocess.run(command, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("UNVERIFIED", result.stderr)
+                self.assertNotIn("passed", result.stdout)
+            first_log.write_text(valid_log)
+            (root / "observations.json").write_text("[]")
+            result = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("UNVERIFIED", result.stderr)
+            self.assertNotIn("passed", result.stdout)
+            for part, field, value in (("manifest", "fixtures", None), ("policy", "languageEvidence", None),
+                                      ("policy", "requiredCases", None)):
+                malformed = copy.deepcopy(data[1] if part == "manifest" else data[0])
+                malformed[field] = value
+                changed = root / (part + ".json")
+                original = changed.read_text()
+                changed.write_text(json.dumps(malformed))
+                result = subprocess.run(command, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("UNVERIFIED", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+                changed.write_text(original)
+
+    def test_product_checked_in_policy_declares_targets_not_measurements(self):
+        path = Path(__file__).resolve().parents[1] / "docs/benchmarks/product-quality.json"
+        self.assertTrue(path.is_file(), "product policy is missing")
+        policy = json.loads(path.read_text())
+        self.assertEqual(policy["status"], "unverified")
+        self.assertGreaterEqual(policy["minimumWarmRuns"], 50)
+        self.assertEqual(policy["limits"], self.product_data()[0]["limits"])
+        self.assertEqual(policy["languageEvidence"]["requiredCohorts"], ["en", "de"])
 
 
 if __name__ == "__main__":

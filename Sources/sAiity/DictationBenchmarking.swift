@@ -14,6 +14,8 @@ struct DictationBenchmarkFixture: Codable, Equatable, Sendable {
     let maxWER: Double?
     var expectedTranslations: [String: TranslationReference]? = nil
     var scoring: [String: String]? = nil
+    var durationSeconds: Double? = nil
+    var condition: String? = nil
 }
 
 struct DictationBenchmarkManifest: Codable, Equatable, Sendable {
@@ -22,6 +24,7 @@ struct DictationBenchmarkManifest: Codable, Equatable, Sendable {
     enum Error: Swift.Error, Equatable {
         case duplicateAudio(String)
         case invalidWER(String)
+        case invalidProductEvidence
     }
 
     static func load(from directory: URL,
@@ -43,6 +46,20 @@ struct DictationBenchmarkManifest: Codable, Equatable, Sendable {
 }
 
 enum DictationBenchmarkScorer {
+    static func productFields(runID: String, warmState: String, phraseSeconds: Double,
+                              delivery: TextInsertionResult, phaseSeconds: [String: Double]) throws -> [String: Any] {
+        let phases: Set<String> = ["capture", "modelLoad", "nativeQueue", "recognition", "cleanup", "translation", "delivery", "drain"]
+        guard UUID(uuidString: runID) != nil, ["warm", "cold-start", "post-eviction"].contains(warmState),
+              phraseSeconds.isFinite, phraseSeconds > 0,
+              let endpoint = delivery.deliveryEndpoint, let hash = delivery.payloadSHA256,
+              hash.count == 64, hash.allSatisfy({ "0123456789abcdef".contains($0) }),
+              Set(phaseSeconds.keys) == phases,
+              phaseSeconds.values.allSatisfy({ $0.isFinite && $0 >= 0 }) else {
+            throw DictationBenchmarkManifest.Error.invalidProductEvidence
+        }
+        return ["runID": runID, "warmState": warmState, "phraseSeconds": phraseSeconds,
+                "deliveryEndpoint": endpoint, "outputSHA256": hash, "phaseSeconds": phaseSeconds]
+    }
     struct Errors: Equatable, Sendable {
         var substitutions = 0
         var deletions = 0

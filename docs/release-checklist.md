@@ -200,3 +200,22 @@ signed bundle's `--selftest`. That smoke test exercises bubble presets, caption
 clear/new content, dictation waveform/result/reset and all setup trial layouts.
 `scripts/release.sh` additionally requires current, clean-source real-model
 quality reports and a successful GUI smoke test before creating the release tag.
+
+For the preliminary short-dictation product gate, use
+`scripts/quality-matrix.sh --product --help` and the separate contract in
+`docs/benchmarks/product-qualification.md`. This harness hashes the measured
+test code image and emits copied outcomes only; passing its synthetic checks
+does not certify the shipping app or visible insertion. Preserve the old
+twelve-cohort language gate. Missing natural recordings, independent semantic
+review, physical/compositor observations or calibrated hardware evidence must
+remain UNVERIFIED.
+
+New optional Gemma 4 E2B/E4B, TranslateGemma 4B and commercial Granite TurboCTC
+choices retain the existing defaults and need explicit downloads from Models.
+Verify exact selected files, terms and availability, removal after native
+quiescence, and missing/corrupt recovery. Granite is English-only with final
+audio regions, no live partials, timestamps or audio language detection. Native
+abort polls at run entry; Stop can require the active encoder to return before
+resources are released. No quality or speed superiority follows from the
+catalogue or adapter tests. Keep new weights and real-device qualification
+separate from local implementation evidence.
