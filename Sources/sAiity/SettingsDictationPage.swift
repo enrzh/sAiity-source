@@ -66,7 +66,7 @@ struct DictationView: View {
                     DictationShortcutRecorder(state: state) { message in
                         shortcutMessage = message
                     }
-                    .frame(width: 170, height: 28)
+                    .frame(width: 150, height: 26)
                 } label: {
                     Text("Shortcut")
                     Text(verbatim: shortcutHint)

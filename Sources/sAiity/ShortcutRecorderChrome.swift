@@ -31,25 +31,23 @@ enum ShortcutRecorderChrome {
     /// - Parameters:
     ///   - recording: armed and listening for keys.
     ///   - assigned: has a shortcut.
+    ///
+    /// At rest it is a quiet button, the same weight as the other controls in
+    /// a settings form; a full accent fill made the one shortcut the loudest
+    /// thing on the page. The accent appears only while it is listening.
     static func fill(recording: Bool, assigned: Bool) -> CGColor {
-        let accent = NSColor.controlAccentColor
         if recording {
-            // Strongest: the control is mid-interaction, which is the one moment
-            // where asking for attention is correct.
-            return accent.withAlphaComponent(0.34).cgColor
+            return NSColor.controlAccentColor.withAlphaComponent(0.22).cgColor
         }
-        return accent.withAlphaComponent(assigned ? 0.15 : 0.07).cgColor
+        return NSColor.labelColor.withAlphaComponent(assigned ? 0.07 : 0.04).cgColor
     }
 
-    /// The border tracks the fill, for the same reason: a field's border is a
-    /// separator, a button's is its own edge.
     static func border(recording: Bool, assigned: Bool) -> CGColor {
-        let accent = NSColor.controlAccentColor
-        if recording { return accent.withAlphaComponent(0.75).cgColor }
-        return accent.withAlphaComponent(assigned ? 0.40 : 0.22).cgColor
+        if recording { return NSColor.controlAccentColor.withAlphaComponent(0.8).cgColor }
+        return NSColor.separatorColor.cgColor
     }
 
-    static func borderWidth(recording: Bool) -> CGFloat { recording ? 1.5 : 1 }
+    static func borderWidth(recording: Bool) -> CGFloat { recording ? 1.5 : 0.5 }
 
     /// Text for the resting states.
     ///

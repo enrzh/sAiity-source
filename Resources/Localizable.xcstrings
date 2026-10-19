@@ -5087,7 +5087,7 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Dictaten bereinigen"
+            "value": "Diktat-Bereinigung"
           }
         },
         "es": {
@@ -25688,6 +25688,69 @@
         "fr": { "stringUnit": { "state": "translated", "value": "La dictée a besoin d’une autorisation…" } },
         "es": { "stringUnit": { "state": "translated", "value": "El dictado necesita un permiso…" } },
         "ja": { "stringUnit": { "state": "translated", "value": "音声入力に許可が必要です…" } }
+      }
+    },
+    "Preparing": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Wird vorbereitet" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Préparation" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Preparando" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "準備中" } }
+      }
+    },
+    "Starting": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Startet" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Démarrage" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Iniciando" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "開始中" } }
+      }
+    },
+    "Cleaning": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Wird bereinigt" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Nettoyage" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Limpiando" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "整形中" } }
+      }
+    },
+    "Translating": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Wird übersetzt" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Traduction" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Traduciendo" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "翻訳中" } }
+      }
+    },
+    "Inserting": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Wird eingefügt" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Insertion" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Insertando" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "入力中" } }
+      }
+    },
+    "Limit reached": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Limit erreicht" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Limite atteinte" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Límite alcanzado" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "上限に達しました" } }
+      }
+    },
+    "Start Captions": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Untertitel starten" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Démarrer les sous-titres" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Iniciar subtítulos" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "字幕を開始" } }
       }
     }
   },

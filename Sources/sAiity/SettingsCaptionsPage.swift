@@ -61,7 +61,7 @@ struct CaptionsView: View {
                 Button {
                     NotificationCenter.default.post(name: .saiityToggleCaptions, object: nil)
                 } label: {
-                    Text(state.isCaptioning ? "Stop Captions" : "Start Captions")
+                    Text(state.isCaptioning ? String(localized: "Stop Captions") : String(localized: "Start Captions"))
                         .frame(minWidth: 110)
                 }
                 .buttonStyle(.borderedProminent)

@@ -179,21 +179,24 @@ func usesOriginalText(bundleIdentifier: String?, exceptions: Set<String>) -> Boo
 }
 
 extension DictationPhase {
+    /// What the bubble says. Localized here: the bubble draws this string as
+    /// is, so an English literal stayed English on a German Mac.
     var toastPresentation: DictationToastPresentation {
+        let label = String(localized: "Dictation")
         switch self {
-        case .idle: return .init(label: "Dictation", value: "Idle")
-        case .waitingForInputMonitoring: return .init(label: "Dictation", value: "Permission required")
-        case .preparing: return .init(label: "Dictation", value: "Preparing")
-        case .ready: return .init(label: "Dictation", value: "Ready")
-        case .starting: return .init(label: "Dictation", value: "Starting")
-        case .dictating: return .init(label: "Dictation", value: "Recording")
-        case .transcribing: return .init(label: "Dictation", value: "Transcribing")
-        case .cleaning: return .init(label: "Dictation", value: "Cleaning")
-        case .translating: return .init(label: "Dictation", value: "Translating")
-        case .inserting: return .init(label: "Dictation", value: "Inserting")
-        case .limit: return .init(label: "Dictation", value: "Limit reached")
+        case .idle: return .init(label: label, value: String(localized: "Idle"))
+        case .waitingForInputMonitoring: return .init(label: label, value: String(localized: "Permission required"))
+        case .preparing: return .init(label: label, value: String(localized: "Preparing"))
+        case .ready: return .init(label: label, value: String(localized: "Ready"))
+        case .starting: return .init(label: label, value: String(localized: "Starting"))
+        case .dictating: return .init(label: label, value: String(localized: "Recording"))
+        case .transcribing: return .init(label: label, value: String(localized: "Transcribing"))
+        case .cleaning: return .init(label: label, value: String(localized: "Cleaning"))
+        case .translating: return .init(label: label, value: String(localized: "Translating"))
+        case .inserting: return .init(label: label, value: String(localized: "Inserting"))
+        case .limit: return .init(label: label, value: String(localized: "Limit reached"))
         case .recovery(let text), .result(let text), .failure(let text), .needsPermission(let text):
-            return .init(label: "Dictation", value: text)
+            return .init(label: label, value: text)
         }
     }
 }

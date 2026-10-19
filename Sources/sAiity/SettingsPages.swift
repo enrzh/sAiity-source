@@ -39,7 +39,7 @@ struct DictationShortcutRecorder: NSViewRepresentable {
         override init(frame: NSRect) {
             super.init(frame: frame)
             label.alignment = .center
-            label.font = .monospacedSystemFont(ofSize: 12, weight: .medium)
+            label.font = .systemFont(ofSize: 13, weight: .medium)
             label.translatesAutoresizingMaskIntoConstraints = false
             addSubview(label)
             NSLayoutConstraint.activate([
@@ -49,8 +49,8 @@ struct DictationShortcutRecorder: NSViewRepresentable {
                 // with a Spacer expanded to fill the row, so the recorder ran to
                 // ~450 pt to hold five characters of key chord. A control the size
                 // of its content is also a control, not a banner.
-                widthAnchor.constraint(equalToConstant: 170),
-                heightAnchor.constraint(equalToConstant: 28),
+                widthAnchor.constraint(equalToConstant: 150),
+                heightAnchor.constraint(equalToConstant: 26),
             ])
             wantsLayer = true
             layer?.cornerRadius = ShortcutRecorderChrome.cornerRadius
@@ -353,7 +353,7 @@ struct ShortcutRecorder: NSViewRepresentable {
         override init(frame: NSRect) {
             super.init(frame: frame)
             label.alignment = .center
-            label.font = .monospacedSystemFont(ofSize: 12, weight: .medium)
+            label.font = .systemFont(ofSize: 13, weight: .medium)
             label.translatesAutoresizingMaskIntoConstraints = false
             addSubview(label)
             NSLayoutConstraint.activate([
