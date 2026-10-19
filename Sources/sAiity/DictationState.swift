@@ -96,6 +96,9 @@ enum DictationPhase: Equatable, Sendable {
     case recovery(String)
     case result(String)
     case failure(String)
+    /// A permission is missing or was just answered. Not a failed run: no
+    /// recording started, so nothing is logged as a dictation failure.
+    case needsPermission(String)
 }
 
 /// A small preset over the existing dictation controls. `custom` is derived
@@ -189,7 +192,7 @@ extension DictationPhase {
         case .translating: return .init(label: "Dictation", value: "Translating")
         case .inserting: return .init(label: "Dictation", value: "Inserting")
         case .limit: return .init(label: "Dictation", value: "Limit reached")
-        case .recovery(let text), .result(let text), .failure(let text):
+        case .recovery(let text), .result(let text), .failure(let text), .needsPermission(let text):
             return .init(label: "Dictation", value: text)
         }
     }
@@ -232,7 +235,7 @@ enum DictationTerminal: Equatable {
 extension DictationPhase {
     var automaticallyDismissesToast: Bool {
         switch self {
-        case .result, .failure:
+        case .result, .failure, .needsPermission:
             true
         default:
             false

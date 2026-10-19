@@ -76,6 +76,7 @@ struct AssetControl: View {
             }
         } else if status.isInstalled {
             Button("Delete", role: .destructive) {
+                guard ModelDeletion.confirm(status.asset, size: status.bytesOnDisk) else { return }
                 Task { await state.delete(status.asset) }
             }
             .controlSize(.small)

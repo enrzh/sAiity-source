@@ -27,6 +27,14 @@ final class OnboardingModel {
             }
         }
 
+        var detail: String {
+            switch self {
+            case .captions: return String(localized: "Subtitles for anything your Mac plays, optionally translated.")
+            case .dictation: return String(localized: "Hold a shortcut and speak; the text appears where you type.")
+            case .both: return String(localized: "Dictation and captions share one speech model.")
+            }
+        }
+
         var includesCaptions: Bool { self == .captions || self == .both }
         var includesDictation: Bool { self == .dictation || self == .both }
     }
@@ -150,406 +158,272 @@ struct OnboardingView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Bindable var model: OnboardingModel
     let onFinish: () -> Void
+    @State private var permissions = PermissionMonitor()
+    @State private var tryText = ""
+    @FocusState private var tryFieldFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
-            stepIndicator
-                .padding(.horizontal, 28)
-                .padding(.top, 22)
-                .padding(.bottom, 4)
-            // Centred rather than pinned to the top. Every step used to sit in
-            // the top third with two thirds of the window empty under it, which
-            // reads as a screen that has not finished loading.
-            //
-            // Push, not crossfade: an assistant moves forward through pages,
-            // and the motion should say so.
             content
                 .id(model.step)
                 .transition(reduceMotion ? .opacity : .push(from: model.goingBack ? .leading : .trailing))
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                .padding(.horizontal, 28)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .animation(reduceMotion ? nil : .smooth(duration: 0.28), value: model.step)
             Divider()
             footer
         }
-        .frame(width: 640, height: 600)
-        // The window's own translucency, not a painted gradient — the same
-        // material Settings uses, so the two windows read as one app. See
-        // VibrantBackground for why this is the honest version of "fancy".
-        .background(VibrantBackground())
-    }
-
-    /// Where you are, and how much is left. The step name alone in the corner
-    /// answered neither.
-    private var stepIndicator: some View {
-        let steps = OnboardingStep.allCases
-        let current = steps.firstIndex(of: model.step) ?? 0
-        return ProgressView(value: Double(current + 1), total: Double(steps.count))
-            .progressViewStyle(.linear)
-            .tint(.accentColor)
-            .accessibilityElement()
-            .accessibilityLabel(Text("Step \(current + 1) of \(steps.count)"))
+        .frame(width: 620, height: 640)
+        .task { await permissions.watch() }
     }
 
     @ViewBuilder
     private var content: some View {
         switch model.step {
         case .permission: permission
-        case .setup: setup
-        case .welcome, .purpose, .models: setup
+        case .setup, .welcome, .purpose, .models: setup
         case .finish: finish
         }
     }
 
-    // MARK: - Steps
-
-    /// The setup-assistant header every step past the welcome shares: symbol
-    /// over title over subtitle, centred — the grammar Apple's own assistants
-    /// use, so each page answers "where am I and why" before any control.
-    private func header(_ symbol: String, _ title: LocalizedStringKey,
-                        _ subtitle: LocalizedStringKey) -> some View {
-        VStack(spacing: 8) {
-            Image(systemName: symbol)
-                .font(.system(size: 34, weight: .medium))
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(.tint)
+    /// App icon, title and one line: where the user is and why.
+    private func header(_ title: LocalizedStringKey, _ subtitle: LocalizedStringKey) -> some View {
+        VStack(spacing: 6) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 64, height: 64)
                 .accessibilityHidden(true)
             Text(title).font(.title2.weight(.semibold))
             Text(subtitle)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 460)
+                .frame(maxWidth: 440)
         }
         .frame(maxWidth: .infinity)
-        .padding(.bottom, 16)
+        .padding(.top, 24)
+        .padding(.bottom, 4)
     }
 
-    private var permission: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            header("lock.shield",
-                   "Permission",
-                   "Everything runs on this Mac. No audio ever leaves it.")
-
-            if model.needsScreenRecording {
-                permissionRow(
-                    title: "Screen Recording",
-                    symbol: "rectangle.dashed.badge.record",
-                    granted: model.screenRecordingGranted,
-                    explanation: "macOS has no separate permission for system audio — Screen Recording is the one that gates it. Syllivra records no video and takes no screenshots.") {
-                        ScreenRecordingPermission.request()
-                        model.askedOnce = true
-                        Task { await model.refreshPermission() }
-                    } openSettings: {
-                        ScreenRecordingPermission.openSettings()
-                    }
-                if model.askedOnce, ScreenRecordingPermission.canRelaunch,
-                   !model.screenRecordingGranted {
-                    Button("Quit & Reopen") { ScreenRecordingPermission.relaunch() }
-                        .controlSize(.small)
-                }
-            }
-
-            if model.needsInputMonitoring {
-                permissionRow(
-                    title: "Input Monitoring",
-                    symbol: "keyboard",
-                    granted: model.inputMonitoringGranted,
-                    explanation: "Required to detect your dictation shortcut in other apps.") {
-                        InputMonitoringPermission.request()
-                        model.askedOnce = true
-                        Task { await model.refreshPermission() }
-                    } openSettings: {
-                        InputMonitoringPermission.openSettings()
-                    }
-            }
-
-            if model.needsInputMonitoring {
-                Label("Accessibility is requested only when dictation inserts text into another app.",
-                      systemImage: "info.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            if model.checkingPermission { ProgressView().controlSize(.small) }
-            Spacer()
-        }
-        .task { await model.refreshPermission() }
-        // Coming back from System Settings is the strongest signal there is that
-        // something changed — better than polling alone.
-        .onReceive(NotificationCenter.default.publisher(
-            for: NSApplication.didBecomeActiveNotification)) { _ in
-            Task { await model.refreshPermission() }
-        }
-        // When the permission arrives, take the step: the user's only next
-        // action was Continue, and making them find it after a round-trip
-        // through System Settings is friction with no decision inside it. The
-        // beat is so the "Granted" checkmark is seen, not skipped past.
-        .onChange(of: model.permissionGranted) { _, granted in
-            guard granted, model.step == .permission else { return }
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 600_000_000)
-                guard model.permissionGranted, model.step == .permission else { return }
-                model.lastAutoAdvance = Date()
-                model.goingBack = false
-                let steps = OnboardingStep.allCases
-                if let i = steps.firstIndex(of: model.step) {
-                    model.step = steps[min(i + 1, steps.count - 1)]
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func permissionRow(title: LocalizedStringKey,
-                               symbol: String,
-                               granted: Bool,
-                               explanation: LocalizedStringKey,
-                               request: @escaping () -> Void,
-                               openSettings: @escaping () -> Void) -> some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text(granted ? String(localized: "Granted.") : String(localized: "Not granted yet."))
-                        .foregroundStyle(granted ? AnyShapeStyle(.green) : AnyShapeStyle(.secondary))
-                    Spacer()
-                }
-                if !granted {
-                    Text(explanation)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    HStack {
-                        Button("Allow…", action: request)
-                            .buttonStyle(.glassProminent)
-                        Button("Open Settings", action: openSettings)
-                    }
-                }
-            }
-        } label: {
-            Label {
-                Text(title)
-            } icon: {
-                Image(systemName: granted ? "checkmark.circle.fill" : symbol)
-                    .foregroundStyle(granted ? AnyShapeStyle(.green) : AnyShapeStyle(.orange))
-            }
-        }
-    }
+    // MARK: - Steps
 
     private var setup: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                header("sparkles",
-                       "What for",
-                       "Choose what you want to use. You can change this later in Settings.")
-
-                Picker("Use case", selection: $model.useCase) {
-                    ForEach(OnboardingModel.UseCase.allCases, id: \.self) { useCase in
-                        Text(verbatim: useCase.title).tag(useCase)
-                    }
-                }
-                .pickerStyle(.segmented)
-                Text(verbatim: model.useCase.includesCaptions && model.useCase.includesDictation
-                     ? String(localized: "One download and you are set")
-                     : model.useCase.includesCaptions
-                         ? String(localized: "It captures the audio your Mac plays — the microphone stays off unless you later opt in under Settings → Captions.")
-                         : String(localized: "Dictation is separate from live captions. It never starts the caption service and is not saved as a meeting transcript."))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-
-                Divider().padding(.vertical, 4)
-                GroupBox {
-                    HStack(spacing: 10) {
-                        Image(systemName: "waveform")
-                            .font(.title3)
-                            .foregroundStyle(.tint)
-                            .accessibilityHidden(true)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(verbatim: ASREngine.nemotron.displayName)
-                                .font(.headline)
-                            Text(verbatim: ASREngine.nemotron.shortSummary)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            header("Welcome to Syllivra",
+                   "Dictation and live captions that run entirely on your Mac.")
+            Form {
+                Section {
+                    Picker("Use Syllivra for", selection: $model.useCase) {
+                        ForEach(OnboardingModel.UseCase.allCases, id: \.self) { useCase in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(verbatim: useCase.title)
+                                Text(verbatim: useCase.detail)
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .tag(useCase)
                         }
-                        Spacer()
                     }
-                } label: {
-                    Text("Recognition model")
+                    .pickerStyle(.radioGroup)
+                    .labelsHidden()
+                } header: {
+                    Text("Use Syllivra for")
                 }
-
-                Divider().padding(.vertical, 4)
-                ForEach(model.assetsToOffer) { asset in
-                    let status = model.state.assets.first { $0.asset.id == asset.id }
-                    GroupBox {
-                        HStack(alignment: .top, spacing: 12) {
-                            Text(verbatim: asset.detail)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Spacer(minLength: 12)
+                Section {
+                    ForEach(model.assetsToOffer) { asset in
+                        let status = model.state.assets.first { $0.asset.id == asset.id }
+                        LabeledContent {
                             if status?.isInstalled == true {
-                                Label("Ready", systemImage: "checkmark.circle.fill")
-                                    .foregroundStyle(.green).font(.callout)
+                                Text("Downloaded").foregroundStyle(.secondary)
                             } else if let status {
                                 AssetControl(state: model.state, status: status, prominent: true)
                             } else {
-                                HStack(spacing: 8) {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                    Text("Checking download…")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
+                                ProgressView().controlSize(.small)
                             }
+                        } label: {
+                            Text(verbatim: ASREngine.nemotron.displayName)
+                            Text(verbatim: ASREngine.nemotron.shortSummary)
                         }
-                    } label: {
-                        Text(verbatim: asset.title)
-                            .font(.headline)
                     }
-                }
-                if let e = model.state.modelError {
-                    Text(e).font(.caption).foregroundStyle(.red)
+                    if let e = model.state.modelError {
+                        Text(verbatim: e).foregroundStyle(.red)
+                    }
+                } header: {
+                    Text("Speech model")
+                } footer: {
+                    Text("Downloaded once from Hugging Face. After that, nothing leaves this Mac.")
+                        .foregroundStyle(.secondary)
                 }
             }
+            .formStyle(.grouped)
         }
         .task { await model.state.refreshModelsAsync(force: true) }
     }
 
+    private var neededPermissions: [AppPermission] {
+        AppPermission.allCases.filter {
+            ($0.feature == .dictation && model.useCase.includesDictation)
+                || ($0.feature == .captions && model.useCase.includesCaptions)
+        }
+    }
+
+    private var permissionsGranted: Bool {
+        neededPermissions.allSatisfy { permissions.status($0) == .granted }
+    }
+
+    private var permission: some View {
+        VStack(spacing: 0) {
+            header("Allow access",
+                   "macOS asks you to confirm each one. Syllivra uses them only for what is written here.")
+            Form {
+                Section {
+                    ForEach(neededPermissions) { permission in
+                        PermissionRow(permission: permission, status: permissions.status(permission))
+                    }
+                } footer: {
+                    if !permissionsGranted {
+                        Text("After you switch Syllivra on in System Settings, come back here. Each row updates by itself.")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .formStyle(.grouped)
+        }
+        .onChange(of: permissionsGranted) { _, granted in
+            model.screenRecordingGranted = permissions.status(.screenRecording) == .granted
+            model.inputMonitoringGranted = permissions.status(.inputMonitoring) == .granted
+            guard granted, model.step == .permission else { return }
+            NSApp.activate()
+        }
+    }
+
+    private var dictationShortcut: String { model.state.dictationChord.displayString }
+
     private var finish: some View {
-        ScrollView {
-        VStack(alignment: .leading, spacing: 14) {
-            header("checkmark.seal",
-                   "Try it out",
-                   "An optional check before you finish setup.")
-            GroupBox {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("For dictation, record a short sentence, then stop to see the result here. For captions, play speech on your Mac.")
-                        .font(.callout).foregroundStyle(.secondary)
-                    HStack {
-                        if model.useCase.includesDictation || model.trial == .dictation {
-                            Button(model.trial == .dictation && model.trialRecording ? String(localized: "Stop & Transcribe") : String(localized: "Try Dictation")) {
+        VStack(spacing: 0) {
+            header("Try it",
+                   "A quick check before you start.")
+            Form {
+                if model.useCase.includesDictation {
+                    Section {
+                        Text("Click in the box, hold \(dictationShortcut), say a sentence, then let go.")
+                        TextEditor(text: $tryText)
+                            .font(.body)
+                            .frame(minHeight: 80)
+                            .focused($tryFieldFocused)
+                            .accessibilityLabel(Text("Try dictation here"))
+                        LabeledContent {
+                            Button(model.trial == .dictation && model.trialRecording
+                                   ? String(localized: "Stop & Transcribe")
+                                   : String(localized: "Test Without Shortcut")) {
                                 Task { await (NSApp.delegate as? AppDelegate)?.tryOnboarding(.dictation, model: model) }
                             }
-                            .buttonStyle(.bordered)
                             .disabled(model.trialBusy && !(model.trial == .dictation && model.trialRecording))
+                        } label: {
+                            Text("Microphone check")
+                            Text("Records one sentence and shows the result here, without the shortcut.")
                         }
-                        if model.useCase.includesCaptions || model.trial == .captions {
-                            Button(model.trial == .captions && model.trialBusy ? String(localized: "Stop Captions") : String(localized: "Try Captions")) {
+                        if model.trial == .dictation {
+                            trialFeedback
+                        }
+                    } header: {
+                        Text("Dictation")
+                    }
+                }
+                if model.useCase.includesCaptions {
+                    Section {
+                        LabeledContent {
+                            Button(model.trial == .captions && model.trialBusy
+                                   ? String(localized: "Stop Captions")
+                                   : String(localized: "Try Captions")) {
                                 Task { await (NSApp.delegate as? AppDelegate)?.tryOnboarding(.captions, model: model) }
                             }
-                            .buttonStyle(.bordered)
                             .disabled(model.trialBusy && model.trial != .captions)
-                        }
-                    }
-                    if !model.trialStatus.isEmpty {
-                        Text(model.trialStatus).font(.callout)
-                            .accessibilityAddTraits(.updatesFrequently)
-                    }
-                    if model.trial == .dictation {
-                        Label(model.trialMicrophoneName ?? String(localized: "Microphone name unavailable"), systemImage: "mic")
-                            .font(.callout).foregroundStyle(.secondary)
-                        Text(model.trialInputHealth?.trialHint
-                             ?? String(localized: "Speak a short sentence to check this microphone."))
-                            .font(.callout).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if let health = model.trialInputHealth, health.observedDuration >= 2,
-                           health.clippedSampleFraction > 0.01 || (health.rmsDBFS ?? 0) < -50 {
-                            Button("Open Sound Settings") {
-                                if let url = URL(string: "x-apple.systempreferences:com.apple.Sound-Settings.extension") {
-                                    NSWorkspace.shared.open(url)
-                                }
+                        } label: {
+                            Text("Play a video with speech, then start captions.")
+                            if let shortcut = HotKeyCenter.shortcut(for: .toggleCaptions)?.displayString {
+                                Text("Later, start them from the menu bar or with \(shortcut).")
+                            } else {
+                                Text("Later, start them from the menu bar.")
                             }
-                            .buttonStyle(.bordered)
                         }
-                    }
-                    if !model.trialText.isEmpty {
-                        Text(model.trialText).textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(10).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
-                    }
-                    Text("The dictation trial leaves your clipboard and other apps untouched. Stop captions or close setup to end the trial.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    if !model.trialBusy, !model.trialStatus.isEmpty, model.trialText.isEmpty {
-                        HStack {
-                            if let pane = model.trialPermissionPane {
-                                Button("Open Settings") {
-                                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") {
-                                        NSWorkspace.shared.open(url)
-                                    }
-                                }
-                            }
-                            Button("Review setup") { model.step = .setup }
+                        if model.trial == .captions, !model.trialStatus.isEmpty {
+                            Text(model.trialStatus).foregroundStyle(.secondary)
                         }
+                    } header: {
+                        Text("Captions")
                     }
                 }
-            } label: { Text("Check recognition") }
-            GroupBox {
-                VStack(alignment: .leading, spacing: 6) {
-                    Toggle("Check for updates automatically", isOn: $model.wantsAutoUpdates)
-                    Text("Asks aiity.de about once a day whether a newer version exists. The check sends no audio, no transcripts and no identifiers — but it is a network request, so it is off unless you want it. You can always check by hand from the menu bar.")
-                        .font(.caption).foregroundStyle(.secondary)
+                Section {
+                    Toggle(isOn: $model.wantsAutoUpdates) {
+                        Text("Check for updates automatically")
+                        Text("About once a day. Sends no audio, text or identifiers.")
+                    }
                 }
-            } label: {
-                Label("Updates", systemImage: "arrow.triangle.2.circlepath")
             }
-            Divider().padding(.vertical, 2)
-            // Read the live binding rather than the default: it is user-editable,
-            // and telling someone the wrong shortcut is worse than telling them none.
-            // Two whole sentences rather than one built by concatenation: a
-            // LocalizedStringKey interpolating \(shortcut) becomes the key
-            // "…, or press %@." and stays translatable. Gluing the tail on at
-            // runtime produced a String, which localizes to nothing at all.
-            if model.useCase.includesCaptions,
-               let shortcut = HotKeyCenter.shortcut(for: .toggleCaptions)?.displayString {
-                bullet("captions.bubble",
-                       "Start captions from the Syllivra icon in the menu bar, or press \(shortcut).")
-            } else if model.useCase.includesCaptions {
-                bullet("captions.bubble", "Start captions from the Syllivra icon in the menu bar.")
-            }
-            if model.useCase.includesDictation {
-                let shortcut = model.state.dictationChord.displayString
-                bullet("keyboard", "For everyday dictation, hold \(shortcut) while speaking, then release.")
-            }
-            bullet("slider.horizontal.3", "Change engine, language and appearance in Settings.")
-            bullet("lock", "Nothing you caption is sent anywhere.")
-            Spacer()
+            .formStyle(.grouped)
         }
+        .onAppear { tryFieldFocused = model.useCase.includesDictation }
+    }
+
+    @ViewBuilder
+    private var trialFeedback: some View {
+        if !model.trialStatus.isEmpty {
+            Text(model.trialStatus)
+                .foregroundStyle(.secondary)
+                .accessibilityAddTraits(.updatesFrequently)
+        }
+        if model.trialRecording || model.trialInputHealth != nil {
+            LabeledContent {
+                EmptyView()
+            } label: {
+                Text(verbatim: model.trialMicrophoneName ?? String(localized: "Microphone name unavailable"))
+                Text(verbatim: model.trialInputHealth?.trialHint
+                     ?? String(localized: "Speak a short sentence to check this microphone."))
+            }
+        }
+        if !model.trialText.isEmpty {
+            Text(model.trialText)
+                .textSelection(.enabled)
+        }
+        if !model.trialBusy, let pane = model.trialPermissionPane {
+            LabeledContent("Permission") {
+                Button("Open Settings…") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+            }
         }
     }
 
     // MARK: - Chrome
 
     private var footer: some View {
-        HStack {
-            Text(model.step.title).font(.caption).foregroundStyle(.secondary)
+        let steps = OnboardingStep.allCases
+        let index = (steps.firstIndex(of: model.step) ?? 0) + 1
+        return HStack {
+            Text("Step \(index) of \(steps.count)")
+                .foregroundStyle(.secondary)
             Spacer()
-            if model.step != OnboardingStep.allCases.first {
+            if model.step != steps.first {
                 Button("Back") { back() }
-                    .buttonStyle(.bordered)
             }
-            Button(model.step == .finish ? "Done" : "Continue") { advance() }
-                .buttonStyle(.glassProminent)
+            Button(primaryTitle) { advance() }
+                .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
-                .disabled(model.step == .permission && !model.permissionGranted)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(.regularMaterial)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
     }
 
-    /// `text` is a LocalizedStringKey, not a String, and that is the whole
-    /// point: `Text(someString)` resolves to SwiftUI's VERBATIM overload, so a
-    /// literal handed through a String parameter never becomes a localization
-    /// key. These three bullets sat in the catalog fully translated and still
-    /// rendered in English on a German system for exactly that reason.
-    private func bullet(_ symbol: String, _ text: LocalizedStringKey) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: symbol).frame(width: 20).foregroundStyle(.tint)
-            Text(text)
-            Spacer(minLength: 0)
+    private var primaryTitle: LocalizedStringKey {
+        switch model.step {
+        case .finish: "Done"
+        case .permission where !permissionsGranted: "Skip for Now"
+        default: "Continue"
         }
     }
 
     private func advance() {
-        // A click that arrives right after the permission step advanced
-        // itself was aimed at the step that just left — the primary button
-        // does not move, so the user cannot have meant this one.
         if let auto = model.lastAutoAdvance, Date().timeIntervalSince(auto) < 0.7 {
             return
         }
@@ -595,7 +469,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
         if let initialStep { model.step = initialStep }
         if let trial { model.openTrial(trial) }
         self.model = model
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 600),
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 640),
                          styleMask: [.titled, .closable],
                          backing: .buffered, defer: false)
         w.title = String(localized: "Set up Syllivra")

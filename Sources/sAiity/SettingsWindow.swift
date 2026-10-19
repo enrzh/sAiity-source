@@ -1145,7 +1145,7 @@ enum SettingsWindowController {
     static let settingsWindowIdentifier = NSUserInterfaceItemIdentifier("saiity.settings")
     /// Shared, so the menu bar can raise a specific sheet in this window.
     static let state = AppState()
-    static var selectedPane: SettingsPane = .captions
+    static var selectedPane: SettingsPane = .dictation
 
     static func openTranscript(_ session: SessionRef) {
         state.openTranscript(session)
@@ -1159,17 +1159,12 @@ enum SettingsWindowController {
         if let w = window {
             NSApp.activate(ignoringOtherApps: true)
             w.makeKeyAndOrderFront(nil)
-            if selectedPane == .library || selectedPane == .models || selectedPane == .transcripts {
-                setContentHeight(600)
-            } else {
-                applyRequestedContentHeight()
-            }
             applyChrome(to: w)
             Task { await state.refresh() }
             return
         }
         let w = SettingsChromeWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 860, height: 600),
+            contentRect: NSRect(x: 0, y: 0, width: defaultSize.width, height: defaultSize.height),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered, defer: false)
         w.isReleasedWhenClosed = false
@@ -1179,7 +1174,7 @@ enum SettingsWindowController {
         let host = NSHostingController(
             rootView: SettingsRootView(state: state,
                                         initialPane: selectedPane)
-                .frame(minWidth: 760, minHeight: 420)
+                .frame(minWidth: 760, minHeight: 480)
                 .background(VibrantBackground()))
         host.view.wantsLayer = true
         host.view.layer?.backgroundColor = .clear
@@ -1196,10 +1191,9 @@ enum SettingsWindowController {
         w.titlebarAppearsTransparent = false
         w.toolbarStyle = .unified
         w.titleVisibility = .visible
-        w.setContentSize(NSSize(width: 860, height: 600))
-        w.contentMinSize = NSSize(width: 760, height: 420)
+        w.setContentSize(defaultSize)
+        w.contentMinSize = NSSize(width: 760, height: 480)
         window = w
-        setContentHeight(selectedPane == .library || selectedPane == .models || selectedPane == .transcripts ? 600 : 420)
         w.center()
         NSApp.activate(ignoringOtherApps: true)
         w.makeKeyAndOrderFront(nil)
@@ -1224,11 +1218,12 @@ enum SettingsWindowController {
         item.image = NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: label)
     }
 
-    /// Keep a compact page compact. Expanded settings still get the full
-    /// work surface; a collapsed disclosure should not leave a dead black
-    /// half-window below the primary controls.
+    /// One size for every page. The window used to grow and shrink as pages
+    /// and disclosures changed, so controls moved under the pointer.
+    static let defaultSize = NSSize(width: 880, height: 660)
+
     static func setContentHeight(_ height: CGFloat) {
-        requestedContentHeight = min(max(height, 420), 600)
+        requestedContentHeight = min(max(height, 480), 900)
         applyRequestedContentHeight()
     }
 
@@ -1285,13 +1280,13 @@ enum SettingsPane: String, CaseIterable, Hashable, Identifiable {
     case models, general
 
     static var allCases: [SettingsPane] {
-        [.setup, .captions, .dictation, .library, .transcripts]
+        [.setup, .dictation, .captions, .library, .transcripts]
     }
 
     var id: String { rawValue }
     var title: LocalizedStringKey {
         switch self {
-        case .setup: "Setup"
+        case .setup: "General"
         case .captions: "Captions"
         case .dictation: "Dictation"
         case .library: "Models"
@@ -1302,7 +1297,7 @@ enum SettingsPane: String, CaseIterable, Hashable, Identifiable {
     }
     var windowTitle: String {
         switch self {
-        case .setup: String(localized: "Setup")
+        case .setup: String(localized: "General")
         case .captions: String(localized: "Captions")
         case .dictation: String(localized: "Dictation")
         case .library: String(localized: "Models")
@@ -1313,7 +1308,7 @@ enum SettingsPane: String, CaseIterable, Hashable, Identifiable {
     }
     var symbol: String {
         switch self {
-        case .setup: "checklist"
+        case .setup: "gearshape"
         case .captions: "captions.bubble"
         case .dictation: "mic"
         case .library: "shippingbox"
@@ -1368,9 +1363,6 @@ struct SettingsRootView: View {
         }
         .onChange(of: selection) { _, value in
             SettingsWindowController.selectedPane = value
-            if value == .library || value == .models || value == .transcripts {
-                SettingsWindowController.setContentHeight(600)
-            }
             SettingsWindowController.applyChrome()
         }
         .onReceive(NotificationCenter.default.publisher(for: .saiityToggleSettingsSidebar)) { _ in
@@ -1401,27 +1393,13 @@ struct SettingsRootView: View {
     private func detailView(for pane: SettingsPane) -> some View {
         switch pane {
         case .setup:
-            SettingsPage(isRefreshing: state.isRefreshing) {
-                GeneralView(state: state) { expanded in
-                    SettingsWindowController.setContentHeight(expanded ? 600 : 420)
-                }
-            }
+            SettingsPage(isRefreshing: state.isRefreshing) { GeneralView(state: state) }
         case .captions:
-            SettingsPage(isRefreshing: state.isRefreshing) {
-                CaptionsView(state: state) { expanded in
-                    SettingsWindowController.setContentHeight(expanded ? 600 : 420)
-                }
-            }
+            SettingsPage(isRefreshing: state.isRefreshing) { CaptionsView(state: state) }
         case .dictation:
-            SettingsPage(isRefreshing: state.isRefreshing) {
-                DictationView(state: state) { expanded in
-                    SettingsWindowController.setContentHeight(expanded ? 600 : 420)
-                }
-            }
+            SettingsPage(isRefreshing: state.isRefreshing) { DictationView(state: state) }
         case .library:
-            SettingsPage(isRefreshing: state.isRefreshing) {
-                ModelsView(state: state)
-            }
+            SettingsPage(isRefreshing: state.isRefreshing) { ModelsView(state: state) }
         case .transcripts:
             SettingsPage(isRefreshing: state.isRefreshing) {
                 TranscriptsView(state: state)
@@ -1445,28 +1423,15 @@ struct SettingsPage<Content: View>: View {
 
     var body: some View {
         content
-            .frame(maxWidth: 780, maxHeight: .infinity, alignment: .top)
-            .overlay(alignment: .topTrailing) {
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .overlay(alignment: .bottomTrailing) {
                 if isRefreshing {
-                    HStack(spacing: 6) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("Refreshing…")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(.regularMaterial, in: Capsule())
-                    .overlay(Capsule().stroke(Color(nsColor: .separatorColor).opacity(0.35), lineWidth: 0.5))
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel("Refreshing settings")
-                    .padding(.trailing, 24)
-                    .padding(.top, 16)
+                    ProgressView()
+                        .controlSize(.small)
+                        .padding(12)
+                        .accessibilityLabel("Refreshing settings")
                 }
             }
-            .background(.clear)
-            .safeAreaPadding(.top, 20)
     }
 }
 

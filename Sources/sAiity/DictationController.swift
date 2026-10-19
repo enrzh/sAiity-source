@@ -31,6 +31,24 @@ protocol DictationTextInsertion: AnyObject {
 
 extension TextInserter: DictationTextInsertion {}
 
+/// Whether dictation may open the microphone, and the way to ask.
+///
+/// macOS shows its microphone prompt only when an app asks for access. The
+/// shortcut path used to skip asking, so on a fresh install (or after the
+/// permission was reset) a press either recorded silence or did nothing, with
+/// no prompt and no message — only "Try Dictation" in setup ever asked.
+struct MicrophoneAccess: Sendable {
+    var status: @Sendable () -> AVAuthorizationStatus
+    var request: @Sendable (@escaping @Sendable (Bool) -> Void) -> Void
+
+    static let system = MicrophoneAccess(
+        status: { AVCaptureDevice.authorizationStatus(for: .audio) },
+        request: { answer in AVCaptureDevice.requestAccess(for: .audio, completionHandler: answer) })
+
+    /// For tests and previews that drive a fake capture.
+    static let granted = MicrophoneAccess(status: { .authorized }, request: { $0(true) })
+}
+
 /// Owns the reusable ASR backend and one short microphone -> insertion session.
 @MainActor
 final class DictationController {
@@ -78,6 +96,12 @@ final class DictationController {
     private let originalTextApplications: () -> Set<String>
     private let onDelivered: DeliveryHandler
     private let onRunTiming: (DiagnosticsRuntimeTiming) -> Void
+    private let microphoneAccess: MicrophoneAccess
+    private var awaitingMicrophoneAnswer = false
+    /// Set by `cancelPress()`: the recording finishes through the normal path,
+    /// so the warm model is returned exactly as after a real dictation, but
+    /// nothing is inserted, copied or shown.
+    private var deliveryCancelled = false
 
     private var state = DictationSessionState()
     private var generation = 0
@@ -124,7 +148,15 @@ final class DictationController {
         }
     }
 
+    /// Shown instead of the result when the text could only be copied because
+    /// Accessibility is off: the words are on the clipboard, and this is the
+    /// one thing that makes the next dictation paste by itself.
+    static var accessibilityHint: String {
+        String(localized: "Copied. Allow Accessibility in Syllivra's settings to paste automatically.")
+    }
+
     var isActive: Bool { state.isActive }
+    var isDiscardingDelivery: Bool { deliveryCancelled }
     var inputHealth: DictationInputHealth? { capture.inputHealth }
     var isUsingOriginalText: Bool { sessionUsesOriginalText && (isActive || isFinishing) }
 
@@ -142,7 +174,7 @@ final class DictationController {
         switch phase {
         case .limit, .transcribing, .cleaning, .translating, .inserting: return true
         case .idle, .waitingForInputMonitoring, .preparing, .ready, .starting,
-             .dictating, .recovery, .result, .failure:
+             .dictating, .recovery, .result, .failure, .needsPermission:
             return false
         }
     }
@@ -154,7 +186,7 @@ final class DictationController {
         switch phase {
         case .preparing, .starting, .dictating, .limit, .transcribing, .cleaning, .translating, .inserting:
             return true
-        case .idle, .waitingForInputMonitoring, .ready, .recovery, .result, .failure:
+        case .idle, .waitingForInputMonitoring, .ready, .recovery, .result, .failure, .needsPermission:
             return false
         }
     }
@@ -185,7 +217,8 @@ final class DictationController {
          onPhaseChanged: @escaping (DictationPhase) -> Void = { _ in },
          originalTextApplications: @escaping () -> Set<String> = { [] },
          onDelivered: @escaping DeliveryHandler = { _, _, _ in },
-         onRunTiming: @escaping (DiagnosticsRuntimeTiming) -> Void = { _ in }) {
+         onRunTiming: @escaping (DiagnosticsRuntimeTiming) -> Void = { _ in },
+         microphoneAccess: MicrophoneAccess = .granted) {
         self.backendProvider = SingleBackendProvider(makeBackend: makeBackend)
         self.capture = capture
         self.inserter = inserter
@@ -213,6 +246,7 @@ final class DictationController {
         self.originalTextApplications = originalTextApplications
         self.onDelivered = onDelivered
         self.onRunTiming = onRunTiming
+        self.microphoneAccess = microphoneAccess
     }
 
     init(backendProvider: any ASRBackendProvider,
@@ -241,7 +275,8 @@ final class DictationController {
          onPhaseChanged: @escaping (DictationPhase) -> Void = { _ in },
          originalTextApplications: @escaping () -> Set<String> = { [] },
          onDelivered: @escaping DeliveryHandler = { _, _, _ in },
-         onRunTiming: @escaping (DiagnosticsRuntimeTiming) -> Void = { _ in }) {
+         onRunTiming: @escaping (DiagnosticsRuntimeTiming) -> Void = { _ in },
+         microphoneAccess: MicrophoneAccess = .granted) {
         self.backendProvider = backendProvider
         self.capture = capture
         self.inserter = inserter
@@ -269,6 +304,7 @@ final class DictationController {
         self.originalTextApplications = originalTextApplications
         self.onDelivered = onDelivered
         self.onRunTiming = onRunTiming
+        self.microphoneAccess = microphoneAccess
     }
 
     /// Starts ASR preparation without opening the microphone. Calling this more
@@ -325,7 +361,9 @@ final class DictationController {
             phase = .failure(String(localized: "Captions are already running."))
             return
         }
+        guard microphoneIsAvailable() else { return }
         guard state.begin() else { return }
+        deliveryCancelled = false
 
         sessionIsTrial = previewOnly
         sessionFocus = previewOnly ? nil : inserter.captureFocus()
@@ -391,6 +429,47 @@ final class DictationController {
                 await self?.start(session: session)
             }
         }
+    }
+
+    /// True when the microphone may be opened now. Otherwise asks macOS (the
+    /// first time) or explains where to turn it on, and the press does nothing
+    /// else: the key is usually released before anyone answers a prompt.
+    private func microphoneIsAvailable() -> Bool {
+        switch microphoneAccess.status() {
+        case .authorized:
+            return true
+        case .notDetermined:
+            guard !awaitingMicrophoneAnswer else { return false }
+            awaitingMicrophoneAnswer = true
+            phase = .needsPermission(String(localized: "Allow microphone access to dictate."))
+            microphoneAccess.request { [weak self] granted in
+                Task { @MainActor in self?.microphoneAnswered(granted) }
+            }
+            return false
+        default:
+            reportIssue("dictation.microphone", "Microphone access is off")
+            phase = .needsPermission(String(localized: "Microphone access is off. Turn on Syllivra in System Settings → Privacy & Security → Microphone."))
+            return false
+        }
+    }
+
+    /// Ends the current recording without delivering it.
+    ///
+    /// For a modifier-only shortcut that turned out to be part of another
+    /// shortcut (⌃⌥→) or was only tapped. `cancel()` would also throw away the
+    /// prepared model, making the next real dictation start cold.
+    func cancelPress() {
+        guard state.isActive else { return }
+        deliveryCancelled = true
+        release()
+    }
+
+    private func microphoneAnswered(_ granted: Bool) {
+        awaitingMicrophoneAnswer = false
+        guard !state.isActive else { return }
+        phase = granted
+            ? .needsPermission(String(localized: "Microphone allowed. Hold the shortcut again to dictate."))
+            : .needsPermission(String(localized: "Microphone access is off. Turn on Syllivra in System Settings → Privacy & Security → Microphone."))
     }
 
     func release() {
@@ -837,6 +916,12 @@ final class DictationController {
                         session: Int,
                         fallbackSourceLanguage: String) async {
         guard session == generation else { return }
+        if deliveryCancelled {
+            deliveryCancelled = false
+            finishRun(outcome: "cancelled")
+            phase = .idle
+            return
+        }
         if processingDeadlineExpired {
             reportProcessingTimeout(session: session)
             return
@@ -978,6 +1063,8 @@ final class DictationController {
                 phase = .result(String(localized: "Translated and copied"))
             } else if translationFailed {
                 phase = .result(String(localized: cleaned ? "Translation unavailable — cleaned text copied to Clipboard" : "Translation unavailable — original copied to Clipboard"))
+            } else if result.accessibilityMissing {
+                phase = .result(Self.accessibilityHint)
             } else {
                 phase = .result(String(localized: "Copied to Clipboard"))
             }

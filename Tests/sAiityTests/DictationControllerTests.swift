@@ -27,6 +27,67 @@ import Testing
         #expect(inserter.inserted.isEmpty && !controller.isBusy)
         if case .failure = controller.phase {} else { Issue.record("Late preparation needs an explicit retryable failure") }
     }
+    @Test("A press asks for the microphone once and records nothing until it is answered")
+    func pressAsksForMicrophone() async {
+        let backend = FakeBackend(log: EventLog()), capture = FakeCapture(log: EventLog()), inserter = FakeInserter()
+        let requests = LockedBox(0)
+        let answer = LockedBox<(@Sendable (Bool) -> Void)?>(nil)
+        let access = MicrophoneAccess(status: { .notDetermined }, request: { done in
+            requests.withValue { $0 += 1 }
+            answer.withValue { $0 = done }
+        })
+        let controller = DictationController(makeBackend: { backend }, capture: capture, inserter: inserter,
+            captionsActive: { false }, cleanupConfiguration: { .disabled }, microphoneAccess: access)
+        controller.press()
+        controller.release()
+        controller.press()
+        #expect(requests.value == 1, "a second press while the prompt is up does not ask again")
+        #expect(capture.startCalls == 0 && inserter.inserted.isEmpty)
+        #expect(controller.phase == .needsPermission(String(localized: "Allow microphone access to dictate.")))
+        answer.value?(true)
+        let deadline = ContinuousClock.now + .seconds(2)
+        while controller.phase == .needsPermission(String(localized: "Allow microphone access to dictate.")),
+              ContinuousClock.now < deadline { await Task.yield() }
+        #expect(controller.phase == .needsPermission(String(localized: "Microphone allowed. Hold the shortcut again to dictate.")))
+        #expect(!controller.isBusy)
+    }
+    @Test("A press with the microphone turned off explains where to turn it on")
+    func pressWithMicrophoneDenied() async {
+        let capture = FakeCapture(log: EventLog())
+        var issues: [String] = []
+        let controller = DictationController(makeBackend: { FakeBackend(log: EventLog()) }, capture: capture,
+            inserter: FakeInserter(), captionsActive: { false }, cleanupConfiguration: { .disabled },
+            onIssue: { operation, _ in issues.append(operation) },
+            microphoneAccess: MicrophoneAccess(status: { .denied }, request: { _ in Issue.record("must not ask again") }))
+        controller.press()
+        #expect(capture.startCalls == 0)
+        if case .needsPermission(let message) = controller.phase {
+            #expect(message.contains("Microphone"))
+        } else {
+            Issue.record("expected a permission message, got \(controller.phase)")
+        }
+        #expect(issues == ["dictation.microphone"])
+    }
+    @Test("A cancelled press inserts nothing and keeps the model for the next press")
+    func cancelledPressDeliversNothing() async {
+        let backend = FakeBackend(log: EventLog()), capture = FakeCapture(log: EventLog()), inserter = FakeInserter()
+        var made = 0
+        let controller = DictationController(makeBackend: { made += 1; return backend }, capture: capture,
+            inserter: inserter, captionsActive: { false }, cleanupConfiguration: { .disabled })
+        controller.press()
+        await controller.waitForWorkForTests()
+        capture.samples = [0.2, 0.3]
+        controller.cancelPress()
+        await controller.waitForWorkForTests()
+        #expect(inserter.inserted.isEmpty)
+        #expect(controller.phase == .idle && !controller.isBusy)
+        controller.press()
+        await controller.waitForWorkForTests()
+        controller.release()
+        await controller.waitForWorkForTests()
+        #expect(made == 1, "the warm backend was returned, not discarded")
+        #expect(capture.startCalls == 2)
+    }
     @Test("Native Paste dispatch uses truthful delivery wording without claiming visible insertion")
     func deliveryCopyDescribesPasteDispatch() async {
         let backend = FakeBackend(log: EventLog()), inserter = FakeInserter()
@@ -1558,4 +1619,13 @@ import Testing
         #expect(issues.contains { $0.hasPrefix("dictation.start") })
         #expect(controller.phase == .failure("Speech recognition is already in use."))
     }
+}
+
+/// A value shared with `@Sendable` callbacks in tests.
+final class LockedBox<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Value
+    init(_ value: Value) { stored = value }
+    var value: Value { lock.withLock { stored } }
+    func withValue(_ body: (inout Value) -> Void) { lock.withLock { body(&stored) } }
 }

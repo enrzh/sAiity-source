@@ -594,7 +594,8 @@ extension SavedTranscriptOperationTests {
 
     @Test("settings keeps the everyday destinations separate")
     func settingsNavigationIsCompact() {
-        #expect(SettingsPane.allCases == [.setup, .captions, .dictation, .library, .transcripts])
+        #expect(SettingsPane.allCases == [.setup, .dictation, .captions, .library, .transcripts])
+        #expect(SettingsPane.setup.windowTitle == "General")
     }
 
     @Test("interrupted download cleanup preserves completed models")
@@ -1126,7 +1127,7 @@ extension SavedTranscriptOperationTests {
         #expect(window.standardWindowButton(.miniaturizeButton)?.isEnabled == true)
         #expect(window.standardWindowButton(.zoomButton)?.isEnabled == true)
         #expect(window.contentViewController != nil)
-        #expect(abs((window.contentView?.bounds.height ?? 0) - 420) < 1)
+        #expect(abs((window.contentView?.bounds.height ?? 0) - SettingsWindowController.defaultSize.height) < 1)
     }
 
     @Test("recognition deletion releases dictation's fallback backend")
@@ -1217,7 +1218,7 @@ extension SavedTranscriptOperationTests {
         #expect(window.standardWindowButton(.zoomButton)?.isEnabled == true)
         #expect(window.contentViewController != nil)
         #expect(window.contentView?.bounds.width ?? 0 >= 760)
-        #expect(abs((window.contentView?.bounds.height ?? 0) - 420) < 1)
+        #expect(abs((window.contentView?.bounds.height ?? 0) - SettingsWindowController.defaultSize.height) < 1)
     }
 
     private func settingsWindow() -> NSWindow? {

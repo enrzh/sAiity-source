@@ -8,7 +8,10 @@ import Testing
     @Test("modifier chords use the standard language-neutral Mac glyphs")
     func chordDisplay() {
         #expect(DictationChord(keyCodes: [59]).displayString == "⌃")
-        #expect(DictationChord(keyCodes: [55, 58, 49]).displayString == "⌘⌥Space")
+        // The order macOS menus use: ⌃ ⌥ ⇧ ⌘, then the key.
+        #expect(DictationChord(keyCodes: [55, 58, 49]).displayString == "⌥⌘Space")
+        #expect(DictationChord(keyCodes: [58, 59]).displayString == "⌃⌥")
+        #expect(DictationChord(keyCodes: [49, 56, 59]).displayString == "⌃⇧Space")
     }
 
     @Test("a chord needs a modifier and a real key, or it fires by accident")
@@ -25,6 +28,100 @@ import Testing
         #expect(capture.handle(.keyUp(2)) == nil)
     }
 
+    @Test("two modifiers held on their own are a usable chord; one is not")
+    func modifierOnlyChords() {
+        #expect(DictationChord(keyCodes: [59, 58]).isUsable)            // ⌃⌥
+        #expect(DictationChord(keyCodes: [59, 58]).isModifierOnly)
+        #expect(!DictationChord(keyCodes: [59, 62]).isUsable)           // left + right ⌃
+        #expect(!DictationChord(keyCodes: [58]).isUsable)               // ⌥ alone
+        #expect(!DictationChord(keyCodes: [59, 49]).isModifierOnly)     // ⌃Space
+
+        var capture = DictationChordCaptureState()
+        #expect(capture.handle(.flagsChanged(59, isDown: true)) == nil)
+        #expect(capture.handle(.flagsChanged(58, isDown: true)) == nil)
+        #expect(capture.captured == [59, 58])
+        #expect(capture.handle(.flagsChanged(58, isDown: false)) == nil)
+        #expect(capture.handle(.flagsChanged(59, isDown: false)) == DictationChord(keyCodes: [59, 58]))
+    }
+
+    @Test("a rejected chord is reported so the recorder can explain it")
+    func rejectedChordIsReported() {
+        var capture = DictationChordCaptureState()
+        _ = capture.handle(.flagsChanged(59, isDown: true))
+        #expect(capture.handle(.flagsChanged(59, isDown: false)) == nil)
+        #expect(capture.lastRejected == DictationChord(keyCodes: [59]))
+        _ = capture.handle(.flagsChanged(59, isDown: true))
+        #expect(capture.lastRejected == nil, "a new attempt clears the old explanation")
+    }
+
+    @Test("the default is Control and Option, which no macOS shortcut uses")
+    func defaultChordIsControlOption() {
+        #expect(DictationChord.defaultControl == DictationChord(keyCodes: [59, 58]))
+        #expect(DictationChord.defaultControl.symbolicHotKey == nil)
+        #expect(SystemShortcuts.conflict(for: .defaultControl, hotKeys: Self.standardHotKeys) == nil)
+    }
+
+    @Test("another key pressed with a modifier-only chord cancels the recording")
+    func modifierOnlyChordCancelsOnOtherKey() {
+        var state = DictationChordState(chord: .defaultControl)
+        #expect(state.handle(.flagsChanged(59, isDown: true)) == .none)
+        #expect(state.handle(.flagsChanged(58, isDown: true)) == .start)
+        #expect(state.handle(.keyDown(UInt16(kVK_RightArrow))) == .cancel)
+        // Letting go of the arrow while ⌃⌥ are still held must not restart.
+        #expect(state.handle(.keyUp(UInt16(kVK_RightArrow))) == .none)
+        #expect(state.handle(.flagsChanged(58, isDown: false)) == .none)
+        #expect(state.handle(.flagsChanged(59, isDown: false)) == .none)
+        // A clean hold afterwards works again.
+        #expect(state.handle(.flagsChanged(59, isDown: true)) == .none)
+        #expect(state.handle(.flagsChanged(58, isDown: true)) == .start)
+        #expect(state.handle(.flagsChanged(58, isDown: false)) == .stop)
+    }
+
+    @Test("a modifier-only chord does not start while another modifier is held")
+    func modifierOnlyChordIgnoresLargerShortcuts() {
+        var state = DictationChordState(chord: .defaultControl)
+        #expect(state.handle(.flagsChanged(55, isDown: true)) == .none)   // ⌘ first
+        #expect(state.handle(.flagsChanged(59, isDown: true)) == .none)
+        #expect(state.handle(.flagsChanged(58, isDown: true)) == .none)   // ⌃⌥⌘ is not dictation
+        #expect(state.handle(.flagsChanged(55, isDown: false)) == .none)   // still that shortcut
+        #expect(state.handle(.flagsChanged(58, isDown: false)) == .none)
+        #expect(state.handle(.flagsChanged(59, isDown: false)) == .none)
+        #expect(state.handle(.flagsChanged(59, isDown: true)) == .none)
+        #expect(state.handle(.flagsChanged(58, isDown: true)) == .start)
+        #expect(state.handle(.flagsChanged(56, isDown: true)) == .cancel)  // ⇧ joins
+    }
+
+    @Test("a chord with a real key keeps ignoring other keys")
+    func keyChordIgnoresOtherKeys() {
+        var state = DictationChordState(chord: DictationChord(keyCodes: [59, 56, 49]))
+        #expect(state.handle(.flagsChanged(59, isDown: true)) == .none)
+        #expect(state.handle(.flagsChanged(56, isDown: true)) == .none)
+        #expect(state.handle(.keyDown(49)) == .start)
+        #expect(state.handle(.keyDown(UInt16(kVK_ANSI_A))) == .none)
+        #expect(state.handle(.keyUp(49)) == .stop)
+    }
+
+    /// The symbolic hot keys a standard Mac ships with enabled.
+    static let standardHotKeys: [String: Any] = [
+        "64": ["enabled": true, "value": ["parameters": [32, 49, 1_048_576], "type": "standard"]],
+        "65": ["enabled": true, "value": ["parameters": [32, 49, 1_572_864], "type": "standard"]],
+        "60": ["enabled": true, "value": ["parameters": [32, 49, 262_144], "type": "standard"]],
+        "61": ["enabled": false, "value": ["parameters": [32, 49, 786_432], "type": "standard"]],
+    ]
+
+    @Test("chords macOS already uses are named; free ones are not")
+    func systemShortcutConflicts() {
+        let finder = DictationChord(keyCodes: [55, 58, 49])
+        #expect(SystemShortcuts.conflict(for: finder, hotKeys: Self.standardHotKeys) == "Finder search")
+        let spotlight = DictationChord(keyCodes: [55, 49])
+        #expect(SystemShortcuts.conflict(for: spotlight, hotKeys: Self.standardHotKeys) == "Spotlight")
+        // Disabled in System Settings, so free.
+        let inputSource = DictationChord(keyCodes: [59, 58, 49])
+        #expect(SystemShortcuts.conflict(for: inputSource, hotKeys: Self.standardHotKeys) == nil)
+        let free = DictationChord(keyCodes: [59, 56, 49])
+        #expect(SystemShortcuts.conflict(for: free, hotKeys: Self.standardHotKeys) == nil)
+    }
+
     @Test("a bare modifier cannot be recorded as the dictation shortcut")
     func bareModifierIsNotRecordable() {
         // Pressing and releasing only Control must not become the shortcut.
@@ -35,13 +132,20 @@ import Testing
 
     @Test("the default shortcut cannot fire on an ordinary key press")
     func defaultChordIsInertWithoutTheModifier() {
-        // The whole point of the new default: a Control press anywhere must not
-        // start a recording.
+        // A Control press anywhere, or Control with a letter, must not start a
+        // recording.
         let chord = DictationChord.defaultControl
         #expect(chord.isUsable)
         var state = DictationChordState(chord: chord)
         #expect(state.handle(.flagsChanged(UInt16(kVK_Control), isDown: true)) == .none)
         #expect(state.handle(.keyDown(UInt16(kVK_ANSI_A))) == .none)
+        #expect(state.handle(.flagsChanged(UInt16(kVK_Option), isDown: true)) == .none,
+                "⌃ is still held from ⌃A, so this is not a clean ⌃⌥ hold")
+        #expect(state.handle(.keyUp(UInt16(kVK_ANSI_A))) == .none)
+        #expect(state.handle(.flagsChanged(UInt16(kVK_Option), isDown: false)) == .none)
+        #expect(state.handle(.flagsChanged(UInt16(kVK_Control), isDown: false)) == .none)
+        #expect(state.handle(.flagsChanged(UInt16(kVK_Control), isDown: true)) == .none)
+        #expect(state.handle(.flagsChanged(UInt16(kVK_Option), isDown: true)) == .start)
     }
 
     @Test("a configured chord starts when all keys are pressed and stops when one is released")

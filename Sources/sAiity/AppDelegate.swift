@@ -140,7 +140,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             Diagnostics.recordTiming(operation: timing.operation, seconds: timing.seconds, cold: timing.cold,
                                      runID: timing.runID, outcome: timing.outcome, fallbackReason: timing.fallbackReason,
                                      modelLoadCount: timing.modelLoadCount, modelCallCount: timing.modelCallCount)
-        })
+        },
+        microphoneAccess: .system)
     }()
     private let dictationHotkeyMonitor = DictationHotkeyMonitor()
     private var dictationPrewarmTask: Task<Void, Never>?
@@ -1716,6 +1717,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             },
             onRelease: { [weak self] in
                 Task { @MainActor in self?.dictationController.release() }
+            },
+            onCancel: { [weak self] in
+                // Another key joined a modifier-only chord, or it was only
+                // tapped: the user was typing a shortcut, so drop the audio.
+                Task { @MainActor in self?.dictationController.cancelPress() }
             }) else { return false }
         // Warm an installed model immediately so the first key press starts
         // recording quickly. A missing model stays cold here; preparation on
@@ -1903,6 +1909,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func updateDictationToast(_ phase: DictationPhase) {
         SettingsWindowController.state.dictationUsesOriginalText = dictationController.isUsingOriginalText
+        // A cancelled press finishes quietly: no "Transcribing" flash for a
+        // shortcut that was never dictation.
+        if dictationController.isDiscardingDelivery {
+            dictationToast.dismiss()
+            return
+        }
         if let model = onboardingTrialModel, model.trial == .dictation {
             switch phase {
             case .starting, .preparing:
@@ -1926,7 +1938,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 model.trialRecording = false
                 model.trialStatus = String(localized: "Dictation worked. Your result is shown below.")
                 onboardingTrialModel = nil
-            case .failure(let reason), .recovery(let reason):
+            case .failure(let reason), .recovery(let reason), .needsPermission(let reason):
                 onboardingHealthTask?.cancel()
                 model.trialBusy = false
                 model.trialRecording = false
@@ -1969,6 +1981,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .recovery, .failure:
             dictationToast.show(phase: phase)
             scheduleDictationFeedbackDismissal(after: .seconds(2))
+        case .needsPermission:
+            // Long enough to read a sentence that names a System Settings pane.
+            dictationToast.show(phase: phase)
+            scheduleDictationFeedbackDismissal(after: .seconds(6))
+        case .result(let message) where message == DictationController.accessibilityHint:
+            dictationToast.show(text: message, animated: false)
+            scheduleDictationFeedbackDismissal(after: .seconds(6))
         case .result(let message):
             if let output = lastDictationResult?.outputText.trimmingCharacters(in: .whitespacesAndNewlines),
                !output.isEmpty {
@@ -2087,11 +2106,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         latest.isHidden = !overlay.isReviewingHistory
         menu.addItem(latest)
 
-        let chord = SettingsWindowController.state.dictationChord.displayString
-        let dictationItem = NSMenuItem(title: String(localized: "Hold \(chord) to Dictate"),
-                                       action: nil, keyEquivalent: "")
+        let dictationItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         dictationItem.image = Self.menuSymbol("mic")
-        dictationItem.isEnabled = false
+        dictationItem.tag = Self.dictationMenuTag
+        configureDictationMenuItem(dictationItem)
         menu.addItem(dictationItem)
 
         let original = NSMenuItem(title: String(localized: "Copy Original Dictation"),
@@ -2145,6 +2163,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.item(withTag: Self.copyOriginalMenuTag)?.isEnabled =
             !dictationController.isBusy && lastDictationResult?.originalForRecovery != nil
         menu.item(withTag: Self.jumpToLatestMenuTag)?.isHidden = !overlay.isReviewingHistory
+        if let dictation = menu.item(withTag: Self.dictationMenuTag) {
+            configureDictationMenuItem(dictation)
+        }
         guard let item = menu.item(withTag: Self.clearCaptionMenuTag) else { return }
         item.isEnabled = CaptionLatencyCopy.clearEnabled(
             showingCaption: overlay.hasVisibleCaption)
@@ -2169,6 +2190,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private static let clearCaptionMenuTag = 174
     private static let copyOriginalMenuTag = 175
     private static let jumpToLatestMenuTag = 176
+    private static let dictationMenuTag = 177
+
+    /// The dictation line says what pressing the shortcut will do right now:
+    /// dictate, or nothing until it is switched on or a permission is given.
+    /// It used to read "Hold … to Dictate" even with dictation off.
+    private func configureDictationMenuItem(_ item: NSMenuItem) {
+        let settings = SettingsWindowController.state
+        let chord = settings.dictationChord.displayString
+        if !settings.dictationEnabled {
+            item.title = String(localized: "Turn On Dictation…")
+            item.action = #selector(openDictationSettings)
+            item.target = self
+            item.isEnabled = true
+        } else if !AppPermission.allCases.filter({ $0.feature == .dictation && $0.status != .granted }).isEmpty {
+            item.title = String(localized: "Dictation Needs Permission…")
+            item.action = #selector(openDictationSettings)
+            item.target = self
+            item.isEnabled = true
+        } else {
+            item.title = String(localized: "Hold \(chord) to Dictate")
+            item.action = nil
+            item.isEnabled = false
+        }
+    }
+
+    @objc private func openDictationSettings() {
+        SettingsWindowController.selectedPane = .dictation
+        SettingsWindowController.show()
+        NotificationCenter.default.post(name: .saiitySelectSettingsPane, object: SettingsPane.dictation.rawValue)
+    }
 
 
     /// Only claim items that have not already chosen a target — otherwise this

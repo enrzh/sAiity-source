@@ -33,6 +33,9 @@ struct TextInsertionResult: Equatable {
     var secureTargetObserved = false
     /// SHA-256 of the exact UTF-8 payload successfully written to the clipboard.
     var payloadSHA256: String? = nil
+    /// Copied only because Accessibility is off, so the message can say what
+    /// would make the next dictation paste by itself.
+    var accessibilityMissing = false
 
     var deliveryEndpoint: String? {
         switch outcome {
@@ -159,9 +162,11 @@ final class TextInserter {
     /// ask for.
     func insert(_ text: String, expecting expected: DictationFocusToken?) -> TextInsertionResult {
         guard let expected, isStillFrontmost(expected) else {
-            let target = accessibilityTrusted() ? focusedElement() : nil
+            let trusted = accessibilityTrusted()
+            let target = trusted ? focusedElement() : nil
             var result = copy(text)
             result.secureTargetObserved = target?.isSecure == true
+            result.accessibilityMissing = !trusted
             return result
         }
         return insert(text, shouldPaste: { self.isStillFrontmost(expected) })
@@ -196,7 +201,8 @@ final class TextInserter {
             return copy(cleaned)
         }
 
-        let target = accessibilityTrusted() ? focusedElement() : nil
+        let trusted = accessibilityTrusted()
+        let target = trusted ? focusedElement() : nil
         let canPaste = target.map(Self.canPasteInto) == true
         // The separating space rides inside the pasted string rather than being
         // posted as its own keystroke. A synthetic Space is delivered to
@@ -211,7 +217,7 @@ final class TextInserter {
 
         guard canPaste, shouldPaste() else {
             return TextInsertionResult(outcome: .copied, secureTargetObserved: target?.isSecure == true,
-                                       payloadSHA256: payloadSHA256)
+                                       payloadSHA256: payloadSHA256, accessibilityMissing: !trusted)
         }
 
         guard sendPaste() else { return TextInsertionResult(outcome: .copied, payloadSHA256: payloadSHA256) }
