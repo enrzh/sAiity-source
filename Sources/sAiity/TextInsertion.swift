@@ -153,7 +153,7 @@ final class TextInserter {
             return DictationFocusToken(processIdentifier: app.processIdentifier,
                                        bundleIdentifier: app.bundleIdentifier)
         }
-        exposeAccessibilityTree(of: app.processIdentifier)
+        exposeAccessibilityTree(of: app.processIdentifier, bundleIdentifier: app.bundleIdentifier)
         // Only a real text input counts as "the field". A browser that has not
         // built its tree yet reports its whole web area, which would never
         // match the text area it reports a moment later.
@@ -165,15 +165,28 @@ final class TextInserter {
 
     private static var exposedProcesses = Set<pid_t>()
 
+    /// Browsers built on Chromium. They ignore `AXManualAccessibility` and
+    /// expose page content only with `AXEnhancedUserInterface`, the switch a
+    /// screen reader uses. It is not set for other apps: some animate window
+    /// changes differently while it is on.
+    static let chromiumBrowsers: Set<String> = [
+        "com.google.Chrome", "com.google.Chrome.beta", "com.google.Chrome.canary",
+        "com.microsoft.edgemac", "com.brave.Browser", "company.thebrowser.Browser",
+        "com.operasoftware.Opera", "com.vivaldi.Vivaldi", "org.chromium.Chromium",
+    ]
+
     /// Chromium and Electron apps (Chrome, Slack, VS Code and many more) build
     /// their accessibility tree only when an assistive app asks for it. Until
     /// then a page's text area is invisible, so dictation could only copy.
-    /// `AXManualAccessibility` is their documented switch; other apps ignore it.
-    private static func exposeAccessibilityTree(of pid: pid_t) {
+    /// `AXManualAccessibility` is Electron's switch; other apps ignore it.
+    private static func exposeAccessibilityTree(of pid: pid_t, bundleIdentifier: String?) {
         guard exposedProcesses.insert(pid).inserted else { return }
         let app = AXUIElementCreateApplication(pid)
         _ = AXUIElementSetMessagingTimeout(app, accessibilityTimeout)
         _ = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        if let bundleIdentifier, chromiumBrowsers.contains(bundleIdentifier) {
+            _ = AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        }
     }
 
     private static func isTextInput(_ element: AXUIElement) -> Bool {
@@ -297,14 +310,26 @@ final class TextInserter {
 
     private static func currentFocusedUIElement() -> AXUIElement? {
         let system = AXUIElementCreateSystemWide()
-        guard AXUIElementSetMessagingTimeout(system, accessibilityTimeout) == .success else { return nil }
+        if AXUIElementSetMessagingTimeout(system, accessibilityTimeout) == .success,
+           let element = focusedElement(of: system) {
+            return element
+        }
+        // Chrome answers the system-wide query with "cannot complete" even when
+        // its own focused element is a perfectly good text area. Ask the
+        // frontmost app directly before giving up.
+        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
+        let element = AXUIElementCreateApplication(app.processIdentifier)
+        guard AXUIElementSetMessagingTimeout(element, accessibilityTimeout) == .success else { return nil }
+        return focusedElement(of: element)
+    }
+
+    private static func focusedElement(of element: AXUIElement) -> AXUIElement? {
         var focusedValue: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(system,
+        guard AXUIElementCopyAttributeValue(element,
                                             kAXFocusedUIElementAttribute as CFString,
                                             &focusedValue) == .success,
-              let focusedValue else { return nil }
-
-        guard CFGetTypeID(focusedValue) == AXUIElementGetTypeID() else { return nil }
+              let focusedValue,
+              CFGetTypeID(focusedValue) == AXUIElementGetTypeID() else { return nil }
         return (focusedValue as! AXUIElement)
     }
 

@@ -320,7 +320,10 @@ import Testing
         backend.feed(buffer)
         await first
         await second
-        for _ in 0..<1_000 where !failed.value { await Task.yield() }
+        // A time bound, not a yield count: under a busy full-suite run a
+        // thousand yields can pass before the failure handler is scheduled.
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !failed.value, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(5)) }
         #expect(failed.value)
         backend.feed(buffer)
         #expect(backend.pendingSampleCountForTests == 0)
