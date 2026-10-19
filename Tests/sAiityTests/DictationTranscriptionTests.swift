@@ -349,3 +349,36 @@ import WhisperKit
         #expect(recordedOptions.allSatisfy { $0.language == nil && $0.detectLanguage })
     }
 }
+
+@Suite struct SpeechRegionVoiceTests {
+    private func region(_ range: Range<Int>) -> DictationSpeechRegion {
+        DictationSpeechRegion(audioRange: range, coveredRange: range)
+    }
+
+    @Test("a tail of room noise and a click is not sent to the recognizer")
+    func noiseTailHasNoSpeech() {
+        var samples = (0..<16_000).map { _ in Float.random(in: -0.003...0.003) }
+        samples[8_000] = 0.4    // one key click
+        samples[8_001] = -0.35
+        #expect(!SpeechRegionSegmenter.default.containsSpeech(samples, in: region(0..<16_000), sampleRate: 16_000))
+    }
+
+    @Test("a short spoken word is enough")
+    func shortWordHasSpeech() {
+        var samples = [Float](repeating: 0, count: 16_000)
+        for i in 6_000..<10_000 { samples[i] = 0.05 * sin(Float(i) * 0.06) }   // 250 ms
+        #expect(SpeechRegionSegmenter.default.containsSpeech(samples, in: region(0..<16_000), sampleRate: 16_000))
+    }
+
+    @Test("quiet speech above the noise floor still counts")
+    func quietSpeechHasSpeech() {
+        let samples = (0..<16_000).map { i in 0.015 * sin(Float(i) * 0.05) }
+        #expect(SpeechRegionSegmenter.default.containsSpeech(samples, in: region(0..<16_000), sampleRate: 16_000))
+    }
+
+    @Test("a region shorter than the minimum must be voiced throughout")
+    func shortRegionNeedsVoiceThroughout() {
+        #expect(SpeechRegionSegmenter.default.containsSpeech([0.2, 0.3], in: region(0..<2), sampleRate: 16_000))
+        #expect(!SpeechRegionSegmenter.default.containsSpeech([0, 0], in: region(0..<2), sampleRate: 16_000))
+    }
+}

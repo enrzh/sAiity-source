@@ -31,6 +31,10 @@ struct SpeechRegionSegmenter: Sendable {
         var minimumSpeechDuration: Duration = .milliseconds(700)
         var maximumRegionDuration: Duration = .seconds(10)
         var forcedCutOverlap: Duration = .milliseconds(160)
+        /// Frame loudness (RMS) above which a 20 ms frame counts as voiced.
+        var voicedFrameThreshold: Float = 0.008
+        /// How much voiced audio a region needs before it is worth decoding.
+        var minimumVoicedDuration: Duration = .milliseconds(160)
     }
 
     static let `default` = Self()
@@ -47,6 +51,35 @@ struct SpeechRegionSegmenter: Sendable {
         return segment(samples, sampleRate: sampleRate).filter {
             $0.coveredRange.upperBound <= samples.count - retainedTail
         }
+    }
+
+    /// Whether a region holds enough voiced audio to send to a recognizer.
+    ///
+    /// Regions partition the whole recording, so the stretch after the last
+    /// word (room noise, a key click) becomes a region of its own. Recognizers
+    /// invent words for near-silence: live tests produced "不显示," and
+    /// "Silo süle" from exactly that tail. A whole silent recording was
+    /// already refused; this applies the same rule to each region.
+    func containsSpeech(_ samples: [Float], in region: DictationSpeechRegion, sampleRate: Double) -> Bool {
+        let range = region.audioRange.clamped(to: samples.indices)
+        guard !range.isEmpty, sampleRate > 0 else { return false }
+        let frame = max(1, Int(sampleRate / 50))
+        let frames = (range.count + frame - 1) / frame
+        // A region shorter than the minimum has to be voiced throughout.
+        let needed = min(frames, max(1, durationSamples(configuration.minimumVoicedDuration, sampleRate: sampleRate) / frame))
+        var voiced = 0
+        var start = range.lowerBound
+        while start < range.upperBound {
+            let end = min(range.upperBound, start + frame)
+            var energy: Float = 0
+            for index in start..<end { energy += samples[index] * samples[index] }
+            if (energy / Float(end - start)).squareRoot() > configuration.voicedFrameThreshold {
+                voiced += 1
+                if voiced >= needed { return true }
+            }
+            start = end
+        }
+        return false
     }
 
     func segment(_ samples: [Float], sampleRate: Double) -> [DictationSpeechRegion] {

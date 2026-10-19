@@ -511,9 +511,18 @@ final class DictationHotkeyMonitor: NSObject, @unchecked Sendable {
                 if chord.isModifierOnly, let pressedAt,
                    ContinuousClock.now - pressedAt < Self.minimumModifierOnlyHold {
                     effect = .cancel
+                    NSLog("sAiity dictation shortcut: cancelled, released after a short tap")
                 }
                 pressedAt = nil
             case .cancel:
+                // The kind of event, never which key: enough to tell a typed
+                // shortcut from a stray modifier without recording keystrokes.
+                let kind = switch type {
+                case .flagsChanged: "another modifier key"
+                case .keyDown: "another key"
+                default: "a key event"
+                }
+                NSLog("sAiity dictation shortcut: cancelled by \(kind)")
                 pressedAt = nil
             case .none:
                 break

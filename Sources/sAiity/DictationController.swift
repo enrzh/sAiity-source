@@ -776,6 +776,9 @@ final class DictationController {
     }
 
     private func decodeRegion(samples: [Float], region: DictationSpeechRegion) async throws -> DictationTranscriptionResult {
+        guard segmenter.containsSpeech(samples, in: region, sampleRate: sessionSampleRate) else {
+            return DictationTranscriptionResult(regions: [])
+        }
         let deadline = [processingDeadline, LocalGeneration.deadline].compactMap { $0 }.min()
         return try await LocalGeneration.$deadline.withValue(deadline) {
             try LocalGeneration.checkDeadline()
