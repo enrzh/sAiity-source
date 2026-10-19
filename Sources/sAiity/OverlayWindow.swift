@@ -780,6 +780,10 @@ final class OverlayWindow: NSPanel {
         isMovable = false              // move only via performDrag
         hidesOnDeactivate = false
         acceptsMouseMovedEvents = true
+        // No system fade. A panel's default order-out animation kept the
+        // bubble on screen for about 0.3 s after Stop, three times the 100 ms
+        // target, and captions appear and leave with the speech anyway.
+        animationBehavior = .none
 
         historyStack.frame = NSRect(x: 0, y: 0, width: 1, height: 1)
         historyStack.autoresizingMask = [.width]
