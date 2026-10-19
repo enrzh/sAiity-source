@@ -802,6 +802,17 @@ import Testing
         #expect(controller.phase == .result("No speech detected"))
     }
 
+    @Test("near-silent input is named as the reason nothing was recognized")
+    func nearSilentInputIsExplained() {
+        let quiet = DictationInputHealth(sampleCount: 32_000, rmsDBFS: -62, clippedSampleFraction: 0, observedDuration: 2)
+        let speech = DictationInputHealth(sampleCount: 32_000, rmsDBFS: -28, clippedSampleFraction: 0, observedDuration: 2)
+        let tap = DictationInputHealth(sampleCount: 2_000, rmsDBFS: -70, clippedSampleFraction: 0, observedDuration: 0.1)
+        #expect(DictationController.inputWasNearlySilent(quiet))
+        #expect(!DictationController.inputWasNearlySilent(speech))
+        #expect(!DictationController.inputWasNearlySilent(tap), "too short to judge")
+        #expect(!DictationController.inputWasNearlySilent(nil))
+    }
+
     @Test("enabled dictation translates before inserting and copying")
     func translatesBeforeInsertion() async {
         let log = EventLog()

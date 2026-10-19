@@ -38,9 +38,12 @@ extension LocalGenerationTests {
     func lateLoadRecordsOnce() async {
         var events: [DiagnosticsRuntimeTiming] = []
         do {
-            _ = try await LocalGeneration.$deadline.withValue(.now + .milliseconds(5)) {
+            // Wide margins: with 5 ms the deadline could pass before the load
+            // even began under a busy full-suite run, failing the entry check
+            // instead of exercising a load that returns late.
+            _ = try await LocalGeneration.$deadline.withValue(.now + .milliseconds(100)) {
                 try await LocalGeneration.loadModel({
-                    try await Task.sleep(for: .milliseconds(15))
+                    try await Task.sleep(for: .milliseconds(300))
                     return 1
                 }, onTiming: { events.append($0) })
             }

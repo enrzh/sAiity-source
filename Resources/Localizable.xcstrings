@@ -25752,6 +25752,15 @@
         "es": { "stringUnit": { "state": "translated", "value": "Iniciar subtítulos" } },
         "ja": { "stringUnit": { "state": "translated", "value": "字幕を開始" } }
       }
+    },
+    "Syllivra heard almost nothing. Check the microphone and its input level in Sound settings.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Syllivra hat fast nichts gehört. Prüfe das Mikrofon und seine Eingangslautstärke in den Ton-Einstellungen." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Syllivra n’a presque rien entendu. Vérifiez le micro et son niveau d’entrée dans les réglages Son." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Syllivra casi no ha oído nada. Revisa el micrófono y su nivel de entrada en los ajustes de Sonido." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "Syllivraにはほとんど何も聞こえませんでした。サウンド設定でマイクと入力レベルを確認してください。" } }
+      }
     }
   },
   "version": "1.0"

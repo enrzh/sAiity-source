@@ -155,6 +155,18 @@ final class DictationController {
         String(localized: "Copied. Allow Accessibility in Syllivra's settings to paste automatically.")
     }
 
+    static var quietInputMessage: String {
+        String(localized: "Syllivra heard almost nothing. Check the microphone and its input level in Sound settings.")
+    }
+
+    /// Below about −50 dBFS for a recording long enough to judge, the input
+    /// was close to silence rather than quiet speech.
+    nonisolated static func inputWasNearlySilent(_ health: DictationInputHealth?) -> Bool {
+        guard let health, health.observedDuration >= 0.5,
+              let rms = health.rmsDBFS, !rms.isNaN else { return false }
+        return rms < -50
+    }
+
     var isActive: Bool { state.isActive }
     var isDiscardingDelivery: Bool { deliveryCancelled }
     var inputHealth: DictationInputHealth? { capture.inputHealth }
@@ -929,8 +941,12 @@ final class DictationController {
         let runID = currentRunID
         let authoritativeText = transcription.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !authoritativeText.isEmpty else {
-            finishRun(outcome: "failed")
-            phase = .result(String(localized: "No speech detected"))
+            // Say why when the reason is visible in the audio: a microphone
+            // turned down, muted or pointed elsewhere records near-silence,
+            // and "No speech detected" alone sends people looking for a bug.
+            let quiet = Self.inputWasNearlySilent(capture.inputHealth)
+            finishRun(outcome: "failed", fallback: quiet ? "quiet-input" : "no-speech")
+            phase = .result(quiet ? Self.quietInputMessage : String(localized: "No speech detected"))
             return
         }
         let transcription = sessionUsesOriginalText ? transcription : DictationVocabulary.applying(to: transcription)
