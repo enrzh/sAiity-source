@@ -465,6 +465,21 @@ final class DictationController {
         }
     }
 
+    #if SAIITY_TEST_HOOKS
+    /// Development only: `SAIITY_DICTATION_DUMP_DIR` keeps each recording as a
+    /// WAV so recognition problems can be reproduced from the exact audio.
+    /// Compiled out of release builds; it would store the user's voice.
+    private static func dumpForDebugging(_ samples: [Float], sampleRate: Double) {
+        guard let dir = ProcessInfo.processInfo.environment["SAIITY_DICTATION_DUMP_DIR"], !samples.isEmpty,
+              let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1),
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)) else { return }
+        buffer.frameLength = AVAudioFrameCount(samples.count)
+        samples.withUnsafeBufferPointer { buffer.floatChannelData![0].update(from: $0.baseAddress!, count: samples.count) }
+        let url = URL(fileURLWithPath: dir).appendingPathComponent("dictation-\(Int(Date().timeIntervalSince1970 * 1000)).wav")
+        try? AVAudioFile(forWriting: url, settings: format.settings).write(from: buffer)
+    }
+    #endif
+
     /// Ends the current recording without delivering it.
     ///
     /// For a modifier-only shortcut that turned out to be part of another
@@ -838,6 +853,9 @@ final class DictationController {
             return
         }
         NSLog("sAiity dictation capture: \(samples.count) samples at \(Int(sessionSampleRate)) Hz (\(String(format: "%.2f", Double(samples.count) / sessionSampleRate))s)")
+        #if SAIITY_TEST_HOOKS
+        Self.dumpForDebugging(samples, sampleRate: sessionSampleRate)
+        #endif
         if sessionUsesWhisper {
             do {
                 if transcribeWhisperSegments != nil,
