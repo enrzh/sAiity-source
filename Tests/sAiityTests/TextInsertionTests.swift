@@ -222,11 +222,14 @@ import Testing
             focusedElement: { ax.snapshot() }, sendPaste: { true })
 
         #expect(inserter.insert(" new ").outcome == .insertedAndCopied)
-        #expect(board.value == (location == 5 ? " new" : "new"))
+        // "Hello world ": a word follows only at the very start.
+        #expect(board.value == [0: "new ", 5: " new", 12: "new"][location])
+        // One character after the caret first, then the bounded text before it.
+        #expect(ax.ranges.first.map { ($0.location, $0.length) } ?? (-1, -1) == (location, 1))
         if location == 0 {
-            #expect(ax.ranges.isEmpty)
-        } else {
             #expect(ax.ranges.count == 1)
+        } else {
+            #expect(ax.ranges.count == 2)
             #expect(ax.ranges.last.map { $0.location + $0.length } == location)
         }
     }
@@ -241,7 +244,7 @@ import Testing
             focusedElement: { ax.snapshot() }, sendPaste: { true })
 
         #expect(inserter.insert("new").outcome == .insertedAndCopied)
-        #expect(board.value == (location == 11 ? " new" : "new"))
+        #expect(board.value == [0: "new ", 6: "new ", 11: " new"][location])
     }
 
     @Test("replacement spacing uses the selection start, not selected text", arguments: [0, 5, 6])
@@ -254,8 +257,11 @@ import Testing
             focusedElement: { ax.snapshot() }, sendPaste: { true })
 
         #expect(inserter.insert("new").outcome == .insertedAndCopied)
-        #expect(board.value == (location == 5 ? " new" : "new"))
-        #expect(ax.ranges.allSatisfy { $0.location + $0.length == location })
+        // The trailing check looks after the selection, never inside it.
+        #expect(board.value == [0: "new ", 5: " new", 6: "new"][location])
+        let selectionEnd = location + (location == 5 ? 4 : 3)
+        #expect(ax.ranges.first.map { ($0.location, $0.length) } ?? (-1, -1) == (selectionEnd, 1))
+        #expect(ax.ranges.dropFirst().allSatisfy { $0.location + $0.length == location })
         #expect(!ax.attributes.contains(kAXSelectedTextAttribute))
     }
 
@@ -272,8 +278,9 @@ import Testing
         let phrase = "cafe\u{301} 字幕 مرحبا 👩🏽‍💻"
 
         #expect(inserter.insert(phrase).outcome == .insertedAndCopied)
-        #expect(board.value == (prefix.last?.isWhitespace == true ? phrase : " " + phrase))
-        #expect(ax.ranges.count == 1)
+        // "suffix" follows directly, so a trailing space is added too.
+        #expect(board.value == (prefix.last?.isWhitespace == true ? phrase : " " + phrase) + " ")
+        #expect(ax.ranges.count == 2)
         #expect(ax.ranges.last.map { $0.location + $0.length } == prefix.utf16.count)
     }
 
@@ -288,14 +295,28 @@ import Testing
 
         #expect(inserter.insert("new").outcome == .insertedAndCopied)
         #expect(board.value == " new")
-        #expect(ax.ranges.count == 1)
-        #expect(ax.ranges.allSatisfy { $0.length > 0 && $0.length <= 32
+        #expect(ax.ranges.count == 2)
+        #expect(ax.ranges.first.map { ($0.location, $0.length) } ?? (-1, -1) == (100_000, 1))
+        #expect(ax.ranges.dropFirst().allSatisfy { $0.length > 0 && $0.length <= 32
             && $0.location + $0.length == 100_000 })
         #expect(ax.timeouts.count == 1)
         #expect(ax.timeouts.allSatisfy { $0 > 0 && $0 <= 0.25 })
         #expect(ax.operations.first == "timeout")
         #expect(ax.attributes.filter { $0 == kAXSelectedTextRangeAttribute }.count == 1)
         #expect(!ax.attributes.contains(kAXValueAttribute))
+    }
+
+    @Test("a trailing space only before a following word, never between scripts without spaces")
+    func trailingSeparatorRules() {
+        #expect(TextInserter.needsSeparator(after: "send it", following: "b"))
+        #expect(TextInserter.needsSeparator(after: "send it", following: "4"))
+        #expect(!TextInserter.needsSeparator(after: "send it", following: "."))
+        #expect(!TextInserter.needsSeparator(after: "send it", following: ","))
+        #expect(!TextInserter.needsSeparator(after: "send it", following: " "))
+        #expect(!TextInserter.needsSeparator(after: "send it", following: nil))
+        #expect(!TextInserter.needsSeparator(after: "字幕", following: "字"))
+        #expect(!TextInserter.needsSeparator(after: "send it", following: "字"))
+        #expect(!TextInserter.needsSeparator(after: "ありがとう", following: "b"))
     }
 
     @Test("unavailable or malformed selection never guesses from document text", arguments: [false, true])

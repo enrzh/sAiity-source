@@ -36,19 +36,29 @@ extension LocalGenerationTests {
 @Suite struct LocalGenerationTests {
     @MainActor @Test("A load that returns after its deadline is recorded exactly once")
     func lateLoadRecordsOnce() async {
+        // The deadline has to pass *during* the load. On a busy full-suite run
+        // the main actor can be held long enough that a short deadline expires
+        // before the load even starts, which tests the entry check instead. So
+        // retry with a longer deadline until the load really ran, and assert
+        // on that run only.
         var events: [DiagnosticsRuntimeTiming] = []
-        do {
-            // Wide margins: with 5 ms the deadline could pass before the load
-            // even began under a busy full-suite run, failing the entry check
-            // instead of exercising a load that returns late.
-            _ = try await LocalGeneration.$deadline.withValue(.now + .milliseconds(100)) {
-                try await LocalGeneration.loadModel({
-                    try await Task.sleep(for: .milliseconds(300))
-                    return 1
-                }, onTiming: { events.append($0) })
-            }
-            Issue.record("late load was accepted")
-        } catch { #expect(error is CancellationError) }
+        var loaderRan = false
+        for margin in [50, 250, 1_000, 4_000] {
+            events.removeAll()
+            loaderRan = false
+            do {
+                _ = try await LocalGeneration.$deadline.withValue(.now + .milliseconds(margin)) {
+                    try await LocalGeneration.loadModel({
+                        loaderRan = true
+                        try await Task.sleep(for: .milliseconds(margin * 3))
+                        return 1
+                    }, onTiming: { events.append($0) })
+                }
+                Issue.record("late load was accepted")
+            } catch { #expect(error is CancellationError) }
+            if loaderRan { break }
+        }
+        #expect(loaderRan, "the load never started before its deadline")
         #expect(events.count == 1)
     }
     @Test("product native rows bind exact delivered bytes, actual lifecycle and closed finite phase durations")

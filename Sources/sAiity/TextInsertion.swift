@@ -65,6 +65,10 @@ struct TextInsertionTarget: Equatable {
     // defaults for stored `var`s, so a `let` with an initial value is not a
     // parameter at all and every call site passing `subrole:` fails to compile.
     var subrole: String? = nil
+    /// The one character right after the caret or selection, or nil at the
+    /// end of the text. Only used to decide on a trailing space, so text
+    /// inserted before a word does not run into it ("tomorrowbeta").
+    var following: String? = nil
 
     var isSecure: Bool {
         role == TextInserter.secureRole || subrole == TextInserter.secureRole
@@ -209,7 +213,8 @@ final class TextInserter {
         // whatever happens to be focused when the event lands — it can become
         // part of a Terminal command, advance a slide deck, and it stays in the
         // document even when the paste that follows it fails.
-        let payload = canPaste && Self.needsSeparator(before: target?.value) ? " " + cleaned : cleaned
+        var payload = canPaste && Self.needsSeparator(before: target?.value) ? " " + cleaned : cleaned
+        if canPaste, Self.needsSeparator(after: cleaned, following: target?.following) { payload += " " }
         guard pasteboard.setString(payload) else {
             return TextInsertionResult(outcome: .copyFailed, secureTargetObserved: target?.isSecure == true)
         }
@@ -236,6 +241,23 @@ final class TextInserter {
     /// Separates a phrase at the selection start without duplicating whitespace.
     private static func needsSeparator(before precedingContext: String?) -> Bool {
         precedingContext?.last?.isWhitespace == false
+    }
+
+    /// A space after the dictated text only when a word follows directly:
+    /// not before punctuation or whitespace, and not between scripts that
+    /// are written without spaces.
+    static func needsSeparator(after text: String, following: String?) -> Bool {
+        guard let next = following?.first, let last = text.last,
+              next.isLetter || next.isNumber,
+              !last.isWhitespace,
+              !writtenWithoutSpaces(next), !writtenWithoutSpaces(last) else { return false }
+        return true
+    }
+
+    private static func writtenWithoutSpaces(_ character: Character) -> Bool {
+        character.unicodeScalars.contains { scalar in
+            scalar.properties.isIdeographic || (0x3040...0x30FF).contains(scalar.value)
+        }
     }
 
     private static func currentFocusedUIElement() -> AXUIElement? {
@@ -292,20 +314,36 @@ final class TextInserter {
         var selection = CFRange()
         guard AXValueGetValue(selectionValue as! AXValue, .cfRange, &selection),
               selection.location >= 0, selection.length >= 0,
-              selection.location <= Int.max - selection.length,
-              selection.location > 0 else { return target }
+              selection.location <= Int.max - selection.length - 1 else { return target }
+
+        // One UTF-16 unit after the selection, for the trailing space. Asked
+        // first so the bounded preceding query below stays the last one.
+        var followingRange = CFRange(location: selection.location + selection.length, length: 1)
+        var following: String?
+        if let rangeValue = AXValueCreate(.cfRange, &followingRange) {
+            var followingValue: CFTypeRef?
+            if copyParameterizedAttributeValue(focused, kAXStringForRangeParameterizedAttribute as CFString,
+                                               rangeValue, &followingValue) == .success,
+               let text = followingValue as? String, text.utf16.count == 1 {
+                following = text
+            }
+        }
+        let withFollowing = TextInsertionTarget(role: role, value: nil, isEditable: isEditable,
+                                                subrole: subrole, following: following)
+        guard selection.location > 0 else { return withFollowing }
 
         // AX offsets are UTF-16. Query only before the selection start, so
         // replacement text and an unrelated document suffix cannot affect it.
         let length = min(selection.location, 32)
         var precedingRange = CFRange(location: selection.location - length, length: length)
-        guard let rangeValue = AXValueCreate(.cfRange, &precedingRange) else { return target }
+        guard let rangeValue = AXValueCreate(.cfRange, &precedingRange) else { return withFollowing }
         var contextValue: CFTypeRef?
         guard copyParameterizedAttributeValue(focused, kAXStringForRangeParameterizedAttribute as CFString,
                                                rangeValue, &contextValue) == .success,
               let context = contextValue as? String,
-              context.utf16.count <= length else { return target }
-        return TextInsertionTarget(role: role, value: context, isEditable: isEditable, subrole: subrole)
+              context.utf16.count <= length else { return withFollowing }
+        return TextInsertionTarget(role: role, value: context, isEditable: isEditable,
+                                   subrole: subrole, following: following)
     }
 
     private static func attributeIsSettable(_ attribute: String, on element: AXUIElement) -> Bool {
