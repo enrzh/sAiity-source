@@ -71,12 +71,17 @@ enum AppPermission: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Asks macOS. The first time, that shows macOS's own prompt. macOS shows
-    /// those prompts once and then stays silent, so every later request opens
-    /// the right list in System Settings instead of appearing to do nothing.
+    /// Asks macOS, and from the second time on also opens the right list in
+    /// System Settings.
+    ///
+    /// The request runs every time, not just the first: it is what puts *this*
+    /// build into the System Settings list. A list entry left behind by an
+    /// earlier copy of the app looks switched on but belongs to that copy's
+    /// signature, and only a fresh request replaces it. macOS shows its own
+    /// prompt at most once and then stays silent, which is why later requests
+    /// also open System Settings instead of appearing to do nothing.
     @MainActor
     func request(defaults: UserDefaults = .standard) {
-        let askedKey = "permissionAsked.\(rawValue)"
         if self == .microphone {
             if status == .notAsked {
                 AVCaptureDevice.requestAccess(for: .audio) { _ in }
@@ -85,22 +90,22 @@ enum AppPermission: String, CaseIterable, Identifiable, Sendable {
             }
             return
         }
-        guard !defaults.bool(forKey: askedKey) else {
-            openSettings()
-            return
-        }
+        let askedKey = "permissionAsked.\(rawValue)"
+        let askedBefore = defaults.bool(forKey: askedKey)
         defaults.set(true, forKey: askedKey)
+        let granted: Bool
         switch self {
         case .accessibility:
-            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-            _ = AXIsProcessTrustedWithOptions(options)
+            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: !askedBefore] as CFDictionary
+            granted = AXIsProcessTrustedWithOptions(options)
         case .inputMonitoring:
-            _ = CGRequestListenEventAccess()
+            granted = CGRequestListenEventAccess()
         case .screenRecording:
-            _ = CGRequestScreenCaptureAccess()
+            granted = CGRequestScreenCaptureAccess()
         case .microphone:
-            break
+            granted = true
         }
+        if askedBefore, !granted { openSettings() }
     }
 
     var settingsURL: URL? {
