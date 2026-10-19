@@ -58,7 +58,6 @@ struct PermissionRow: View {
             Text(verbatim: permission.title)
             Text(verbatim: permission.purpose)
         }
-        .accessibilityElement(children: .combine)
     }
 }
 

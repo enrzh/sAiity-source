@@ -1807,8 +1807,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 guard !Task.isCancelled else { return }
                 // Cheap pre-check: skip the thread, the run loop and the tap
                 // request entirely while the permission is known to be absent.
+                // The preflight is a cheap in-process check, so the wait stays
+                // short: someone who has just switched Syllivra on in System
+                // Settings should be able to dictate within seconds, not after
+                // a two-minute backoff.
                 guard CGPreflightListenEventAccess() else {
-                    delay = min(delay * 2, .seconds(120))
+                    delay = min(delay * 2, .seconds(5))
                     self.dictationHotkeyRetryDelay = delay
                     continue
                 }

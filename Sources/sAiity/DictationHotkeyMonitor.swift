@@ -418,10 +418,23 @@ final class DictationHotkeyMonitor: NSObject, @unchecked Sendable {
         }
     }
 
+    /// Whether macOS lets this process see every key, not just modifiers.
+    ///
+    /// Without Input Monitoring, macOS still creates a listen-only tap but
+    /// silently narrows it to modifier changes. That tap looked like success:
+    /// a ⌃⌥ chord half-worked, other keys never cancelled it, and a chord with
+    /// a real key never fired at all. So the tap is only installed with full
+    /// access, and the app's retry loop installs it once access arrives.
+    nonisolated(unsafe) static var hasFullKeyAccess: () -> Bool = { CGPreflightListenEventAccess() }
+
     @discardableResult
     func start(onPress: @escaping @Sendable () -> Void,
                onRelease: @escaping @Sendable () -> Void,
                onCancel: (@Sendable () -> Void)? = nil) -> Bool {
+        guard Self.hasFullKeyAccess() else {
+            NSLog("sAiity dictation shortcut: waiting for Input Monitoring before listening")
+            return false
+        }
         lock.lock()
         if eventTap != nil { lock.unlock(); return true }
         self.onPress = onPress
