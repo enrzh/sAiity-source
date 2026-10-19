@@ -509,6 +509,25 @@ import Testing
         #expect(pastes == 0)
     }
 
+    @Test("a field the app could not name at the press still pastes into the same app")
+    func unidentifiedPressFieldUsesTheSameApp() {
+        // Chrome before its accessibility tree exists: no text field at the
+        // press, a real one by the time the result is ready.
+        let board = FakePasteboard()
+        var focus = DictationFocusToken(processIdentifier: 42, bundleIdentifier: "test.browser")
+        var pastes = 0
+        let inserter = TextInserter(pasteboard: board, accessibilityTrusted: { true },
+            focusedElement: { .init(role: "AXTextArea", value: "", isEditable: true) },
+            sendPaste: { pastes += 1; return true }, currentFocus: { focus })
+        let captured = inserter.captureFocus()
+        focus.field = AXUIElementCreateApplication(7)
+        #expect(inserter.insert("same app", expecting: captured).outcome == .insertedAndCopied)
+        #expect(pastes == 1)
+        focus = .init(processIdentifier: 43, bundleIdentifier: "test.other", field: AXUIElementCreateApplication(7))
+        #expect(inserter.insert("other app", expecting: captured).outcome == .copied)
+        #expect(pastes == 1)
+    }
+
     @Test("focus is rechecked after a successful clipboard write")
     func lateFieldChangePreventsPaste() {
         let board = FakePasteboard()

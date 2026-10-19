@@ -149,9 +149,40 @@ final class TextInserter {
     /// The frontmost app right now, for `captureFocus()`.
     static func currentFocusToken() -> DictationFocusToken? {
         guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
+        guard AXIsProcessTrusted() else {
+            return DictationFocusToken(processIdentifier: app.processIdentifier,
+                                       bundleIdentifier: app.bundleIdentifier)
+        }
+        exposeAccessibilityTree(of: app.processIdentifier)
+        // Only a real text input counts as "the field". A browser that has not
+        // built its tree yet reports its whole web area, which would never
+        // match the text area it reports a moment later.
+        let field = currentFocusedUIElement().flatMap { isTextInput($0) ? $0 : nil }
         return DictationFocusToken(processIdentifier: app.processIdentifier,
                                    bundleIdentifier: app.bundleIdentifier,
-                                   field: AXIsProcessTrusted() ? currentFocusedUIElement() : nil)
+                                   field: field)
+    }
+
+    private static var exposedProcesses = Set<pid_t>()
+
+    /// Chromium and Electron apps (Chrome, Slack, VS Code and many more) build
+    /// their accessibility tree only when an assistive app asks for it. Until
+    /// then a page's text area is invisible, so dictation could only copy.
+    /// `AXManualAccessibility` is their documented switch; other apps ignore it.
+    private static func exposeAccessibilityTree(of pid: pid_t) {
+        guard exposedProcesses.insert(pid).inserted else { return }
+        let app = AXUIElementCreateApplication(pid)
+        _ = AXUIElementSetMessagingTimeout(app, accessibilityTimeout)
+        _ = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+    }
+
+    private static func isTextInput(_ element: AXUIElement) -> Bool {
+        var roleValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleValue) == .success,
+              let role = roleValue as? String else { return false }
+        if editableRoles.contains(role) || role == secureRole { return true }
+        var range: CFTypeRef?
+        return AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &range) == .success
     }
 
     /// Record which app the user was in when dictation started. Call this at the
@@ -179,13 +210,17 @@ final class TextInserter {
     private func isStillFrontmost(_ token: DictationFocusToken) -> Bool {
         guard let current = currentFocus() else { return false }
         if current.processIdentifier != token.processIdentifier { return false }
-        guard let expectedField = token.field, let currentField = current.field,
-              CFEqual(expectedField, currentField) else { return false }
         // Some apps expose no bundle identifier; the process identity is enough
         // in that case, and requiring both would reject perfectly good targets.
-        guard let expectedID = token.bundleIdentifier,
-              let currentID = current.bundleIdentifier else { return true }
-        return expectedID == currentID
+        if let expectedID = token.bundleIdentifier, let currentID = current.bundleIdentifier,
+           expectedID != currentID { return false }
+        // No text field could be identified at the press: typically an app
+        // that was still building its accessibility tree. The same app still
+        // in front is the best evidence there is; the paste itself still
+        // requires an editable, non-secure field at insertion time.
+        guard let expectedField = token.field else { return true }
+        guard let currentField = current.field, CFEqual(expectedField, currentField) else { return false }
+        return true
     }
 
     func insert(_ text: String) -> TextInsertionResult {
