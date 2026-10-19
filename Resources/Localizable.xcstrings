@@ -25761,6 +25761,24 @@
         "es": { "stringUnit": { "state": "translated", "value": "Syllivra casi no ha oído nada. Revisa el micrófono y su nivel de entrada en los ajustes de Sonido." } },
         "ja": { "stringUnit": { "state": "translated", "value": "Syllivraにはほとんど何も聞こえませんでした。サウンド設定でマイクと入力レベルを確認してください。" } }
       }
+    },
+    "Other shortcuts also start with %@, such as %@. Pressed slowly, they can start a recording. ⌃⌥ avoids this.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Auch andere Kurzbefehle beginnen mit %1$@, etwa %2$@. Langsam gedrückt, können sie eine Aufnahme starten. ⌃⌥ vermeidet das." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "D’autres raccourcis commencent aussi par %1$@, comme %2$@. Pressés lentement, ils peuvent lancer un enregistrement. ⌃⌥ évite cela." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Otros atajos también empiezan por %1$@, como %2$@. Si se pulsan despacio, pueden iniciar una grabación. ⌃⌥ lo evita." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "%2$@ など、ほかのショートカットも %1$@ で始まります。ゆっくり押すと録音が始まることがあります。⌃⌥ ならこれを避けられます。" } }
+      }
+    },
+    "Many shortcuts also start with %@. Pressed slowly, they can start a recording. ⌃⌥ avoids this.": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Viele Kurzbefehle beginnen ebenfalls mit %@. Langsam gedrückt, können sie eine Aufnahme starten. ⌃⌥ vermeidet das." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Beaucoup de raccourcis commencent aussi par %@. Pressés lentement, ils peuvent lancer un enregistrement. ⌃⌥ évite cela." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Muchos atajos también empiezan por %@. Si se pulsan despacio, pueden iniciar una grabación. ⌃⌥ lo evita." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "多くのショートカットも %@ で始まります。ゆっくり押すと録音が始まることがあります。⌃⌥ ならこれを避けられます。" } }
+      }
     }
   },
   "version": "1.0"

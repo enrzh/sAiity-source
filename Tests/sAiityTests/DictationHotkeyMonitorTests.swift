@@ -101,6 +101,59 @@ import Testing
         #expect(state.handle(.keyUp(49)) == .stop)
     }
 
+    @Test("a modifier-only start waits; a shortcut typed in time never opens the microphone")
+    func pressGateSwallowsQuickShortcuts() {
+        var gate = DictationPressGate()
+        guard case .schedule(let token) = gate.handle(.start, deferStart: true) else {
+            Issue.record("expected a scheduled start"); return
+        }
+        let cancelled = gate.handle(.cancel, deferStart: true)
+        #expect(cancelled == .none, "⌥⌘C within the delay")
+        let fired = gate.confirm(token)
+        #expect(!fired, "the scheduled start no longer fires")
+        let released = gate.handle(.stop, deferStart: true)
+        #expect(released == .none)
+    }
+
+    @Test("a held modifier-only chord starts after the delay and releases normally")
+    func pressGateStartsAfterDelay() {
+        var gate = DictationPressGate()
+        guard case .schedule(let token) = gate.handle(.start, deferStart: true) else {
+            Issue.record("expected a scheduled start"); return
+        }
+        let fired = gate.confirm(token)
+        #expect(fired)
+        let released = gate.handle(.stop, deferStart: true)
+        #expect(released == .release)
+        guard case .schedule(let second) = gate.handle(.start, deferStart: true) else {
+            Issue.record("expected a scheduled start"); return
+        }
+        let firedAgain = gate.confirm(second)
+        #expect(firedAgain)
+        let cancelled = gate.handle(.cancel, deferStart: true)
+        #expect(cancelled == .cancel)
+    }
+
+    @Test("a chord with a real key starts at once, as before")
+    func pressGateKeyChordStartsImmediately() {
+        var gate = DictationPressGate()
+        let started = gate.handle(.start, deferStart: false)
+        #expect(started == .startNow)
+        let released = gate.handle(.stop, deferStart: false)
+        #expect(released == .release)
+        let again = gate.handle(.stop, deferStart: false)
+        #expect(again == .none)
+    }
+
+    @Test("a modifier-only chord that begins other shortcuts says so; ⌃⌥ does not")
+    func overlapNote() {
+        let captions = [Shortcut(keyCode: UInt32(kVK_ANSI_C), modifiers: UInt32(cmdKey | optionKey))]
+        #expect(DictationChord(keyCodes: [61, 54]).overlapNote(with: captions) != nil)    // ⌥⌘ vs ⌥⌘C
+        #expect(DictationChord(keyCodes: [55, 56]).overlapNote(with: []) != nil)          // ⌘⇧: ⌘ shortcuts
+        #expect(DictationChord.defaultControl.overlapNote(with: captions) == nil)        // ⌃⌥
+        #expect(DictationChord(keyCodes: [59, 56, 49]).overlapNote(with: captions) == nil) // has a real key
+    }
+
     /// The symbolic hot keys a standard Mac ships with enabled.
     static let standardHotKeys: [String: Any] = [
         "64": ["enabled": true, "value": ["parameters": [32, 49, 1_048_576], "type": "standard"]],

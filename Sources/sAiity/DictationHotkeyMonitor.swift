@@ -49,6 +49,37 @@ struct DictationChord: Codable, Equatable, Sendable {
         !keyCodes.isEmpty && keyCodes.allSatisfy(Self.isModifierKey)
     }
 
+    /// The chord's modifiers as a Carbon mask, to compare with other shortcuts.
+    var carbonModifiers: UInt32 {
+        var mask: UInt32 = 0
+        for code in keyCodes {
+            switch Int(code) {
+            case kVK_Command, kVK_RightCommand: mask |= UInt32(cmdKey)
+            case kVK_Shift, kVK_RightShift: mask |= UInt32(shiftKey)
+            case kVK_Option, kVK_RightOption: mask |= UInt32(optionKey)
+            case kVK_Control, kVK_RightControl: mask |= UInt32(controlKey)
+            default: break
+            }
+        }
+        return mask
+    }
+
+    /// For a modifier-only chord, a note when other shortcuts begin with the
+    /// same modifiers, or nil. Those still work, because the start waits a
+    /// moment, but pressed slowly they can open the microphone.
+    func overlapNote(with shortcuts: [Shortcut]) -> String? {
+        guard isModifierOnly else { return nil }
+        let mask = carbonModifiers
+        let chord = displayString
+        if let example = shortcuts.first(where: { $0.modifiers & mask == mask && $0.modifiers != 0 }) {
+            return String(localized: "Other shortcuts also start with \(chord), such as \(example.displayString). Pressed slowly, they can start a recording. ⌃⌥ avoids this.")
+        }
+        if mask & UInt32(cmdKey) != 0 {
+            return String(localized: "Many shortcuts also start with \(chord). Pressed slowly, they can start a recording. ⌃⌥ avoids this.")
+        }
+        return nil
+    }
+
     private var modifierFamilies: Set<UInt16> {
         Set(keyCodes.compactMap { Self.modifierFamily(for: $0)?.min() })
     }
@@ -353,6 +384,55 @@ enum SystemShortcuts {
     }
 }
 
+/// Holds back the start of a modifier-only chord for a moment.
+///
+/// ⌥⌘ is also the start of ⌥⌘C and of many app shortcuts. Starting the
+/// recording the instant the modifiers are down turned the microphone on for
+/// every one of those shortcuts, only to cancel it when the letter arrived:
+/// no text, but the orange microphone indicator flashed each time. The start
+/// now waits `delay`; a chord that is released or joined by another key
+/// before then never opens the microphone. People do not start speaking in
+/// the first 150 ms of a press, so no words are lost.
+struct DictationPressGate: Sendable {
+    enum Action: Equatable, Sendable { case none, startNow, schedule(Int), release, cancel }
+
+    static let delay: Duration = .milliseconds(150)
+
+    private var pending: Int?
+    private var started = false
+    private var nextToken = 0
+
+    mutating func handle(_ effect: DictationChordState.Effect, deferStart: Bool) -> Action {
+        switch effect {
+        case .none:
+            return .none
+        case .start:
+            guard deferStart else { started = true; return .startNow }
+            nextToken += 1
+            pending = nextToken
+            return .schedule(nextToken)
+        case .stop, .cancel:
+            if pending != nil { pending = nil; return .none }
+            guard started else { return .none }
+            started = false
+            return effect == .stop ? .release : .cancel
+        }
+    }
+
+    /// True when the scheduled start is still wanted; it is then running.
+    mutating func confirm(_ token: Int) -> Bool {
+        guard pending == token else { return false }
+        pending = nil
+        started = true
+        return true
+    }
+
+    mutating func reset() {
+        pending = nil
+        started = false
+    }
+}
+
 /// Listen-only physical-key chord monitor based on Ghost Pepper's event model.
 /// The tap owns a dedicated run loop so model preparation cannot delay key-up.
 final class DictationHotkeyMonitor: NSObject, @unchecked Sendable {
@@ -368,6 +448,7 @@ final class DictationHotkeyMonitor: NSObject, @unchecked Sendable {
     private var onRelease: (@Sendable () -> Void)?
     private var onCancel: (@Sendable () -> Void)?
     private var pressedAt: ContinuousClock.Instant?
+    private var gate = DictationPressGate()
 
     /// A modifier-only chord released sooner than this was a stray tap, not
     /// dictation: nobody finishes a sentence in a quarter of a second, and
@@ -407,6 +488,7 @@ final class DictationHotkeyMonitor: NSObject, @unchecked Sendable {
             self.chord = chord
             self.chordState = DictationChordState(chord: chord)
             self.requiresAllKeysReleased = false
+            self.gate.reset()
         }
     }
 
@@ -414,6 +496,7 @@ final class DictationHotkeyMonitor: NSObject, @unchecked Sendable {
         lock.withLock {
             self.suspended = suspended
             chordState = DictationChordState(chord: chord)
+            gate.reset()
             requiresAllKeysReleased = !suspended && !currentlyPressedKeys().isEmpty
         }
     }
@@ -465,6 +548,7 @@ final class DictationHotkeyMonitor: NSObject, @unchecked Sendable {
         lock.withLock {
             eventThread = nil
             chordState = DictationChordState(chord: chord)
+            gate.reset()
             requiresAllKeysReleased = false
             onPress = nil
             onRelease = nil
@@ -529,16 +613,31 @@ final class DictationHotkeyMonitor: NSObject, @unchecked Sendable {
             }
             return effect
         }
-        let callback: (@Sendable () -> Void)? = lock.withLock {
-            switch effect {
-            case .none: return nil
-            case .start: return onPress
-            case .stop: return onRelease
-            case .cancel: return onCancel
+        let (action, callback): (DictationPressGate.Action, (@Sendable () -> Void)?) = lock.withLock {
+            let action = gate.handle(effect, deferStart: chord.isModifierOnly)
+            switch action {
+            case .none, .schedule: return (action, nil)
+            case .startNow: return (action, onPress)
+            case .release: return (action, onRelease)
+            case .cancel: return (action, onCancel)
             }
         }
-        if effect != .none {
-            NSLog("sAiity dictation shortcut: \(effect)")
+        if case .schedule(let token) = action {
+            DispatchQueue.global(qos: .userInteractive).asyncAfter(deadline: .now() + .milliseconds(150)) { [weak self] in
+                guard let self else { return }
+                let press: (@Sendable () -> Void)? = self.lock.withLock {
+                    self.gate.confirm(token) ? self.onPress : nil
+                }
+                guard let press else { return }
+                NSLog("sAiity dictation shortcut: start")
+                press()
+            }
+            return
+        }
+        if action != .none {
+            NSLog("sAiity dictation shortcut: \(action)")
+        } else if effect != .none {
+            NSLog("sAiity dictation shortcut: \(effect) before the start delay, microphone not opened")
         }
         callback?()
     }

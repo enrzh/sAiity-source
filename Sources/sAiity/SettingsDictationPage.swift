@@ -74,6 +74,10 @@ struct DictationView: View {
                 if let shortcutMessage {
                     Text(verbatim: shortcutMessage)
                         .foregroundStyle(.orange)
+                } else if let overlap = state.dictationChord.overlapNote(
+                    with: HotKeyCenter.Action.allCases.compactMap { HotKeyCenter.shortcut(for: $0) }) {
+                    Text(verbatim: overlap)
+                        .foregroundStyle(.secondary)
                 }
                 ForEach(permissions.missing(for: .dictation)) { permission in
                     PermissionRow(permission: permission, status: permissions.status(permission))
