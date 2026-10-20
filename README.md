@@ -323,6 +323,21 @@ included in the application bundle.
 | Sources/sAiity/OverlayWindow.swift | Caption bubble geometry and presentation |
 | Resources/Localizable.xcstrings | User-facing localization catalog |
 
+## What's new in 2.7.0
+
+- sAiity is now **Syllivra**. Bundle identifier, settings, models, transcripts,
+  `saiity://` links and the Sparkle feed are unchanged, so installs update in place.
+- Dictation works straight from the shortcut, with redesigned settings and setup.
+  Modifier-only starts are held back so other shortcuts never open the microphone.
+- Dictation pastes into browser and Electron text fields, including Chrome's
+  focused field, and adds a space when a word follows.
+- The bubble reports near-silence; silent stretches are skipped before
+  recognition and cancelled presses are logged.
+- Pinned local runtimes and catalogue options for Gemma 4 cleanup,
+  TranslateGemma translation and Granite Speech English recognition.
+- Immediate capture, bounded dictation delivery, reused warm models and drained
+  native work before cleanup.
+
 ## What's new in 2.6.6
 
 - Open a saved session, then choose **Summarize** in its viewer for a local
@@ -484,15 +499,14 @@ included in the application bundle.
 
 ## Release
 
-The current signed and notarized release is [sAiity 2.6.6](https://github.com/enrzh/sAiity/releases/tag/v2.6.6).
+The current signed and notarized release is [Syllivra 2.7.0](https://github.com/enrzh/sAiity/releases/tag/v2.7.0) (previously sAiity).
 
-- [Download the DMG](https://github.com/enrzh/sAiity/releases/download/v2.6.6/sAiity-2.6.6.dmg)
-- [Download the ZIP](https://github.com/enrzh/sAiity/releases/download/v2.6.6/sAiity-2.6.6.zip)
+- [Download the DMG](https://github.com/enrzh/sAiity/releases/download/v2.7.0/Syllivra-2.7.0.dmg)
+- [Download the ZIP](https://github.com/enrzh/sAiity/releases/download/v2.7.0/Syllivra-2.7.0.zip)
 - [Sparkle update feed](https://enrzh.github.io/sAiity/appcast.xml)
 
-This release adds a resizable transcript reader with Summarize Again and Remove
-Summary, plus safer summary lifecycle controls. Build 2 also keeps setup window
-chrome opaque like Settings — still fully local recognition and translation on
-the Mac.
+This release renames the app to Syllivra and makes dictation work straight from
+the shortcut, including browser and Electron text fields — still fully local
+recognition and translation on the Mac.
 
 Syllivra is part of the [aiity](https://aiity.de) family.
