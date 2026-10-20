@@ -1,8 +1,8 @@
-# Syllivra 2.7.0 (previously sAiity)
+# Syllivra 2.7.0
 
 Published release: https://github.com/enrzh/sAiity/releases/tag/v2.7.0 · Sparkle build 244.
 
-Syllivra is the new name of sAiity. This release keeps the same bundle identifier, settings, downloaded models, transcripts, `saiity://` links and Sparkle update feed, so existing installs update in place. When installing from the DMG, quit sAiity and replace the old app bundle with Syllivra; keep only one installed copy.
+This release keeps the same bundle identifier, settings, downloaded models, transcripts, `saiity://` links and Sparkle update feed, so existing installs update in place. When installing from the DMG, quit the older version and replace its app bundle with Syllivra; keep only one installed copy.
 
 ## Highlights
 

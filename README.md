@@ -1,8 +1,8 @@
 # Syllivra
 
-Previously named sAiity. The app keeps its existing bundle identifier, local data/model directories and `saiity://` links for compatibility. The Swift module and source/test directory names remain internal; new app bundles and downloads use Syllivra.
+For compatibility, the app keeps its existing bundle identifier, local data/model directories and `saiity://` links. The Swift module and source/test directory names remain internal; new app bundles and downloads use Syllivra.
 
-When upgrading, quit the old sAiity app and replace its app bundle with Syllivra. Keep only one installed copy; removing the old app bundle does not remove the separately stored settings, models or transcripts.
+When upgrading from an older version installed from the DMG, quit it and replace its app bundle with Syllivra. Keep only one installed copy; removing the old app bundle does not remove the separately stored settings, models or transcripts.
 
 Live subtitles for whatever your Mac is playing.
 
@@ -325,7 +325,7 @@ included in the application bundle.
 
 ## What's new in 2.7.0
 
-- sAiity is now **Syllivra**. Bundle identifier, settings, models, transcripts,
+- The app is now called **Syllivra**. Bundle identifier, settings, models, transcripts,
   `saiity://` links and the Sparkle feed are unchanged, so installs update in place.
 - Dictation works straight from the shortcut, with redesigned settings and setup.
   Modifier-only starts are held back so other shortcuts never open the microphone.
@@ -499,7 +499,7 @@ included in the application bundle.
 
 ## Release
 
-The current signed and notarized release is [Syllivra 2.7.0](https://github.com/enrzh/sAiity/releases/tag/v2.7.0) (previously sAiity).
+The current signed and notarized release is [Syllivra 2.7.0](https://github.com/enrzh/sAiity/releases/tag/v2.7.0).
 
 - [Download the DMG](https://github.com/enrzh/sAiity/releases/download/v2.7.0/Syllivra-2.7.0.dmg)
 - [Download the ZIP](https://github.com/enrzh/sAiity/releases/download/v2.7.0/Syllivra-2.7.0.zip)
