@@ -112,10 +112,15 @@ grep -q '"model":"nemotron-2240"' "$log" || {
     echo "FATAL: Nemotron benchmark record is missing." >&2
     exit 1
 }
-grep -q '"model":"whisper-base"' "$log" || {
-    echo "FATAL: Whisper benchmark record is missing." >&2
-    exit 1
-}
+# Whisper base shares this harness. Require its records only when the
+# fingerprint found an installed, ready model. A missing install is not a
+# failed Nemotron run.
+if printf '%s\n' "$evidence_before" | grep -q '"whisper-base"'; then
+    grep -q '"model":"whisper-base"' "$log" || {
+        echo "FATAL: Whisper benchmark record is missing." >&2
+        exit 1
+    }
+fi
 grep -q '"phase":"cold_prepare"' "$log" || {
     echo "FATAL: cold preparation record is missing." >&2
     exit 1

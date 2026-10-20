@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check existing local benchmark JSON lines against explicit release budgets."""
 import argparse
+import copy
 import hashlib
 from itertools import product
 import json
@@ -76,6 +77,120 @@ def reviewed_coverage(policy, fixtures):
         if len(clips) < evidence["minimumClips"] or len(speakers) < evidence["minimumSpeakers"]:
             raise ValueError(f"{cohort}: unverified cohort coverage (clips={len(clips)}, speakers={len(speakers)})")
     return required
+
+
+def skip_line(case, reason):
+    return f"SKIP (optional future tier): {case} — {reason}"
+
+
+def _case_name(phase, config):
+    target = config.get("target") or "off"
+    return f"{phase}/{config.get('chunkMs')}/cleanup={config.get('cleanup')}/translation={config.get('translation')}/target={target}"
+
+
+def _future_block(phase, config, fixtures, model_root, environment, latency):
+    """Why this optional case cannot be measured. Empty means it must run and gate."""
+    reasons = []
+    if config.get("cleanup") == "model":
+        name = environment.get("SAIITY_DICTATION_BENCHMARK_CLEANUP_MODEL")
+        path = Path(model_root) / "qwen" / name if isinstance(name, str) else None
+        if (not isinstance(name, str) or Path(name).name != name or not name.endswith(".gguf")
+                or path is None or not path.is_file() or path.stat().st_size <= 0):
+            reasons.append("cleanup model is not installed (Models/qwen has no SAIITY_DICTATION_BENCHMARK_CLEANUP_MODEL GGUF)")
+    translation = config.get("translation", "off")
+    if translation == "hy-mt2":
+        weights = Path(model_root) / "hymt2" / "Hy-MT2-1.8B-Q4_K_M.gguf"
+        if not weights.is_file() or weights.stat().st_size <= 0:
+            reasons.append("Hy-MT2 weights are not installed (Models/hymt2 is empty)")
+    elif translation == "madlad":
+        if not benchmark_evidence.nonempty_files(Path(model_root) / "madlad" / "int4"):
+            reasons.append("MADLAD weights are not installed")
+    elif translation != "off":
+        reasons.append(f"unsupported translation {translation}")
+    if translation != "off":
+        target = config.get("target")
+        missing = []
+        for audio, fixture in fixtures.items():
+            translations = fixture.get("expectedTranslations")
+            reference = translations.get(target) if isinstance(translations, dict) else None
+            if (not isinstance(reference, dict) or reference.get("reviewed") is not True
+                    or not isinstance(reference.get("text"), str) or not reference["text"].strip()):
+                missing.append(audio)
+        if missing:
+            reasons.append(f"reviewed expectedTranslations for {target} are missing ({', '.join(missing)})")
+        if phase == "warm_live_stream" and not (
+                isinstance(latency, dict) and latency.get("status") == "calibrated"
+                and isinstance(latency.get("limits"), dict)):
+            reasons.append("translated caption latency is unverified")
+    return "; ".join(reasons)
+
+
+def release_plan(policy, manifest, model_root=None, environment=None):
+    """Required cases always run. futureTier cases run only when their inputs exist.
+
+    The returned policy is the file the verifier should use. It keeps every
+    required budget and adds a future case only after that case is included.
+    It never removes a required configuration, category, or limit.
+    """
+    if not isinstance(policy, dict) or not isinstance(manifest, dict) or not isinstance(manifest.get("fixtures"), list):
+        raise ValueError("release policy and manifest are required")
+    if "configurations" not in policy or "limits" not in policy or "models" not in policy:
+        raise ValueError("release policy is missing required configurations, models, or limits")
+    if model_root is None:
+        model_root = Path.home() / "Library/Application Support/de.aiity.saiity/Models"
+    environment = {} if environment is None else environment
+    model_root = Path(model_root)
+    effective = copy.deepcopy(policy)
+    future = effective.pop("futureTier", None) or {}
+    if not isinstance(future, dict):
+        raise ValueError("futureTier must be an object")
+    fixtures = {}
+    for fixture in manifest["fixtures"]:
+        if isinstance(fixture, dict) and isinstance(fixture.get("audio"), str):
+            fixtures[fixture["audio"]] = fixture
+    skips = []
+    evidence = future.get("languageEvidence")
+    if evidence is not None:
+        try:
+            reviewed_coverage({"languageEvidence": evidence}, fixtures)
+        except ValueError as error:
+            skips.append({"case": "languageEvidence", "reason": str(error)})
+        else:
+            effective["languageEvidence"] = evidence
+    for model in future.get("models", {}).get("warm_segmented_decode", []):
+        if model != "whisper-base":
+            raise ValueError(f"unsupported optional model {model}")
+        if benchmark_evidence.whisper_base_installed(model_root):
+            chosen = effective["models"].setdefault("warm_segmented_decode", [])
+            if model not in chosen:
+                chosen.append(model)
+        else:
+            skips.append({"case": "warm_segmented_decode/whisper-base",
+                          "reason": "Whisper base is not installed (no ready Models/whisper-openai_whisper-base)"})
+    latency = future.get("translationLatency")
+    included_caption_translation = False
+    for phase, configs in future.get("configurations", {}).items():
+        if phase not in effective["configurations"]:
+            raise ValueError(f"{phase}: optional cases need a required phase")
+        if not isinstance(configs, list):
+            raise ValueError(f"{phase}: optional configurations must be a list")
+        for config in configs:
+            if not isinstance(config, dict) or any(key not in config for key in ("chunkMs", "cleanup", "translation")):
+                raise ValueError(f"{phase}: future tier configuration is incomplete")
+            reason = _future_block(phase, config, fixtures, model_root, environment, latency)
+            if reason:
+                skips.append({"case": _case_name(phase, config), "reason": reason})
+                continue
+            if phase == "warm_live_stream" and config.get("translation", "off") != "off":
+                included_caption_translation = True
+            selected = effective["configurations"][phase]
+            if config not in selected:
+                selected.append(config)
+    if included_caption_translation:
+        effective["translationLatency"] = latency
+    runs = [{"phase": phase, "configuration": config}
+            for phase, configs in effective["configurations"].items() for config in configs]
+    return {"policy": effective, "skips": skips, "runs": runs}
 
 
 def reviewed_output(row, label):

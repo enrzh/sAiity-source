@@ -291,14 +291,17 @@ class BenchmarkEvidenceTests(unittest.TestCase):
                 model = root / name
                 model.mkdir(parents=True)
                 (model / "weights.bin").write_bytes(name.encode())
+            (root / "whisper-openai_whisper-base" / ".saiity-ready").write_bytes(b"")
             def command(*args):
                 return "16" if args[-1] == "hw.memsize" else "test-hardware"
             with patch.object(evidence, "command", command):
                 asr = evidence.capture(root, "asr", root, {})
                 pipeline = evidence.capture(root, "pipeline", root, {})
-            self.assertEqual(asr["hardware"], pipeline["hardware"])
-            self.assertEqual(asr["models"]["nemotron-2240"], pipeline["models"]["nemotron-2240"])
-            self.assertIn("whisper-base", asr["models"])
+                self.assertEqual(asr["hardware"], pipeline["hardware"])
+                self.assertEqual(asr["models"]["nemotron-2240"], pipeline["models"]["nemotron-2240"])
+                self.assertIn("whisper-base", asr["models"])
+                (root / "whisper-openai_whisper-base" / ".saiity-ready").unlink()
+                self.assertNotIn("whisper-base", evidence.capture(root, "asr", root, {})["models"])
             self.assertEqual(pipeline["configuration"]["preview"], [False, True])
             self.assertEqual(pipeline["configuration"]["cleanup"], "rules")
 

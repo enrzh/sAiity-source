@@ -46,6 +46,26 @@ def command(*args):
     return subprocess.check_output(args, text=True, stderr=subprocess.DEVNULL).strip()
 
 
+def nonempty_files(path):
+    path = Path(path)
+    if path.is_file():
+        return path.stat().st_size > 0
+    if not path.is_dir():
+        return False
+    return any(child.is_file() and child.stat().st_size > 0 for child in path.rglob("*"))
+
+
+def whisper_base_installed(model_root):
+    """True only when Whisper base has been loaded once and still has weight bytes.
+
+    The benchmark refuses to run it without the readiness marker. Fingerprints
+    follow that same line so a missing install is omitted instead of failing
+    the Nemotron measurement that shares the ASR harness.
+    """
+    folder = Path(model_root) / "whisper-openai_whisper-base"
+    return (folder / ".saiity-ready").is_file() and nonempty_files(folder)
+
+
 def configuration(profile, environment=os.environ, *, product=None):
     if profile not in ("asr", "captions", "pipeline"):
         raise ValueError("unknown benchmark profile")
@@ -104,7 +124,8 @@ def capture(directory, profile, model_root, environment=os.environ, *, product=N
     models = environment.get("SAIITY_CAPTION_BENCHMARK_MODELS", "nemotron").split(",") if profile == "captions" else ["nemotron"]
     if profile == "captions" and environment.get("SAIITY_CAPTION_BENCHMARK_WHISPER") == "1" and "whisper" not in models:
         models.append("whisper")
-    if profile == "asr": models.append("whisper-base")
+    if profile == "asr" and whisper_base_installed(model_root):
+        models.append("whisper-base")
     paths = {}
     for model in models:
         if model == "nemotron": paths[f"nemotron-{chunk}"] = model_root / "nemotron-multilingual/multilingual" / f"{chunk}ms"

@@ -146,14 +146,24 @@ export SAIITY_DICTATION_PIPELINE_BENCHMARK=0
 # Never permit inherited developer options to fetch model weights.
 export SAIITY_CAPTION_BENCHMARK_DOWNLOAD=0
 export SAIITY_CLEANUP_BENCHMARK_DOWNLOAD=0
-# Use the policy's representative cases, not a Cartesian product of every model.
-matrix=$(python3 - "$policy" <<'PY'
-import json, sys
+# Required cases always run. futureTier cases are appended only when their
+# weights and reviewed references exist; each omission is one explicit line.
+effective_policy="$report_dir/effective-policy.json"
+matrix=$(python3 - "$policy" "$fixtures/manifest.json" "$effective_policy" <<'PY'
+import json, os, runpy, sys
+from pathlib import Path
+sys.path.insert(0, "scripts")
+gate = runpy.run_path("scripts/verify-quality.py")
 policy = json.load(open(sys.argv[1]))
+manifest = json.load(open(sys.argv[2]))
+plan = gate["release_plan"](policy, manifest, environment=os.environ)
+Path(sys.argv[3]).write_text(json.dumps(plan["policy"], indent=2) + "\n")
+for skip in plan["skips"]:
+    print(gate["skip_line"](skip["case"], skip["reason"]), file=sys.stderr)
 profiles = {"warm_segmented_decode": "asr", "warm_live_stream": "captions", "release_to_insertion": "pipeline"}
-for phase, configs in policy["configurations"].items():
-    for config in configs:
-        print(profiles[phase], config["chunkMs"], config["cleanup"], config["translation"], config["target"] or "off")
+for run in plan["runs"]:
+    config = run["configuration"]
+    print(profiles[run["phase"]], config["chunkMs"], config["cleanup"], config["translation"], config.get("target") or "off")
 PY
 )
 logs=()
@@ -188,5 +198,5 @@ if [ "$(git rev-parse HEAD)" != "$revision" ] || [ "$(git status --porcelain | w
     echo "FATAL: quality measurements require unchanged, clean source." >&2
     exit 1
 fi
-python3 scripts/verify-quality.py --revision "$revision" --policy "$policy" --manifest "$fixtures/manifest.json" \
+python3 scripts/verify-quality.py --revision "$revision" --policy "$effective_policy" --manifest "$fixtures/manifest.json" \
     "${logs[@]}" | tee "$report_dir/summary.jsonl"

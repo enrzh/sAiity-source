@@ -44,8 +44,17 @@ authorized recordings, independent native reviewers or native measurements are
 supplied by this change. Passing synthetic Python/Swift contract tests is not a
 speech-quality pass.
 
-`languageEvidence.requiredCohorts` names the exact release subset; the policy's
-existing models/configurations name the measured engine/settings/target subset.
+**20 October 2026.** The paragraph above describes the policy as checked in on
+9 October. For 2.7.0 that 12-cohort contract stays in `futureTier` and does not
+block the default release gate. A German/English corpus can pass the required
+tier. It still cannot satisfy `futureTier.languageEvidence`. The required cases,
+the skip line, and why this does not block 2.7.0 are under Release acceptance.
+
+`futureTier.languageEvidence.requiredCohorts` names that optional cohort
+subset. When the tier is included, or when a selected policy puts
+`languageEvidence` at the top level, those cohorts are the exact release
+subset. The policy's models and configurations name the measured
+engine, settings, and target subset.
 An explicitly selected local policy via `SAIITY_RELEASE_POLICY` may require a
 smaller reviewed subset, and the verifier prints its `verifiedCohorts` and
 `qualityScope: bounded-release-subset` on each case. Such a pass certifies only
@@ -87,8 +96,9 @@ existing NaturalLanguage word tokenizer with that reviewed language; CER uses
 NFC canonical graphemes and includes combining marks, independently of WER and
 missing-word deletions. No stemming, transliteration, compatibility folding or
 whitespace-only/scalar-as-word flattening is a reviewed word metric. Legacy
-fixtures without scoring metadata keep the legacy word-tokenization contract;
-they cannot satisfy the new multilingual policy. Unknown/extra nonadjacent
+fixtures without scoring metadata keep the legacy word-tokenization contract.
+They can satisfy the required 2.7.0 gate, and they cannot satisfy
+`futureTier.languageEvidence`. Unknown/extra nonadjacent
 language labels fail exact ordered language evidence; adjacent duplicate tags
 and regional labels remain normalized for base language identity only.
 
@@ -117,10 +127,14 @@ Chinese script targets require `targetVariantPreserved` separately: base `zh`
 identity alone cannot certify `zh-Hans` → `zh-Hant`. Ambiguous output remains
 unverified.
 
-Provenance/cohort preflight runs before native commands. The normal release
-matrix will therefore fail until a reviewed corpus exists. Python unit tests
-use clearly synthetic temporary bytes only to test rejection and binding;
-they neither load installed weights nor establish measured quality.
+Provenance/cohort preflight still runs before native commands. The default
+release policy keeps `languageEvidence` inside `futureTier`, so that preflight
+follows the historical narrower contract and continues. A policy that places
+`languageEvidence` at the top level, including `product-quality.json` and any
+file selected with `SAIITY_RELEASE_POLICY`, still fails that preflight before
+any native command when provenance, review, or a required cohort is missing.
+Python unit tests use clearly synthetic temporary bytes only to test rejection
+and binding; they neither load installed weights nor establish measured quality.
 
 ## 7 October 2026 — transcript reading controls
 
@@ -492,10 +506,99 @@ the production tail; longer device runs remain necessary.
 
 These are explicit initial acceptance targets, not a claim that every supported
 device/model meets them. Change budgets only alongside reviewed measurements;
-do not loosen them merely to make a release pass. The default gate covers
-Nemotron and Whisper dictation, Nemotron live captions, and deterministic
-cleanup. Model cleanup and translated dictation need the existing additional
-native-generation/cleanup/translation benchmarks and signed-app checklist.
+do not loosen them merely to make a release pass.
+
+### Required gate and optional future tier (2.7.0)
+
+`scripts/release.sh` calls `scripts/quality-matrix.sh` with no arguments. That
+command reads `docs/benchmarks/release-quality.json`. Everything above
+`futureTier` is the required gate. It keeps the 2.6.6 budgets in the table
+above (`minimumRuns` 5, WER 0.25, two missing words, real-time factor 1.0,
+caption timing, zero dropped audio, and the 8 second release-to-insertion
+budget), the five speech categories, clean-source checks, before/after
+fingerprints, completion markers, and both dictation preview states. The
+required cases are:
+
+| Phase | Configuration | Harness |
+| --- | --- | --- |
+| `warm_segmented_decode` | Nemotron 2240, cleanup off, translation off | `scripts/model-matrix.sh` |
+| `warm_live_stream` | Nemotron 1120, realtime, cleanup off, translation off | `scripts/caption-matrix.sh` |
+| `warm_live_stream` | Nemotron 2240, realtime, cleanup off, translation off | `scripts/caption-matrix.sh` |
+| `release_to_insertion` | Nemotron 1120, rules cleanup, translation off, preview off and on | `DictationASRPerformanceTests.completePipeline` |
+| `release_to_insertion` | Nemotron 2240, rules cleanup, translation off, preview off and on | same filter |
+
+Nemotron 1120 and 2240 are the installed streaming models
+(`Models/nemotron-multilingual/multilingual/{1120,2240}ms` with metadata,
+tokenizer, and the encoder/decoder/joint/preprocessor bundles), so both
+untranslated rules-cleanup rows stay on the required gate. Rules cleanup needs
+no GGUF.
+
+`futureTier` keeps the measurements the current five-clip English/German
+corpus and the installed model set cannot produce yet. The cases stay in the
+policy. They are not deleted, and they do not block 2.7.0.
+`quality-matrix.sh` calls `release_plan()` and runs a future case only when
+its weights and reviewed references exist. Each omitted case prints one line
+on stderr:
+
+```text
+SKIP (optional future tier): <case> — <reason>
+```
+
+When the prerequisites exist, the runner appends that case to an effective
+policy and the same verifier gates it, including the 12-cohort provenance
+rules and the budgets above. `futureTier` has no field that relaxes
+`minimumRuns`, the required categories, or those limits. Point
+`SAIITY_RELEASE_POLICY` at another policy file to tighten the required gate.
+No variable disables the future tier or widens a budget.
+
+Retained future cases, and what must exist before they run:
+
+- `languageEvidence` — cohorts `en`, `de`, `ja`, `zh-Hans`, `zh-Hant`, `fr`,
+  `es`, `pt`, `ar`, `ru`, `hi`, `ko`, status `unverified`, at least one clip
+  and one speaker per cohort. The separate corpus goal remains 20 clips and
+  3 speakers (12 clean, 4 difficult, 4 critical). Every fixture needs reviewed
+  natural-speech provenance, an independent reference review, a cohort listed
+  in `expectedLanguages`, and scoring `natural-language` / `nfc-grapheme-v1`.
+  The release corpus has audio, categories, `expectedLanguages`, and
+  `expectedText` only, so this case is skipped until that review exists.
+- `warm_segmented_decode/whisper-base` — Whisper base is a comparison inside
+  the ASR harness. It runs when `Models/whisper-openai_whisper-base` contains
+  `.saiity-ready` and nonempty weights, the same readiness rule as
+  `WhisperDictationBackend.isReady`. Those files are not installed for this
+  release, so the row is skipped and the harness still requires the Nemotron
+  2240 records. A missing Whisper install must not discard the Nemotron rows
+  already measured in that process.
+- Model cleanup (`cleanup: "model"`, Nemotron 1120 and 2240, translation off)
+  — `SAIITY_DICTATION_BENCHMARK_CLEANUP_MODEL` must name a nonempty `.gguf`
+  basename already present in `Models/qwen`. The runner does not scan that
+  directory or substitute a default. The directory is empty, so both rows are
+  skipped.
+- Hy-MT2 (`translation: "hy-mt2"`, target `de`) —
+  `Models/hymt2/Hy-MT2-1.8B-Q4_K_M.gguf` must be a nonempty file, and every
+  fixture needs `expectedTranslations.de` with `reviewed: true` and nonempty
+  text. The weights directory is empty and the corpus has no reviewed
+  translations, so the caption row and both pipeline rows are skipped.
+- MADLAD translation (`translation: "madlad"`, target `de`) —
+  `Models/madlad/int4` is installed. Those rows still need the same reviewed
+  `expectedTranslations.de`. The corpus does not have them, so the rows are
+  skipped.
+- Translated live captions also need `futureTier.translationLatency.status`
+  of `calibrated` with a limits object. The checked-in status is
+  `unverified`. `verify-quality.py` still treats unverified translated caption
+  latency as fatal, so the two caption rows stay skipped until a reviewed
+  calibration is written into the policy. Pipeline translations do not use
+  that latency field.
+
+The runner writes `build/release-quality/effective-policy.json` (or
+`$SAIITY_RELEASE_QUALITY_OUT`) and passes that file to `verify-quality.py`.
+An included future case is gated. Calling `verify-quality.py` directly on the
+source policy checks the required tier. `release.sh` goes through
+`quality-matrix.sh`, which verifies the effective policy.
+
+Missing required runs, a failed budget, a missing category, dirty or changed
+source, a changed fingerprint, or a missing completion marker still fail the
+gate. A future-tier skip is a recorded omission, and it is not a pass for
+that case.
 
 ```sh
 SAIITY_RELEASE_FIXTURES=/absolute/verified-fixtures scripts/quality-matrix.sh

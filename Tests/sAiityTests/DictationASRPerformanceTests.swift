@@ -842,9 +842,6 @@ struct DictationASRPerformanceTests {
                 throw BenchmarkError("Missing installed Nemotron 2240 asset: \(name)")
             }
         }
-        guard WhisperDictationBackend.isReady(.base) else {
-            throw BenchmarkError("Installed Whisper base assets/readiness marker are missing; downloads are disabled")
-        }
 
         let nemotron = StreamingASRBackend(name: "Nemotron 2240 benchmark",
             engine: InstalledNemotron(directory: nemotronDirectory))
@@ -860,6 +857,11 @@ struct DictationASRPerformanceTests {
             throw error
         }
         await nemotron.release() // stop and unload before Whisper allocates its models.
+        guard WhisperDictationBackend.isReady(.base) else {
+            // Whisper base is an optional comparison. Missing weights must not
+            // throw away the Nemotron measurements already recorded above.
+            return
+        }
 
         // A private benchmark cache reuses the production loader and its existing
         // invalidate/unload hook, without touching the app's private global cache.

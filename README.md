@@ -273,19 +273,24 @@ ZIP with `scripts/validate-appcast.sh`.
 The release workflow requires a verified local corpus and checks accuracy,
 language preservation and warm latency budgets before notarizing or tagging:
 
-    SAIITY_RELEASE_FIXTURES=/absolute/verified-fixtures SAIITY_DICTATION_BENCHMARK_CLEANUP_MODEL=installed-cleanup.gguf scripts/quality-matrix.sh
+    SAIITY_RELEASE_FIXTURES=/absolute/verified-fixtures scripts/quality-matrix.sh
 
 `scripts/release.sh <version>` runs this gate automatically. Missing recordings,
-reference text, model weights, speech categories or benchmark records fail the
-gate. See [the corpus and acceptance criteria](docs/benchmarks/README.md) and
+reference text, required model weights, speech categories or benchmark records
+fail the gate. Rows in `futureTier` (12-language reviewed provenance, Whisper
+base, model cleanup, Hy-MT2, and translated MADLAD) log
+`SKIP (optional future tier): <case> — <reason>` when their weights or reviewed
+references are absent. That skip does not block 2.7.0. When those inputs exist,
+the same budgets gate the row. See [the corpus and acceptance criteria](docs/benchmarks/README.md) and
 [the signed-app checklist](docs/release-checklist.md). These checks are local;
 they do not download models or send recordings anywhere.
 
-The [release policy](docs/benchmarks/release-quality.json) covers representative
-1120/2240 ms caption and dictation configurations, including enabled model
-cleanup and Hy-MT2/MADLAD translation. Translated runs score raw recognition
-against reviewed source text and translated output against a separate reviewed
-target reference. See [the PRR gates](docs/release-checklist.md) for exact settings
+The [release policy](docs/benchmarks/release-quality.json) required tier covers
+Nemotron 2240 segmented decode, untranslated Nemotron 1120/2240 live captions,
+and rules-cleanup insertion at both chunk sizes. Model cleanup and
+Hy-MT2/MADLAD translation remain in `futureTier`. Translated runs that do
+execute score raw recognition against reviewed source text and translated
+output against a separate reviewed target reference. See [the PRR gates](docs/release-checklist.md) for exact settings
 and outstanding device/corpus acceptance; deterministic tests alone are a partial
 check, not a full release pass or evidence of improved accuracy/performance.
 

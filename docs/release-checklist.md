@@ -95,27 +95,35 @@ evidence must include the successful post-run revision/fingerprint marker.
 Use [quality-matrix.sh](../scripts/quality-matrix.sh),
 [verify-quality.py](../scripts/verify-quality.py),
 [benchmark_evidence.py](../scripts/benchmark_evidence.py) and the exact
-[release-quality.json](benchmarks/release-quality.json) policy. Current
-representative coverage is one ASR comparison (Nemotron 2240 and Whisper base),
-four caption configurations (untranslated 1120/2240, Hy-MT2 1120, MADLAD 2240),
-and eight dictation configurations (rules/model cleanup untranslated at both
-tiers, and each cleanup mode with Hy-MT2/MADLAD at 2240). This is not every
-combination. Each requires five runs per fixture; dictation needs both preview
-states. Missing/skipped cases, unavailable cleanup, translation failures or
-fallback, dirty/changed source and mismatched fingerprints fail the gate.
+[release-quality.json](benchmarks/release-quality.json) policy. The required
+gate is one Nemotron 2240 ASR run, two untranslated Nemotron caption runs
+(1120 and 2240), and two rules-cleanup dictation runs (1120 and 2240). This is
+not every combination. Each requires five runs per fixture; dictation needs
+both preview states. Missing required runs, a failed budget, translation
+failures on a case that ran, dirty or changed source, and mismatched
+fingerprints fail the gate.
+
+The wider matrix stays in `futureTier` and does not block 2.7.0: the
+12-language reviewed-provenance contract, Whisper base, model cleanup at both
+chunk sizes, Hy-MT2, and MADLAD translation. `quality-matrix.sh` runs each of
+those cases only when its installed weights and reviewed references exist,
+then the same verifier gates it. Otherwise it logs
+`SKIP (optional future tier): <case> — <reason>`. A skip of that tier does not
+fail the release. See [the benchmark notes](benchmarks/README.md).
 
 ```sh
 SAIITY_RELEASE_FIXTURES=/absolute/verified-fixtures \
-SAIITY_DICTATION_BENCHMARK_CLEANUP_MODEL=installed-cleanup.gguf \
 SAIITY_RELEASE_QUALITY_OUT=/absolute/evidence/current-build \
 scripts/quality-matrix.sh
 ```
 
 These are instructions for the authorized validation owner, not commands run
-by this documentation worker. The cleanup filename must identify an installed
-compatible GGUF in the existing `Models/qwen` directory; no default substitution
-or preference read establishes that choice. Corpus audio/references stay outside
-Git and require reviewed natural-speech provenance/licence or consent.
+by this documentation worker. To include the optional model-cleanup rows, also
+set `SAIITY_DICTATION_BENCHMARK_CLEANUP_MODEL` to the basename of a nonempty
+compatible `.gguf` already in `Models/qwen`. No default substitution or
+preference read establishes that choice. Omitting it skips those rows. Corpus
+audio and references stay outside Git. Reviewed natural-speech provenance and
+`expectedTranslations` are required only for the future-tier cases that run.
 
 The runner sets `SAIITY_ASR_BENCHMARK_DIR`, `SAIITY_CAPTION_BENCHMARK_DIR`,
 `SAIITY_CAPTION_BENCHMARK_MODELS=nemotron`,

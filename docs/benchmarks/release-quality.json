@@ -1,15 +1,8 @@
 {
   "minimumRuns": 5,
-  "languageEvidence": {
-    "status": "unverified",
-    "requiredCohorts": ["en", "de", "ja", "zh-Hans", "zh-Hant", "fr", "es", "pt", "ar", "ru", "hi", "ko"],
-    "minimumClips": 1,
-    "minimumSpeakers": 1,
-    "corpusGoal": {"clips": 20, "speakers": 3, "conditions": {"clean": 12, "difficult": 4, "critical": 4}}
-  },
   "requiredCategories": ["german", "english", "mixed", "noise", "technical"],
   "models": {
-    "warm_segmented_decode": ["nemotron-2240", "whisper-base"],
+    "warm_segmented_decode": ["nemotron-2240"],
     "warm_live_stream": ["nemotron-1120", "nemotron-2240"],
     "release_to_insertion": ["nemotron-1120", "nemotron-2240"]
   },
@@ -19,25 +12,44 @@
     ],
     "warm_live_stream": [
       {"chunkMs": 1120, "realtime": true, "cleanup": "off", "translation": "off", "target": null},
-      {"chunkMs": 2240, "realtime": true, "cleanup": "off", "translation": "off", "target": null},
-      {"chunkMs": 1120, "realtime": true, "cleanup": "off", "translation": "hy-mt2", "target": "de"},
-      {"chunkMs": 2240, "realtime": true, "cleanup": "off", "translation": "madlad", "target": "de"}
+      {"chunkMs": 2240, "realtime": true, "cleanup": "off", "translation": "off", "target": null}
     ],
     "release_to_insertion": [
       {"chunkMs": 1120, "cleanup": "rules", "translation": "off", "target": null},
-      {"chunkMs": 2240, "cleanup": "rules", "translation": "off", "target": null},
-      {"chunkMs": 1120, "cleanup": "model", "translation": "off", "target": null},
-      {"chunkMs": 2240, "cleanup": "model", "translation": "off", "target": null},
-      {"chunkMs": 2240, "cleanup": "rules", "translation": "hy-mt2", "target": "de"},
-      {"chunkMs": 2240, "cleanup": "model", "translation": "hy-mt2", "target": "de"},
-      {"chunkMs": 2240, "cleanup": "rules", "translation": "madlad", "target": "de"},
-      {"chunkMs": 2240, "cleanup": "model", "translation": "madlad", "target": "de"}
+      {"chunkMs": 2240, "cleanup": "rules", "translation": "off", "target": null}
     ]
   },
-  "translationLatency": {"status": "unverified", "limits": null},
   "limits": {
     "warm_segmented_decode": {"wer": 0.25, "missingWords": 2, "realTimeFactor": 1.0},
     "warm_live_stream": {"wer": 0.25, "missingWords": 2, "firstVolatileSeconds": 5.0, "firstFinalSeconds": 8.0, "finalizationSeconds": 5.0, "droppedAudioSeconds": 0.0},
     "release_to_insertion": {"wer": 0.25, "missingWords": 2, "seconds": 8.0}
+  },
+  "futureTier": {
+    "note": "Optional. The default release gate does not require this tier, and a skip does not block 2.7.0. quality-matrix.sh runs each case only when its installed weights and reviewed references exist, then the same verifier gates it. Nothing here is a way to loosen minimumRuns, categories, or the limits above. Select a stricter file with SAIITY_RELEASE_POLICY to tighten the required gate.",
+    "languageEvidence": {
+      "status": "unverified",
+      "requiredCohorts": ["en", "de", "ja", "zh-Hans", "zh-Hant", "fr", "es", "pt", "ar", "ru", "hi", "ko"],
+      "minimumClips": 1,
+      "minimumSpeakers": 1,
+      "corpusGoal": {"clips": 20, "speakers": 3, "conditions": {"clean": 12, "difficult": 4, "critical": 4}}
+    },
+    "translationLatency": {"status": "unverified", "limits": null},
+    "models": {
+      "warm_segmented_decode": ["whisper-base"]
+    },
+    "configurations": {
+      "warm_live_stream": [
+        {"chunkMs": 1120, "realtime": true, "cleanup": "off", "translation": "hy-mt2", "target": "de"},
+        {"chunkMs": 2240, "realtime": true, "cleanup": "off", "translation": "madlad", "target": "de"}
+      ],
+      "release_to_insertion": [
+        {"chunkMs": 1120, "cleanup": "model", "translation": "off", "target": null},
+        {"chunkMs": 2240, "cleanup": "model", "translation": "off", "target": null},
+        {"chunkMs": 2240, "cleanup": "rules", "translation": "hy-mt2", "target": "de"},
+        {"chunkMs": 2240, "cleanup": "model", "translation": "hy-mt2", "target": "de"},
+        {"chunkMs": 2240, "cleanup": "rules", "translation": "madlad", "target": "de"},
+        {"chunkMs": 2240, "cleanup": "model", "translation": "madlad", "target": "de"}
+      ]
+    }
   }
 }

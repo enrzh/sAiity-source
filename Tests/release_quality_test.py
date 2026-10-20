@@ -115,13 +115,17 @@ class ReleaseQualityTests(unittest.TestCase):
 
     def test_initial_twelve_cohorts_are_declared_unverified_without_relaxing_limits(self):
         policy = json.loads((Path(__file__).resolve().parents[1] / "docs/benchmarks/release-quality.json").read_text())
-        evidence = policy.get("languageEvidence", {})
+        self.assertNotIn("languageEvidence", policy)
+        evidence = policy["futureTier"]["languageEvidence"]
         self.assertEqual(evidence.get("status"), "unverified")
         self.assertEqual(evidence.get("requiredCohorts"), ["en", "de", "ja", "zh-Hans", "zh-Hant", "fr", "es", "pt", "ar", "ru", "hi", "ko"])
         self.assertEqual(evidence.get("minimumClips"), 1)
         self.assertEqual(evidence.get("minimumSpeakers"), 1)
         self.assertEqual(evidence.get("corpusGoal"), {"clips": 20, "speakers": 3,
                          "conditions": {"clean": 12, "difficult": 4, "critical": 4}})
+        self.assertEqual(policy["limits"]["warm_segmented_decode"]["realTimeFactor"], 1.0)
+        self.assertEqual(policy["limits"]["warm_live_stream"]["droppedAudioSeconds"], 0.0)
+        self.assertEqual(policy["minimumRuns"], 5)
 
     def test_translated_reviewed_scope_requires_target_contract_and_review(self):
         policy, manifest, rows = self.reviewed_cohort()
@@ -263,7 +267,9 @@ class ReleaseQualityTests(unittest.TestCase):
     def test_runner_stamps_only_successful_unchanged_runs(self):
         repository = Path(__file__).resolve().parents[1]
         source = (repository / "scripts/quality-matrix.sh").read_text()
-        run_report = source[source.index("run_report() {"):source.index("export SAIITY_ASR_BENCHMARK_DIR")]
+        # The product branch exports this name earlier. Slice the release function only.
+        start = source.index("run_report() {")
+        run_report = source[start:source.index("export SAIITY_ASR_BENCHMARK_DIR", start)]
         # Execute the real shell function with synthetic fingerprint/Git commands;
         # never invoke the matrix's Swift/model/recording paths.
         harness = r'''
@@ -520,15 +526,115 @@ probe() {
         for limits in policy["limits"].values():
             self.assertTrue({"wer", "missingWords"}.issubset(limits))
         for phase in ("warm_live_stream", "release_to_insertion"):
-            configs = policy.get("configurations", {}).get(phase, [])
+            configs = policy["configurations"][phase]
             self.assertEqual({c["chunkMs"] for c in configs}, {1120, 2240})
-            self.assertEqual({c["translation"] for c in configs}, {"off", "hy-mt2", "madlad"})
-            if phase == "release_to_insertion":
-                self.assertEqual({c["cleanup"] for c in configs}, {"rules", "model"})
-            self.assertLessEqual(len(configs), 8, "keep representative coverage bounded")
+            self.assertEqual({c["translation"] for c in configs}, {"off"})
+            self.assertNotIn("model", {c["cleanup"] for c in configs})
+        self.assertEqual({c["cleanup"] for c in policy["configurations"]["release_to_insertion"]}, {"rules"})
+        self.assertEqual(policy["models"]["warm_segmented_decode"], ["nemotron-2240"])
+        self.assertEqual(policy["models"]["warm_live_stream"], ["nemotron-1120", "nemotron-2240"])
+        future = policy["futureTier"]
+        self.assertEqual(future["translationLatency"], {"status": "unverified", "limits": None})
+        self.assertEqual(future["models"]["warm_segmented_decode"], ["whisper-base"])
+        self.assertEqual({c["translation"] for c in future["configurations"]["warm_live_stream"]}, {"hy-mt2", "madlad"})
+        self.assertEqual({c["cleanup"] for c in future["configurations"]["release_to_insertion"]}, {"rules", "model"})
+        self.assertIn("hy-mt2", {c["translation"] for c in future["configurations"]["release_to_insertion"]})
+        self.assertIn("madlad", {c["translation"] for c in future["configurations"]["release_to_insertion"]})
+        self.assertLessEqual(len(future["configurations"]["release_to_insertion"]), 8)
         self.assertEqual(policy["limits"]["release_to_insertion"]["seconds"], 8)
         self.assertEqual(policy["limits"]["warm_live_stream"]["firstVolatileSeconds"], 5)
-        self.assertEqual(policy["translationLatency"], {"status": "unverified", "limits": None})
+        self.assertNotIn("translationLatency", policy)
+
+    def test_future_tier_skips_until_its_inputs_exist_and_budgets_still_fail(self):
+        policy = json.loads((Path(__file__).resolve().parents[1] / "docs/benchmarks/release-quality.json").read_text())
+        manifest = {"fixtures": [
+            {"audio": "german-fleurs.wav", "expectedText": "Hallo", "expectedLanguages": ["de"], "categories": ["german"]},
+            {"audio": "english-jfk.wav", "expectedText": "Hello", "expectedLanguages": ["en"], "categories": ["english"]},
+            {"audio": "mixed-de-en.wav", "expectedText": "Hallo Hello", "expectedLanguages": ["de", "en"], "categories": ["mixed", "german", "english"]},
+            {"audio": "noise-english.wav", "expectedText": "Hello", "expectedLanguages": ["en"], "categories": ["noise", "english"]},
+            {"audio": "technical-english.wav", "expectedText": "Hello", "expectedLanguages": ["en"], "categories": ["technical", "english"]},
+        ]}
+        with tempfile.TemporaryDirectory(prefix="saiity-future-tier-") as directory:
+            root = Path(directory)
+            plan = gate["release_plan"](policy, manifest, model_root=root, environment={})
+            self.assertEqual([(run["phase"], run["configuration"]["chunkMs"], run["configuration"]["cleanup"],
+                               run["configuration"]["translation"]) for run in plan["runs"]], [
+                ("warm_segmented_decode", 2240, "off", "off"),
+                ("warm_live_stream", 1120, "off", "off"),
+                ("warm_live_stream", 2240, "off", "off"),
+                ("release_to_insertion", 1120, "rules", "off"),
+                ("release_to_insertion", 2240, "rules", "off"),
+            ])
+            self.assertEqual(plan["policy"]["limits"], policy["limits"])
+            self.assertNotIn("languageEvidence", plan["policy"])
+            self.assertNotIn("futureTier", plan["policy"])
+            skipped = {item["case"]: item["reason"] for item in plan["skips"]}
+            self.assertIn("german-fleurs.wav", skipped["languageEvidence"])
+            self.assertIn("Whisper base", skipped["warm_segmented_decode/whisper-base"])
+            for case in (
+                "warm_live_stream/1120/cleanup=off/translation=hy-mt2/target=de",
+                "warm_live_stream/2240/cleanup=off/translation=madlad/target=de",
+                "release_to_insertion/1120/cleanup=model/translation=off/target=off",
+                "release_to_insertion/2240/cleanup=model/translation=off/target=off",
+                "release_to_insertion/2240/cleanup=rules/translation=hy-mt2/target=de",
+                "release_to_insertion/2240/cleanup=model/translation=hy-mt2/target=de",
+                "release_to_insertion/2240/cleanup=rules/translation=madlad/target=de",
+                "release_to_insertion/2240/cleanup=model/translation=madlad/target=de",
+            ):
+                self.assertIn(case, skipped)
+                self.assertTrue(skipped[case].strip())
+                self.assertEqual(gate["skip_line"](case, skipped[case]),
+                                 f"SKIP (optional future tier): {case} — {skipped[case]}")
+            # A slow run still fails the unchanged 8 second budget. The optional
+            # tier is not a switch that turns the required gate into a no-op.
+            gated = copy.deepcopy(plan["policy"])
+            gated["models"] = {"release_to_insertion": ["nemotron-2240"]}
+            gated["configurations"] = {"release_to_insertion": [
+                config for config in plan["policy"]["configurations"]["release_to_insertion"] if config["chunkMs"] == 2240]}
+            config = gated["configurations"]["release_to_insertion"][0]
+            rows = [dict(row, fixture=fixture["audio"], configuration=config, seconds=9)
+                    for fixture in manifest["fixtures"] for row in self.records]
+            with self.assertRaisesRegex(ValueError, "seconds"):
+                verify(gated, manifest, rows)
+
+            ready = root / "whisper-openai_whisper-base"
+            ready.mkdir()
+            (ready / ".saiity-ready").write_bytes(b"")
+            (ready / "weights.bin").write_bytes(b"weights")
+            (root / "hymt2").mkdir()
+            (root / "hymt2" / "Hy-MT2-1.8B-Q4_K_M.gguf").write_bytes(b"gguf")
+            (root / "madlad" / "int4").mkdir(parents=True)
+            (root / "madlad" / "int4" / "model.safetensors").write_bytes(b"madlad")
+            (root / "qwen").mkdir()
+            (root / "qwen" / "cleanup.gguf").write_bytes(b"cleanup")
+            reviewed = copy.deepcopy(manifest)
+            for fixture in reviewed["fixtures"]:
+                fixture["expectedTranslations"] = {"de": {"text": "Hallo", "reviewed": True}}
+            included = gate["release_plan"](policy, reviewed, model_root=root, environment={
+                "SAIITY_DICTATION_BENCHMARK_CLEANUP_MODEL": "cleanup.gguf"})
+            included_cases = {(run["phase"], run["configuration"]["cleanup"], run["configuration"]["translation"],
+                               run["configuration"]["chunkMs"]) for run in included["runs"]}
+            self.assertIn(("release_to_insertion", "model", "off", 1120), included_cases)
+            self.assertIn(("release_to_insertion", "model", "off", 2240), included_cases)
+            self.assertIn(("release_to_insertion", "rules", "hy-mt2", 2240), included_cases)
+            self.assertIn(("release_to_insertion", "model", "hy-mt2", 2240), included_cases)
+            self.assertIn(("release_to_insertion", "rules", "madlad", 2240), included_cases)
+            self.assertIn(("release_to_insertion", "model", "madlad", 2240), included_cases)
+            self.assertIn("whisper-base", included["policy"]["models"]["warm_segmented_decode"])
+            # Caption translation stays out until its latency budget is calibrated.
+            self.assertNotIn(("warm_live_stream", "off", "hy-mt2", 1120), included_cases)
+            self.assertNotIn(("warm_live_stream", "off", "madlad", 2240), included_cases)
+            self.assertNotIn("translationLatency", included["policy"])
+            calibrated = copy.deepcopy(policy)
+            calibrated["futureTier"]["translationLatency"] = {"status": "calibrated", "limits": {
+                "firstTargetSeconds": 5, "targetFinalSeconds": 6, "translationDrainSeconds": 0.5}}
+            captions = gate["release_plan"](calibrated, reviewed, model_root=root, environment={
+                "SAIITY_DICTATION_BENCHMARK_CLEANUP_MODEL": "cleanup.gguf"})
+            caption_cases = {(run["phase"], run["configuration"]["translation"], run["configuration"]["chunkMs"])
+                             for run in captions["runs"]}
+            self.assertIn(("warm_live_stream", "hy-mt2", 1120), caption_cases)
+            self.assertIn(("warm_live_stream", "madlad", 2240), caption_cases)
+            self.assertEqual(captions["policy"]["translationLatency"]["status"], "calibrated")
 
 
 class ProductQualificationTests(unittest.TestCase):
